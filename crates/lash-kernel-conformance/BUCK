@@ -19,11 +19,21 @@ load(
 lash_rust_library(
     name = "lash-kernel-conformance",
     build_script = None,
-    crate_features = [],
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     crate_name = "lash_kernel_conformance",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "lash_kernel_conformance"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
+    ],
     manifest_dir = "crates/lash-kernel-conformance",
     package_name = "lash-kernel-conformance",
     version = "0.0.0-dev",
@@ -39,12 +49,21 @@ lash_rust_doc(
 lash_rust_unit_test(
     name = "lash-kernel-conformance__unit_test",
     build_script = None,
-    crate_features = [],
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     crate_name = "lash_kernel_conformance",
     crate_root = "src/lib.rs",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "lash_kernel_conformance", "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test"),
     extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
         "//docs/kernel:package_files",
         "//crates/lash-kernel-conformance:package_files",
         "//crates/lash-kernel-lib:package_files",
@@ -60,12 +79,22 @@ lash_rust_unit_test(
 
 lash_rust_binary(
     name = "admission_corpus__example",
-    crate_features = [],
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     crate_name = "admission_corpus",
     crate_root = "examples/admission_corpus.rs",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "admission_corpus"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
+    ],
     include_dev_deps = True,
     library = ":lash-kernel-conformance",
     library_crate_name = "lash_kernel_conformance",
@@ -78,12 +107,22 @@ lash_rust_binary(
 
 lash_rust_binary(
     name = "package_audit__example",
-    crate_features = [],
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     crate_name = "package_audit",
     crate_root = "examples/package_audit.rs",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "package_audit"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
+    ],
     include_dev_deps = True,
     library = ":lash-kernel-conformance",
     library_crate_name = "lash_kernel_conformance",
@@ -96,12 +135,22 @@ lash_rust_binary(
 
 lash_rust_binary(
     name = "sort_corpus__example",
-    crate_features = [],
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     crate_name = "sort_corpus",
     crate_root = "examples/sort_corpus.rs",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "sort_corpus"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
+    ],
     include_dev_deps = True,
     library = ":lash-kernel-conformance",
     library_crate_name = "lash_kernel_conformance",
@@ -155,19 +204,33 @@ load(
 )
 
 lash_rust_feature_library(
-    name = "lash-kernel-conformance__fv_40d16bc4",
+    name = "lash-kernel-conformance__fv_2d0eb7da",
     build_script = None,
     crate_features = [],
     crate_name = "lash_kernel_conformance",
-    declared_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "shipped-library",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-conformance", "lash_kernel_conformance"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-releases:rust_sources",
+    ],
     manifest_dir = "crates/lash-kernel-conformance",
     package_name = "lash-kernel-conformance",
     tags = [
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_399ba27e", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_dab7c91c", "//crates/lash-kernel-exec:lash-kernel-exec": "//crates/lash-kernel-exec:lash-kernel-exec__fv_d8679f69", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_1e1c1a29", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_36aa9c79", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_668c808a", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_2fb87040", "//crates/lash-tool-shape:lash-tool-shape": "//crates/lash-tool-shape:lash-tool-shape__fv_af996fe8", "//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_79452c6e"},
+    pruned_deps = [
+        "lash_ext_date_ecma",
+        "lash_ext_py_core",
+        "lash_ext_regex_ecma",
+        "lash_ext_ts_core",
+        "lash_ext_url_whatwg",
+        "lash_kernel_releases",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_eddb44e1", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_aa4eb9f1", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_273b6067", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_84dc582b", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_6068e4d4", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_29e705d2", "//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_d25b4c9e"},
     version = "0.0.0-dev",
 )

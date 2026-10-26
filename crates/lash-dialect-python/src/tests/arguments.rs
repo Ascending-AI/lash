@@ -14,10 +14,10 @@ fn checks(source: &str, name: &str) -> usize {
     let mut pending = document
         .units()
         .filter(|(unit, _)| match unit {
-            lash_vocabulary::sites::Unit::Library(id) => {
+            lash_kernel_value::sites::Unit::Library(id) => {
                 lash_kernel_doc::FunctionCatalog::header(super::machine::library(), id).is_none()
             }
-            lash_vocabulary::sites::Unit::Main => true,
+            lash_kernel_value::sites::Unit::Main => true,
             _ => false,
         })
         .map(|(_, block)| lash_kernel_doc::Node::Block(block))
@@ -250,7 +250,10 @@ except ValueError:
     );
     // Typed crossing freezes the token data and the packed callable's
     // captured body; a second callable must never hide in token data.
-    use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
+    use {
+        lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+        lash_kernel_value::Signature, lash_kernel_value::Type,
+    };
     let signature = Signature {
         params: vec![Param {
             name: Name::new("value"),
@@ -291,7 +294,7 @@ except ValueError:
                         .check(
                             super::machine::library(),
                             lash_kernel_doc::FunctionValueLimits::standard(),
-                            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                            lash_kernel_value::data_limits::KernelDataLimits::standard(),
                         )
                         .unwrap();
                     assert_eq!(

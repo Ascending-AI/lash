@@ -10,8 +10,8 @@ use lash_execution_contracts::process::ProcessStartRegistration;
 use lash_execution_contracts::process::ProcessStartRequest;
 use lash_execution_contracts::session_types::SessionCreateRequest;
 use lash_execution_contracts::session_types::SessionHandle;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 

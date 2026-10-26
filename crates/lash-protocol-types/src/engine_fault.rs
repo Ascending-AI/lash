@@ -165,7 +165,7 @@ pub enum KernelRestoreRefusal {
     /// A live continuation needs an exact build helper absent from this image.
     #[error("build helper {function} is missing")]
     MissingHelper {
-        function: lash_vocabulary::FunctionId,
+        function: lash_kernel_value::FunctionId,
     },
     #[error("the document is not admitted: {reason}")]
     NotAdmitted { reason: String },
@@ -648,18 +648,18 @@ pub enum RunRefusal {
     /// A cache miss must name code supplied under this exact run's ownership.
     #[error("the run did not supply document {document}")]
     DocumentNotSupplied {
-        document: lash_vocabulary::names::DocumentId,
+        document: lash_kernel_value::names::DocumentId,
     },
 
     /// The run names immutable code the worker's exact image does not own.
     #[error("worker image does not own document {document}")]
     ImageDocumentMissing {
-        document: lash_vocabulary::names::DocumentId,
+        document: lash_kernel_value::names::DocumentId,
     },
 
     #[error("unusable payload schema: {source}")]
     UnusableSchema {
-        source: Box<lash_vocabulary::json_schema::SchemaAdmissionError>,
+        source: Box<lash_kernel_value::json_schema::SchemaAdmissionError>,
     },
     #[error("{refusal}")]
     Checkpoint { refusal: CheckpointRefusal },
@@ -935,17 +935,17 @@ pub enum WorkerLibraryRefusal {
     Malformed { problem: String },
     #[error("native {name} ({function}) is missing")]
     NativeMissing {
-        function: lash_vocabulary::FunctionId,
-        name: lash_vocabulary::FunctionName,
+        function: lash_kernel_value::FunctionId,
+        name: lash_kernel_value::FunctionName,
     },
     /// A build's generated helper plan has no exact body in the held image.
     #[error("generated plan {name} ({function}) has no registered body")]
     PlanMissing {
-        function: lash_vocabulary::FunctionId,
-        name: lash_vocabulary::FunctionName,
+        function: lash_kernel_value::FunctionId,
+        name: lash_kernel_value::FunctionName,
     },
     #[error("native {function} is unused")]
     NativeUnused {
-        function: lash_vocabulary::FunctionId,
+        function: lash_kernel_value::FunctionId,
     },
 }

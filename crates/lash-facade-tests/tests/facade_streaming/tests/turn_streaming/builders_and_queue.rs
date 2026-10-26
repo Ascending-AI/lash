@@ -20,7 +20,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("turn-started-cancel-target")
+        lash_kernel_value::identity::SessionId::parse("turn-started-cancel-target")
             .expect("nonblank host identity"),
     )
     .await
@@ -79,7 +79,7 @@ pub(super) async fn idle_queued_input_emits_typed_application_and_durable_identi
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("idle-input-application")
+        lash_kernel_value::identity::SessionId::parse("idle-input-application")
             .expect("nonblank host identity"),
     )
     .await
@@ -197,7 +197,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("durable-input-application-gap")
+        lash_kernel_value::identity::SessionId::parse("durable-input-application-gap")
             .expect("nonblank host identity"),
     )
     .await
@@ -282,7 +282,7 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     let second = answering_core("answered by the second store").await?;
     let first_session = created_session(
         &first,
-        lash_vocabulary::identity::SessionId::parse("shared-session")
+        lash_kernel_value::identity::SessionId::parse("shared-session")
             .expect("nonblank host identity"),
     )
     .await
@@ -290,7 +290,7 @@ pub(super) async fn a_send_never_answers_from_a_run_another_store_ran() -> Resul
     .await?;
     let second_session = created_session(
         &second,
-        lash_vocabulary::identity::SessionId::parse("shared-session")
+        lash_kernel_value::identity::SessionId::parse("shared-session")
             .expect("nonblank host identity"),
     )
     .await

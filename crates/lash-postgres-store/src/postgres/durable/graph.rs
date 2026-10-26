@@ -61,9 +61,9 @@ use lash_durable::domain::graph_commit::{
 use lash_durable::{
     CommitCapacity, CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind,
 };
+use lash_kernel_value::tokens::DecodeDimension;
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::{Dialect, Rendered};
-use lash_vocabulary::tokens::DecodeDimension;
 use sqlx::PgConnection;
 
 use super::steps::{self, Entry, Shape, Step, Ty, Value};
@@ -1316,7 +1316,7 @@ impl PostgresDurableStore {
         let policy = self.pools.graph_reads.owner();
         let requested = limits.kernel_data;
         let configured = policy.kernel_data;
-        let kernel_data = lash_vocabulary::data_limits::KernelDataLimits::new(
+        let kernel_data = lash_kernel_value::data_limits::KernelDataLimits::new(
             requested.document_depth().min(configured.document_depth()),
             requested
                 .document_json_depth()

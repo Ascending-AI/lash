@@ -12,8 +12,8 @@ use lash_kernel_doc::Node;
 use lash_kernel_doc::Rhs;
 use lash_kernel_doc::Stmt;
 use lash_kernel_doc::TryStmt;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 /// Every statement and action site of `document`'s code.
 fn code_sites(document: &Document) -> Vec<(Site, String)> {

@@ -37,9 +37,9 @@ use lash_core::runtime::durable::session::TurnServices;
 use lash_durable::domain::{ExecKey, OwnerKey};
 use lash_durable_test::SimClock;
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::cases::run_of;
 use super::services::{EXT_WRITE, FINAL, TurnScript, kill_owner, session_id};

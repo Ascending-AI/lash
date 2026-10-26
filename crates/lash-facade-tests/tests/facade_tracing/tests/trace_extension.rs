@@ -159,7 +159,7 @@ async fn spanning_turn(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let output = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session).expect("an id"),
+        lash_kernel_value::identity::SessionId::parse(session).expect("an id"),
     )
     .await
     .open()
@@ -563,7 +563,7 @@ async fn nesting_turn(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let output = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session).expect("an id"),
+        lash_kernel_value::identity::SessionId::parse(session).expect("an id"),
     )
     .await
     .open()

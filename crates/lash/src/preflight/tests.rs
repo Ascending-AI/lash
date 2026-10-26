@@ -15,7 +15,7 @@
               in-test exemption does not recognize"
 )]
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;

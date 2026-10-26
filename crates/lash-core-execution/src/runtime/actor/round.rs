@@ -75,8 +75,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lash_core_store::tool_run::{CompletionSource, MaterialRef};
 use lash_durable::domain::{AdmittedId, Ordinal};
 use lash_durable::{ActorTx, DurableError};
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use lash_vocabulary::tool_contract::LimitCause;
 use tokio_util::sync::CancellationToken;
 

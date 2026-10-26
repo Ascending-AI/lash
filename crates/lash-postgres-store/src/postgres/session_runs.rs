@@ -30,6 +30,7 @@ use lash_core_store::store::stored_intent_kind;
 use lash_core_store::store::stored_intent_state;
 use lash_core_store::store::{FollowFacts, FollowSubject};
 use lash_core_store::store_backend_support::turn_cancel::EndedRunInputRelease;
+use lash_kernel_value::identity::SessionId;
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::session_follow::SessionFollowStatements;
 use lash_store_sql::session_runs::{
@@ -37,7 +38,6 @@ use lash_store_sql::session_runs::{
     runs::SessionRunStatements,
 };
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use sqlx::{PgConnection, Row};
 

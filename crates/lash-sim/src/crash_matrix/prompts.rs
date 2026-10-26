@@ -25,9 +25,9 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::plugin::prompt::{PromptWrapSpec, PromptWrapTarget};
 use lash_core::prompt_sections::{PromptSectionId, PromptSectionKey, PromptWrapKey};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::services::{FINAL, session_id};
 use super::world::World;

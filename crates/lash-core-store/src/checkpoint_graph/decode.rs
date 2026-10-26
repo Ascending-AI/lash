@@ -14,13 +14,13 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use lash_vocabulary::tokens::CanonicalFault;
-use lash_vocabulary::tokens::DecodeDimension;
-use lash_vocabulary::tokens::RefForm;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenEvent;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::CanonicalFault;
+use lash_kernel_value::tokens::DecodeDimension;
+use lash_kernel_value::tokens::RefForm;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenEvent;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::commit::{EncodeBudget, ExplicitLimit};
 use super::encode::{AnalyzedBody, GraphStaging, LogicalScan, Placement, token_len};

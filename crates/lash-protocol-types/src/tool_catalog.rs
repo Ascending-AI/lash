@@ -29,7 +29,7 @@ pub struct ToolCatalogBuildInput {
 pub struct ToolCatalogContribution {
     /// The operations of the tools to remove from the catalog
     /// (non-membership).
-    pub remove: Vec<lash_vocabulary::names::QualifiedOperation>,
+    pub remove: Vec<lash_kernel_value::names::QualifiedOperation>,
 }
 
 impl ToolCatalogContribution {
@@ -38,7 +38,7 @@ impl ToolCatalogContribution {
     }
 
     pub fn remove_tools(
-        tools: impl IntoIterator<Item = lash_vocabulary::names::QualifiedOperation>,
+        tools: impl IntoIterator<Item = lash_kernel_value::names::QualifiedOperation>,
     ) -> Self {
         Self {
             remove: tools.into_iter().collect(),
@@ -199,7 +199,7 @@ impl ToolCatalog {
     /// exist to the model.
     pub fn has_callable_tool(
         &self,
-        operation: &lash_vocabulary::names::QualifiedOperation,
+        operation: &lash_kernel_value::names::QualifiedOperation,
     ) -> bool {
         self.entry(operation).is_some()
     }
@@ -207,7 +207,7 @@ impl ToolCatalog {
     /// The member performed as `operation`.
     pub fn entry(
         &self,
-        operation: &lash_vocabulary::names::QualifiedOperation,
+        operation: &lash_kernel_value::names::QualifiedOperation,
     ) -> Option<&ToolCatalogEntry> {
         self.entries()
             .iter()
@@ -325,7 +325,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn op(name: &str) -> lash_vocabulary::names::QualifiedOperation {
+    fn op(name: &str) -> lash_kernel_value::names::QualifiedOperation {
         use lash_vocabulary::tool_contract::IntoOperation as _;
         format!("tools.{name}")
             .into_operation()
@@ -394,7 +394,7 @@ mod tests {
             "default": {"$ref": "https://example.invalid/default"},
             "enum": [{"$ref": "https://example.invalid/value"}]
         });
-        let admitted = lash_vocabulary::json_schema::JsonSchema::admit(literal_reference.clone())
+        let admitted = lash_kernel_value::json_schema::JsonSchema::admit(literal_reference.clone())
             .expect("reference keys inside literal data are not schema references");
         assert_eq!(admitted.as_value(), &literal_reference);
         assert!(
@@ -416,11 +416,11 @@ mod tests {
             error,
             ToolCatalogBuildError::UnusableSchema {
                 purpose: lash_vocabulary::schema_contract::SchemaPurpose::ToolInput,
-                source: lash_vocabulary::json_schema::SchemaAdmissionError::Compilation { .. },
+                source: lash_kernel_value::json_schema::SchemaAdmissionError::Compilation { .. },
                 ..
             }
         ));
-        let schema = lash_vocabulary::json_schema::JsonSchema::admit(
+        let schema = lash_kernel_value::json_schema::JsonSchema::admit(
             serde_json::json!({"type": "object", "properties": {"count": {"type": "integer"}}}),
         )
         .unwrap();
@@ -440,11 +440,11 @@ mod tests {
             serde_json::json!({"canonical": {}})
         );
         assert_eq!(
-            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!(true)).unwrap(),
-            lash_vocabulary::json_schema::JsonSchema::any()
+            lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!(true)).unwrap(),
+            lash_kernel_value::json_schema::JsonSchema::any()
         );
         assert!(
-            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!(false))
+            lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!(false))
                 .unwrap()
                 .validate(&serde_json::json!(null))
                 .is_err()

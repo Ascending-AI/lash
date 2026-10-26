@@ -187,7 +187,7 @@ fn finalization(
         .filter(|tool| {
             tool.declaration()
                 .controls
-                .contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
+                .contains(lash_kernel_value::tool_declaration::TurnControlKind::Finish)
         })
         .map(|tool| behaviour.dialect.finish_call(tool))
         .collect::<Vec<_>>();

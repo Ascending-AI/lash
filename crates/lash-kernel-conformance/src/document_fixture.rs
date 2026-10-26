@@ -16,7 +16,7 @@ pub(crate) fn authored(
     for digits in text.split(|ch: char| !matches!(ch, '0'..='9' | 'a'..='f')) {
         for start in 0..=digits.len().saturating_sub(64) {
             if let Some(spelling) = digits.get(start..start + 64)
-                && let Ok(id) = lash_vocabulary::FunctionId::parse(spelling)
+                && let Ok(id) = lash_kernel_value::FunctionId::parse(spelling)
                 && registry.get(&id).is_some()
             {
                 selected.insert(id);
@@ -125,7 +125,7 @@ pub(crate) fn authored(
     lash_kernel_doc::core_support::parse_document_over(
         &main,
         missing,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
 }

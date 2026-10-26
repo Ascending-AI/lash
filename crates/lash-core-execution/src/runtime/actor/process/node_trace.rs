@@ -62,14 +62,14 @@ pub(super) fn step_trace_scope(
 fn node_site<'a>(
     record: &ProcessRecord,
     step: &InFlight,
-    site: Option<&'a lash_vocabulary::sites::EffectId>,
-) -> Option<&'a lash_vocabulary::sites::EffectId> {
+    site: Option<&'a lash_kernel_value::sites::EffectId>,
+) -> Option<&'a lash_kernel_value::sites::EffectId> {
     site.filter(|_| record.trace_nodes && !step.resolves)
 }
 
 /// One node span a commit closes.
 struct NodeClose {
-    at: lash_vocabulary::sites::EffectId,
+    at: lash_kernel_value::sites::EffectId,
     started_at_ms: u64,
     status: TraceDomainStatus,
 }

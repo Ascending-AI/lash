@@ -24,7 +24,7 @@
 #[path = "support/served.rs"]
 mod served;
 
-use lash_vocabulary::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenReader;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -388,7 +388,7 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
         "tools.switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120));
@@ -438,15 +438,15 @@ fn rotating_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefini
             format!("tools.{name}"),
             description,
             input,
-            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+            lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
         ),
         "new_after_rotation" => lash_vocabulary::tool_contract::ToolDefinition::control(
             format!("tool:{name}"),
             format!("tools.{name}"),
             description,
             input,
-            lash_vocabulary::tool_declaration::TurnControls::finish(
-                lash_vocabulary::json_schema::JsonSchema::any(),
+            lash_kernel_value::tool_declaration::TurnControls::finish(
+                lash_kernel_value::json_schema::JsonSchema::any(),
             ),
         ),
         _ => lash_vocabulary::tool_contract::ToolDefinition::raw(

@@ -21,7 +21,7 @@ pub use lash_core_execution::facade_support::*;
 pub use lash_core_execution::testing::kernel_internals::*;
 pub use lash_core_execution::*;
 use lash_execution_contracts::DeploymentStore;
-pub use lash_vocabulary::json_schema::JsonSchema;
+pub use lash_kernel_value::json_schema::JsonSchema;
 
 #[path = "store_backed/support.rs"]
 mod support;

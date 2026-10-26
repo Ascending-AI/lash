@@ -1105,7 +1105,7 @@ impl BoundRegistrar {
                 "plugin operation error type is empty".into(),
             ));
         }
-        lash_vocabulary::json_schema::JsonSchema::admit(operation.def().error_schema.clone())
+        lash_kernel_value::json_schema::JsonSchema::admit(operation.def().error_schema.clone())
             .map_err(|source| PluginError::UnusableSchema {
                 source: Box::new(source),
             })?;

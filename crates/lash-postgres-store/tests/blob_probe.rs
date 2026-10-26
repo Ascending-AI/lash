@@ -48,7 +48,7 @@ impl PostgresBlobProbe {
 impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
     async fn session_config_ref(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> lash_core_store::store::BlobRef {
         let config_ref: String = sqlx::query_scalar(
             "SELECT encode(revision.config_ref, 'hex') FROM lash_session_head AS head

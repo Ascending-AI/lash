@@ -9,7 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Environment, Lowered};
 use lash_kernel_doc::Stmt;
-use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use super::machine;
 use crate::Diagnostic;

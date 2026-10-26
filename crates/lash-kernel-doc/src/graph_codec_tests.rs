@@ -1,11 +1,13 @@
 //! Canonical primitive codec laws, independent of replaced callable transport.
 use super::*;
 use crate::parse_document;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::tokens::{
-    CanonicalFault, DecodeDimension, MAX_DECODE_DEPTH, decode_body, encode_body,
-};
+use lash_kernel_value::names::Name;
 use num_bigint::BigInt;
+use {
+    lash_kernel_value::tokens::CanonicalFault, lash_kernel_value::tokens::DecodeDimension,
+    lash_kernel_value::tokens::MAX_DECODE_DEPTH, lash_kernel_value::tokens::decode_body,
+    lash_kernel_value::tokens::encode_body,
+};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -118,9 +120,9 @@ fn nesting_past_the_decode_bound_is_refused() {
 fn a_host_kernel_data_policy_controls_recursive_decoding() {
     let value = Datum::Tuple(vec![Datum::Tuple(vec![Datum::Null])]);
     let bytes = encode_body(&value);
-    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(1, 1, 1, 1, 1).unwrap();
+    let limits = lash_kernel_value::data_limits::KernelDataLimits::new(1, 1, 1, 1, 1).unwrap();
     assert!(matches!(
-        lash_vocabulary::tokens::decode_body_with_limits::<Datum>(&bytes, limits),
+        lash_kernel_value::tokens::decode_body_with_limits::<Datum>(&bytes, limits),
         Err(TokenError::Limit {
             dimension: DecodeDimension::Depth,
             limit: 1,
@@ -145,7 +147,8 @@ fn a_host_kernel_data_policy_controls_recursive_decoding() {
 #[test]
 fn independent_decoders_do_not_share_guest_depth() {
     let bytes = encode_body(&TaskIdentity::Main);
-    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let limits =
+        lash_kernel_value::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
     let mut outer = TokenReader::new(&[]).with_data_limits(limits);
     let result = outer.nested(|_| {
         let mut inner = TokenReader::new(&bytes).with_data_limits(limits);

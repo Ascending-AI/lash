@@ -3,7 +3,7 @@ use crate::paged::family_impl::FrozenBase;
 use crate::paged::laws::heap::{Source, fresh, seal, write_list};
 use crate::paged::*;
 use lash_kernel_doc::heap::*;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 use std::rc::Rc;
 
 fn int(n: i64) -> PageValue {
@@ -25,8 +25,8 @@ fn record(heap: &PagedHeap, name: &Name, value: PageValue) -> BindingRecord {
     BindingRecord {
         name: NameRef::new(name, &heap.access).unwrap(),
         declared: SiteRef::new(
-            &(lash_vocabulary::sites::Site {
-                unit: lash_vocabulary::sites::Unit::Main,
+            &(lash_kernel_value::sites::Site {
+                unit: lash_kernel_value::sites::Unit::Main,
                 path: vec![],
             }),
             &heap.access,
@@ -351,13 +351,13 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
     let (mut heap, _) = fresh();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
-            callable: lash_vocabulary::names::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            callable: lash_kernel_value::names::CallableId {
+                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+                function: lash_kernel_value::names::FunctionId::from_bytes([2; 32]),
             },
             site: SiteRef::new(
-                &(lash_vocabulary::sites::Site {
-                    unit: lash_vocabulary::sites::Unit::Main,
+                &(lash_kernel_value::sites::Site {
+                    unit: lash_kernel_value::sites::Unit::Main,
                     path: vec![],
                 }),
                 &heap.access,
@@ -649,15 +649,15 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
         .unwrap();
     assert_eq!(heap.data_only_certificate().task_edges, 1);
     let site = SiteRef::new(
-        &lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, [0]),
+        &lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, [0]),
         heap.pages(),
     )
     .unwrap();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
-            callable: lash_vocabulary::names::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            callable: lash_kernel_value::names::CallableId {
+                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+                function: lash_kernel_value::names::FunctionId::from_bytes([2; 32]),
             },
             site,
             captures: Vec::new(),
@@ -689,11 +689,11 @@ fn session_slot_roots_and_task_edges_follow_replacements() {
 /// their code is identical and no current binding names them.
 #[test]
 fn saved_environments_keep_identity_and_shared_cells_across_carry() {
-    use lash_vocabulary::{
-        CallableId, FunctionId, LinkId,
-        sites::{Site, Unit},
-    };
     use std::collections::{BTreeMap, BTreeSet};
+    use {
+        lash_kernel_value::CallableId, lash_kernel_value::FunctionId, lash_kernel_value::LinkId,
+        lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit,
+    };
     let (mut heap, pages) = fresh();
     let callable = CallableId {
         link: LinkId::from_bytes([1; 32]),

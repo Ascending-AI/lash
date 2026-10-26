@@ -86,7 +86,7 @@ pub async fn record(args: &RecordArgs) -> Result<()> {
             lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),
         ))
         .map_err(|error| anyhow::anyhow!("build the reading core: {error}"))?;
-    let id = lash_vocabulary::identity::SessionId::try_from(args.session.clone())
+    let id = lash_kernel_value::identity::SessionId::try_from(args.session.clone())
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     let transcript = core
         .session(id)

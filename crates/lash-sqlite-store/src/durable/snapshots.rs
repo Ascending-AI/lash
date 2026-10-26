@@ -226,7 +226,7 @@ pub(super) fn under_limited(
     if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
         return Ok(Err(DurableError::Graph(
             lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
+                dimension: lash_kernel_value::tokens::DecodeDimension::Nodes,
                 actual: rows.len() as u64,
                 limit: max_rows as u64,
             },

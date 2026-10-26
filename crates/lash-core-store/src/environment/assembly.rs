@@ -1,7 +1,13 @@
 use super::*;
-use lash_vocabulary::names::{PackagePath, QualifiedOperation, Segment};
-use lash_vocabulary::package::{AcceptedAdvertisement, PackageAdvertisement, PublicationRecord};
 use lash_vocabulary::tool_contract::ToolId;
+use {
+    lash_kernel_value::names::PackagePath, lash_kernel_value::names::QualifiedOperation,
+    lash_kernel_value::names::Segment,
+};
+use {
+    lash_kernel_value::package::PackageAdvertisement,
+    lash_vocabulary::package::AcceptedAdvertisement, lash_vocabulary::package::PublicationRecord,
+};
 
 /// version_surface = "coexist"
 /// version_guard(items(ENVIRONMENT_DOMAIN, assemble))
@@ -48,8 +54,8 @@ pub enum AssemblyRefusal {
     },
     #[error("publication domains {first:?} and {second:?} disagree")]
     NamespaceDomain {
-        first: lash_vocabulary::package::PublicationDomain,
-        second: lash_vocabulary::package::PublicationDomain,
+        first: lash_kernel_value::package::PublicationDomain,
+        second: lash_kernel_value::package::PublicationDomain,
     },
     #[error("namespace paths {path} and {other} conflict")]
     NamespaceConflict {

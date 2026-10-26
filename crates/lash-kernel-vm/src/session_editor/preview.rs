@@ -17,7 +17,7 @@ impl SessionEditor {
     /// A fault in a page needed to inspect or copy the bounded value.
     pub fn preview(
         &mut self,
-        name: &lash_vocabulary::names::Name,
+        name: &lash_kernel_value::names::Name,
         budget: usize,
     ) -> Result<Option<SessionValue>, HeapFault> {
         let Some(record) = self.bindings.get(&metadata_key(name), self.heap.pages())? else {

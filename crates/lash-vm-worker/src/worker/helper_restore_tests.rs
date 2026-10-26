@@ -4,8 +4,11 @@ use lash_kernel_doc::heap::{HeapFault, PageGrant};
 use lash_kernel_doc::{BuildHelpers, Document, FunctionRegistry, LibraryDependencies, Selection};
 use lash_kernel_state::paged::{PageAnswer, PageBody};
 use lash_vm_client::packages::WorkerLibrary;
-use lash_vocabulary::{CallableId, Fill, FunctionId, Link, OperationRequirement};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::CallableId, lash_kernel_value::Fill, lash_kernel_value::FunctionId,
+    lash_kernel_value::Link, lash_kernel_value::OperationRequirement,
+};
 
 const BOUNDS: Bounds = Bounds {
     memory_meter: lash_kernel_vm::MemoryMeter::On,
@@ -96,7 +99,7 @@ struct Fixture {
 }
 fn fixture() -> Fixture {
     // Worker bindings require the build's exact declarations for generated plans.
-    let mut registry = lash_vm_releases::helper_release()
+    let mut registry = lash_kernel_releases::helper_release()
         .unwrap()
         .functions
         .clone();
@@ -149,14 +152,14 @@ fn fixture() -> Fixture {
         .imports
         .iter()
         .map(|(slot, import)| {
-            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
                 panic!("operation")
             };
             (
                 *slot,
                 Fill::Operation(OperationRequirement::new(
                     signature.clone(),
-                    lash_vocabulary::ContractId::new("1"),
+                    lash_kernel_value::ContractId::new("1"),
                 )),
             )
         })
@@ -256,7 +259,7 @@ impl Fixture {
         let helpers = Arc::new(BuildHelpers::new(registry.clone(), roots).unwrap());
         // Keep the worker's build declarations and selected law helpers only;
         // removed law helpers must be absent, not merely unreachable.
-        let mut selected = lash_vm_releases::helper_release()
+        let mut selected = lash_kernel_releases::helper_release()
             .unwrap()
             .functions
             .clone();
@@ -346,7 +349,7 @@ impl Fixture {
                             (
                                 *slot,
                                 lash_kernel_vm::PreparedSlot::Operation(
-                                    lash_vocabulary::OperationUse {
+                                    lash_kernel_value::OperationUse {
                                         link: self.link.identity(),
                                         slot: *slot,
                                     },
@@ -552,7 +555,7 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
     let mut document = fixture.document.as_ref().clone();
     document
         .private_bindings
-        .insert(lash_vocabulary::Name::new("carry_marker"));
+        .insert(lash_kernel_value::Name::new("carry_marker"));
     let rewritten = lash_kernel_migrate::Rewritten {
         correspondence: lash_kernel_migrate::unchanged(&fixture.document, &document).unwrap(),
         document: document.clone(),
@@ -566,12 +569,12 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
         if changed {
             let Fill::Operation(requirement) = next
                 .fills
-                .get_mut(&lash_vocabulary::ImportSlot(0xffff0002))
+                .get_mut(&lash_kernel_value::ImportSlot(0xffff0002))
                 .unwrap()
             else {
                 panic!("operation")
             };
-            requirement.contract = lash_vocabulary::ContractId::new("changed");
+            requirement.contract = lash_kernel_value::ContractId::new("changed");
         }
         let links: BTreeMap<_, _> = [
             (fixture.link.identity(), fixture.link.clone()),
@@ -636,7 +639,7 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
         );
         if changed {
             assert!(
-                matches!(carried, Err(lash_kernel_migrate::CarryFault::Refused(lash_kernel_migrate::ParkedRefusal::HelperOperationContext { function, slot })) if function == fixture.ids["twice"] && slot == lash_vocabulary::ImportSlot(0xffff0002))
+                matches!(carried, Err(lash_kernel_migrate::CarryFault::Refused(lash_kernel_migrate::ParkedRefusal::HelperOperationContext { function, slot })) if function == fixture.ids["twice"] && slot == lash_kernel_value::ImportSlot(0xffff0002))
             );
             continue;
         }
@@ -696,13 +699,13 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
             function,
         },
         captures: [(
-            lash_vocabulary::Name::new("recursive_surplus"),
+            lash_kernel_value::Name::new("recursive_surplus"),
             lash_kernel_doc::CaptureValue::Reference(0),
         )]
         .into(),
-        signature: lash_vocabulary::Signature {
+        signature: lash_kernel_value::Signature {
             params: vec![],
-            result: lash_vocabulary::Type::Json,
+            result: lash_kernel_value::Type::Json,
         },
         convention: lash_kernel_doc::StartConvention::Direct,
         representation: lash_kernel_doc::FunctionRepresentation::Bare,
@@ -719,7 +722,7 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
             .is_ok()
     );
 
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills: Default::default(),
     };
@@ -740,7 +743,7 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     let document = opened.document;
     let error = lash_kernel_check::WorkflowDocument::entered(
         document.clone(),
-        lash_vocabulary::LinkedStart {
+        lash_kernel_value::LinkedStart {
             link: callable.callable.link,
             selector: opened.selector,
         },

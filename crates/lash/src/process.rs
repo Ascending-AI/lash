@@ -1,11 +1,11 @@
 #[cfg(feature = "codemode")]
 pub use crate::artifacts::LinkTarget;
+/// Statement observation requested by a kernel-engine start.
+#[cfg(feature = "codemode")]
+pub use lash_kernel_value::observation::RunObservation;
 /// Typed settings for a kernel-engine start.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};
-/// Statement observation requested by a kernel-engine start.
-#[cfg(feature = "codemode")]
-pub use lash_vocabulary::observation::RunObservation;
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_execution_contracts::process::ConsumerHold;
@@ -233,3 +233,5 @@ pub use lash_execution_contracts::process::WaitState;
 pub use lash_execution_contracts::process::lifetime;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
+
+pub use lash_kernel_value::providers::{ProcessComponentId, ProcessComponentIdError};

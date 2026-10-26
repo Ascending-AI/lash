@@ -9,11 +9,11 @@ use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::Integer;
 
 use lash_kernel_doc::parse_document;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use lash_kernel_vm::{
     CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
 };
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 
 use crate::{Case, CaseBounds, Shard};
 

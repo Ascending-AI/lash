@@ -339,7 +339,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             else {
                                 unreachable!("a loop position names its source loop");
                             };
-                            loops.push(lash_vocabulary::sites::LoopIteration {
+                            loops.push(lash_kernel_value::sites::LoopIteration {
                                 site: site.clone(),
                                 iteration: started.saturating_sub(1),
                             });

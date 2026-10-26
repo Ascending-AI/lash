@@ -13,8 +13,8 @@
 use crate::support::{Arc, EmbedError, LashCore, Result};
 use lash_core::ActorContext;
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
@@ -55,7 +55,7 @@ pub enum ProcessAuthority {
         engine_settings: Option<lash_execution_contracts::process::EngineSettings>,
         /// The components `env` names that this core declares retired, in
         /// env order: the process builds without them (FIG-6296).
-        retired: Vec<lash_vocabulary::providers::ProcessComponentId>,
+        retired: Vec<lash_kernel_value::providers::ProcessComponentId>,
     },
     SessionTurn {
         session: SessionId,
@@ -827,7 +827,7 @@ impl Processes {
     pub async fn check_link(
         &self,
         kind: &str,
-        start: &lash_vocabulary::LinkedStart,
+        start: &lash_kernel_value::LinkedStart,
         env: &lash_core::ProcessEnv,
     ) -> Result<lash_vocabulary::claims::ClaimRequirements> {
         let engines = &self.core.host_process_engines;

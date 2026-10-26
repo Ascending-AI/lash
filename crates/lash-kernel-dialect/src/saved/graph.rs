@@ -18,11 +18,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::Document;
 use lash_kernel_doc::heap::PageRef;
 use lash_kernel_state::paged::FrozenRef;
-use lash_vocabulary::tokens::{
-    ChildRef, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
-    encode_body,
+use {
+    lash_kernel_value::CallableId, lash_kernel_value::EffectName, lash_kernel_value::LinkId,
+    lash_kernel_value::Name,
 };
-use lash_vocabulary::{CallableId, EffectName, LinkId, Name};
+use {
+    lash_kernel_value::tokens::ChildRef, lash_kernel_value::tokens::CodecVariant,
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::check_ascending, lash_kernel_value::tokens::encode_body,
+};
 
 use super::{CaptureRefusal, HeldAt, NotSaved, SavedFunction, Token};
 use crate::Written;

@@ -5,7 +5,7 @@ use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, Node};
 
 use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
 
-use lash_vocabulary::sites::{Site, Unit};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 /// Generated source is a separate, disposable format from stored documents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -140,8 +140,8 @@ pub fn check_document_depth(
         }
     }
     for import in document.imports.values() {
-        if let lash_vocabulary::ImportKind::Code { signature, .. }
-        | lash_vocabulary::ImportKind::Operation { signature } = &import.kind
+        if let lash_kernel_value::ImportKind::Code { signature, .. }
+        | lash_kernel_value::ImportKind::Operation { signature } = &import.kind
         {
             check_signature(signature, limit)?;
         }
@@ -238,15 +238,18 @@ fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result
     }
     Ok(())
 }
-fn check_signature(signature: &lash_vocabulary::Signature, limit: usize) -> Result<(), PrintError> {
+fn check_signature(
+    signature: &lash_kernel_value::Signature,
+    limit: usize,
+) -> Result<(), PrintError> {
     check_type(&signature.result, limit)?;
     for param in &signature.params {
         check_type(&param.ty, limit)?;
     }
     Ok(())
 }
-fn check_type(ty: &lash_vocabulary::Type, limit: usize) -> Result<(), PrintError> {
-    use lash_vocabulary::Type;
+fn check_type(ty: &lash_kernel_value::Type, limit: usize) -> Result<(), PrintError> {
+    use lash_kernel_value::Type;
     let mut stack = vec![(ty, 1usize)];
     while let Some((ty, depth)) = stack.pop() {
         if depth > limit {
@@ -264,7 +267,7 @@ fn check_type(ty: &lash_vocabulary::Type, limit: usize) -> Result<(), PrintError
             }
             Type::Record(t) => {
                 stack.extend(t.fields.iter().map(|f| (&f.ty, next)));
-                if let lash_vocabulary::RecordRest::Keep(rest) = &t.rest {
+                if let lash_kernel_value::RecordRest::Keep(rest) = &t.rest {
                     stack.push((rest, next));
                 }
             }

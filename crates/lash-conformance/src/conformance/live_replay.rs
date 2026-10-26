@@ -14,7 +14,7 @@ use super::*;
 use crate::runtime::LiveReplayEventDraft;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use pretty_assertions::assert_eq;
 

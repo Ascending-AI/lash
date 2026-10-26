@@ -12,7 +12,10 @@ use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseR
 use lash_durable::domain::{CellId, ExecKey, ExecRootWrite, RootOwner, TurnWrite};
 use lash_durable::{ActorKey, ActorTx, CommitLabel, DomainWrite, FormatSet, MailTx, NodeSpec};
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::{InputId, SessionId, TurnId};
+use {
+    lash_kernel_value::identity::SessionId, lash_vocabulary::identity::InputId,
+    lash_vocabulary::identity::TurnId,
+};
 
 use crate::plugin::{CodeExecutorPlugin, ExecutionCandidate, ProtocolSessionContext};
 

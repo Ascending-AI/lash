@@ -12,8 +12,11 @@ use lash_kernel_doc::{
     RegistryError, Value, ValueKind,
 };
 
-use lash_vocabulary::{FunctionName, Name, Param, Signature, Type};
 use num_bigint::BigInt;
+use {
+    lash_kernel_value::FunctionName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use crate::arithmetic::{self, Binary, Unary};
 use crate::comparison::{compare, equal, same};

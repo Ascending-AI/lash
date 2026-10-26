@@ -1,7 +1,7 @@
 //! The canonical binary codecs of the kernel's vocabulary (FIG-5887 §2, §3).
 //!
 //! Every type here has one spelling in the token grammar of
-//! [`lash_vocabulary::tokens`], written and read by hand, never derived:
+//! [`lash_kernel_value::tokens`], written and read by hand, never derived:
 //!
 //! - a struct is a sequence of exactly its fields in declaration order, every
 //!   field present, empty or default ones included;
@@ -43,15 +43,15 @@ use crate::TaskId;
 use crate::Timestamp;
 
 #[cfg(test)]
-use lash_vocabulary::sites::TaskIdentity;
-use lash_vocabulary::tokens::CodecVariant;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::sites::TaskIdentity;
+use lash_kernel_value::tokens::CodecVariant;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// FrozenValue (node kind 8) variant numbers: what a frozen tree is.
-use lash_vocabulary::tokens::FROZEN_DATUM;
+use lash_kernel_value::tokens::FROZEN_DATUM;
 
 /// A datum as the body of a FrozenValue node: `sum(0, 1, <Datum>)`. A
 /// committed effect outcome and a run's result are staged through it, so
@@ -330,7 +330,7 @@ impl TokenCodec for Datum {
                 12 => Self::Set(Vec::decode(input)?),
                 13 => Self::Record(Vec::decode(input)?),
                 14 => Self::Error(Box::decode(input)?),
-                15 => Self::Function(lash_vocabulary::names::CallableId::decode(input)?),
+                15 => Self::Function(lash_kernel_value::names::CallableId::decode(input)?),
                 16 => Self::Handle(Handle::decode(input)?),
                 _ => Self::FunctionValue(Box::decode(input)?),
             })
@@ -357,11 +357,11 @@ pub mod heap_values {
     use crate::heap::*;
     use crate::{Float, Integer, TaskId, Timestamp};
 
-    use lash_vocabulary::tokens::ChildRef;
-    use lash_vocabulary::tokens::TokenCodec;
-    use lash_vocabulary::tokens::TokenError;
-    use lash_vocabulary::tokens::TokenReader;
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::ChildRef;
+    use lash_kernel_value::tokens::TokenCodec;
+    use lash_kernel_value::tokens::TokenError;
+    use lash_kernel_value::tokens::TokenReader;
+    use lash_kernel_value::tokens::TokenWriter;
     use num_bigint::{BigInt, Sign};
     use num_traits::FromPrimitive;
     use sha2::{Digest, Sha256};

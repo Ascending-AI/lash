@@ -32,9 +32,9 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessStatus;
 use lash_execution_contracts::process::ProcessStatusFilter;
 use lash_execution_contracts::process::process_child_session_id;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 use served::{Tier, WATCHDOG};
 
@@ -408,7 +408,7 @@ fn probe_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).unwrap(),
         1,
         1,

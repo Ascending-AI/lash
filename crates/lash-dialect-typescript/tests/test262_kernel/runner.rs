@@ -20,10 +20,10 @@ use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_value::names::Name;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, RunError, Step, Target,
 };
-use lash_vocabulary::names::Name;
 
 #[path = "../../src/tests/linked.rs"]
 mod linked;
@@ -100,9 +100,7 @@ pub(crate) fn executor() -> Box<dyn Executor> {
 fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let embedding =
-            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
-        Arc::clone(embedding.registry().expect("installed package natives"))
+        Arc::new(lash_kernel_conformance::installed_functions().expect("installed package natives"))
     })
 }
 
@@ -140,7 +138,7 @@ impl<M: Machine> OnMachine<M> {
             library: PreparedLibrary::with_helpers(
                 registry,
                 Arc::clone(
-                    &lash_vm_releases::helper_release()
+                    &lash_kernel_releases::helper_release()
                         .expect("build helpers")
                         .helpers,
                 ),
@@ -160,10 +158,10 @@ struct TestHost {
 impl Host for TestHost {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         linked_reads::read(use_, 0)
     }
@@ -239,28 +237,31 @@ impl<M: Machine> Executor for OnMachine<M> {
 
 /// The test host's turn-ending tool: a program ends with
 /// `await host.finish(value)`, as a model's cell ends with `control.finish`.
-fn finish_effect() -> BTreeMap<lash_vocabulary::names::EffectName, lash_vocabulary::types::Signature>
-{
+fn finish_effect()
+-> BTreeMap<lash_kernel_value::names::EffectName, lash_kernel_value::types::Signature> {
     BTreeMap::from([(
-        lash_vocabulary::names::EffectName::new("host.finish").expect("a tool's name"),
-        lash_vocabulary::types::Signature {
-            params: vec![lash_vocabulary::types::Param {
+        lash_kernel_value::names::EffectName::new("host.finish").expect("a tool's name"),
+        lash_kernel_value::types::Signature {
+            params: vec![lash_kernel_value::types::Param {
                 name: Name::new("value"),
-                ty: lash_vocabulary::types::Type::Any,
+                ty: lash_kernel_value::types::Type::Any,
                 optional: false,
             }],
-            result: lash_vocabulary::types::Type::Any,
+            result: lash_kernel_value::types::Type::Any,
         },
     )])
 }
 
 /// [`finish_effect`]'s control: its call ends the program.
 fn finish_control() -> &'static BTreeMap<
-    lash_vocabulary::names::EffectName,
+    lash_kernel_value::names::EffectName,
     BTreeSet<lash_kernel_dialect::EffectControl>,
 > {
     static CONTROLS: std::sync::OnceLock<
-        BTreeMap<lash_vocabulary::names::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        BTreeMap<
+            lash_kernel_value::names::EffectName,
+            BTreeSet<lash_kernel_dialect::EffectControl>,
+        >,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         finish_effect()
@@ -279,7 +280,7 @@ fn finish_control() -> &'static BTreeMap<
 fn library() -> &'static NamedLibrary {
     static LIBRARY: std::sync::OnceLock<NamedLibrary> = std::sync::OnceLock::new();
     LIBRARY.get_or_init(|| {
-        let roots = lash_vm_releases::helper_release()
+        let roots = lash_kernel_releases::helper_release()
             .expect("helper release")
             .resolver_roots();
         NamedLibrary::resolving(registry(), |id| roots.contains(id)).expect("unique exported names")

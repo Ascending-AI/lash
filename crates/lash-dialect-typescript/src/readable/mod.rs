@@ -20,7 +20,7 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use crate::Diagnostic;
 
@@ -63,15 +63,18 @@ fn print_attempt(
             .map(|(name, (function, item))| {
                 item.map(|item| (name, item))
                     .map_err(|_| PrintError::Unprintable {
-                        site: lash_vocabulary::sites::Site::new(
-                            lash_vocabulary::sites::Unit::Library(function),
+                        site: lash_kernel_value::sites::Site::new(
+                            lash_kernel_value::sites::Unit::Library(function),
                             Vec::new(),
                         ),
                     })
             })
             .collect::<Result<_, _>>()?,
         main: Some(lifted.main.map_err(|_| PrintError::Unprintable {
-            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+            site: lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                Vec::new(),
+            ),
         })?),
     };
     let verified = printing.items.keys().cloned().collect();
@@ -96,7 +99,10 @@ impl regions::Regions for Printing<'_> {
         let mut writer = source::Writer::default();
         let mut written = BTreeMap::new();
         let unprintable = || PrintError::Unprintable {
-            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+            site: lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                Vec::new(),
+            ),
         };
         match self.main.as_ref().ok_or_else(unprintable)? {
             lift::Main::Module(parts) => {
@@ -311,22 +317,22 @@ export async function demo(value: number): Promise<string> {
                 "title":{"type":"string"},"url":{"type":"string"},"content":{"type":"string"}
             },"required":["title","url","content"],"additionalProperties":false}}
         },"required":["results"],"additionalProperties":false});
-        let signature = lash_vocabulary::json_schema::tool_signature(
-            &lash_vocabulary::JsonSchema::admit(input).unwrap(),
-            &lash_vocabulary::JsonSchema::admit(output).unwrap(),
+        let signature = lash_kernel_value::json_schema::tool_signature(
+            &lash_kernel_value::JsonSchema::admit(input).unwrap(),
+            &lash_kernel_value::JsonSchema::admit(output).unwrap(),
         );
         let namespaces = lash_kernel_dialect::Namespaces::new(
             [(
-                lash_vocabulary::PackagePath::parse("web").unwrap(),
+                lash_kernel_value::PackagePath::parse("web").unwrap(),
                 [(
-                    lash_vocabulary::Segment::new("search").unwrap(),
+                    lash_kernel_value::Segment::new("search").unwrap(),
                     lash_kernel_dialect::NamespaceMember {
-                        visibility: lash_vocabulary::Visibility::Public,
+                        visibility: lash_kernel_value::Visibility::Public,
                         kind: lash_kernel_dialect::NamespaceKind::Operation(
                             lash_kernel_dialect::OperationSignature {
                                 signature,
-                                controls: lash_vocabulary::TurnControls::none(),
-                                mode: lash_vocabulary::OperationMode::Waited,
+                                controls: lash_kernel_value::TurnControls::none(),
+                                mode: lash_kernel_value::OperationMode::Waited,
                             },
                         ),
                     },

@@ -2,12 +2,12 @@
 
 use lash_kernel_doc::{Document, Expr, Node};
 
-use lash_vocabulary::observation::RanCounts;
-use lash_vocabulary::observation::ReplayPath;
-use lash_vocabulary::observation::RunObservation;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::TaskLabel;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::observation::RanCounts;
+use lash_kernel_value::observation::ReplayPath;
+use lash_kernel_value::observation::RunObservation;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::TaskLabel;
+use lash_kernel_value::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

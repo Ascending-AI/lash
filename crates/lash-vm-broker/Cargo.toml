@@ -28,6 +28,7 @@ testing = []
 # vocabulary and the parent's identity vocabulary. It drives a machine
 # through its interface and never compiles model code (ADR 0123).
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-core-execution = { workspace = true }
@@ -38,7 +39,7 @@ lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-protocol-types = { workspace = true }
 lash-vm-protocol = { workspace = true }
-lash-vm-releases = { workspace = true }
+lash-kernel-releases = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 serde_json = { workspace = true }
@@ -48,7 +49,7 @@ tokio-util = { workspace = true }
 
 [dev-dependencies]
 # The laws' runs pin a dialect's release, so their build holds one.
-lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
 # The resume law builds two releases of one package line.
 lash-kernel-package = { workspace = true }

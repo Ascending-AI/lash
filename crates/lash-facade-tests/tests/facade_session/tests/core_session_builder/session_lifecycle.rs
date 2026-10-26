@@ -3,12 +3,12 @@
 //! laws the deleted engine-double session lifecycle tests owed.
 
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 mod session_binding;
 
-fn session(text: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::parse(text).expect("nonblank host identity")
+fn session(text: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::parse(text).expect("nonblank host identity")
 }
 
 #[cfg(feature = "rlm")]
@@ -274,7 +274,7 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         "tools.switch_frame",
         "Switches the agent frame.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

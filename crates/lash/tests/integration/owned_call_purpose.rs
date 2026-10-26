@@ -263,7 +263,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
             lash::persistence::LeaseIncarnationId::new("purpose-probe-boot"),
         ))
         .expect("core");
-    core.session(lash_vocabulary::identity::SessionId::from(
+    core.session(lash_kernel_value::identity::SessionId::from(
         "purpose-probe-session",
     ))
     .create(lash::SessionCreation {
@@ -288,7 +288,7 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
     .await
     .expect("session created");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "purpose-probe-session",
         ))
         .open()

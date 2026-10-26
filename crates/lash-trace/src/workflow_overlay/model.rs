@@ -1,4 +1,4 @@
-use lash_vocabulary::WorkflowReference;
+use lash_kernel_value::WorkflowReference;
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
@@ -24,7 +24,7 @@ pub(super) const MISMATCH_LIMIT: usize = 64;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowOverlayDocument {
     reference: WorkflowReference,
-    sites: BTreeSet<lash_vocabulary::sites::PositionLabel>,
+    sites: BTreeSet<lash_kernel_value::sites::PositionLabel>,
 }
 
 impl WorkflowOverlayDocument {
@@ -32,7 +32,7 @@ impl WorkflowOverlayDocument {
     /// entry it selects.
     pub fn new(
         reference: WorkflowReference,
-        sites: impl IntoIterator<Item = impl Into<lash_vocabulary::sites::PositionLabel>>,
+        sites: impl IntoIterator<Item = impl Into<lash_kernel_value::sites::PositionLabel>>,
     ) -> Self {
         Self {
             reference,
@@ -45,7 +45,7 @@ impl WorkflowOverlayDocument {
     }
 
     /// Whether the document has `site`.
-    pub fn contains(&self, site: &lash_vocabulary::sites::PositionLabel) -> bool {
+    pub fn contains(&self, site: &lash_kernel_value::sites::PositionLabel) -> bool {
         self.sites.contains(site)
     }
 }
@@ -60,14 +60,14 @@ impl WorkflowOverlayDocument {
 #[serde(deny_unknown_fields)]
 pub struct WorkflowTaskSite {
     /// The site in the document.
-    pub site: lash_vocabulary::sites::PositionLabel,
+    pub site: lash_kernel_value::sites::PositionLabel,
     /// The task that ran it.
-    pub task: lash_vocabulary::sites::TaskLabel,
+    pub task: lash_kernel_value::sites::TaskLabel,
 }
 
 impl WorkflowTaskSite {
     /// The site and task of the occurrence `at`.
-    pub fn of(at: &lash_vocabulary::sites::EffectId) -> Self {
+    pub fn of(at: &lash_kernel_value::sites::EffectId) -> Self {
         Self {
             site: at.position(),
             task: at.task(),
@@ -78,7 +78,9 @@ impl WorkflowTaskSite {
 impl std::fmt::Display for WorkflowTaskSite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(
-            &lash_vocabulary::sites::ObservationReader::task_position_label(&self.task, &self.site),
+            &lash_kernel_value::sites::ObservationReader::task_position_label(
+                &self.task, &self.site,
+            ),
         )
     }
 }
@@ -148,11 +150,11 @@ pub enum WorkflowOverlayEventIdentity {
         transition: WorkflowOverlayExecutionTransition,
     },
     Node {
-        at: lash_vocabulary::sites::EffectId,
+        at: lash_kernel_value::sites::EffectId,
         transition: WorkflowOverlayNodeTransition,
     },
     StepBody {
-        at: lash_vocabulary::sites::EffectId,
+        at: lash_kernel_value::sites::EffectId,
         attempt: u32,
     },
 }
@@ -160,7 +162,7 @@ pub enum WorkflowOverlayEventIdentity {
 impl WorkflowOverlayEventIdentity {
     /// The occurrence the observation is about; `None` for a fact about the
     /// whole execution.
-    pub const fn at(&self) -> Option<&lash_vocabulary::sites::EffectId> {
+    pub const fn at(&self) -> Option<&lash_kernel_value::sites::EffectId> {
         match self {
             Self::Execution { .. } => None,
             Self::Node { at, .. } | Self::StepBody { at, .. } => Some(at),
@@ -262,7 +264,7 @@ pub struct WorkflowExecutionOverlay {
     pub document: WorkflowOverlayDocumentBinding,
     pub coverage: WorkflowOverlayCoverage,
     /// The start's observation level; None when the start is missing.
-    pub observation: Option<lash_vocabulary::observation::RunObservation>,
+    pub observation: Option<lash_kernel_value::observation::RunObservation>,
     /// Cumulative counts, summed over cell activation segments. Read them
     /// through `workflow::view::coverage` using `ran_counts()`.
     pub ran: Vec<(u32, u64)>,
@@ -295,7 +297,7 @@ struct WorkflowExecutionOverlayWire {
     attempt: Option<u32>,
     document: WorkflowOverlayDocumentBinding,
     coverage: WorkflowOverlayCoverage,
-    observation: Option<lash_vocabulary::observation::RunObservation>,
+    observation: Option<lash_kernel_value::observation::RunObservation>,
     ran: Vec<(u32, u64)>,
     ran_segments: BTreeMap<String, BTreeMap<u32, u64>>,
     status: LanguageExecutionStatus,
@@ -352,8 +354,8 @@ impl<'de> Deserialize<'de> for WorkflowExecutionOverlay {
 impl WorkflowExecutionOverlay {
     /// The common input to the workflow coverage helper. Missing starts and
     /// off executions stay unobserved rather than becoming observed zeros.
-    pub fn ran_counts(&self) -> lash_vocabulary::observation::RanCounts {
-        lash_vocabulary::observation::RanCounts {
+    pub fn ran_counts(&self) -> lash_kernel_value::observation::RanCounts {
+        lash_kernel_value::observation::RanCounts {
             observation: self.observation,
             ran: self.ran.clone(),
         }
@@ -396,7 +398,7 @@ pub(super) fn execution_key(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySiteRetention {
     pub site: WorkflowTaskSite,
-    pub truncation_watermark: lash_vocabulary::sites::VisitId,
+    pub truncation_watermark: lash_kernel_value::sites::VisitId,
     /// What the occurrences below the watermark folded to.
     pub archived: WorkflowOverlaySiteState,
     /// The child executions the occurrences below the watermark started.
@@ -412,31 +414,31 @@ pub enum WorkflowOverlayOccurrence {
     #[default]
     Unobserved,
     Running {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         start: DateTime<Utc>,
     },
     Waiting {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         since: DateTime<Utc>,
         awaited: crate::TraceNodeAwaited,
     },
     Completed {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
     },
     Failed {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
         failure: TraceLanguageExecutionFailure,
     },
     Cancelled {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
@@ -445,7 +447,7 @@ pub enum WorkflowOverlayOccurrence {
     /// observed occurrence. The category is authoritative; success, failure
     /// and timing are not inferred from it.
     Incomplete {
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -499,7 +501,7 @@ impl WorkflowOverlayOccurrence {
     }
 
     /// Which occurrence of the site this state is of.
-    pub const fn occurrence(&self) -> Option<lash_vocabulary::sites::VisitId> {
+    pub const fn occurrence(&self) -> Option<lash_kernel_value::sites::VisitId> {
         match self {
             Self::Unobserved => None,
             Self::Running { occurrence, .. }
@@ -525,7 +527,7 @@ pub struct WorkflowOverlaySiteReport {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayTerminalRecord {
-    pub occurrence: lash_vocabulary::sites::VisitId,
+    pub occurrence: lash_kernel_value::sites::VisitId,
     pub status: WorkflowOverlayTerminalStatus,
     pub end: DateTime<Utc>,
 }
@@ -541,7 +543,7 @@ pub enum WorkflowOverlayTerminalStatus {
 /// The admitted call an occurrence is bound to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayCall {
-    pub occurrence: lash_vocabulary::sites::VisitId,
+    pub occurrence: lash_kernel_value::sites::VisitId,
     pub call_id: lash_protocol_types::ToolCallId,
     /// The latest attempt of the call's admitted body that was observed to
     /// start; absent when the binding came from a language fact alone.
@@ -563,7 +565,7 @@ pub struct WorkflowOverlaySiteState {
     /// The authored statement of this occurrence, reported by its request.
     /// Absent when no origin observation was retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<lash_vocabulary::sites::Site>,
+    pub origin: Option<lash_kernel_value::sites::Site>,
     /// Which arm a branch site last took. Absent on every other site, and on
     /// a branch whose selection has not been observed. The arms themselves
     /// are the document's: a host reads which nodes an unselected arm holds

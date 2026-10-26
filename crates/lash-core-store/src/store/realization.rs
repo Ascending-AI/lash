@@ -56,7 +56,7 @@ pub fn admit_runtime_commit_budget(
 mod tests {
     use super::*;
     use crate::session_graph::RealizedNodeTimestamp;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn commit_runtime_state_verified(

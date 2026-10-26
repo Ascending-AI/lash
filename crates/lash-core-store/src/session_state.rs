@@ -9,7 +9,7 @@ const LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION: &str =
     "lash-session-append-draft-fallback/v2";
 
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::session_model::{LlmUsage, Message, SessionPolicy, plugin_message_to_message};

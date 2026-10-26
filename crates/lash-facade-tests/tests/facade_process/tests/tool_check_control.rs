@@ -117,7 +117,7 @@ async fn run_policy_turn(
     .plugin(tool_policy_plugin(decision))
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();

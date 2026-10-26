@@ -27,9 +27,9 @@ pub use scope_lifetime::*;
 mod start_request;
 pub use start_request::*;
 
+pub use lash_kernel_value::identity::SessionId;
 pub use lash_protocol_types::handle::HandleId;
 pub use lash_vocabulary::identity::ProcessId;
-pub use lash_vocabulary::identity::SessionId;
 pub type ProcessOutcome = ProcessAwaitOutput;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -222,7 +222,7 @@ pub enum SessionTurnOutcome {
     /// when one is given.
     FinalValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<lash_vocabulary::json_schema::JsonSchema>,
+        schema: Option<lash_kernel_value::json_schema::JsonSchema>,
     },
 }
 

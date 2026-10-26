@@ -1,12 +1,11 @@
 //! Turn retained callable state into ordinary authored code, without executing it.
 use crate::{LinkRefusal, LinkedContent};
 use lash_kernel_doc::*;
-use lash_vocabulary::{
-    names::*,
-    package::LinkId,
-    sites::{Site, Unit},
-};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::*, lash_kernel_value::package::LinkId,
+    lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit,
+};
 
 mod lexical;
 mod source;
@@ -149,7 +148,7 @@ pub fn materialize_workflow(
     function.check(
         helpers,
         FunctionValueLimits::standard(),
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )?;
     let mut block = Vec::new();
     let mut factories = BTreeSet::new();
@@ -448,11 +447,11 @@ pub fn materialize_workflow(
         params
             .into_iter()
             .map(|mut param| {
-                param.ty = lash_vocabulary::Type::Any;
+                param.ty = lash_kernel_value::Type::Any;
                 param
             })
             .collect(),
-        lash_vocabulary::Type::Any,
+        lash_kernel_value::Type::Any,
         block,
         &document,
         helpers,

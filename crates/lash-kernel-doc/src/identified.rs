@@ -12,13 +12,13 @@
 use std::sync::Arc;
 
 use crate::Document;
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::tokens::TokenCodec as _;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
-use lash_vocabulary::tokens::logical_digest;
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::tokens::TokenCodec as _;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
+use lash_kernel_value::tokens::logical_digest;
 
 /// A document, its identity and its canonical token body, made together
 /// once. Clones share all three.

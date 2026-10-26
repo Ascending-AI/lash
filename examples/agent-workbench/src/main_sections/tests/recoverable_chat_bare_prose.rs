@@ -2,7 +2,7 @@
 //! turn's reply renders once, whatever committed it.
 
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The agent replies a page shows for `snapshot`: one per turn. A committed
 /// reply stands for its turn; a live product reply shows only for a turn

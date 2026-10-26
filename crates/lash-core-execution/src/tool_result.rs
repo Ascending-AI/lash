@@ -581,7 +581,7 @@ mod tests {
     fn declared_start() -> crate::PendingResolver {
         let start = lash_execution_contracts::tool_intent::StartProcessIntent {
             owner: lash_vocabulary::identity::RuntimeOwner::Session(
-                lash_vocabulary::identity::SessionId::from("parent"),
+                lash_kernel_value::identity::SessionId::from("parent"),
             ),
             declaration: lash_execution_contracts::testing::held_engine_declaration(
                 serde_json::Value::Null,
@@ -591,7 +591,7 @@ mod tests {
         };
         let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
             &lash_vocabulary::identity::RuntimeOwner::Session(
-                lash_vocabulary::identity::SessionId::from("parent"),
+                lash_kernel_value::identity::SessionId::from("parent"),
             ),
             "turn-1",
             &crate::ToolCallId::fixture("call-1"),
@@ -677,7 +677,7 @@ mod tests {
         let derive = |session: &str, scope: &str, call: &str, index: u32| {
             lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
                 &lash_vocabulary::identity::RuntimeOwner::Session(
-                    lash_vocabulary::identity::SessionId::fixture(session),
+                    lash_kernel_value::identity::SessionId::fixture(session),
                 ),
                 scope,
                 &crate::ToolCallId::fixture(call),
@@ -688,7 +688,7 @@ mod tests {
         let emission = crate::RuntimeInvocation::effect(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn(
-                    lash_vocabulary::identity::SessionId::from("parent"),
+                    lash_kernel_value::identity::SessionId::from("parent"),
                     "turn-1",
                 ),
                 "tool:call-1:attempt:2",
@@ -710,7 +710,7 @@ mod tests {
                 "another minting emission",
                 lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
                     &lash_vocabulary::identity::RuntimeOwner::Session(
-                        lash_vocabulary::identity::SessionId::from("parent"),
+                        lash_kernel_value::identity::SessionId::from("parent"),
                     ),
                     "turn-1",
                     &crate::ToolCallId::fixture("call-1"),
@@ -743,8 +743,8 @@ mod tests {
         assert_eq!(
             lash_execution_contracts::declared_start::bound_declared_start(&foreign, &declaring),
             Err(lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::OwnerMismatch {
-                expected: lash_vocabulary::identity::RuntimeOwner::Session(lash_vocabulary::identity::SessionId::from("parent")),
-                recorded: lash_vocabulary::identity::RuntimeOwner::Session(lash_vocabulary::identity::SessionId::from("other")),
+                expected: lash_vocabulary::identity::RuntimeOwner::Session(lash_kernel_value::identity::SessionId::from("parent")),
+                recorded: lash_vocabulary::identity::RuntimeOwner::Session(lash_kernel_value::identity::SessionId::from("other")),
             }),
             "a start naming another session is refused"
         );

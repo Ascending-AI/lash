@@ -26,10 +26,10 @@ use lash_kernel_state::paged::{
     HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
     TaskStateRecord,
 };
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use lash_kernel_exec::coord::{ActionPhase, LoopPhase, RestoreRefusal, SitePath};
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
 use crate::{Bounds, End, Layout, Machine, Request, Step};
@@ -69,7 +69,7 @@ fn setup(slice: u64) -> Setup {
 /// origin, and its charge.
 #[derive(Debug, PartialEq)]
 struct Trace {
-    checkpoints: Vec<crate::conformance::Checkpoint>,
+    checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
     end: String,
     printed: Vec<String>,
     requests: Vec<String>,
@@ -180,7 +180,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         ..setup(drive.slice)
     };
     if let Some((entry, arg)) = drive.entry {
-        setup.start.target = crate::Target::Entry(lash_vocabulary::names::Name::new(entry));
+        setup.start.target = crate::Target::Entry(lash_kernel_value::names::Name::new(entry));
         setup.start.args = vec![int(arg)];
     }
     if drive.reads {
@@ -221,7 +221,8 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
                 && let Some(carry) = &finished.carry
             {
                 checkpoints.push(
-                    crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap(),
+                    lash_kernel_state::semantic::session(carry, Box::new(embedder.source.clone()))
+                        .unwrap(),
                 );
             }
             break end_of(end);
@@ -630,7 +631,7 @@ fn each_nested_wait_is_named_by_its_own_site() {
             let identity = match request {
                 Request::Effect(effect) => &effect.identity,
             };
-            let identity = lash_kernel_doc::kernel_internals::effect_parts(identity);
+            let identity = lash_kernel_value::kernel_internals::effect_parts(identity);
             let iteration = identity.loops.first().map_or(99, |at| at.iteration);
             (identity.site.to_string(), identity.occurrence, iteration)
         })
@@ -656,8 +657,8 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
     let mut warm = Embedder::with(SOURCE, setup(u64::MAX));
     warm.run_to_end(&[]);
     let expected: Vec<_> = (0..5)
-        .map(|occurrence| lash_vocabulary::sites::EffectIdentity {
-            task: lash_vocabulary::sites::TaskIdentity::Main,
+        .map(|occurrence| lash_kernel_value::sites::EffectIdentity {
+            task: lash_kernel_value::sites::TaskIdentity::Main,
             site: embedder::function_site("work", [0, 0]),
             occurrence,
             loops: Vec::new(),
@@ -668,7 +669,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
             .iter()
             .map(|request| {
                 let Request::Effect(effect) = request;
-                lash_kernel_doc::kernel_internals::effect_parts(&effect.identity).clone()
+                lash_kernel_value::kernel_internals::effect_parts(&effect.identity).clone()
             })
             .collect::<Vec<_>>()
     };
@@ -763,7 +764,7 @@ fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
         .iter()
         .map(|request| {
             let Request::Effect(effect) = request;
-            let identity = lash_kernel_doc::kernel_internals::effect_parts(&effect.identity);
+            let identity = lash_kernel_value::kernel_internals::effect_parts(&effect.identity);
             let loops = identity
                 .loops
                 .iter()
@@ -1043,7 +1044,7 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
     embedder
         .machine
         .tamper_loop(TaskId::MAIN, 0, |record, access| {
-            let moved = Site::new(lash_vocabulary::sites::Unit::Main, [9, 9]);
+            let moved = Site::new(lash_kernel_value::sites::Unit::Main, [9, 9]);
             record.site = lash_kernel_state::paged::SiteRef::new(&moved, access).unwrap();
         })
         .unwrap();

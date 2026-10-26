@@ -4,7 +4,7 @@ use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{ModelCall, ModelPin, PhaseAdvance, RunSeq, TurnWrite, UnfinishedPhase};
 use crate::{DomainWrite, DurableInstant, DurableStore};
 use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// A turn counts the model calls it admitted. Admission starts the count at

@@ -3,17 +3,17 @@
 use crate::{ParkedRefusal, Rewritten};
 use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
-use lash_kernel_doc::kernel_internals::{effect_id, effect_parts};
-use lash_vocabulary::sites::{EffectIdentity, TaskIdentity};
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::kernel_internals::{effect_id, effect_parts};
+use lash_kernel_value::tokens::encode_body;
+use {lash_kernel_value::sites::EffectIdentity, lash_kernel_value::sites::TaskIdentity};
 
 use lash_kernel_state::kernel_internals::{
     metadata::metadata_key,
     tree::{Access, Cell, SealWork, Tree},
 };
 use lash_kernel_state::paged::*;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::sites::Site;
 
 /// Infrastructure faults remain distinct from a semantic carry refusal.
 #[derive(Debug, thiserror::Error)]
@@ -35,7 +35,7 @@ fn site(
     held: &str,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<Site, ParkedRefusal> {
-    if matches!(&from.unit, lash_vocabulary::sites::Unit::Library(function) if helpers.contains(function))
+    if matches!(&from.unit, lash_kernel_value::sites::Unit::Library(function) if helpers.contains(function))
     {
         return Ok(from.clone());
     }
@@ -63,7 +63,7 @@ fn task(
     }
     let mut to = TaskIdentity::Main;
     for (site, occurrence) in steps.into_iter().rev() {
-        to = TaskIdentity::Spawned(lash_vocabulary::sites::SpawnIdentity {
+        to = TaskIdentity::Spawned(lash_kernel_value::sites::SpawnIdentity {
             parent: std::sync::Arc::new(to),
             site,
             occurrence,
@@ -86,7 +86,7 @@ pub fn carry_effect(
             .loops
             .iter()
             .map(|held| {
-                Ok(lash_vocabulary::sites::LoopIteration {
+                Ok(lash_kernel_value::sites::LoopIteration {
                     site: site(c, &held.site, "wait loop", helpers)?,
                     iteration: held.iteration,
                 })
@@ -97,8 +97,8 @@ pub fn carry_effect(
 struct Carry<'a, 's> {
     access: Access<'s>,
     correspondence: &'a Correspondence,
-    predecessor: lash_vocabulary::LinkId,
-    successor: lash_vocabulary::LinkId,
+    predecessor: lash_kernel_value::LinkId,
+    successor: lash_kernel_value::LinkId,
     helpers: &'a lash_kernel_doc::BuildHelpers,
 }
 impl Carry<'_, '_> {
@@ -177,7 +177,7 @@ impl Carry<'_, '_> {
             return Ok(());
         }
         let old = frame.statement.resolve(&self.access)?;
-        if matches!(&old.unit, lash_vocabulary::sites::Unit::Library(function) if self.helpers.contains(function))
+        if matches!(&old.unit, lash_kernel_value::sites::Unit::Library(function) if self.helpers.contains(function))
         {
             return Ok(());
         }
@@ -230,7 +230,7 @@ impl Carry<'_, '_> {
             return Ok(());
         }
         let old = frame.statement.resolve(&self.access)?;
-        if matches!(&old.unit, lash_vocabulary::sites::Unit::Library(function) if self.helpers.contains(function))
+        if matches!(&old.unit, lash_kernel_value::sites::Unit::Library(function) if self.helpers.contains(function))
         {
             // Exact helper code keeps its coordinates; service-slot preflight
             // proved this operation-context transfer before any mutation.
@@ -315,16 +315,19 @@ pub struct CarryContext {
     pub closure: PageId,
     /// Ordinary defining code authenticated by the pinned closure's producer.
     pub code: std::collections::BTreeMap<
-        lash_vocabulary::LinkId,
-        std::collections::BTreeSet<lash_vocabulary::FunctionId>,
+        lash_kernel_value::LinkId,
+        std::collections::BTreeSet<lash_kernel_value::FunctionId>,
     >,
-    pub links: std::collections::BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
+    pub links:
+        std::collections::BTreeMap<lash_kernel_value::LinkId, lash_kernel_value::package::Link>,
     pub selection: lash_kernel_doc::Selection,
     /// Live function values keep their defining code and occurrence history.
-    pub retained: std::collections::BTreeSet<lash_vocabulary::CallableId>,
+    pub retained: std::collections::BTreeSet<lash_kernel_value::CallableId>,
     /// Producer-validated live/held operation uses; no resolution occurs here.
-    pub uses:
-        std::collections::BTreeMap<lash_vocabulary::OperationUse, lash_vocabulary::OperationUse>,
+    pub uses: std::collections::BTreeMap<
+        lash_kernel_value::OperationUse,
+        lash_kernel_value::OperationUse,
+    >,
 }
 
 /// Carries one authenticated foreign checkpoint. The caller must validate
@@ -337,7 +340,7 @@ pub fn carry_checkpoint(
     checkpoint: &Checkpoint,
     rewritten: &Rewritten,
     closure: PageId,
-    successor: lash_vocabulary::LinkId,
+    successor: lash_kernel_value::LinkId,
     context: &CarryContext,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(PageRef, Checkpoint), CarryFault> {
@@ -394,11 +397,11 @@ pub fn carry_checkpoint(
         .entries()
         .iter()
         .filter_map(|entry| {
-            let lash_vocabulary::sites::Unit::Library(function) = &entry.from.unit else {
+            let lash_kernel_value::sites::Unit::Library(function) = &entry.from.unit else {
                 return None;
             };
             (entry.from != entry.to
-                && context.retained.contains(&lash_vocabulary::CallableId {
+                && context.retained.contains(&lash_kernel_value::CallableId {
                     link: root.link,
                     function: *function,
                 }))
@@ -431,7 +434,7 @@ pub fn carry_checkpoint(
             carry.check_frame(&frame)?;
             if frame.link == root.link {
                 let at = frame.statement.resolve(&carry.access)?;
-                if let lash_vocabulary::sites::Unit::Library(function) = &at.unit
+                if let lash_kernel_value::sites::Unit::Library(function) = &at.unit
                     && helpers.contains(function)
                 {
                     check_helper_operation_context(
@@ -452,7 +455,7 @@ pub fn carry_checkpoint(
     carry.visit(&session, |binding| {
         carry.check_reference(&binding.declared, "session declaration")
     })?;
-    let reads = Tree::<lash_vocabulary::OperationUse>::of_keyed(&root.reads);
+    let reads = Tree::<lash_kernel_value::OperationUse>::of_keyed(&root.reads);
     carry.visit(&reads, |use_| {
         if !context.uses.contains_key(use_) {
             return Err(state("read use has no successor correspondence").into());
@@ -554,13 +557,13 @@ pub fn carry_checkpoint(
 /// The helper's exact validated static reach owns these service slots. An
 /// equal library digest never authorizes rebinding an operation contract.
 fn check_helper_operation_context(
-    root: lash_vocabulary::FunctionId,
-    predecessor: lash_vocabulary::LinkId,
-    successor: lash_vocabulary::LinkId,
+    root: lash_kernel_value::FunctionId,
+    predecessor: lash_kernel_value::LinkId,
+    successor: lash_kernel_value::LinkId,
     helpers: &lash_kernel_doc::BuildHelpers,
-    links: &std::collections::BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
+    links: &std::collections::BTreeMap<lash_kernel_value::LinkId, lash_kernel_value::package::Link>,
 ) -> Result<(), ParkedRefusal> {
-    use lash_vocabulary::package::Fill;
+    use lash_kernel_value::package::Fill;
     let mut pending = vec![root];
     let mut seen = std::collections::BTreeSet::new();
     while let Some(function) = pending.pop() {

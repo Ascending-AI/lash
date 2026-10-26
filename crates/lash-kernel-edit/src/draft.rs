@@ -3,7 +3,7 @@
 use lash_kernel_check::{Admitted, Environment};
 use lash_kernel_doc::Document;
 
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::names::DocumentId;
 
 use crate::apply::{FaultKind, Working};
 use crate::edit::Transaction;
@@ -164,19 +164,23 @@ impl Draft {
         // Check the resulting header facets, including changes reached through
         // edited literals or bindings rather than ChangeCondition itself.
         for node in published.admitted.graph.nodes() {
-            let (child, expected, valid): (_, _, fn(&lash_vocabulary::types::Type) -> bool) =
+            let (child, expected, valid): (_, _, fn(&lash_kernel_value::types::Type) -> bool) =
                 match &node.kind {
                     lash_kernel_check::NodeKind::Stmt(
                         lash_kernel_check::StmtNode::If { condition, .. }
                         | lash_kernel_check::StmtNode::While { condition, .. },
-                    ) => (*condition, lash_vocabulary::types::Type::Bool, can_be_bool),
+                    ) => (
+                        *condition,
+                        lash_kernel_value::types::Type::Bool,
+                        can_be_bool,
+                    ),
                     lash_kernel_check::NodeKind::Stmt(lash_kernel_check::StmtNode::For {
                         iterable,
                         ..
                     }) => (
                         *iterable,
-                        lash_vocabulary::types::Type::List(Box::new(
-                            lash_vocabulary::types::Type::Any,
+                        lash_kernel_value::types::Type::List(Box::new(
+                            lash_kernel_value::types::Type::Any,
                         )),
                         can_be_iterable,
                     ),
@@ -193,7 +197,7 @@ impl Draft {
                             site: Some(node.site.clone()),
                             reason: lash_kernel_check::RefusalReason::ArgumentType {
                                 callee: "wrapper".into(),
-                                param: lash_vocabulary::names::Name::new("header"),
+                                param: lash_kernel_value::names::Name::new("header"),
                                 expected,
                                 found: found.clone(),
                             },
@@ -222,22 +226,22 @@ impl Draft {
     }
 }
 
-fn can_be_bool(ty: &lash_vocabulary::types::Type) -> bool {
+fn can_be_bool(ty: &lash_kernel_value::types::Type) -> bool {
     match ty {
-        lash_vocabulary::types::Type::Bool | lash_vocabulary::types::Type::Any => true,
-        lash_vocabulary::types::Type::Union(members) => members.iter().any(can_be_bool),
+        lash_kernel_value::types::Type::Bool | lash_kernel_value::types::Type::Any => true,
+        lash_kernel_value::types::Type::Union(members) => members.iter().any(can_be_bool),
         _ => false,
     }
 }
 
-fn can_be_iterable(ty: &lash_vocabulary::types::Type) -> bool {
+fn can_be_iterable(ty: &lash_kernel_value::types::Type) -> bool {
     match ty {
-        lash_vocabulary::types::Type::Any
-        | lash_vocabulary::types::Type::List(_)
-        | lash_vocabulary::types::Type::Tuple(_)
-        | lash_vocabulary::types::Type::Map(_)
-        | lash_vocabulary::types::Type::Set(_) => true,
-        lash_vocabulary::types::Type::Union(members) => members.iter().any(can_be_iterable),
+        lash_kernel_value::types::Type::Any
+        | lash_kernel_value::types::Type::List(_)
+        | lash_kernel_value::types::Type::Tuple(_)
+        | lash_kernel_value::types::Type::Map(_)
+        | lash_kernel_value::types::Type::Set(_) => true,
+        lash_kernel_value::types::Type::Union(members) => members.iter().any(can_be_iterable),
         _ => false,
     }
 }

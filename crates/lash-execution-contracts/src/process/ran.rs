@@ -37,7 +37,7 @@ pub struct ProcessRan {
     pub vocabulary_version: u32,
     pub ran: Vec<(u32, u64)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub caught: Vec<lash_vocabulary::sites::EffectId>,
+    pub caught: Vec<lash_kernel_value::sites::EffectId>,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +46,7 @@ struct ProcessRanFields {
     vocabulary_version: u32,
     ran: Vec<(u32, u64)>,
     #[serde(default)]
-    caught: Vec<lash_vocabulary::sites::EffectId>,
+    caught: Vec<lash_kernel_value::sites::EffectId>,
 }
 
 impl TryFrom<ProcessRanFields> for ProcessRan {
@@ -77,7 +77,7 @@ impl ProcessRan {
 
     /// This record with the occurrences its segment recovered from.
     #[must_use]
-    pub fn with_caught(mut self, caught: Vec<lash_vocabulary::sites::EffectId>) -> Self {
+    pub fn with_caught(mut self, caught: Vec<lash_kernel_value::sites::EffectId>) -> Self {
         self.caught = caught;
         self
     }
@@ -129,8 +129,8 @@ impl ProcessRan {
     clippy::expect_used,
     reason = "this module declares the payload schema and admission checks its invariant"
 )]
-pub(super) fn ran_payload_schema() -> lash_vocabulary::json_schema::JsonSchema {
-    lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
+pub(super) fn ran_payload_schema() -> lash_kernel_value::json_schema::JsonSchema {
+    lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["vocabulary_version", "ran"],

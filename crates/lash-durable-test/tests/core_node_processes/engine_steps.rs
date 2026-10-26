@@ -73,8 +73,8 @@ impl lash_execution_contracts::process::EngineSteps for Double {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
-        lash_vocabulary::tool_contract::ExecutionPolicy::Once
+    ) -> lash_kernel_value::tool_contract::ExecutionPolicy {
+        lash_kernel_value::tool_contract::ExecutionPolicy::Once
     }
 
     async fn run(
@@ -256,7 +256,7 @@ const RETRY_ENGINE: &str = "core-node-retry-engine";
 /// The `flaky` body, declared with `retry` as its engine author's policy.
 struct Flaky {
     runs: Arc<AtomicUsize>,
-    retry: lash_vocabulary::tool_contract::ExecutionPolicy,
+    retry: lash_kernel_value::tool_contract::ExecutionPolicy,
 }
 
 #[async_trait::async_trait]
@@ -277,7 +277,7 @@ impl lash_execution_contracts::process::EngineSteps for Flaky {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+    ) -> lash_kernel_value::tool_contract::ExecutionPolicy {
         self.retry
     }
 
@@ -338,8 +338,8 @@ fn flaky_advance(
 /// there is one.
 struct RetryPlugin {
     runs: Arc<AtomicUsize>,
-    declared: lash_vocabulary::tool_contract::ExecutionPolicy,
-    overridden: Option<lash_vocabulary::tool_contract::ExecutionPolicy>,
+    declared: lash_kernel_value::tool_contract::ExecutionPolicy,
+    overridden: Option<lash_kernel_value::tool_contract::ExecutionPolicy>,
 }
 
 struct NoRetrySessionPlugin;
@@ -434,8 +434,8 @@ impl lash_core::plugin::PluginMetadata for RetryPlugin {
 /// engine's `declared` policy and the host's `overridden` one.
 async fn flaky_runs(
     tier: Tier,
-    declared: lash_vocabulary::tool_contract::ExecutionPolicy,
-    overridden: Option<lash_vocabulary::tool_contract::ExecutionPolicy>,
+    declared: lash_kernel_value::tool_contract::ExecutionPolicy,
+    overridden: Option<lash_kernel_value::tool_contract::ExecutionPolicy>,
 ) -> usize {
     let runs = Arc::new(AtomicUsize::new(0));
     let plugin = Arc::new(RetryPlugin {
@@ -459,7 +459,7 @@ async fn flaky_runs(
 /// override retries it to its attempts, and a host's `Once` override stops
 /// an engine's declared retries.
 async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(tier: Tier) {
-    let three = lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    let three = lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::MIN.saturating_add(2),
         0,
         0,
@@ -467,7 +467,7 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
     assert_eq!(
         Box::pin(flaky_runs(
             tier,
-            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            lash_kernel_value::tool_contract::ExecutionPolicy::Once,
             None
         ))
         .await,
@@ -477,7 +477,7 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
     assert_eq!(
         Box::pin(flaky_runs(
             tier,
-            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            lash_kernel_value::tool_contract::ExecutionPolicy::Once,
             Some(three)
         ))
         .await,
@@ -488,7 +488,7 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
         Box::pin(flaky_runs(
             tier,
             three,
-            Some(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
+            Some(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
         ))
         .await,
         1,
@@ -583,7 +583,7 @@ fn failed_step_advance(
 /// The component whose tool catalog contribution refuses.
 const FAILING_CATALOG: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "core-node-failing-catalog",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 fn failing_catalog_component() -> Arc<dyn lash::process::ProcessComponentFactory> {

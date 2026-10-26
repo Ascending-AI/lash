@@ -159,7 +159,7 @@ jobs:
           kiln build --config=optimized --materializations=final \
             --build-report .benchmarks/perf-guard/build-report.json \
             //crates/lash-perf:lash-perf__bin \
-            //crates/lash-dialect-typescript:kernel_perf__example \
+            //crates/lash-vm-worker:kernel_perf__example \
             //crates/lash-vm-worker:lash-vm-worker__bin
           worker="$(python3 tools/buck2/outputs.py \
             --report .benchmarks/perf-guard/build-report.json \
@@ -175,7 +175,7 @@ jobs:
         if: '!cancelled()'
         run: |
           set -euo pipefail
-          kernel="$(python3 tools/buck2/outputs.py --report .benchmarks/perf-guard/build-report.json --label //crates/lash-dialect-typescript:kernel_perf__example --single)"
+          kernel="$(python3 tools/buck2/outputs.py --report .benchmarks/perf-guard/build-report.json --label //crates/lash-vm-worker:kernel_perf__example --single)"
           reader="$(python3 tools/buck2/outputs.py --report .benchmarks/perf-guard/build-report.json --label //crates/lash-perf:lash-perf__bin --single)"
           (ulimit -v 8388608; /usr/bin/time -v python3 scripts/perf/kernel/measure.py \
             --kernel "$kernel" --reader "$reader" --record-baseline \

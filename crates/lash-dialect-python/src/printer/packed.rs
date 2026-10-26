@@ -1,6 +1,6 @@
 //! Invert the Python callable ABI without printing its binder as user code.
 use super::{BindingScope, Renderer, k};
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 fn token(value: &k::Expr) -> Option<&[k::Expr]> {
     let k::Expr::Tuple(parts) = value else {
@@ -65,7 +65,7 @@ impl Renderer<'_> {
         &self,
         closure: &k::Closure,
         parts: &[k::Expr],
-    ) -> Option<(Vec<Name>, k::Block, lash_vocabulary::FunctionId, usize)> {
+    ) -> Option<(Vec<Name>, k::Block, lash_kernel_value::FunctionId, usize)> {
         let k::Expr::Tuple(metadata) = &parts[2] else {
             return None;
         };
@@ -219,7 +219,7 @@ impl Renderer<'_> {
         let main = self.main;
         self.main = false;
         self.out
-            .begin_node(Some(&lash_vocabulary::sites::Unit::Library(body_unit)));
+            .begin_node(Some(&lash_kernel_value::sites::Unit::Library(body_unit)));
         self.indent += 1;
         for _ in 0..prologue {
             self.implicit();

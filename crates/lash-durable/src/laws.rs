@@ -107,7 +107,7 @@ fn tagged_node(
     use lash_core_store::checkpoint_graph::GraphStaging;
     use lash_core_store::checkpoint_graph::NodeKind;
     use lash_core_store::checkpoint_graph::TypedBody;
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
     let mut out = TokenWriter::new();
     out.text(tag);
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
@@ -656,9 +656,9 @@ pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
 ) -> LawOutcome {
     use crate::domain::{DomainWrite, MailDomainWrite, TurnCancelRequest, TurnWrite};
     use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
+    use lash_kernel_value::identity::SessionId;
     use lash_protocol_types::TurnCancelMode;
     use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
-    use lash_vocabulary::identity::SessionId;
     use lash_vocabulary::identity::TurnId;
 
     let id = SessionId::try_from("late-cancel-session".to_owned())
@@ -738,9 +738,9 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
         DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest, TurnWrite,
     };
     use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord, RunTerminalCause};
+    use lash_kernel_value::identity::SessionId;
     use lash_protocol_types::TurnCancelMode;
     use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
-    use lash_vocabulary::identity::SessionId;
     use lash_vocabulary::identity::TurnId;
 
     let id = SessionId::try_from("cancelled-session".to_owned())
@@ -939,7 +939,7 @@ pub async fn lo_fence_with_path(
         RunFactKind, RunFactWrite, RunSeq,
     };
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
-    use lash_vocabulary::identity::{SessionId, TurnId};
+    use {lash_kernel_value::identity::SessionId, lash_vocabulary::identity::TurnId};
     let actor = session("lo-fence")?;
     create(store, std::slice::from_ref(&actor)).await?;
     append(store, &actor, "seen before draft").await?;
@@ -1078,7 +1078,7 @@ pub async fn lo_fence_with_path(
 pub async fn lo_fence_preserves_a_composed_drafts_basis(store: &dyn DurableStore) -> LawOutcome {
     use crate::domain::{CellId, EffectAdmissionWrite, EffectKey, ExecKey, RootOwner};
     use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
-    use lash_vocabulary::identity::{SessionId, TurnId};
+    use {lash_kernel_value::identity::SessionId, lash_vocabulary::identity::TurnId};
 
     let actor = session("lo-composed")?;
     create(store, std::slice::from_ref(&actor)).await?;
@@ -1185,7 +1185,7 @@ pub async fn lo_postimage_receipt_matches_reopen(
         lash_protocol_types::MaxToolCalls::new(8),
         lash_protocol_types::NoProgressBudget::bounded(12),
     );
-    let id = lash_vocabulary::identity::SessionId::try_from("lo-postimage-receipt".to_owned())
+    let id = lash_kernel_value::identity::SessionId::try_from("lo-postimage-receipt".to_owned())
         .map_err(|error| LawBroken(error.to_string()))?;
     let mut state = RuntimeSessionState::new(
         policy,

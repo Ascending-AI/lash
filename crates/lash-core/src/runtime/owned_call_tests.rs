@@ -142,7 +142,7 @@ async fn admit(world: &World) -> OwnedAdmission {
         enclosing: None,
         cx: &world.cx,
         key: PromptCallKey {
-            session: lash_vocabulary::identity::SessionId::from(SESSION),
+            session: lash_kernel_value::identity::SessionId::from(SESSION),
             call: ModelCallId::Owned {
                 owner: "session-operation:compaction".to_owned(),
                 key: "summary".to_owned(),

@@ -27,7 +27,7 @@ use lash_durable::domain::pages::{
 };
 use lash_durable::domain::{CellId, DomainWrite, ExecKey, SnapshotRev};
 use lash_durable::{ActorKey, DurableError, Epoch, FormatSet, MailTx, NodeSpec};
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::*;
 

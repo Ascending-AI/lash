@@ -3,14 +3,16 @@
 use super::source::{INDEX_FANOUT, KEYED_LEAF_ROWS, PAGE_TARGET_BYTES};
 use super::{PageAnswer, PageBody, PageKind, PageSource, SealBudget};
 use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
-use lash_vocabulary::tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
-};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body,
+};
 
 mod canonical;
 #[cfg(test)]
@@ -1541,7 +1543,7 @@ impl PageSource for SourcePort<'_> {
     }
 }
 
-impl Cell for lash_vocabulary::names::OperationUse {
+impl Cell for lash_kernel_value::names::OperationUse {
     fn cost(&self) -> u64 {
         0
     }

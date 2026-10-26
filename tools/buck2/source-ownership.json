@@ -143,15 +143,8 @@
       "unit-test": "module/include leaves the package"
     }
   },
-  "crates/lash-dialect-python": {
-    "compile_data": [
-      "src/helpers/*.kernel"
-    ]
-  },
+  "crates/lash-dialect-python": {},
   "crates/lash-dialect-typescript": {
-    "compile_data": [
-      "src/helpers/*.kernel"
-    ],
     "test_data": {
       "test262_kernel": [
         "tests/test262/test/**/*.js"
@@ -1159,9 +1152,19 @@
       "nightly.ts"
     ]
   },
-  "crates/lash-vm-releases": {
+  "crates/lash-kernel-releases": {
     "compile_data": [
       "labels/*.json"
+    ]
+  },
+  "crates/lash-ext-py-helpers": {
+    "compile_data": [
+      "src/helpers/*.kernel"
+    ]
+  },
+  "crates/lash-ext-ts-helpers": {
+    "compile_data": [
+      "src/helpers/*.kernel"
     ]
   }
 }

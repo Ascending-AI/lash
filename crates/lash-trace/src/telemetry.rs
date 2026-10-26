@@ -15,9 +15,9 @@
 //! freshly executed work and newly committed transitions hold; a retained read
 //! or a replayed journal entry has none.
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
 use lash_vocabulary::identity::RuntimeOwner;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

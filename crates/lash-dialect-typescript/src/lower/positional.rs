@@ -257,8 +257,8 @@ impl super::Lowerer<'_> {
         use super::{Operand, Ty};
         use lash_kernel_doc::{ActKind, Callee, Expr as KExpr, Stmt as KStmt};
 
-        use lash_vocabulary::Name;
-        let Some((helper, arity)) = crate::builtins::array_callback(method) else {
+        use lash_kernel_value::Name;
+        let Some((helper, arity)) = lash_ext_ts_helpers::builtins::array_callback(method) else {
             return Ok(None);
         };
         let callback = match callback {

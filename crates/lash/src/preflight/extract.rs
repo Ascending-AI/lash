@@ -237,8 +237,8 @@ fn execution_surface(format: DurableFormat) -> Vec<Extraction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_kernel_value::identity::SessionId;
     use lash_vocabulary::identity::ProcessId;
-    use lash_vocabulary::identity::SessionId;
 
     async fn extract(item: &DurableItem) -> Vec<Extraction> {
         super::extract(item)

@@ -1,4 +1,7 @@
-use lash_vocabulary::{names::*, operations::ContractId, package::*};
+use {
+    lash_kernel_value::names::*, lash_kernel_value::operations::ContractId,
+    lash_kernel_value::package::*,
+};
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkRefusal {
     #[error(transparent)]

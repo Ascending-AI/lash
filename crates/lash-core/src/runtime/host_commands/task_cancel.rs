@@ -29,7 +29,7 @@ use tokio_util::sync::CancellationToken;
 /// The owner's transaction failed.
 pub(super) async fn enter(
     controller: &ActorContext,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     batch: &lash_vocabulary::identity::BatchId,
 ) -> Result<bool, crate::RuntimeError> {
     let entered = async {
@@ -60,7 +60,7 @@ pub(super) async fn enter(
 /// first.
 pub(super) async fn watch_cancel(
     controller: &ActorContext,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     batch_id: &lash_vocabulary::identity::BatchId,
     stop: &CancellationToken,
 ) {

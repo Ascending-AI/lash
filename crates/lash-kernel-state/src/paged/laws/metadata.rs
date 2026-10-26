@@ -5,11 +5,11 @@ use super::super::*;
 use super::heap::{fresh, seal};
 
 use lash_kernel_doc::heap::*;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::TaskIdentity;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::tokens::{decode_body, encode_body};
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::TaskIdentity;
+use lash_kernel_value::sites::Unit;
+use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
 
 fn work() -> SealWork {
     SealWork::new(SealBudget {
@@ -31,9 +31,9 @@ fn megabyte_binding_and_capture_names_keep_bounded_cells() {
         .unwrap();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
-            callable: lash_vocabulary::names::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            callable: lash_kernel_value::names::CallableId {
+                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+                function: lash_kernel_value::names::FunctionId::from_bytes([2; 32]),
             },
             site: site.clone(),
             captures: vec![(named.clone(), variable)],

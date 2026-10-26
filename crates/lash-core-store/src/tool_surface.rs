@@ -19,14 +19,15 @@
 //! compared (OP-LINK-ONE).
 
 use lash_vocabulary::package::PublicationRecord;
-use lash_vocabulary::{
-    claims::*, names::OperationUse, operations::OperationRequirement, package::*,
-};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::OperationUse, lash_kernel_value::operations::OperationRequirement,
+    lash_kernel_value::package::*, lash_vocabulary::claims::*,
+};
 
 use serde::{Deserialize, Serialize};
 
-use lash_vocabulary::names::QualifiedOperation;
+use lash_kernel_value::names::QualifiedOperation;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use lash_vocabulary::tool_contract::ToolId;
 
@@ -91,7 +92,7 @@ pub struct RecordedSurface {
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        with = "lash_vocabulary::operation_keys"
+        with = "lash_kernel_value::operation_keys"
     )]
     tools: BTreeMap<QualifiedOperation, SurfaceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -272,7 +273,7 @@ pub struct OperationRoute {
     pub provider: ProviderKey,
     /// The execution policy captured from the runner's manifest at link
     /// time: the only policy a call through this link is admitted under.
-    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
+    pub policy: lash_kernel_value::tool_contract::ExecutionPolicy,
     #[serde(default, skip_serializing_if = "is_default_projection")]
     pub projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
     /// The runner's codec payload, read back from the call's context and
@@ -382,7 +383,7 @@ impl OperationRoute {
         requirements.providers.insert(self.provider.clone());
         requirements.callbacks.insert(CallbackRequirement {
             registry: self.provider.registry(),
-            callback: if self.policy == lash_vocabulary::ExecutionPolicy::Read {
+            callback: if self.policy == lash_kernel_value::ExecutionPolicy::Read {
                 self.provider.reads_identity()
             } else {
                 self.provider.callback_identity()
@@ -427,8 +428,8 @@ pub enum Judgement {
     Missing,
     /// The runner serves the linked tool under another contract.
     ContractChanged {
-        pinned: lash_vocabulary::operations::ContractId,
-        live: lash_vocabulary::operations::ContractId,
+        pinned: lash_kernel_value::operations::ContractId,
+        live: lash_kernel_value::operations::ContractId,
     },
 }
 
@@ -439,7 +440,7 @@ pub enum Judgement {
 /// The live contract id must equal the pinned one; nothing else about the
 /// live tool is compared.
 pub fn judge(
-    pinned: &lash_vocabulary::operations::ContractId,
+    pinned: &lash_kernel_value::operations::ContractId,
     link: &OperationRoute,
     live: Option<&ToolDefinition>,
 ) -> Judgement {
@@ -526,7 +527,10 @@ pub fn provider_key(provider: &ProviderKey) -> String {
     format!("{}/{}", provider.owner(), provider.key())
 }
 
-use lash_vocabulary::providers::{DeferredResolutionPolicy, ExecutionBinding};
+use {
+    lash_kernel_value::providers::DeferredResolutionPolicy,
+    lash_vocabulary::providers::ExecutionBinding,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -553,7 +557,7 @@ pub enum UseBinding {
 /// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
 pub struct ExecutionEnvironment {
     /// Defining callables owed to live values after an owner-carried upgrade.
-    pub retained_code: BTreeSet<lash_vocabulary::CallableId>,
+    pub retained_code: BTreeSet<lash_kernel_value::CallableId>,
     pub publications: Vec<PublicationRecord>,
     pub roots: BTreeSet<LinkId>,
     /// Cell roots admitted by this source execution; never supplied by a guest.
@@ -609,11 +613,11 @@ impl RoutedOperation {
             return Err("fixed requirement and accepted offer contracts disagree".into());
         }
         if (self.offer.mode == OperationMode::Read)
-            != (self.route.policy == lash_vocabulary::ExecutionPolicy::Read)
+            != (self.route.policy == lash_kernel_value::ExecutionPolicy::Read)
         {
             return Err("fixed offer mode and route policy disagree".into());
         }
-        match lash_vocabulary::type_relations::serves(
+        match lash_kernel_value::type_relations::serves(
             &self.offer.requirement.signature,
             &self.requirement.signature,
         ) {
@@ -642,7 +646,7 @@ pub struct AdvertisedRoute {
 #[serde(deny_unknown_fields)]
 pub struct RecordedPackages {
     /// Trusted consumer identity, never inferred from an advertised publisher.
-    pub consumer: Option<lash_vocabulary::package::PublicationContext>,
+    pub consumer: Option<lash_kernel_value::package::PublicationContext>,
     pub snapshot: NamespaceSnapshot,
     pub routes: Vec<AdvertisedRoute>,
 }

@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 anyhow = { workspace = true }
 axum = "0.8"

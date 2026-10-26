@@ -24,7 +24,7 @@
 //! Admission exports have a retained reconciliation obligation and may duplicate
 //! between export and its record; other diagnostics are best effort and may be
 //! lost or repeated after a crash. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
-use lash_vocabulary::names::LinkedStart;
+use lash_kernel_value::names::LinkedStart;
 mod limits;
 pub use limits::ObservationWorkLimits;
 pub mod policy;
@@ -36,13 +36,13 @@ pub use policy::{
     TracePolicyField, TracePolicySelection, TracePolicySnapshot, TraceValue, WriterRemaining,
 };
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::CausalRef;
 use lash_protocol_types::ToolCallId;
 use lash_protocol_types::ToolIntentIdentity;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::io;
 use std::path::PathBuf;
@@ -1204,7 +1204,7 @@ impl TraceLanguageExecutionGeneration {
 )]
 pub enum TraceExecutionCode {
     Start(LinkedStart),
-    Callable(lash_vocabulary::names::CallableId),
+    Callable(lash_kernel_value::names::CallableId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]

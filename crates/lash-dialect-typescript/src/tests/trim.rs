@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use lash_kernel_dialect::{NamedLibrary, define_functions};
 use lash_kernel_doc::Datum;
+use lash_kernel_value::Name;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, PreparedLibrary, Program, Step, Target,
 };
-use lash_vocabulary::Name;
 
 // Independent pre-optimization TrimString oracle; never used in production.
 const REFERENCE: &str = r#"
@@ -75,7 +75,7 @@ impl Host for Console {
 fn native_trim_agrees_with_generic_utf16_scan() {
     let mut registry = super::kernel_registry();
     let mut named = NamedLibrary::from_registry(&registry).unwrap();
-    for definition in crate::define_helpers(&mut named).unwrap() {
+    for definition in lash_ext_ts_helpers::package::define_helpers(&mut named).unwrap() {
         registry.register(definition, None).unwrap();
     }
     for definition in define_functions(REFERENCE, &mut named, &[]).unwrap() {

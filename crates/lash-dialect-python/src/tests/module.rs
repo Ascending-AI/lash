@@ -7,7 +7,10 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_vocabulary::{MapType, Name, Param, Signature, Type};
+use {
+    lash_kernel_value::MapType, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use super::machine;
 
@@ -146,16 +149,16 @@ if helper():
 #[test]
 fn tool_keywords_name_the_declared_input_fields() {
     use lash_kernel_doc::Datum;
+    use lash_kernel_value::EffectName;
     use lash_kernel_vm::{End, Outcome, Request};
-    use lash_vocabulary::EffectName;
 
     let show = EffectName::new("display.show_message").expect("a tool's name");
     let projected = |schema: serde_json::Value| {
-        lash_vocabulary::schema::type_of_schema(&schema)
+        lash_kernel_value::schema::type_of_schema(&schema)
             .expect("a tool's input type")
             .0
     };
-    let signature = lash_vocabulary::schema::tool_signature(
+    let signature = lash_kernel_value::schema::tool_signature(
         projected(serde_json::json!({
             "type": "object",
             "properties": {
@@ -166,7 +169,7 @@ fn tool_keywords_name_the_declared_input_fields() {
             "additionalProperties": false
         })),
         false,
-        lash_vocabulary::Type::Null,
+        lash_kernel_value::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
     let environment_namespaces = crate::tests::linked::namespaces(&effects, machine::controls())
@@ -194,7 +197,7 @@ fn tool_keywords_name_the_declared_input_fields() {
                 .imports
                 .values()
                 .find_map(|import| match &import.kind {
-                    lash_vocabulary::ImportKind::Operation { signature }
+                    lash_kernel_value::ImportKind::Operation { signature }
                         if import.name.member.as_str() == "show_message" =>
                         Some(signature.clone()),
                     _ => None,
@@ -343,7 +346,7 @@ fn saved_handle(
             let closure = lash_kernel_doc::snapshot::closure_at(
                 &lowered.document,
                 site,
-                lash_vocabulary::LinkId::from_bytes([1; 32]),
+                lash_kernel_value::LinkId::from_bytes([1; 32]),
                 machine::installed().prepared.helpers(),
                 &lash_kernel_doc::Selection::Fresh,
             )?;
@@ -359,8 +362,8 @@ fn saved_handle(
     let presentation = closure.presentation.as_ref().unwrap();
     let value = lash_kernel_doc::FunctionValue {
         written_signature: None,
-        callable: lash_vocabulary::CallableId {
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+        callable: lash_kernel_value::CallableId {
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: closure.function,
         },
         captures: BTreeMap::new(),
@@ -443,7 +446,7 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
 /// structural annotation contract, including explicitly open JSON data.
 #[test]
 fn typed_dict_entry_contract_survives_saved_function_promotion() {
-    use lash_vocabulary::{RecordType, RecordTypeField};
+    use {lash_kernel_value::RecordType, lash_kernel_value::RecordTypeField};
     let source = "\
 class Event(TypedDict, extra_items=JsonValue):
     actor: Actor
@@ -468,7 +471,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
                 optional: false,
             },
         ],
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     });
     let event = Type::Record(RecordType {
         fields: vec![
@@ -491,14 +494,14 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
                 optional: true,
             },
         ],
-        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+        rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
     });
     let mut input_event = event.clone();
     if let Type::Record(record) = &mut input_event {
         let Type::Record(actor) = &mut record.fields[0].ty else {
             unreachable!()
         };
-        actor.rest = lash_vocabulary::RecordRest::Drop;
+        actor.rest = lash_kernel_value::RecordRest::Drop;
     }
     let expected = Signature {
         params: vec![
@@ -527,7 +530,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
             result: Type::Json
         }
     );
-    use lash_vocabulary::AnnotationResolutionReason as Reason;
+    use lash_kernel_value::AnnotationResolutionReason as Reason;
     for (source, reason, annotation) in [
         (
             "class Loop(TypedDict):\n    next: Loop\ndef handle(value: Loop) -> None:\n    pass\n",
@@ -576,7 +579,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         };
         assert_eq!(
             refused.span,
-            Some(lash_vocabulary::sites::Span {
+            Some(lash_kernel_value::sites::Span {
                 start,
                 end: start + width
             })
@@ -619,16 +622,16 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
 /// never keyword parameters that the operation contract does not declare.
 #[test]
 fn open_record_operation_inputs_print_as_positional_records() {
-    let signature = lash_vocabulary::schema::tool_signature(
-        Type::Record(lash_vocabulary::RecordType {
+    let signature = lash_kernel_value::schema::tool_signature(
+        Type::Record(lash_kernel_value::RecordType {
             fields: Vec::new(),
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
         }),
         false,
         Type::Any,
     );
     let effects = BTreeMap::from([(
-        lash_vocabulary::EffectName::new("host.echo").unwrap(),
+        lash_kernel_value::EffectName::new("host.echo").unwrap(),
         signature,
     )]);
     let namespaces = super::linked::namespaces(&effects, &BTreeMap::new()).unwrap();
@@ -658,7 +661,7 @@ fn open_record_operation_inputs_print_as_positional_records() {
 /// with its input mode preserved by source printing and saved promotion.
 #[test]
 fn entry_record_modes_survive_source_and_saved_function_promotion() {
-    use lash_vocabulary::RecordRest;
+    use lash_kernel_value::RecordRest;
     for (suffix, rest, result_rest) in [
         ("", RecordRest::Drop, RecordRest::Closed),
         (", closed=True", RecordRest::Closed, RecordRest::Closed),
@@ -973,7 +976,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         panic!("callable token")
     };
     let document = lowered.document.document().clone();
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills: Default::default(),
     };
@@ -981,7 +984,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
-        callable: lash_vocabulary::CallableId {
+        callable: lash_kernel_value::CallableId {
             link: link.identity(),
             function: closure.function,
         },

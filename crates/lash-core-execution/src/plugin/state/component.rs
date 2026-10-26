@@ -12,7 +12,7 @@ use super::publication::{StateAuthority, StateDesk};
 use super::*;
 use crate::plugin::ProcessComposition;
 use lash_durable::domain::TurnNamespaceWrite;
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 
 /// The state sink of one process activation's step tools.
 pub struct ComponentState {

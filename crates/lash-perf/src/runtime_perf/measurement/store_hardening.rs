@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
 const HARDENING_PRUNE_BATCH: usize = 16;

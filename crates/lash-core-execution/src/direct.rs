@@ -159,7 +159,7 @@ pub enum DirectLlmError {
     },
     #[error("invalid response: {source}")]
     InvalidResponse {
-        source: lash_vocabulary::json_schema::ValueMismatch,
+        source: lash_kernel_value::json_schema::ValueMismatch,
         result: Box<DirectLlmOutcome>,
     },
     #[error("transport error: {0}")]
@@ -167,7 +167,7 @@ pub enum DirectLlmError {
 }
 
 impl DirectLlmError {
-    pub fn value_mismatch(&self) -> Option<&lash_vocabulary::json_schema::ValueMismatch> {
+    pub fn value_mismatch(&self) -> Option<&lash_kernel_value::json_schema::ValueMismatch> {
         match self {
             Self::InvalidResponse { source, .. } => Some(source),
             Self::LeadingSystemMessage | Self::InvalidRequest { .. } | Self::Transport(_) => None,
@@ -512,13 +512,13 @@ pub fn build_llm_request(
 fn validate_direct_output(
     output: &DirectOutputSpec,
     response: &LlmResponse,
-) -> Result<(), lash_vocabulary::json_schema::ValueMismatch> {
+) -> Result<(), lash_kernel_value::json_schema::ValueMismatch> {
     let DirectOutputSpec::JsonSchema(schema) = output else {
         return Ok(());
     };
     let response_text = response.full_text();
     let parsed: serde_json::Value = serde_json::from_str(response_text.trim()).map_err(|err| {
-        lash_vocabulary::json_schema::ValueMismatch {
+        lash_kernel_value::json_schema::ValueMismatch {
             instance_path: String::new(),
             message: format!("expected JSON: {err}"),
         }

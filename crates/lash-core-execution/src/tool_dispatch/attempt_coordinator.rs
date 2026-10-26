@@ -6,7 +6,7 @@ use crate::ToolCallOutput;
 use crate::ToolCallRecord;
 use crate::ToolFailure;
 use crate::ToolFailureClass;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 
 use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 
@@ -671,7 +671,7 @@ async fn sleep_before_retry(
 #[cfg(test)]
 mod projection_tests {
     use super::*;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     fn refusal(
         reason: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,

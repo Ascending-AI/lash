@@ -93,7 +93,7 @@ pub(in crate::runtime) enum OwnedAdmission {
 
 /// The key of the call `owner` makes as `key`, in `session`.
 pub(in crate::runtime) fn owned_call_key(
-    session: lash_vocabulary::identity::SessionId,
+    session: lash_kernel_value::identity::SessionId,
     owner: &crate::ExecutionScope,
     key: impl Into<String>,
 ) -> PromptCallKey {

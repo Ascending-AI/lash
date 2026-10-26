@@ -659,7 +659,7 @@ mod tests {
     use lash_core::ToolView;
     use lash_core::ToolViewMeta;
     use lash_core::facade_support::{ToolPresentationArtifacts, ToolResultProjectionContext};
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
     use std::future::Future;
     use std::pin::Pin;
     use std::sync::atomic::{AtomicUsize, Ordering};

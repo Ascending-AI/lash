@@ -45,7 +45,7 @@ mod context;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
 pub use context::{DurationConversion, ViewContext};
 /// Display facts and refusals accepted by a view's retained label sidecars.
-pub use lash_helper_labels::{Comparison, LabelError, MemberDisplay};
+pub use lash_kernel_labels::{Comparison, LabelError, MemberDisplay};
 mod entry;
 mod produced;
 pub use coarse::{
@@ -58,7 +58,7 @@ pub use coverage::{
     NodeCoverage, PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage,
     path,
 };
-pub use lash_vocabulary::observation::RanCounts;
+pub use lash_kernel_value::observation::RanCounts;
 
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId,
@@ -68,13 +68,13 @@ use lash_kernel_doc::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, Expr, Node, Place, Stmt,
 };
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -108,7 +108,7 @@ pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.js
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowView {
-    pub document: lash_vocabulary::names::DocumentId,
+    pub document: lash_kernel_value::names::DocumentId,
     /// The callable the view opens: its declared signature and what a call
     /// of it can end with.
     pub entry: EntryView,
@@ -319,7 +319,7 @@ pub struct ActionView {
     /// Every canonical effect this action reaches, including calls through
     /// library bodies and statically known declared callees. Derived from the
     /// checker's effect derivation, in canonical order with duplicates removed.
-    pub performs: Vec<lash_vocabulary::OperationUse>,
+    pub performs: Vec<lash_kernel_value::OperationUse>,
     pub args: Vec<ArgumentView>,
     /// A timer's statically known duration, after its pinned helper's conversion.
     /// Whole milliseconds, represented as seconds and nanoseconds in JSON.
@@ -340,7 +340,7 @@ pub struct ActionView {
 pub enum CalleeView {
     Library {
         id: FunctionId,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         name: FunctionName,
         /// Every visible Export backed by this identity in the retained
         /// Packages. A private definition has no Exports.
@@ -348,9 +348,9 @@ pub enum CalleeView {
     },
     Import(ImportSlot),
     Timer {
-        use_: lash_vocabulary::OperationUse,
+        use_: lash_kernel_value::OperationUse,
     },
-    Effect(lash_vocabulary::OperationUse),
+    Effect(lash_kernel_value::OperationUse),
 }
 
 /// One argument of an action.
@@ -997,7 +997,7 @@ impl<'a> Walk<'a> {
             (Some(Callee::Local(function)), _) => {
                 let definition = self
                     .context
-                    .header(&lash_vocabulary::CallableId {
+                    .header(&lash_kernel_value::CallableId {
                         link: self.context.reference.link(),
                         function: *function,
                     })
@@ -1061,7 +1061,7 @@ impl<'a> Walk<'a> {
             }
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
             (None, Some(effect)) => (
-                Some(CalleeView::Effect(lash_vocabulary::OperationUse {
+                Some(CalleeView::Effect(lash_kernel_value::OperationUse {
                     link: self.context.reference.link(),
                     slot: *effect,
                 })),
@@ -1174,7 +1174,7 @@ impl<'a> Walk<'a> {
         let timer = match &callee {
             Some(CalleeView::Effect(use_)) => self.context.is_timer(*use_).then_some(*use_),
             Some(CalleeView::Library { id, link, .. }) => {
-                self.context.only_timer(lash_vocabulary::CallableId {
+                self.context.only_timer(lash_kernel_value::CallableId {
                     link: *link,
                     function: *id,
                 })
@@ -1200,7 +1200,7 @@ impl<'a> Walk<'a> {
         let mut performs = match &callee {
             Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([*effect]),
             Some(CalleeView::Library { id, link, .. }) => {
-                self.context.reached(lash_vocabulary::CallableId {
+                self.context.reached(lash_kernel_value::CallableId {
                     link: *link,
                     function: *id,
                 })
@@ -1246,7 +1246,7 @@ fn applied_performs(
     links: &mut applies::Links,
     callables: &[Site],
     context: &ViewContext,
-) -> std::collections::BTreeSet<lash_vocabulary::OperationUse> {
+) -> std::collections::BTreeSet<lash_kernel_value::OperationUse> {
     use std::collections::BTreeSet;
     let mut effects = BTreeSet::new();
     let mut callables = callables.to_vec();
@@ -1258,7 +1258,7 @@ fn applied_performs(
         if site.path.is_empty() {
             if let Some(unit) = graph.unit(&site.unit) {
                 effects.extend(unit.effects.effects.iter().map(|slot| {
-                    lash_vocabulary::OperationUse {
+                    lash_kernel_value::OperationUse {
                         link: context.reference.link(),
                         slot: *slot,
                     }
@@ -1283,7 +1283,7 @@ fn applied_performs(
             let callee = match action {
                 Some(Derived::Statement(ActionNode::Perform { slot: effect, .. }))
                 | Some(Derived::Nested(ActNode::Perform { slot: effect, .. }, _)) => {
-                    effects.insert(lash_vocabulary::OperationUse {
+                    effects.insert(lash_kernel_value::OperationUse {
                         link: context.reference.link(),
                         slot: *effect,
                     });
@@ -1304,7 +1304,7 @@ fn applied_performs(
             };
             match callee {
                 Some(CalleeNode::Local(id)) => {
-                    effects.extend(context.reached(lash_vocabulary::CallableId {
+                    effects.extend(context.reached(lash_kernel_value::CallableId {
                         link: context.reference.link(),
                         function: id,
                     }))
@@ -1324,7 +1324,7 @@ fn applied_performs(
                 | NodeKind::Stmt(StmtNode::ReturnVia {
                     policy: lash_kernel_doc::FunctionTarget::Local(function),
                     ..
-                }) => effects.extend(context.reached(lash_vocabulary::CallableId {
+                }) => effects.extend(context.reached(lash_kernel_value::CallableId {
                     link: context.reference.link(),
                     function: *function,
                 })),
@@ -1539,7 +1539,7 @@ fn context_callee(
     context: &ViewContext,
     slot: ImportSlot,
 ) -> Option<(
-    lash_vocabulary::CallableId,
+    lash_kernel_value::CallableId,
     &lash_kernel_doc::FunctionDefinition,
 )> {
     let id = context.resolve(context.reference.link(), slot)?;

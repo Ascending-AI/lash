@@ -49,7 +49,7 @@ impl StaticToolExecute for SwitchFrame {
         if let Some(core) = self.0.get() {
             let session = core
                 .session(
-                    lash_vocabulary::identity::SessionId::try_from(self.1.to_owned())
+                    lash_kernel_value::identity::SessionId::try_from(self.1.to_owned())
                         .expect("a session id"),
                 )
                 .durable()
@@ -86,7 +86,7 @@ async fn world(
         SWITCH_TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -145,7 +145,7 @@ async fn the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame(ti
     served::assert_answered(FIRST, &world.send(&session, FIRST).await);
     let store = world.backend.session_store_factory();
     let id =
-        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
+        lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let admitted = store
         .load_session_window(&id, WindowSelector::Current)
         .await

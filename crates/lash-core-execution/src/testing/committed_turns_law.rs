@@ -19,7 +19,7 @@ use crate::store::{
     SessionHistoryStore, TurnCommitOutcome,
 };
 use lash_execution_contracts::deployment::DeploymentStore;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// How long the law lets the other sessions commit while the late turn is

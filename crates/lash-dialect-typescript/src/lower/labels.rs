@@ -2,7 +2,7 @@
 //! A source catch immediately rethrows them. The target alone consumes them,
 //! outside source handlers, so a for-loop update runs in its proper context.
 use lash_kernel_doc::{Expr, Stmt};
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::{Buf, Lowerer, Lowering, Ty};
 use crate::adapter as ast;

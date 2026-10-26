@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::facade_support::SessionNodeProjection as _;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::VecDeque;
 
 fn message_text(message: &lash_core::Message) -> String {
@@ -162,7 +162,7 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -311,7 +311,7 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec(
             "standard-compaction-model",
             None,
@@ -504,7 +504,7 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -571,7 +571,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -682,7 +682,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .build(lash_facade_tests::runtime_lease_owner())?;
     let reopened_session = created_session_with(
         &reopened_core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("standard-compaction-model", None, 40_000)),
     )
     .await
@@ -757,7 +757,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     });
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec("attachment-prune-model", None, 100_000))
             .attachment_acceptance(acceptance),
     )
@@ -907,7 +907,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
         session_spec_for(&llm_profile_spec(
             "standard-compaction-rlm-model",
             None,
@@ -1003,7 +1003,7 @@ async fn facade_compaction_settings_control_pressure_and_summary() -> Result<()>
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session_with(
         &core,
-        lash_vocabulary::identity::SessionId::from("host-compaction"),
+        lash_kernel_value::identity::SessionId::from("host-compaction"),
         session_spec_for(&llm_profile_spec("host-compaction", None, 40_000)),
     )
     .await

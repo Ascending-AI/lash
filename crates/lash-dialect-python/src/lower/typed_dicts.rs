@@ -6,9 +6,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::Caption;
-use lash_vocabulary::{AnnotationResolutionReason as Reason, RecordType, RecordTypeField, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
+use {
+    lash_kernel_value::AnnotationResolutionReason as Reason, lash_kernel_value::RecordType,
+    lash_kernel_value::RecordTypeField, lash_kernel_value::Type,
+};
 
 /// One `TypedDict` a module declares: its fields in declaration order.
 #[derive(Clone, Debug)]
@@ -279,18 +282,16 @@ fn kernel_type(
                             })
                         })
                         .collect::<Result<Vec<_>, Reason>>()?;
-                    let rest = match &record.rest {
-                        Some(rest) => lash_vocabulary::RecordRest::Keep(Box::new(kernel_type(
-                            rest,
-                            typed,
-                            open,
-                            entry_input,
-                            depth - 1,
-                            nodes,
-                        )?)),
-                        None if entry_input && !record.closed => lash_vocabulary::RecordRest::Drop,
-                        None => lash_vocabulary::RecordRest::Closed,
-                    };
+                    let rest =
+                        match &record.rest {
+                            Some(rest) => lash_kernel_value::RecordRest::Keep(Box::new(
+                                kernel_type(rest, typed, open, entry_input, depth - 1, nodes)?,
+                            )),
+                            None if entry_input && !record.closed => {
+                                lash_kernel_value::RecordRest::Drop
+                            }
+                            None => lash_kernel_value::RecordRest::Closed,
+                        };
                     Ok(Type::Record(RecordType { fields, rest }))
                 })();
                 open.pop();
@@ -454,7 +455,7 @@ fn members(subscript: &ast::ExprSubscript) -> Vec<&PyExpr> {
 }
 
 fn map(key: Type, value: Type) -> Type {
-    Type::Map(Box::new(lash_vocabulary::MapType { key, value }))
+    Type::Map(Box::new(lash_kernel_value::MapType { key, value }))
 }
 
 /// One type of `members`: no nested unions or duplicate members.

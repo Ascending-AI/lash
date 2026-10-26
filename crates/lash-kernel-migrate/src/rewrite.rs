@@ -12,10 +12,10 @@ use lash_kernel_doc::{
     NodeMut,
 };
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use crate::migration::DocumentRefusal;
 

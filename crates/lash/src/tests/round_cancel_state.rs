@@ -147,7 +147,7 @@ async fn committed_values(
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>> {
     let store = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
-        &lash_vocabulary::identity::SessionId::fixture(id.to_string()),
+        &lash_kernel_value::identity::SessionId::fixture(id.to_string()),
     )
     .await?
     .expect("the session's store");
@@ -217,7 +217,9 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     .plugin(Arc::new(plugin.clone()))
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(&id).expect("nonblank host identity"))
+        .session(
+            lash_kernel_value::identity::SessionId::parse(&id).expect("nonblank host identity"),
+        )
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("set both")).await?;

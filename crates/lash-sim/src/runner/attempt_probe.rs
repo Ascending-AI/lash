@@ -117,7 +117,7 @@ async fn probe_session(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    core.session(lash_vocabulary::identity::SessionId::fixture(
+    core.session(lash_kernel_value::identity::SessionId::fixture(
         session_id.to_string(),
     ))
     .create(lash::SessionCreation::root(
@@ -132,7 +132,7 @@ async fn probe_session(
     .await
     .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::fixture(
+        .session(lash_kernel_value::identity::SessionId::fixture(
             session_id.to_string(),
         ))
         .open()

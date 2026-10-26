@@ -265,7 +265,7 @@ async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(
                     failure.cause.as_deref(),
                     Some(lash_core::ToolFailureCause::Declaration {
                         refusal: lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredControl {
-                            control: lash_vocabulary::tool_declaration::TurnControlKind::Finish,
+                            control: lash_kernel_value::tool_declaration::TurnControlKind::Finish,
                         },
                     })
                 )
@@ -1050,7 +1050,9 @@ async fn pdf_session_after_model_switch(check_first: bool, omission: Option<&'st
         ))
         .unwrap();
     let session = core
-        .session(lash_vocabulary::identity::SessionId::try_from("pdf-session".to_owned()).unwrap())
+        .session(
+            lash_kernel_value::identity::SessionId::try_from("pdf-session".to_owned()).unwrap(),
+        )
         .create(lash::SessionCreation::root(attachment_spec()))
         .await
         .unwrap();

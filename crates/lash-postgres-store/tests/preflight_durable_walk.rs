@@ -26,8 +26,8 @@ use lash_core_store::store::ScanCoverage;
 use lash_core_store::store::SessionCheckpoint;
 use lash_core_store::store::StorePreflight;
 use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::PostgresStorePreflight;
-use lash_vocabulary::identity::SessionId;
 
 #[allow(dead_code)]
 mod support;

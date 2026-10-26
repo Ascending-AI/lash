@@ -28,7 +28,7 @@ pub(super) fn session_turn_start_of(
 ) -> lash_execution_contracts::process::ProcessStartRequest {
     lash_execution_contracts::process::ProcessStartRequest::session_turn(
         "keys-session-turn-start",
-        create_request.with_session_id(lash_vocabulary::identity::SessionId::fixture(format!(
+        create_request.with_session_id(lash_kernel_value::identity::SessionId::fixture(format!(
             "{key}-child"
         ))),
         TurnInput::text(text),
@@ -239,7 +239,7 @@ pub(super) async fn a_session_turn_start_retried_after_the_host_changed_what_it_
     });
     moved
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-start-other-session")
+            lash_kernel_value::identity::SessionId::parse("keys-start-other-session")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(changed.clone()))

@@ -12,7 +12,7 @@ use crate::facade_support::sql::Receipt;
 use crate::store::{HistoryAnchor, HistoryBudget, WindowSelector};
 use lash_core_ids::operational_metrics::sql;
 use lash_execution_contracts::backend::StoreSet;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::num::{NonZeroU32, NonZeroU64};
 
 /// Functional physical receipts; every returned number is an operation-window

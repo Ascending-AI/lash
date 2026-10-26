@@ -23,13 +23,13 @@ use lash_kernel_doc::Stmt;
 use lash_kernel_doc::parse_document;
 use lash_kernel_edit::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use lash_kernel_edit::{Draft, Position, Transaction};
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 use crate::captions::{CaptionCorpus, CaptionDialect};
 
@@ -110,7 +110,7 @@ fn library(dialect: lash_ext_helper_compiler::library::Dialect) -> NamedLibrary 
     built.names
 }
 
-fn exported(document: &mut Document, name: &str, source: &str) -> lash_vocabulary::FunctionId {
+fn exported(document: &mut Document, name: &str, source: &str) -> lash_kernel_value::FunctionId {
     let definition = lash_kernel_doc::parse_definition(source).expect("caption function");
     let id = definition.identity();
     document.exports.insert(
@@ -325,12 +325,12 @@ fn text_domain() {
         ),
         (
             vec![entry(Site::new(
-                Unit::Library(lash_vocabulary::FunctionId::from_bytes([99; 32])),
+                Unit::Library(lash_kernel_value::FunctionId::from_bytes([99; 32])),
                 Vec::new(),
             ))],
             CaptionsRefusal::Site {
                 site: Site::new(
-                    Unit::Library(lash_vocabulary::FunctionId::from_bytes([99; 32])),
+                    Unit::Library(lash_kernel_value::FunctionId::from_bytes([99; 32])),
                     Vec::new(),
                 ),
             },
@@ -495,7 +495,7 @@ fn signature_targets() {
         base,
         at: Position::before(export_root(&document, "flow").child(0))
             .expect("a statement of the body"),
-        slot: lash_vocabulary::ImportSlot(0),
+        slot: lash_kernel_value::ImportSlot(0),
         args: vec![DataValue::Literal(Literal::Text("new".into()))],
         result: Type::Any,
         binding: None,
@@ -570,15 +570,15 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                 continue;
             };
             let (content, link) = crate::linked::content(document);
-            let reference = lash_vocabulary::LinkedStart {
+            let reference = lash_kernel_value::LinkedStart {
                 link,
-                selector: lash_vocabulary::StartSelector::Main,
+                selector: lash_kernel_value::StartSelector::Main,
             };
             let context = lash_kernel_view::ViewContext::new(
                 reference.clone().into(),
                 content,
                 Default::default(),
-                std::sync::Arc::clone(&lash_vm_releases::helper_release().unwrap().helpers),
+                std::sync::Arc::clone(&lash_kernel_releases::helper_release().unwrap().helpers),
             )
             .map_err(|error| fail(&case.name, error.to_string()))?;
             let holder = lash_kernel_check::WorkflowDocument::entered(
@@ -746,7 +746,7 @@ fn rekey() {
             Operation::InsertStep {
                 base,
                 at: Position::end(main_site(&[2, 1])),
-                slot: lash_vocabulary::ImportSlot(0),
+                slot: lash_kernel_value::ImportSlot(0),
                 args: vec![text("new")],
                 result: Type::Any,
                 binding: None,
@@ -894,7 +894,7 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             .imports
             .iter()
             .find_map(|(slot, import)| match &import.kind {
-                lash_vocabulary::ImportKind::Operation { signature } => Some((slot, signature)),
+                lash_kernel_value::ImportKind::Operation { signature } => Some((slot, signature)),
                 _ => None,
             })
             .expect("the corpus tool");

@@ -43,7 +43,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        session_id: lash_vocabulary::identity::SessionId::from("standard-driver-contract"),
+        session_id: lash_kernel_value::identity::SessionId::from("standard-driver-contract"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-driver-turn"),
         emit_llm_trace: false,
@@ -79,13 +79,13 @@ fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
                     turn_controls: [
                         (
                             "finish".to_string(),
-                            lash_vocabulary::tool_declaration::TurnControls::finish(
-                                lash_vocabulary::json_schema::JsonSchema::any(),
+                            lash_kernel_value::tool_declaration::TurnControls::finish(
+                                lash_kernel_value::json_schema::JsonSchema::any(),
                             ),
                         ),
                         (
                             "switch".to_string(),
-                            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+                            lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
                         ),
                     ]
                     .into(),

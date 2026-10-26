@@ -104,11 +104,13 @@ fn probe_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinitio
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
-        1,
-        1,
-    ));
+    .with_execution_policy(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+            1,
+            1,
+        ),
+    );
     if name == DEFERRED {
         definition
             .with_declaration(
@@ -339,7 +341,8 @@ async fn head(world: &World, session: &str) -> lash_core::store::SessionHeadMeta
     let factory = world.backend.session_store_factory();
     lash_core::SessionCommitStore::load_session_head_meta(
         factory.as_ref(),
-        &lash_vocabulary::identity::SessionId::try_from(session.to_owned()).expect("a session id"),
+        &lash_kernel_value::identity::SessionId::try_from(session.to_owned())
+            .expect("a session id"),
     )
     .await
     .expect("the head reads")
@@ -503,7 +506,7 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: 
     served::assert_answered("source", &seeded);
     let revision = head(&world, source_name).await.head_revision;
 
-    let branch_id = lash_vocabulary::identity::SessionId::try_from("fork-branch".to_owned())
+    let branch_id = lash_kernel_value::identity::SessionId::try_from("fork-branch".to_owned())
         .expect("a session id");
     world
         .core

@@ -76,7 +76,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
     use lash_kernel_vm::Machine as _;
     use lash_vm_client::packages::WorkerLibrary;
     use std::sync::Arc;
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     let width = parse_definition(
         "function host.width(row: List(Any)) -> Int\nkernel 1\ncharge 1\nnative\n",
     )
@@ -99,7 +99,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         &Default::default(),
     )
     .unwrap();
-    for id in [guest_id, lash_vocabulary::FunctionId::from_bytes([0; 32])] {
+    for id in [guest_id, lash_kernel_value::FunctionId::from_bytes([0; 32])] {
         let refusal = lash_vm_worker::Embedder::new()
             .native(id, Arc::new(Width))
             .and_then(|embedder| {
@@ -127,7 +127,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         "kernel 1\nnumbers by_spelling\ndefinition {}\nnative @{width_id}\nmain {{ let n = invoke host.width([1, 2, 3]) return n }}\n",
         serde_json::to_string(&lash_kernel_doc::print_definition(&width)).unwrap(),
     )).unwrap());
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills: BTreeMap::new(),
     };
@@ -353,9 +353,9 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
 
     use lash_kernel_doc::parse_document;
 
-    use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
+    use lash_kernel_vm::testing::ExecutionStrategy;
     use lash_vm_client::packages::WorkerLibrary;
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     let parse_int = release
         .functions
         .named("ts.number.parse_integer")
@@ -410,7 +410,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
     }
     text.push_str("main { let a = invoke w.go(\"123456789\") return a }\n");
     let document = Arc::new(parse_document(&text).unwrap());
-    let stored: Vec<(lash_vocabulary::names::FunctionId, Vec<u8>)> = closure
+    let stored: Vec<(lash_kernel_value::names::FunctionId, Vec<u8>)> = closure
         .body()
         .identities()
         .filter(|function| reader.registry().get(function).is_none())
@@ -418,7 +418,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             let definition = writer.registry().get(&function).expect("held");
             (
                 function,
-                lash_vocabulary::tokens::encode_body(definition.definition().as_ref()),
+                lash_kernel_value::tokens::encode_body(definition.definition().as_ref()),
             )
         })
         .collect();
@@ -430,11 +430,11 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         vec![go],
         "the reader lacks release 1's w.go alone"
     );
-    let definitions: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = stored
+    let definitions: Vec<(lash_kernel_value::names::FunctionId, &[u8])> = stored
         .iter()
         .map(|(function, body)| (*function, body.as_slice()))
         .collect();
-    let limits = lash_vocabulary::KernelDataLimits::standard();
+    let limits = lash_kernel_value::KernelDataLimits::standard();
     let library = |embedding: &lash_vm_worker::Embedding, definitions| {
         lash_vm_worker::core_support::library_for(
             embedding,
@@ -451,8 +451,8 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         lash_kernel_vm::PreparedLibrary,
         lash_vm_broker::kernel::closure::Closure,
     ),
-               layout: Layout| {
-        let link = lash_vocabulary::Link {
+               layout: ExecutionStrategy| {
+        let link = lash_kernel_value::Link {
             document: document.identity(),
             fills: BTreeMap::new(),
         };
@@ -475,7 +475,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
             host: Vec::new(),
         };
         let mut machine =
-            start_with_layout(program, BOUNDS, start, layout, Box::<Pages>::default())
+            lash_kernel_vm::testing::start(program, BOUNDS, start, layout, Box::<Pages>::default())
                 .expect("the run starts");
         let tape = lash_kernel_vm::ChargeTape::new();
         machine.record_charges(tape.clone());
@@ -503,7 +503,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         "the assembled library keeps the planned helper's plan"
     );
     assert_eq!(cold.1.reference(), closure.reference());
-    for layout in [Layout(0), Layout(3)] {
+    for layout in [ExecutionStrategy::Optimized, ExecutionStrategy::Interpreted] {
         let all_a = run(library(&writes, &[]), layout);
         assert!(!all_a.1.is_empty(), "the run charges");
         assert_eq!(run(cold.clone(), layout), all_a, "cold, layout {layout:?}");

@@ -6,18 +6,18 @@ use lash_kernel_doc::snapshot::{
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{ObjectKind, SemanticHeap};
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 struct LinkedCatalog<'a> {
     document: &'a lash_kernel_doc::Document,
-    documents: &'a BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+    documents: &'a BTreeMap<lash_kernel_value::LinkId, lash_kernel_doc::Document>,
     base: &'a dyn lash_kernel_doc::FunctionCatalog,
 }
 impl lash_kernel_doc::FunctionCatalog for LinkedCatalog<'_> {
     fn definition(
         &self,
-        function: &lash_vocabulary::FunctionId,
+        function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::FunctionDefinition> {
         self.document
             .functions
@@ -31,7 +31,7 @@ impl lash_kernel_doc::FunctionCatalog for LinkedCatalog<'_> {
     }
     fn registered(
         &self,
-        function: &lash_vocabulary::FunctionId,
+        function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::RegisteredFunction> {
         self.base.registered(function)
     }

@@ -423,7 +423,7 @@ pub struct Checkout {
     computed: bool,
     /// The run's start, until it crosses with the run's first slice.
     unsent_start: Option<Box<Start>>,
-    document_sources: std::collections::BTreeMap<lash_vocabulary::DocumentId, EncodedPayload>,
+    document_sources: std::collections::BTreeMap<lash_kernel_value::DocumentId, EncodedPayload>,
     /// Committed outcomes for the run, until they cross with its next
     /// slice.
     deliveries: Vec<Delivery>,
@@ -776,7 +776,7 @@ impl Checkout {
     /// had been withdrawn.
     pub fn deliver(
         &mut self,
-        wait: lash_vocabulary::sites::WaitId,
+        wait: lash_kernel_value::sites::WaitId,
         outcome: EncodedPayload,
     ) -> Result<(), PoolError> {
         if self.pending.is_some() || !self.started {

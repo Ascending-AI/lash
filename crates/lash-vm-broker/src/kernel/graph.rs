@@ -36,10 +36,12 @@ use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::{AdmissionMember, EffectAdmissionWrite, EffectKey};
 use lash_kernel_doc::{Datum, ErrorDatum};
 
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::check_ascending, lash_kernel_value::tokens::encode_body,
 };
 
 use crate::snapshot::OperationId;
@@ -305,7 +307,7 @@ pub struct Admission {
     pub exec: ExecKey,
     pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
-    pub wait: lash_vocabulary::sites::WaitId,
+    pub wait: lash_kernel_value::sites::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<OperationUse>,
     /// Its FrozenRequest.
@@ -336,7 +338,7 @@ impl TokenCodec for Admission {
         input.expect_struct(6)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let effect = EffectId::decode(input)?;
-        let wait = lash_vocabulary::sites::WaitId::decode(input)?;
+        let wait = lash_kernel_value::sites::WaitId::decode(input)?;
         let effect_name = Option::decode(input)?;
         let request = NodeId::decode(input)?;
         let (variant, fields) = input.sum()?;
@@ -460,7 +462,7 @@ pub enum MemberStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberEntry {
     pub effect: EffectId,
-    pub wait: lash_vocabulary::sites::WaitId,
+    pub wait: lash_kernel_value::sites::WaitId,
     /// Its Admission.
     pub admission: NodeId,
     pub status: MemberStatus,
@@ -510,7 +512,7 @@ impl TokenCodec for EffectMembership {
         for _ in 0..count {
             input.expect_struct(4)?;
             let effect = EffectId::decode(input)?;
-            let wait = lash_vocabulary::sites::WaitId::decode(input)?;
+            let wait = lash_kernel_value::sites::WaitId::decode(input)?;
             let admission = NodeId::decode(input)?;
             let (variant, fields) = input.sum()?;
             TokenReader::expect_fields(fields, 0)?;
@@ -655,7 +657,7 @@ struct Admitted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
     pub effect: EffectId,
-    pub wait: lash_vocabulary::sites::WaitId,
+    pub wait: lash_kernel_value::sites::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<OperationUse>,
     pub request: FrozenRequest,

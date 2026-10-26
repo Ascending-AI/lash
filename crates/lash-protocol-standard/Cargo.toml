@@ -20,6 +20,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-sansio = { workspace = true }

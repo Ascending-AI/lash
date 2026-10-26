@@ -81,7 +81,7 @@ fn an_identity_validated_against_the_library_is_admitted_without_validating_it_a
     let document =
         Arc::new(parse_document("numbers by_spelling\nkernel 1\nmain { break }\n").unwrap());
     let identity = document.identity();
-    let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
+    let limits = lash_kernel_value::data_limits::KernelDataLimits::standard();
     assert!(
         !prepared.admit_identified(
             &document,
@@ -106,8 +106,8 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
     use lash_kernel_doc::{
         BuildHelpers, Document, LibraryDependencies, NumberPolicy, Selection, parse_definition,
     };
-    use lash_vocabulary::{CallableId, FunctionId};
     use std::collections::BTreeSet;
+    use {lash_kernel_value::CallableId, lash_kernel_value::FunctionId};
     let child =
         parse_definition("function law.child() -> Null\nkernel 1\ncharge 1\nbody { return null }")
             .unwrap();
@@ -126,7 +126,7 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
     let admission = library
         .admit(
             &root,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
             &Selection::Fresh,
         )
         .unwrap_or_else(|_| panic!("valid origin"));
@@ -179,7 +179,7 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
     let admitted = library
         .admit(
             &empty,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
             &Selection::Fresh,
         )
         .unwrap_or_else(|_| panic!("valid origin"));
@@ -219,7 +219,7 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         let admitted = library
             .admit(
                 &root,
-                lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
                 &selection,
             )
             .unwrap_or_else(|_| panic!("retained empty body"));
@@ -248,7 +248,7 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         replaced
             .admit(
                 &root,
-                lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
                 &Selection::Fresh
             )
             .is_err(),

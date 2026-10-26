@@ -350,7 +350,7 @@ fn write_scope(
     encoder: &mut crate::stable_identity::IdentityEncoder,
     scope: &crate::ExecutionScope,
 ) {
-    let (kind, session_id): (u8, Option<&lash_vocabulary::identity::SessionId>) = match scope {
+    let (kind, session_id): (u8, Option<&lash_kernel_value::identity::SessionId>) = match scope {
         crate::ExecutionScope::Turn { session_id, .. } => (1, Some(session_id)),
         crate::ExecutionScope::Process { .. } => (2, None),
         crate::ExecutionScope::SessionOperation { session_id, .. } => (3, Some(session_id)),

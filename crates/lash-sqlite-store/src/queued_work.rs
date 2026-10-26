@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, StoreError> {
     DeliveryPolicy::from_wire_str(&value).ok_or_else(|| {

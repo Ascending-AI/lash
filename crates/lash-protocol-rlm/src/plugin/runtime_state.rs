@@ -81,7 +81,7 @@ impl RlmRuntimeState {
             .as_ref()
             .zip(state.current_frame_node_id.as_ref())
             .map(|(pages, frame)| {
-                let session = lash_vocabulary::identity::SessionId::parse(pages.actor.id())
+                let session = lash_kernel_value::identity::SessionId::parse(pages.actor.id())
                     .map_err(|error| SessionError::Protocol(error.to_string()))?;
                 lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::FrameEnvironment(
                     lash_core::FrameEnvironmentId::new(session, frame.clone()),
@@ -513,7 +513,7 @@ mod tests {
     /// The scope [`admitted_context`] claims.
     fn admitted_scope() -> lash_core::AdmittedScope {
         lash_core::AdmittedScope::turn(
-            lash_vocabulary::identity::SessionId::from("runtime-state-session"),
+            lash_kernel_value::identity::SessionId::from("runtime-state-session"),
             lash_vocabulary::identity::TurnId::from("runtime-state-turn"),
         )
     }
@@ -550,15 +550,15 @@ mod tests {
     impl lash_core::plugin::packages::DeferredPackageProvider for ParkingResolver {
         fn validate_grant(
             &self,
-            grant: &lash_vocabulary::DeferredGrant,
+            grant: &lash_kernel_value::DeferredGrant,
             registry: lash_vocabulary::claims::RegistryKind,
         ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
             if registry == lash_vocabulary::claims::RegistryKind::Session
                 && grant.provider.owner == "parking"
                 && grant.provider.key == "web"
                 && grant.path
-                    == lash_vocabulary::PackagePath::new(
-                        lash_vocabulary::Segment::new("web").unwrap(),
+                    == lash_kernel_value::PackagePath::new(
+                        lash_kernel_value::Segment::new("web").unwrap(),
                     )
             {
                 Ok(())
@@ -571,8 +571,8 @@ mod tests {
         async fn resolve(
             &self,
             _cx: &lash_core::DeferredResolveContext<'_>,
-            _grant: &lash_vocabulary::DeferredGrant,
-            _requested: &lash_vocabulary::QualifiedName,
+            _grant: &lash_kernel_value::DeferredGrant,
+            _requested: &lash_kernel_value::QualifiedName,
         ) -> Result<
             lash_core::plugin::packages::DeferredAnswer,
             lash_core::plugin::packages::ResolverFault,
@@ -592,18 +592,18 @@ mod tests {
     }
     #[async_trait::async_trait]
     impl lash_core::plugin::packages::PackageProvider for ParkingResolver {
-        fn roots(&self, _: &lash_core::OwnerConfigView) -> BTreeSet<lash_vocabulary::Segment> {
-            [lash_vocabulary::Segment::new("web").unwrap()].into()
+        fn roots(&self, _: &lash_core::OwnerConfigView) -> BTreeSet<lash_kernel_value::Segment> {
+            [lash_kernel_value::Segment::new("web").unwrap()].into()
         }
         fn advertise(
             &self,
             _config: &lash_core::OwnerConfigView,
-            context: &lash_vocabulary::PublicationContext,
+            context: &lash_kernel_value::PublicationContext,
         ) -> Result<
             Vec<lash_core::plugin::packages::PackageContribution>,
             lash_execution_contracts::PluginError,
         > {
-            use lash_vocabulary::*;
+            use lash_kernel_value::*;
             let advertisement = PackageAdvertisement::Deferred(Box::new(DeferredPackage {
                 path: PackagePath::new(Segment::new("web").unwrap()),
                 visibility: Visibility::Public,
@@ -630,7 +630,7 @@ mod tests {
         async fn hold(
             &self,
             _claim: &lash_core::ReferrerClaim,
-            _advertisements: &[&lash_vocabulary::PackageAdvertisement],
+            _advertisements: &[&lash_kernel_value::PackageAdvertisement],
         ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
             Ok(())
         }

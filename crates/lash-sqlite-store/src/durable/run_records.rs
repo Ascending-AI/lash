@@ -205,7 +205,7 @@ fn read_limited(
     if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
         return Ok(Err(DurableError::Graph(
             lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
+                dimension: lash_kernel_value::tokens::DecodeDimension::Nodes,
                 actual: rows.len() as u64,
                 limit: max_rows as u64,
             },
@@ -286,14 +286,14 @@ mod tests {
         use lash_core_store::checkpoint_graph::NodeKind;
         use lash_core_store::checkpoint_graph::TypedBody;
         use lash_durable::domain::DurableReads as _;
-        use lash_vocabulary::tokens::TokenWriter;
+        use lash_kernel_value::tokens::TokenWriter;
         let mut options = crate::SqliteStoreSetOptions::memory();
         options.graph_reads = GraphReadPolicy::new(
             1,
             2,
             3,
             64,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
         .unwrap();
         let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
@@ -354,7 +354,7 @@ mod tests {
         use lash_core_store::checkpoint_graph::GraphStaging;
         use lash_core_store::checkpoint_graph::NodeKind;
         use lash_core_store::checkpoint_graph::TypedBody;
-        use lash_vocabulary::tokens::TokenWriter;
+        use lash_kernel_value::tokens::TokenWriter;
         let conn = Connection::open_in_memory().expect("SQLite");
         conn.execute_batch(crate::schema::SCHEMA).expect("schema");
         conn.execute_batch(TABLES).expect("facts");
@@ -445,7 +445,7 @@ mod tests {
             super::super::graph::walk_roots(&conn, &roots, &limits).expect("read"),
             Err(
                 lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                    dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
+                    dimension: lash_kernel_value::tokens::DecodeDimension::Nodes,
                     actual: 3,
                     limit: 2
                 }
@@ -457,7 +457,7 @@ mod tests {
             super::super::graph::walk_roots(&conn, &roots, &limits).expect("read"),
             Err(
                 lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                    dimension: lash_vocabulary::tokens::DecodeDimension::TotalBytes,
+                    dimension: lash_kernel_value::tokens::DecodeDimension::TotalBytes,
                     ..
                 }
             )
@@ -491,7 +491,7 @@ mod tests {
         use lash_core_store::checkpoint_graph::GraphStaging;
         use lash_core_store::checkpoint_graph::NodeKind;
         use lash_core_store::checkpoint_graph::TypedBody;
-        use lash_vocabulary::tokens::TokenWriter;
+        use lash_kernel_value::tokens::TokenWriter;
         for (width, depth, sparse) in [
             (1_usize, 3, false),
             (127, 3, false),
@@ -616,8 +616,8 @@ mod tests {
         use lash_core_store::checkpoint_graph::NodeKind;
         use lash_core_store::checkpoint_graph::NodeSource as _;
         use lash_core_store::checkpoint_graph::TypedBody;
-        use lash_vocabulary::tokens::DecodeDimension;
-        use lash_vocabulary::tokens::TokenWriter;
+        use lash_kernel_value::tokens::DecodeDimension;
+        use lash_kernel_value::tokens::TokenWriter;
         let conn = Connection::open_in_memory().expect("SQLite");
         conn.execute_batch(crate::schema::SCHEMA).expect("schema");
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));

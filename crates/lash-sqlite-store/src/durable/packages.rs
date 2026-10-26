@@ -206,7 +206,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                     lash_durable::domain::processes::ProcessPostimages::from_view(process_view)
                         .into_views();
                 let turn_cancel = if owner.actor.kind() == lash_durable::ActorKind::Session {
-                    let session = match lash_vocabulary::identity::SessionId::try_from(
+                    let session = match lash_kernel_value::identity::SessionId::try_from(
                         owner.actor.id().to_owned(),
                     ) {
                         Ok(session) => session,

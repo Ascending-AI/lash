@@ -18,6 +18,8 @@ use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::heap::{PageGrant, PageRef};
 use lash_kernel_doc::{Datum, Float, Integer, parse_document};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::EffectId;
 use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
 use lash_vm_broker::kernel::MachinePark;
 use lash_vm_broker::kernel::pages::{
@@ -28,8 +30,6 @@ use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, StartWire};
 use lash_vm_client::*;
 use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::*;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::EffectId;
 
 const SLICE: u64 = 1_000_000;
 
@@ -133,7 +133,8 @@ fn document(body: &str) -> (String, EncodedPayload) {
 
 /// `body` as a document against the registry every worker assembles.
 fn parsed(body: &str) -> lash_kernel_doc::Document {
-    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
+    let release =
+        lash_kernel_releases::helper_release().expect("the linked worker fixture is valid");
     let mut text = String::from(
         "numbers by_spelling\nkernel 1\nimport 0 operation host.echo(x?: Any) -> Any\n",
     );
@@ -155,7 +156,10 @@ fn parsed(body: &str) -> lash_kernel_doc::Document {
 
 /// Pin a fixture's final Imports against one immutable helper release.
 fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
-    use lash_vocabulary::{Fill, ImportKind, Link, OperationRequirement};
+    use {
+        lash_kernel_value::Fill, lash_kernel_value::ImportKind, lash_kernel_value::Link,
+        lash_kernel_value::OperationRequirement,
+    };
     let fills = document
         .imports
         .iter()
@@ -167,7 +171,7 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
                 *slot,
                 Fill::Operation(OperationRequirement::new(
                     signature.clone(),
-                    lash_vocabulary::ContractId::new("1"),
+                    lash_kernel_value::ContractId::new("1"),
                 )),
             )
         })
@@ -196,24 +200,25 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
     )
     .expect("the linked worker fixture is valid")
 }
-fn echo_namespace(signature: lash_vocabulary::Signature) -> lash_kernel_dialect::Namespaces {
-    let offer = lash_vocabulary::OperationOffer {
-        requirement: lash_vocabulary::OperationRequirement::new(
+fn echo_namespace(signature: lash_kernel_value::Signature) -> lash_kernel_dialect::Namespaces {
+    let offer = lash_kernel_value::OperationOffer {
+        requirement: lash_kernel_value::OperationRequirement::new(
             signature,
-            lash_vocabulary::ContractId::new("1"),
+            lash_kernel_value::ContractId::new("1"),
         ),
         intents: Default::default(),
         controls: Default::default(),
-        mode: lash_vocabulary::OperationMode::Waited,
+        mode: lash_kernel_value::OperationMode::Waited,
     };
     lash_kernel_dialect::Namespaces::new(
         [(
-            lash_vocabulary::PackagePath::parse("host")
+            lash_kernel_value::PackagePath::parse("host")
                 .expect("the linked worker fixture is valid"),
             [(
-                lash_vocabulary::Segment::new("echo").expect("the linked worker fixture is valid"),
+                lash_kernel_value::Segment::new("echo")
+                    .expect("the linked worker fixture is valid"),
                 lash_kernel_dialect::NamespaceMember {
-                    visibility: lash_vocabulary::Visibility::Public,
+                    visibility: lash_kernel_value::Visibility::Public,
                     kind: lash_kernel_dialect::NamespaceKind::Operation(offer.into()),
                 },
             )]
@@ -265,7 +270,7 @@ fn bounds() -> RunBounds {
 // Program.functions additionally selects binary helpers for execution.
 fn ordinary_functions(
     program: &lash_kernel_vm::Program,
-) -> std::collections::BTreeSet<lash_vocabulary::FunctionId> {
+) -> std::collections::BTreeSet<lash_kernel_value::FunctionId> {
     program
         .functions
         .iter()
@@ -587,7 +592,10 @@ impl PageSource for Staged {
 }
 
 /// The one effect the park requests: its wait and its argument.
-fn requested(step: RunStep, document: &EncodedPayload) -> (lash_vocabulary::sites::WaitId, Datum) {
+fn requested(
+    step: RunStep,
+    document: &EncodedPayload,
+) -> (lash_kernel_value::sites::WaitId, Datum) {
     let (wait, argument, _, _) = admitted(step, document);
     (wait, argument)
 }
@@ -598,7 +606,7 @@ fn admitted(
     step: RunStep,
     document: &EncodedPayload,
 ) -> (
-    lash_vocabulary::sites::WaitId,
+    lash_kernel_value::sites::WaitId,
     Datum,
     EncodedPayload,
     [u8; 32],
@@ -623,7 +631,7 @@ fn admitted(
             import.name.package.to_string() == "host" && import.name.member.as_str() == "echo"
         })
         .expect("the fixture imports host.echo");
-    let expected = lash_vocabulary::OperationUse {
+    let expected = lash_kernel_value::OperationUse {
         link: linked(document.shared().as_ref().clone()).link,
         slot: *slot,
     };
@@ -826,13 +834,13 @@ main {{
 fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     use lash_vm_client::service::{Request, Response};
     let pool = WorkerPool::new(config("")).expect("pool");
-    let echo = lash_vocabulary::types::Signature {
-        params: vec![lash_vocabulary::types::Param {
+    let echo = lash_kernel_value::types::Signature {
+        params: vec![lash_kernel_value::types::Param {
             name: Name::new("x"),
-            ty: lash_vocabulary::types::Type::Any,
+            ty: lash_kernel_value::types::Type::Any,
             optional: false,
         }],
-        result: lash_vocabulary::types::Type::Any,
+        result: lash_kernel_value::types::Type::Any,
     };
     let request = Request::Lower {
         dialect: "typescript".into(),
@@ -955,13 +963,13 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     use lash_vm_client::service::{Request, Response};
     HOST_DIALECTS.set("typescript,python");
     let pool = WorkerPool::new(config("")).expect("pool");
-    let echo = lash_vocabulary::types::Signature {
-        params: vec![lash_vocabulary::types::Param {
+    let echo = lash_kernel_value::types::Signature {
+        params: vec![lash_kernel_value::types::Param {
             name: Name::new("x"),
-            ty: lash_vocabulary::types::Type::Any,
+            ty: lash_kernel_value::types::Type::Any,
             optional: false,
         }],
-        result: lash_vocabulary::types::Type::Any,
+        result: lash_kernel_value::types::Type::Any,
     };
     let request = Request::Lower {
         dialect: "python".into(),
@@ -1082,11 +1090,11 @@ fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
     };
     assert_eq!(
         call.visit(),
-        lash_vocabulary::sites::testkit::visit(1),
+        lash_kernel_value::sites::testkit::visit(1),
         "the second call is the last entry"
     );
     assert_eq!(
-        lash_vocabulary::sites::ObservationReader::counts(call)
+        lash_kernel_value::sites::ObservationReader::counts(call)
             .loops
             .iter()
             .map(|iteration| iteration.entries)
@@ -2006,7 +2014,8 @@ mod pool_package;
 
 /// The parent's code-only package; the shipped worker is given no package list.
 fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
-    let release = lash_vm_releases::helper_release().expect("the linked worker fixture is valid");
+    let release =
+        lash_kernel_releases::helper_release().expect("the linked worker fixture is valid");
     let mut registry = release.functions.clone();
     let definition =
         lash_kernel_doc::parse_definition(source).expect("the linked worker fixture is valid");
@@ -2076,7 +2085,7 @@ fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_
 /// under a warm worker and a fresh process, including the charge.
 #[test]
 fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
-    let held = lash_vm_releases::helper_release().expect("helper release");
+    let held = lash_kernel_releases::helper_release().expect("helper release");
     let function = held
         .functions
         .named("num.abs")

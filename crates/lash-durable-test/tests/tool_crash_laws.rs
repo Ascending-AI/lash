@@ -110,8 +110,8 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::ProcessInfraError;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -449,7 +449,7 @@ fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     // A call a kill interrupted runs again at its ordinal, so every call
     // the turn makes is answered and the turn reaches the call past the
     // limit whatever was cut.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -514,15 +514,15 @@ fn submit_definition(retyped: bool) -> lash_vocabulary::tool_contract::ToolDefin
         SUBMIT_OPERATION,
         "Finishes the turn with its answer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
-        lash_vocabulary::tool_declaration::TurnControls::finish(
-            lash_vocabulary::json_schema::JsonSchema::admit(submit_value_schema(retyped))
+        lash_kernel_value::tool_declaration::TurnControls::finish(
+            lash_kernel_value::json_schema::JsonSchema::admit(submit_value_schema(retyped))
                 .expect("submit's value schema"),
         ),
     )
     .expect("submit's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted before its outcome runs again.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -585,7 +585,7 @@ fn put_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
     // A put a kill interrupted runs again at its ordinal and puts the same
     // bytes again.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -677,7 +677,7 @@ fn state_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinitio
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal and sets a value
     // of its own entry.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -767,8 +767,10 @@ struct StateComponent {
     world: Arc<World>,
 }
 
-const STATE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(STATE_PLUGIN, lash_vocabulary::providers::FormatVersion::ONE);
+const STATE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    STATE_PLUGIN,
+    lash_kernel_value::providers::FormatVersion::ONE,
+);
 
 impl lash_core::plugin::ProcessComponentFactory for StateComponent {
     fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {

@@ -29,13 +29,13 @@ use lash_kernel_exec::{
 
 use super::{CodeId, Constant, LibId, Stream};
 use lash_kernel_doc::JoinMode;
-use lash_vocabulary::Type;
+use lash_kernel_value::Type;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinkedHook {
     Library(LibId),
     Code(CodeId),
-    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+    Import(lash_kernel_value::names::ImportSlot, Option<LibId>),
 }
 impl LinkedHook {
     pub(crate) fn library(self) -> Option<LibId> {
@@ -68,7 +68,7 @@ pub(crate) enum NestedKind {
     /// so no occurrence of its site is counted.
     Body(LibId),
     Perform {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
         result: Type,
         then_yield: bool,
     },
@@ -94,7 +94,7 @@ impl NestedKind {
 
 /// What a nested call or `spawn` runs.
 pub(crate) enum NestedCallee {
-    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+    Import(lash_kernel_value::names::ImportSlot, Option<LibId>),
     Declared(CodeId),
     Library(LibId),
     /// A document's body-helper call retains its typed boundary.

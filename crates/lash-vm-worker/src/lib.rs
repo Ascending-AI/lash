@@ -29,8 +29,8 @@ mod heap_profile;
 #[cfg(all(unix, feature = "testing"))]
 pub mod in_process;
 /// lash's own packages: the natives of each, by its path, as
-/// `lash-vm-releases`' build defines them.
-#[path = "../../lash-vm-releases/src/library.rs"]
+/// `lash-kernel-releases`' build defines them.
+#[path = "../../lash-kernel-releases/src/library.rs"]
 mod library;
 #[cfg(all(test, unix))]
 mod page_laws;
@@ -94,7 +94,7 @@ pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedder,
             tuning.python_source_nesting,
         )
         .map_err(|error| EmbedError::Dialect {
-            dialect: lash_vm_releases::PYTHON.to_owned(),
+            dialect: lash_kernel_releases::PYTHON.to_owned(),
             message: error.to_string(),
         })?,
     ))?;

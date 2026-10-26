@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{self as k, Caption, CaptionTarget, FieldPath, FieldRoot};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::{Site, Unit};
+use lash_kernel_value::Name;
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use super::source::{self, Item, Param, Property, Stmt, Type};
 
@@ -23,7 +23,7 @@ pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
 /// What a document lifts to: each declared function on its own, and
 /// `main` as the order of the module's entries or as a cell's statements.
 pub(super) struct Lifted {
-    pub(super) functions: BTreeMap<Name, (lash_vocabulary::FunctionId, Lift<Item>)>,
+    pub(super) functions: BTreeMap<Name, (lash_kernel_value::FunctionId, Lift<Item>)>,
     pub(super) main: Lift<Main>,
 }
 
@@ -141,7 +141,7 @@ struct Pending {
 pub(super) struct Lifter<'a> {
     pub(super) document: &'a k::Document,
     library: &'a dyn lash_kernel_dialect::Library,
-    pub(super) imports: &'a BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+    pub(super) imports: &'a BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
     captions: Option<&'a k::Captions>,
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
@@ -238,7 +238,7 @@ impl<'a> Lifter<'a> {
         id.name(self.document, self.imports, self.library)
     }
     pub(super) fn is<R: Reference>(&self, id: &R, name: &str) -> bool {
-        let Ok(name) = lash_vocabulary::FunctionName::new(name) else {
+        let Ok(name) = lash_kernel_value::FunctionName::new(name) else {
             return false;
         };
         self.library(id).is_some_and(|found| found == name.as_str())
@@ -252,7 +252,7 @@ impl<'a> Lifter<'a> {
         self.captions?.at(site).cloned()
     }
 
-    pub(super) fn in_function(&self, function: lash_vocabulary::FunctionId) -> Self {
+    pub(super) fn in_function(&self, function: lash_kernel_value::FunctionId) -> Self {
         let mut inner = Self::new(
             self.document,
             self.captions,
@@ -371,12 +371,12 @@ impl<'a> Lifter<'a> {
     fn annotation(
         &self,
         function: &Name,
-        ty: &lash_vocabulary::Type,
+        ty: &lash_kernel_value::Type,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> Lift<Option<Type>> {
         Ok(match ty {
-            lash_vocabulary::Type::Any => None,
+            lash_kernel_value::Type::Any => None,
             _ => Some(self.ts_type(Some(function), ty, root, path)?),
         })
     }
@@ -384,13 +384,13 @@ impl<'a> Lifter<'a> {
     pub(super) fn ts_type(
         &self,
         function: Option<&Name>,
-        ty: &lash_vocabulary::Type,
+        ty: &lash_kernel_value::Type,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> Lift<Type> {
         Ok(match ty {
-            lash_vocabulary::Type::Json => Type::Word("JsonValue"),
-            lash_vocabulary::Type::Enum(values) => {
+            lash_kernel_value::Type::Json => Type::Word("JsonValue"),
+            lash_kernel_value::Type::Enum(values) => {
                 let mut values: Vec<_> = values.iter().cloned().map(Type::Literal).collect();
                 if values.len() == 1 {
                     values.remove(0)
@@ -398,32 +398,32 @@ impl<'a> Lifter<'a> {
                     Type::Union(values)
                 }
             }
-            lash_vocabulary::Type::Any => return refuse("an unconstrained nested kernel type"),
-            lash_vocabulary::Type::Text => Type::Word("string"),
-            lash_vocabulary::Type::Number => Type::Word("number"),
-            lash_vocabulary::Type::Int => Type::Word("bigint"),
-            lash_vocabulary::Type::Bool => Type::Word("boolean"),
-            lash_vocabulary::Type::Null => Type::Word("null"),
-            lash_vocabulary::Type::List(item) => {
+            lash_kernel_value::Type::Any => return refuse("an unconstrained nested kernel type"),
+            lash_kernel_value::Type::Text => Type::Word("string"),
+            lash_kernel_value::Type::Number => Type::Word("number"),
+            lash_kernel_value::Type::Int => Type::Word("bigint"),
+            lash_kernel_value::Type::Bool => Type::Word("boolean"),
+            lash_kernel_value::Type::Null => Type::Word("null"),
+            lash_kernel_value::Type::List(item) => {
                 Type::Array(Box::new(self.ts_type(function, item, root, path)?))
             }
-            lash_vocabulary::Type::Union(members) => {
+            lash_kernel_value::Type::Union(members) => {
                 let mut written = Vec::new();
                 let mut index = 0;
                 while index < members.len() {
                     match &members[index..] {
                         [
-                            lash_vocabulary::Type::Null,
-                            lash_vocabulary::Type::Absent,
+                            lash_kernel_value::Type::Null,
+                            lash_kernel_value::Type::Absent,
                             ..,
                         ] => {
                             written.push(Type::Word("undefined"));
                             index += 2;
                         }
                         [
-                            lash_vocabulary::Type::Any
-                            | lash_vocabulary::Type::Absent
-                            | lash_vocabulary::Type::Union(_),
+                            lash_kernel_value::Type::Any
+                            | lash_kernel_value::Type::Absent
+                            | lash_kernel_value::Type::Union(_),
                             ..,
                         ] => {
                             return refuse("a union member no annotation writes");
@@ -437,7 +437,7 @@ impl<'a> Lifter<'a> {
                 }
                 Type::Union(written)
             }
-            lash_vocabulary::Type::Record(record) => {
+            lash_kernel_value::Type::Record(record) => {
                 let mut properties = Vec::with_capacity(record.fields.len());
                 for field in &record.fields {
                     path.push(field.name.clone());
@@ -462,9 +462,11 @@ impl<'a> Lifter<'a> {
                 Type::Object(
                     properties,
                     match &record.rest {
-                        lash_vocabulary::RecordRest::Closed => Some(Box::new(Type::Word("never"))),
-                        lash_vocabulary::RecordRest::Drop => None,
-                        lash_vocabulary::RecordRest::Keep(rest) => {
+                        lash_kernel_value::RecordRest::Closed => {
+                            Some(Box::new(Type::Word("never")))
+                        }
+                        lash_kernel_value::RecordRest::Drop => None,
+                        lash_kernel_value::RecordRest::Keep(rest) => {
                             Some(Box::new(self.ts_type(function, rest, root, path)?))
                         }
                     },
@@ -669,15 +671,15 @@ pub(super) trait Reference {
     fn name(
         &self,
         document: &k::Document,
-        imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        imports: &BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String>;
 }
-impl Reference for lash_vocabulary::FunctionId {
+impl Reference for lash_kernel_value::FunctionId {
     fn name(
         &self,
         document: &k::Document,
-        _imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        _imports: &BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
         (document.library.contains(self) || document.requires.natives.contains(self))
@@ -693,7 +695,7 @@ impl Reference for k::FunctionTarget {
     fn name(
         &self,
         document: &k::Document,
-        imports: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        imports: &BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
         library: &dyn lash_kernel_dialect::Library,
     ) -> Option<String> {
         match self {

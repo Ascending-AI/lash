@@ -12,7 +12,7 @@
 use super::session_delete_blob_reclaim::SessionDeleteBlobHandles;
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const MODEL: &str = "session-attachment-hold-model";
 

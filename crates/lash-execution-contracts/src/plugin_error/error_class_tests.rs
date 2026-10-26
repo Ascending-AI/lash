@@ -6,7 +6,7 @@ use crate::RuntimeError;
 use crate::RuntimeErrorCode;
 use crate::plugin_error::PluginError;
 use crate::plugin_error::PluginErrorClass;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// `plugin_error_samples!` names every `PluginError` variant with one value
 /// of it. Its one input generates the list the laws iterate and an
@@ -53,7 +53,7 @@ plugin_error_samples! {
     Operation(_) => PluginError::Operation(Box::new(operation_failure_sample("rejected"))),
     HookFailures { .. } => PluginError::HookFailures { causes: Vec::new() },
     UnusableSchema { .. } => PluginError::UnusableSchema {
-        source: Box::new(lash_vocabulary::json_schema::JsonSchema::admit(serde_json::Value::Null)
+        source: Box::new(lash_kernel_value::json_schema::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema")),
     },
     UnusableToolSchema { .. } => PluginError::UnusableToolSchema {
@@ -64,7 +64,7 @@ plugin_error_samples! {
     },
     ValueMismatch { .. } => PluginError::ValueMismatch {
         context: "payload".into(),
-        source: Box::new(lash_vocabulary::json_schema::ValueMismatch {
+        source: Box::new(lash_kernel_value::json_schema::ValueMismatch {
             instance_path: "/count".into(),
             message: "integer required".into(),
         }),
@@ -164,8 +164,8 @@ plugin_error_samples! {
     Format(_) => PluginError::Format(crate::FormatRefusal {
         plugin: "sampled".to_string(),
         namespace: crate::FormatNamespace::State,
-        stored: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
-        readable: lash_vocabulary::providers::FormatVersion::ONE,
+        stored: lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
+        readable: lash_kernel_value::providers::FormatVersion::ONE,
     }),
     PackageStoreRefused(_) => PluginError::PackageStoreRefused(lash_core_store::packages::PackageRefusal::ExecutionUse),
     StoreRefusal(_) => PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced {

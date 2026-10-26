@@ -1,6 +1,6 @@
 use lash_execution_contracts::session_types::PluginOwned;
 use lash_execution_contracts::state_commands::StateCommands;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
 use std::collections::BTreeMap;

@@ -412,7 +412,7 @@ impl ProcessLocalExecution {
     pub async fn stage_start(
         self,
         registration: lash_execution_contracts::process::ProcessStartRegistration,
-        observers: Vec<lash_vocabulary::identity::SessionId>,
+        observers: Vec<lash_kernel_value::identity::SessionId>,
         execution_context: lash_execution_contracts::process::ProcessExecutionContext,
     ) -> Result<crate::StagedProcessStart, RuntimeEffectControllerError> {
         let starter = process_start_starter(&registration, &execution_context)?;

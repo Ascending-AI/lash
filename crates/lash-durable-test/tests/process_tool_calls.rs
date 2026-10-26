@@ -179,7 +179,7 @@ impl lash_core::ToolProvider for Probe {
 /// The component that serves the probe to a process body.
 const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "process-probe",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// A core running RLM turns with the probe, its model the registered
@@ -863,7 +863,7 @@ impl lash_core::ToolProvider for Search {
 /// The component that serves the search tool to a process body.
 const SEARCH_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "workflows-search",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// A core running RLM turns in `dialect` with the search tool, in its cells

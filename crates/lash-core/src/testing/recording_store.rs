@@ -24,7 +24,7 @@ use crate::store::{
 };
 use lash_core_execution::DeploymentStoreDecorator;
 use lash_execution_contracts::deployment::DeploymentStore;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A session store with call counters and one-shot faults over the store it
 /// wraps. See the module documentation.

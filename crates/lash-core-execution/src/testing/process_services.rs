@@ -506,7 +506,7 @@ impl crate::ProcessService for MockSessionManager {
     }
     async fn start_from_request(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
         _request: lash_execution_contracts::process::ProcessStartRequest,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<

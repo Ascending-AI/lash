@@ -25,9 +25,9 @@
 use std::collections::BTreeSet;
 
 use crate::{FunctionDefinition, ValidatedFunctions};
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::tokens::TokenError;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::tokens::TokenError;
 
 #[cfg(test)]
 std::thread_local! {
@@ -198,7 +198,7 @@ impl ReleasedFunctions {
         }
         let field = |index: usize| self.word(self.records() + at * RECORD + ID + index * 4);
         let occurrences =
-            lash_vocabulary::tokens::decode_body(self.slice(self.range(at, 9))).ok()?;
+            lash_kernel_value::tokens::decode_body(self.slice(self.range(at, 9))).ok()?;
         Some(BodyCensus {
             codes: field(5),
             blocks: field(6),
@@ -235,14 +235,14 @@ impl ReleasedFunctions {
         &self,
         at: usize,
     ) -> Result<
-        std::collections::BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::Import>,
+        std::collections::BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
         TokenError,
     > {
-        lash_vocabulary::tokens::decode_body(self.slice(self.range(at, 14)))
+        lash_kernel_value::tokens::decode_body(self.slice(self.range(at, 14)))
     }
 
     /// Function `at`'s definition's canonical token body
-    /// ([`lash_vocabulary::tokens::encode_body`]).
+    /// ([`lash_kernel_value::tokens::encode_body`]).
     pub fn definition_bytes(&self, at: usize) -> &'static [u8] {
         self.slice(self.range(at, 0))
     }
@@ -256,7 +256,7 @@ impl ReleasedFunctions {
         #[cfg(test)]
         DECODED.with(|decoded| decoded.set(decoded.get() + 1));
         crate::document_work::note_helper(|work| work.body_decodes += 1);
-        lash_vocabulary::tokens::decode_body(self.definition_bytes(at))
+        lash_kernel_value::tokens::decode_body(self.definition_bytes(at))
     }
 
     fn records(&self) -> usize {
@@ -329,7 +329,7 @@ impl ValidatedFunctions {
         let mut names = String::new();
         let mut records = Vec::with_capacity(functions.len() * RECORD);
         for (function, definition) in &functions {
-            let body = put(&lash_vocabulary::tokens::encode_body(*definition));
+            let body = put(&lash_kernel_value::tokens::encode_body(*definition));
             let name = [names.len() as u32, definition.name.as_str().len() as u32];
             names.push_str(definition.name.as_str());
             let census = census(function, definition);
@@ -347,7 +347,7 @@ impl ValidatedFunctions {
                     if census.closures {
                         flags |= CLOSURES;
                     }
-                    paths = lash_vocabulary::tokens::encode_body(&census.occurrences);
+                    paths = lash_kernel_value::tokens::encode_body(&census.occurrences);
                     [census.codes, census.blocks, census.stmts, census.sites]
                 }
                 None => [0; 4],
@@ -360,7 +360,7 @@ impl ValidatedFunctions {
                 listed.extend_from_slice(name.as_str().as_bytes());
             }
             let listed = put(&listed);
-            let imports = put(&lash_vocabulary::tokens::encode_body(
+            let imports = put(&lash_kernel_value::tokens::encode_body(
                 &definition
                     .body()
                     .map(|body| body.imports.clone())
@@ -424,7 +424,7 @@ pub struct MissingHelper {
 /// static closure once; compatibility reads only identity and membership.
 #[derive(Clone, Debug)]
 pub struct BuildHelpers {
-    identity: lash_vocabulary::HelperLibraryId,
+    identity: lash_kernel_value::HelperLibraryId,
     functions: crate::FunctionRegistry,
     members: std::collections::HashSet<FunctionId>,
     callees: std::collections::BTreeMap<FunctionId, BTreeSet<FunctionId>>,
@@ -449,7 +449,7 @@ impl BuildHelpers {
             callees.insert(function, children);
         }
         crate::document_work::note_helper(|work| work.identity_hashes += 1);
-        let identity = lash_vocabulary::HelperLibraryId::of_members(callees.keys().copied());
+        let identity = lash_kernel_value::HelperLibraryId::of_members(callees.keys().copied());
         let members = callees.keys().copied().collect();
         Ok(Self {
             identity,
@@ -464,7 +464,7 @@ impl BuildHelpers {
             std::sync::OnceLock::new();
         std::sync::Arc::clone(EMPTY.get_or_init(|| {
             std::sync::Arc::new(Self {
-                identity: lash_vocabulary::HelperLibraryId::of_members([]),
+                identity: lash_kernel_value::HelperLibraryId::of_members([]),
                 functions: crate::FunctionRegistry::declarations(),
                 members: Default::default(),
                 callees: Default::default(),
@@ -480,7 +480,7 @@ impl BuildHelpers {
     /// Opens metadata whose identity and closure were checked by the installing
     /// parent. Like ReleasedFunctions::over_frame, this does no content hashing.
     pub fn from_frame(
-        identity: lash_vocabulary::HelperLibraryId,
+        identity: lash_kernel_value::HelperLibraryId,
         functions: crate::FunctionRegistry,
         members: BTreeSet<FunctionId>,
     ) -> Result<Self, MissingHelper> {
@@ -505,7 +505,7 @@ impl BuildHelpers {
         })
     }
 
-    pub fn identity(&self) -> lash_vocabulary::HelperLibraryId {
+    pub fn identity(&self) -> lash_kernel_value::HelperLibraryId {
         self.identity
     }
     pub fn contains(&self, function: &FunctionId) -> bool {
@@ -607,7 +607,7 @@ pub enum LibraryRequirementRefusal {
     MissingHelper { function: FunctionId },
     #[error("incompatible operation bindings at {slot:?}")]
     IncompatibleImport {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
     },
 }
 
@@ -675,7 +675,7 @@ type DocumentCheck = std::sync::Arc<std::sync::OnceLock<Result<(), crate::Invali
 pub struct DocumentChecks(
     std::sync::Mutex<
         std::collections::VecDeque<(
-            lash_vocabulary::HelperLibraryId,
+            lash_kernel_value::HelperLibraryId,
             std::sync::Weak<crate::Document>,
             DocumentCheck,
         )>,

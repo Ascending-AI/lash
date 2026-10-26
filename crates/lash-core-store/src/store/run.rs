@@ -27,9 +27,9 @@ use super::StoreError;
 use super::control_intent::ControlIntentId;
 use lash_protocol_types::{TurnFinish, TurnOutcome, TurnStop};
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// A turn commit's identity: the logical run and the physical ordinal of
@@ -122,7 +122,7 @@ pub enum RunCommittedOutcome {
         /// evidence of the answer's type, whatever the host offers since.
         /// `None` when no finish tool ended the turn.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
+        value_schema: Option<lash_kernel_value::json_schema::JsonSchema>,
     },
     AgentFrameSwitch {
         frame_key: lash_protocol_types::FrameKey,
@@ -139,7 +139,7 @@ impl RunCommittedOutcome {
     #[must_use]
     pub fn of_turn_outcome(
         outcome: &TurnOutcome,
-        value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
+        value_schema: Option<lash_kernel_value::json_schema::JsonSchema>,
     ) -> Self {
         match outcome {
             TurnOutcome::Finished(finish) => Self::Finished {

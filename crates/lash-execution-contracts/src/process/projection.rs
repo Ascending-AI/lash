@@ -9,9 +9,9 @@ use super::model::ProcessLifecycleState;
 use super::model::ProcessOriginator;
 use super::model::ProcessWaits;
 use super::observation::{ObservedProcess, ObservedProcessEvent, ProcessParkState};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::CancelRequest;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// A process outcome for a host to store or display. Each value, failure or

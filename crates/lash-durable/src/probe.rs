@@ -11,7 +11,7 @@
 
 use crate::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
 use crate::{ActorKey, CommitLabel, DurableError, Epoch};
-use lash_vocabulary::identity::{SessionId, TurnId};
+use {lash_kernel_value::identity::SessionId, lash_vocabulary::identity::TurnId};
 
 /// Owner reads attributed to one actor epoch. Hydration and requested
 /// context are counted separately from repeated reads of acknowledged state.

@@ -1,5 +1,5 @@
 use super::StoreError;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Oldest session-state generation this runtime can admit.
 pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;

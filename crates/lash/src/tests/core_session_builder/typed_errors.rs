@@ -33,7 +33,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     let creating = build();
     for id in ["root", "host-chosen-session"] {
         creating
-            .session(lash_vocabulary::identity::SessionId::from(id))
+            .session(lash_kernel_value::identity::SessionId::from(id))
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("create with explicit identity");
@@ -44,7 +44,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     let mut roots_without_identity = Vec::new();
     for id in ["root", "host-chosen-session"] {
         let session = reopened
-            .session(lash_vocabulary::identity::SessionId::from(id))
+            .session(lash_kernel_value::identity::SessionId::from(id))
             .open()
             .await
             .expect("recorded identity permits cold open");
@@ -52,7 +52,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
         drop(session);
         let head = lash_core::SessionCommitStore::load_session_head_meta(
             reopened.store_factory.as_ref(),
-            &lash_vocabulary::identity::SessionId::from(id),
+            &lash_kernel_value::identity::SessionId::from(id),
         )
         .await
         .expect("read recorded head")
@@ -101,7 +101,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     let refusing = build();
     for id in ["root", "host-chosen-session"] {
         let error = match refusing
-            .session(lash_vocabulary::identity::SessionId::from(id))
+            .session(lash_kernel_value::identity::SessionId::from(id))
             .open()
             .await
         {
@@ -232,7 +232,7 @@ impl StateHook {
 /// installs `hook`, then shut that core down.
 async fn run_first_turn(backend: &crate::Backend, hook: &StateHook, id: &str) {
     let core = hook.core(backend.clone());
-    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("id"))
+    core.session(lash_kernel_value::identity::SessionId::parse(id).expect("id"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
@@ -252,7 +252,7 @@ async fn a_cold_sessions_readiness_reads_its_recorded_namespace() {
     let hook = StateHook::new();
     run_first_turn(&backend, &hook, "cold-namespace").await;
     let core = hook.core(backend);
-    core.session(lash_vocabulary::identity::SessionId::parse("cold-namespace").expect("id"))
+    core.session(lash_kernel_value::identity::SessionId::parse("cold-namespace").expect("id"))
         .durable()
         .await
         .expect("handle")
@@ -285,7 +285,7 @@ async fn a_cold_sessions_readiness_state_refusal_reaches_the_host_typed() {
         let core = hook.core(backend.clone());
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(60),
-            core.session(lash_vocabulary::identity::SessionId::parse(&id).expect("id"))
+            core.session(lash_kernel_value::identity::SessionId::parse(&id).expect("id"))
                 .durable()
                 .await
                 .expect("handle")
@@ -401,7 +401,7 @@ async fn a_created_session_records_the_revision_retention_its_host_states() {
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::tests::host::runtime_lease_owner())
         .expect("a core under a stated retention");
-        let id = lash_vocabulary::identity::SessionId::from("stated-retention");
+        let id = lash_kernel_value::identity::SessionId::from("stated-retention");
         core.session(id.clone())
             .create(crate::SessionCreation::root(mock_session_spec()))
             .await
@@ -416,14 +416,14 @@ async fn a_created_session_records_the_revision_retention_its_host_states() {
 #[tokio::test]
 async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
-    core.session(lash_vocabulary::identity::SessionId::from(
+    core.session(lash_kernel_value::identity::SessionId::from(
         "retry-keyed-append",
     ))
     .create(crate::SessionCreation::root(mock_session_spec()))
     .await
     .expect("create");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "retry-keyed-append",
         ))
         .open()

@@ -8,7 +8,7 @@ use lash_checkpoint_encoder::node::{frame_semantic, write_envelope};
 use lash_checkpoint_encoder::{DecodeLimits, GraphRefusal, NodeId, NodeKind, check_envelope};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::{Checkpoint, CheckpointRoot, PageAnswer, PageKind};
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::tokens::encode_body;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

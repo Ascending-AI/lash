@@ -935,24 +935,26 @@ impl PluginFactory for FormattedCounter {
 
     fn migrate_format(
         &self,
-        from: lash_vocabulary::providers::FormatVersion,
+        from: lash_kernel_value::providers::FormatVersion,
         _namespace: crate::FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, crate::FormatRefusal> {
-        Ok(if from == lash_vocabulary::providers::FormatVersion::ONE {
-            Self::rename(value, "tally", "count")
-        } else {
-            value
-        })
+        Ok(
+            if from == lash_kernel_value::providers::FormatVersion::ONE {
+                Self::rename(value, "tally", "count")
+            } else {
+                value
+            },
+        )
     }
 
     fn encode_format(
         &self,
-        to: lash_vocabulary::providers::FormatVersion,
+        to: lash_kernel_value::providers::FormatVersion,
         _namespace: crate::FormatNamespace,
         value: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::FormatRefusal> {
-        Ok(if to == lash_vocabulary::providers::FormatVersion::ONE {
+        Ok(if to == lash_kernel_value::providers::FormatVersion::ONE {
             Self::rename(value.clone(), "count", "tally")
         } else {
             value.clone()
@@ -973,9 +975,9 @@ impl FormattedCounter {
     pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
         declaration.format_version =
-            lash_vocabulary::providers::FormatVersion::new(2).expect("a format version");
+            lash_kernel_value::providers::FormatVersion::new(2).expect("a format version");
         declaration.writable_formats = vec![
-            lash_vocabulary::providers::FormatVersion::ONE,
+            lash_kernel_value::providers::FormatVersion::ONE,
             declaration.format_version,
         ];
         declaration
@@ -992,7 +994,7 @@ fn formatted_admission(writer: u32) -> crate::store::plugin_writers::PluginAdmis
     crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
         crate::store::plugin_writers::AdmittedPlugin {
             plugin: FormattedCounter::ID.to_string(),
-            writer: lash_vocabulary::providers::FormatVersion::new(writer)
+            writer: lash_kernel_value::providers::FormatVersion::new(writer)
                 .expect("a format version"),
         },
     ])

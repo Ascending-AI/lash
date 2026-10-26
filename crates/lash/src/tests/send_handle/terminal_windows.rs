@@ -65,7 +65,8 @@ async fn terminal_windows_follow_the_session_retention(
     let fixture = fixture_over(1, |_| backend).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse(session_name).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_name)
+            .expect("nonblank host identity"),
     )
     .await
     .open()

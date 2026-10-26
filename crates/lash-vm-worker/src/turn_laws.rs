@@ -19,6 +19,11 @@ use lash_core_store::checkpoint_graph::stage::StageLeaseId;
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::Datum;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 use lash_kernel_vm::{Outcome, Request as RunRequest, Target};
 use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch, PayloadKind};
 use lash_vm_broker::kernel::MachinePark;
@@ -30,14 +35,9 @@ use lash_vm_client::service::{Request, Response};
 use lash_vm_client::wire::{self, OutcomeWire, ParkWire, StartWire};
 use lash_vm_client::{PoolConfig, WorkerEntry};
 use lash_vm_protocol::*;
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
 
 /// The dialect the law's cells are written in.
-const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
+const DIALECT: &str = lash_kernel_releases::TYPESCRIPT;
 
 thread_local! {
     /// The bytes this thread asked the allocator for.
@@ -146,7 +146,7 @@ impl Parent {
     fn name_hosts(&mut self, document: &[u8]) {
         let document = lash_kernel_doc::IdentifiedDocument::decode(
             document,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
         .expect("the lowered document");
         let embedding =
@@ -155,7 +155,7 @@ impl Parent {
             &embedding,
             &document,
             &[],
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
             &lash_kernel_doc::Selection::Fresh,
         )
         .expect("embedding")

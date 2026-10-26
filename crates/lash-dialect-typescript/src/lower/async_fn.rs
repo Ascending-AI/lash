@@ -32,10 +32,9 @@
 use lash_kernel_dialect::{Resolution, Spelling};
 use lash_kernel_doc::{ActKind, Expr, Literal, Rhs, Stmt};
 
-use lash_vocabulary::{
-    EffectName,
-    names::QualifiedName,
-    types::{Signature, Type},
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::names::QualifiedName,
+    lash_kernel_value::types::Signature, lash_kernel_value::types::Type,
 };
 
 use super::{Lowerer, Lowering, Operand, Ty};
@@ -260,7 +259,7 @@ impl Lowerer<'_> {
                 .collect::<Vec<_>>()
         });
         let path = expanded.unwrap_or(path);
-        if self.is_bound(root) || crate::builtins::is_global(root) {
+        if self.is_bound(root) || lash_ext_ts_helpers::builtins::is_global(root) {
             return None;
         }
         if path == ["sleep"] {
@@ -446,7 +445,9 @@ impl Lowerer<'_> {
                 .builtin_paths()
                 .iter()
                 .filter_map(|path| match this.table.builtin(path) {
-                    Some(crate::builtins::Builtin::Function { length, .. }) => Some(length),
+                    Some(lash_ext_ts_helpers::builtins::Builtin::Function { length, .. }) => {
+                        Some(length)
+                    }
                     _ => None,
                 })
                 .collect();
@@ -472,8 +473,8 @@ impl Lowerer<'_> {
                     })?;
                     let signature = Signature {
                         params: (0..length)
-                            .map(|index| lash_vocabulary::Param {
-                                name: lash_vocabulary::Name::new(format!("arg{index}")),
+                            .map(|index| lash_kernel_value::Param {
+                                name: lash_kernel_value::Name::new(format!("arg{index}")),
                                 ty: Type::Any,
                                 optional: true,
                             })
@@ -532,7 +533,7 @@ impl Lowerer<'_> {
             Wait::Effect(effect) => {
                 let signature = self.signature_of(&effect);
                 let deferred = self.namespaces.operation(&effect).is_none();
-                let operation = lash_vocabulary::names::QualifiedOperation::from_effect(&effect)
+                let operation = lash_kernel_value::names::QualifiedOperation::from_effect(&effect)
                     .map_err(|error| {
                         Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), self.span)
                     })?;

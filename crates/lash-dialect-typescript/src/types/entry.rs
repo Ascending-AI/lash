@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_vocabulary::{AnnotationResolutionReason as Reason, RecordType, RecordTypeField, Type};
+use {
+    lash_kernel_value::AnnotationResolutionReason as Reason, lash_kernel_value::RecordType,
+    lash_kernel_value::RecordTypeField, lash_kernel_value::Type,
+};
 
 use crate::SourceSpan;
 use crate::adapter::{Stmt, TypeAnnotation, TypeShape};
@@ -317,7 +320,7 @@ impl Annotations {
                     ("Record", [key, value]) if matches!(child(key, stack, nodes)?, Type::Text) => {
                         Type::Record(RecordType {
                             fields: Vec::new(),
-                            rest: lash_vocabulary::RecordRest::Keep(Box::new(child(
+                            rest: lash_kernel_value::RecordRest::Keep(Box::new(child(
                                 value, stack, nodes,
                             )?)),
                         })
@@ -440,13 +443,13 @@ impl Annotations {
                     .collect::<Result<_, (SourceSpan, Reason)>>()?,
                 rest: match rest.as_deref() {
                     Some(rest) if matches!(rest.shape, TypeShape::Never) => {
-                        lash_vocabulary::RecordRest::Closed
+                        lash_kernel_value::RecordRest::Closed
                     }
                     Some(rest) => {
-                        lash_vocabulary::RecordRest::Keep(Box::new(child(rest, stack, nodes)?))
+                        lash_kernel_value::RecordRest::Keep(Box::new(child(rest, stack, nodes)?))
                     }
-                    None if position == Position::Parameter => lash_vocabulary::RecordRest::Drop,
-                    None => lash_vocabulary::RecordRest::Closed,
+                    None if position == Position::Parameter => lash_kernel_value::RecordRest::Drop,
+                    None => lash_kernel_value::RecordRest::Closed,
                 },
             }),
             TypeShape::Union(members) => {
@@ -485,7 +488,7 @@ impl Annotations {
                     construct: (*construct).into(),
                 });
             }
-            TypeShape::Function(result) => Type::Function(Box::new(lash_vocabulary::Signature {
+            TypeShape::Function(result) => Type::Function(Box::new(lash_kernel_value::Signature {
                 params: Vec::new(),
                 result: self.resolve(
                     result,
@@ -526,8 +529,8 @@ fn boundary(ty: Type, span: SourceSpan) -> Resolution {
             for field in &mut record.fields {
                 field.ty = boundary(std::mem::replace(&mut field.ty, Type::Json), span)?;
             }
-            if let lash_vocabulary::RecordRest::Keep(rest) = record.rest {
-                record.rest = lash_vocabulary::RecordRest::Keep(Box::new(boundary(*rest, span)?));
+            if let lash_kernel_value::RecordRest::Keep(rest) = record.rest {
+                record.rest = lash_kernel_value::RecordRest::Keep(Box::new(boundary(*rest, span)?));
             }
             Type::Record(record)
         }
@@ -557,7 +560,7 @@ fn boundary(ty: Type, span: SourceSpan) -> Resolution {
 
 /// A structural meet keeps every field, combining repeated field contracts.
 fn intersection(left: Type, right: Type, nodes: &mut usize, depth: usize) -> Option<Type> {
-    use lash_vocabulary::RecordRest;
+    use lash_kernel_value::RecordRest;
     if depth == 0 || *nodes == 0 {
         *nodes = 0;
         return None;
@@ -677,7 +680,7 @@ fn copy_type(ty: &Type, nodes: &mut usize, depth: usize) -> Option<Type> {
                 for field in &record.fields {
                     add(&field.ty);
                 }
-                if let lash_vocabulary::RecordRest::Keep(rest) = &record.rest {
+                if let lash_kernel_value::RecordRest::Keep(rest) = &record.rest {
                     add(rest);
                 }
             }

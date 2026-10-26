@@ -161,7 +161,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// pinned to `contract` (D3), judged now.
     fn step_link(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
     ) -> Result<crate::plugin::StepLink, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
         Ok(engine.composition.step_link(&engine.env, effect))
@@ -171,7 +171,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
         &self,
         cx: &crate::ActorContext,
         process: &lash_execution_contracts::process::ProcessRecord,
-        use_: lash_vocabulary::names::OperationUse,
+        use_: lash_kernel_value::names::OperationUse,
     ) -> Result<
         lash_core_execution::runtime::actor::resolutions::CommittedUse,
         lash_core_execution::runtime::actor::resolutions::ResolutionError,
@@ -305,7 +305,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// for `input`, through the deferred provider its grant links (P6).
     async fn resolve_dispatch(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<
         Result<crate::DeferredMatch, lash_core_execution::DispatchRefusal>,
@@ -323,7 +323,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// resolved, as the grant at `effect` names them again for `input`.
     fn dispatch_args(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<

@@ -21,7 +21,7 @@ use crate::runtime::durable::session_close::{
     SessionCloseRequested, request_first_session_close, request_session_close,
 };
 use lash_durable::DurableError;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// What [`delete_session`] did.
 #[derive(Clone, Debug, PartialEq, Eq)]

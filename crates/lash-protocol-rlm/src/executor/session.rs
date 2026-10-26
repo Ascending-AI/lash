@@ -33,12 +33,12 @@ use lash_kernel_doc::NumberPolicy;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
 use lash_kernel_vm::SessionEditor;
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
 
 use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
@@ -547,7 +547,7 @@ impl CodeModeExecutionState {
     fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
         let function = LowerFunction::from_description_with(
             meta,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
             |body| match self
                 .view
                 .functions

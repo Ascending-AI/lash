@@ -1,5 +1,5 @@
 use crate::runtime_error::{RuntimeError, RuntimeErrorCode};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The retired replacement-abort codes are not aliased (clean cutover): a
 /// stored error carrying one decodes as a foreign code, never as the
@@ -635,7 +635,7 @@ mod typed_refusal_causes {
             at: RefusalSite::Creation,
             ..owner_refusal()
         };
-        let session_id = lash_vocabulary::identity::SessionId::from("child");
+        let session_id = lash_kernel_value::identity::SessionId::from("child");
         let error = RuntimeError::session_config_refused(&session_id, refusal.clone());
         assert_eq!(error.code, RuntimeErrorCode::SessionConfigRefused);
         assert!(error.is_terminal() && !error.is_retryable());

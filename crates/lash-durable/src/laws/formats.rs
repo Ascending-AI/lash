@@ -3,7 +3,7 @@
 //! node, and the listings an operator's kernel migration survey reads
 //! (FIG-5787).
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use super::{LawBroken, LawOutcome};

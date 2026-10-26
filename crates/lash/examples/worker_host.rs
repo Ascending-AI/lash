@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     // The parent and workers share the immutable build helper image.
-    let release = lash_vm_releases::helper_release()?;
+    let release = lash_kernel_releases::helper_release()?;
     println!("installs {} build helpers", release.helpers.members().len());
     let entry = WorkerEntry::reexec()?;
     let service = WorkerService::new(WorkerPoolConfig::standard(entry));

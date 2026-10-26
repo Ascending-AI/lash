@@ -12,7 +12,7 @@ use super::*;
 use lash::TurnInput;
 use lash_core::store::StoreTestSupport;
 use lash_facade_tests::history::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::time::Duration;
 
 /// Each measured send decodes at most one body per window read for each

@@ -2,7 +2,7 @@
 use super::{Entry, Executable, Source};
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan::{FormCharge, TemplateMeter};
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 
 #[derive(Default)]
 pub(crate) struct MeteredCharges {

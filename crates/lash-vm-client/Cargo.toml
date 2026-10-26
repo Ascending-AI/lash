@@ -20,7 +20,7 @@ dhat-heap = []
 synthetic-next = [
     "lash-kernel-package/synthetic-next",
     "lash-kernel-migrate/synthetic-next",
-    "lash-vm-releases/synthetic-next",
+    "lash-kernel-releases/synthetic-next",
     "lash-vm-protocol/synthetic-next",
     "lash-vm-broker/synthetic-next",
     "lash-core-execution/synthetic-next",
@@ -35,10 +35,11 @@ workspace = true
 
 [dependencies]
 lash-protocol-types = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-kernel-package = { workspace = true }
 lash-kernel-migrate = { workspace = true, optional = true }
-lash-vm-releases = { workspace = true }
+lash-kernel-releases = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-broker = { workspace = true }
 async-trait = { workspace = true }

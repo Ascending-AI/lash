@@ -6,7 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode};
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use super::machine;
 

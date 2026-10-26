@@ -23,7 +23,7 @@ workspace = true
 
 [dependencies]
 hashlink = { workspace = true }
-lash-vocabulary = { workspace = true }
+lash-kernel-value = { workspace = true }
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 schemars = { workspace = true }

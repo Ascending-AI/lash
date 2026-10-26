@@ -25,10 +25,10 @@ use lash_kernel_check::{
 use lash_kernel_doc::Literal;
 
 use crate::ViewContext;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::{CallableId, LinkId};
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
 
 use crate::Derived;
 

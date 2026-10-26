@@ -4,8 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core::plugin::packages::{
     PackageContribution, PackageProvider, operation_environment_fragment, operation_publication,
 };
-use lash_vocabulary::names::Segment;
-use lash_vocabulary::package::{PackageAdvertisement, PublicationContext};
+use lash_kernel_value::names::Segment;
+use {
+    lash_kernel_value::package::PackageAdvertisement,
+    lash_kernel_value::package::PublicationContext,
+};
 
 /// Providers sharing a root publish together; runner identities stay independent.
 pub(super) fn tool_plugins(
@@ -88,8 +91,8 @@ impl PackageProvider for BuilderPackages {
     fn environment_fragment(
         &self,
         config: &lash_core::OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &lash_core::plugin::ToolProviderHandle,
         tools: Option<&[lash_core::SurfaceEntry]>,
     ) -> std::result::Result<

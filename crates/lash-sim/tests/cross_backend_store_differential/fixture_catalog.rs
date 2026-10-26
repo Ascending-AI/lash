@@ -4,7 +4,7 @@ use lash_core::RuntimeStore;
 use lash_core::SessionStoreCreateRequest;
 use lash_core::StoreError;
 use lash_execution_contracts::deployment::DeploymentStore;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 pub(super) async fn admit_test_session(
     factory: Arc<dyn DeploymentStore>,

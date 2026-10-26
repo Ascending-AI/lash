@@ -20,7 +20,7 @@ pub(crate) fn start(
     source: Box<dyn PageSource>,
     census: Option<Box<dyn AllocationCensus>>,
     layout: Layout,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
     program.validate_links()?;
@@ -196,7 +196,7 @@ pub(crate) fn start(
                 let declared = match target {
                     lash_kernel_doc::FunctionTarget::Local(id) => {
                         machine.program.document.functions.contains_key(id)
-                            || machine.exe.admits_callable(&lash_vocabulary::CallableId {
+                            || machine.exe.admits_callable(&lash_kernel_value::CallableId {
                                 link: function.callable.link,
                                 function: *id,
                             })
@@ -207,7 +207,7 @@ pub(crate) fn start(
                         .imports
                         .get(slot)
                         .is_some_and(|import| {
-                            matches!(import.kind, lash_vocabulary::ImportKind::Code { .. })
+                            matches!(import.kind, lash_kernel_value::ImportKind::Code { .. })
                         }),
                 };
                 if !declared {
@@ -250,7 +250,7 @@ pub(crate) fn start(
             // charge nothing: the cell did not make them.
             for (name, datum) in &start.host {
                 let value = machine
-                    .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
+                    .decode(&exe, datum, &lash_kernel_value::types::Type::Any)
                     .map_err(|error| start_interrupt(name.as_str(), error))?;
                 machine
                     .session_write(&BindingName::new(name.clone()), value, false)
@@ -282,8 +282,8 @@ pub(crate) fn start(
                 .copied()
                 .or_else(|| {
                     exe.code_at(
-                        &lash_vocabulary::sites::Site::new(
-                            lash_vocabulary::sites::Unit::Library(definition.function),
+                        &lash_kernel_value::sites::Site::new(
+                            lash_kernel_value::sites::Unit::Library(definition.function),
                             [],
                         ),
                         &[],
@@ -293,7 +293,7 @@ pub(crate) fn start(
                 return Err(arguments("start function is not loaded".into()));
             }
             let signature = &definition.signature;
-            let callable = lash_vocabulary::CallableId {
+            let callable = lash_kernel_value::CallableId {
                 link: machine.program.link,
                 function: definition.function,
             };
@@ -322,10 +322,12 @@ pub(crate) fn start(
                     .decode(datum, &param.ty)
                     .map_err(|error| match error {
                         lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
-                            StartError::TypeMismatch(Box::new(lash_vocabulary::EntryTypeMismatch {
-                                callable,
-                                mismatch: mismatch.within(param.name.as_str()).within("input"),
-                            }))
+                            StartError::TypeMismatch(Box::new(
+                                lash_kernel_value::EntryTypeMismatch {
+                                    callable,
+                                    mismatch: mismatch.within(param.name.as_str()).within("input"),
+                                },
+                            ))
                         }
                         other => StartError::Decode(other),
                     })?;
@@ -384,7 +386,7 @@ pub(crate) fn start(
                     machine.regs = args.clone().into();
                     args.push(
                         machine
-                            .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
+                            .decode(&exe, datum, &lash_kernel_value::types::Type::Any)
                             .map_err(|error| start_interrupt("extra argument", error))?,
                     );
                 }
@@ -448,7 +450,7 @@ pub(crate) fn start(
                     &exe,
                     &value,
                     &descriptor.signature.result,
-                    lash_vocabulary::CallableId {
+                    lash_kernel_value::CallableId {
                         link: machine.program.link,
                         function: descriptor.function,
                     },
@@ -938,7 +940,7 @@ impl KernelMachine {
             source,
             census,
             layout,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
     }
 
@@ -952,7 +954,7 @@ impl KernelMachine {
         program: Program,
         bounds: Bounds,
         start: CellStart,
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
@@ -991,7 +993,7 @@ impl KernelMachine {
             source,
             Some(census),
             layout,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
     }
 }
@@ -1069,7 +1071,7 @@ fn start_interrupt(what: &str, error: Interrupt) -> StartError {
 
 fn binding_record(
     heap: &mut PagedHeap,
-    declared: &lash_vocabulary::sites::Site,
+    declared: &lash_kernel_value::sites::Site,
     name: &Name,
     value: PageValue,
 ) -> Result<BindingRecord, HeapWriteError> {

@@ -1,7 +1,7 @@
 fn corpus_tool_signatures() -> anyhow::Result<
     std::collections::BTreeMap<
-        lash_vocabulary::names::EffectName,
-        lash_vocabulary::types::Signature,
+        lash_kernel_value::names::EffectName,
+        lash_kernel_value::types::Signature,
     >,
 > {
     Ok(workflow_corpus::tools()?
@@ -9,7 +9,7 @@ fn corpus_tool_signatures() -> anyhow::Result<
         .map(|definition| {
             (
                 definition.operation().effect_name(),
-                lash_vocabulary::json_schema::tool_signature(
+                lash_kernel_value::json_schema::tool_signature(
                     &definition.contract.input_schema.canonical,
                     &definition.contract.output_schema.canonical,
                 ),
@@ -234,7 +234,7 @@ fn module_main_roundtrip(
         }
     };
     assert!(
-        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site }) if site.unit == lash_vocabulary::sites::Unit::Main)
+        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site }) if site.unit == lash_kernel_value::sites::Unit::Main)
     );
     Ok(())
 }
@@ -260,7 +260,10 @@ fn python_module_main_preserves_block_local_functions() -> anyhow::Result<()> {
 fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> anyhow::Result<()> {
     use lash_kernel_dialect::{CellEnvironment, Mode};
     use lash_kernel_doc::SourceLanguage;
-    use lash_vocabulary::{EffectName, Param, Signature, Type};
+    use {
+        lash_kernel_value::EffectName, lash_kernel_value::Param, lash_kernel_value::Signature,
+        lash_kernel_value::Type,
+    };
 
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let mut signatures = corpus_tool_signatures()?;
@@ -611,19 +614,19 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
     let mut effects = corpus_tool_signatures().expect("the shared corpus tool signatures");
     {
         effects.insert(
-            lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
-            lash_vocabulary::types::Signature {
-                params: vec![lash_vocabulary::types::Param {
-                    name: lash_vocabulary::names::Name::new("input"),
-                    ty: lash_vocabulary::types::Type::Any,
+            lash_kernel_value::names::EffectName::new("control.finish").unwrap(),
+            lash_kernel_value::types::Signature {
+                params: vec![lash_kernel_value::types::Param {
+                    name: lash_kernel_value::names::Name::new("input"),
+                    ty: lash_kernel_value::types::Type::Any,
                     optional: true,
                 }],
-                result: lash_vocabulary::types::Type::Any,
+                result: lash_kernel_value::types::Type::Any,
             },
         );
     }
     let controls = std::collections::BTreeMap::from([(
-        lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
+        lash_kernel_value::names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
@@ -682,7 +685,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
             }
         }
         let target =
-            |unit: &lash_vocabulary::sites::Unit, value: &lash_kernel_doc::Expr| match value {
+            |unit: &lash_kernel_value::sites::Unit, value: &lash_kernel_doc::Expr| match value {
                 lash_kernel_doc::Expr::Closure(closure) => Some(closure.function),
                 lash_kernel_doc::Expr::Variable(name) => {
                     bound.get(&(unit.clone(), name.clone())).copied()
@@ -721,7 +724,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         }
         let mut pending = if cell {
             vec![(
-                lash_vocabulary::sites::Unit::Main,
+                lash_kernel_value::sites::Unit::Main,
                 lash_kernel_doc::Node::Block(document.main.as_ref().unwrap()),
             )]
         } else {
@@ -730,7 +733,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                 .values()
                 .filter_map(|export| match export {
                     lash_kernel_doc::Export::Function(function) => Some((
-                        lash_vocabulary::sites::Unit::Library(function.function),
+                        lash_kernel_value::sites::Unit::Library(function.function),
                         lash_kernel_doc::Node::Block(
                             &document.functions[&function.function].body().unwrap().block,
                         ),
@@ -781,7 +784,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                 deferred_calls += 1;
                 pending.extend(call.args.iter().map(|expr| {
                     (
-                        lash_vocabulary::sites::Unit::Library(function),
+                        lash_kernel_value::sites::Unit::Library(function),
                         Node::Expr(expr),
                     )
                 }));
@@ -798,7 +801,7 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                 && !deferred.contains(&closure.function)
             {
                 pending.push((
-                    lash_vocabulary::sites::Unit::Library(closure.function),
+                    lash_kernel_value::sites::Unit::Library(closure.function),
                     Node::Block(&document.functions[&closure.function].body().unwrap().block),
                 ));
             }
@@ -867,21 +870,21 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     .into_iter()
     .map(|name| {
         (
-            lash_vocabulary::names::EffectName::new(name).unwrap(),
-            lash_vocabulary::types::Signature {
-                params: vec![lash_vocabulary::types::Param {
+            lash_kernel_value::names::EffectName::new(name).unwrap(),
+            lash_kernel_value::types::Signature {
+                params: vec![lash_kernel_value::types::Param {
                     name: "input".into(),
-                    ty: lash_vocabulary::types::Type::Any,
+                    ty: lash_kernel_value::types::Type::Any,
                     optional: false,
                 }],
-                result: lash_vocabulary::types::Type::Any,
+                result: lash_kernel_value::types::Type::Any,
             },
         )
     })
     .chain(corpus_tool_signatures().expect("the shared corpus tool signatures"))
     .collect();
     let controls = std::collections::BTreeMap::from([(
-        lash_vocabulary::names::EffectName::new("control.finish").unwrap(),
+        lash_kernel_value::names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let env_namespaces = workflow_corpus::corpus_namespaces(&effects, &controls)

@@ -255,8 +255,8 @@ fn native_identities(
         // K-VAL-001's function-kind witness now carries the defining Link
         // and function identity. Its tag and independently written oracle stay.
         if shard["rule"] == "K-VAL-001" {
-            let callable = lash_vocabulary::names::CallableId {
-                link: lash_vocabulary::package::LinkId::from_bytes([0x11; 32]),
+            let callable = lash_kernel_value::names::CallableId {
+                link: lash_kernel_value::package::LinkId::from_bytes([0x11; 32]),
                 function: registry.named("kind").next().ok_or("missing kind")?,
             };
             updated = updated.replace(

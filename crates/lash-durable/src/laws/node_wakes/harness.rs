@@ -15,8 +15,8 @@ use crate::{
     HeartbeatOutcome, LeaseSettings, MailCommit, MailKind, MailTx, NodeId, NodeLease, NodeSpec,
     NodeWakes, Owner, Reaped, WakeBatch,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The format set every law actor and node uses.
@@ -535,7 +535,7 @@ impl DurableStore for CountingStore {
 impl DurableReads for CountingStore {
     async fn model_call_pins(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<crate::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -543,7 +543,7 @@ impl DurableReads for CountingStore {
 
     async fn model_calls(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -608,7 +608,7 @@ impl DurableReads for CountingStore {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<crate::domain::ExecRootRow>, DurableError> {

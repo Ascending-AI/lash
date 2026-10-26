@@ -6,7 +6,7 @@ use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::TypedBody;
 use lash_durable::DurableReads;
 use lash_durable::domain::{OwnerKey, RunSeq};
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// RUN-READ: the fact walk reads all selected roots and their shared
 /// descendants in one PostgreSQL round trip, for either read shape.

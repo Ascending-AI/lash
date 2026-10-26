@@ -44,7 +44,7 @@ fn core_with(
 }
 
 async fn created(core: &LashCore, id: &'static str) -> lash::DurableSession {
-    core.session(lash_vocabulary::identity::SessionId::from(id))
+    core.session(lash_kernel_value::identity::SessionId::from(id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
@@ -309,7 +309,7 @@ async fn steer(
     run: &lash_vocabulary::identity::TurnId,
     input: lash::TurnInput,
 ) {
-    core.session(lash_vocabulary::identity::SessionId::from(session))
+    core.session(lash_kernel_value::identity::SessionId::from(session))
         .durable()
         .await
         .expect("the session's durable handle")
@@ -345,7 +345,7 @@ async fn queued_checkpoint_input_preserves_images() {
                     SESSION,
                     &run,
                     lash::TurnInput::text("see image").with_attachment(
-                        core.session(lash_vocabulary::identity::SessionId::from(SESSION))
+                        core.session(lash_kernel_value::identity::SessionId::from(SESSION))
                             .open()
                             .await
                             .expect("open")
@@ -382,7 +382,7 @@ async fn queued_checkpoint_input_preserves_images() {
         }
     }
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(SESSION))
+        .session(lash_kernel_value::identity::SessionId::from(SESSION))
         .create(lash::SessionCreation::root(
             mock_session_spec().attachment_acceptance(Arc::new(acceptance)),
         ))
@@ -447,7 +447,7 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
             let (run, steer_run) = (run.clone(), steer_run.clone());
             Box::pin(async move {
                 let core = late.get().expect("the core is built");
-                core.session(lash_vocabulary::identity::SessionId::from(SESSION))
+                core.session(lash_kernel_value::identity::SessionId::from(SESSION))
                     .durable()
                     .await
                     .expect("the session's durable handle")

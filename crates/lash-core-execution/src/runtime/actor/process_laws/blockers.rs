@@ -26,7 +26,7 @@ pub(super) async fn observed(
 }
 
 /// The kind and site of each wait, in the order the record lists them.
-fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_vocabulary::sites::EffectId>)> {
+fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_kernel_value::sites::EffectId>)> {
     waits
         .iter()
         .map(|wait| {
@@ -160,7 +160,7 @@ pub async fn a_process_with_two_parked_calls_lists_both_without_their_keys(
         sites.sort_by_key(|site| site.as_ref().map(|site| site.at.position()));
         ensure!(
             parked.status() == ProcessStatus::Waiting
-                && sites == PARK_TWO.map(|step| Some(lash_vocabulary::sites::EffectLocation::authored(law_site(step)))),
+                && sites == PARK_TWO.map(|step| Some(lash_kernel_value::sites::EffectLocation::authored(law_site(step)))),
             "a process with two parked calls reads {:?} on {:?}",
             parked.status(),
             parked.waits()

@@ -7,8 +7,8 @@ use num_bigint::BigInt;
 use super::{ParseError, ParseErrorReason};
 use crate::number::{Float, Integer};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::parse_hex;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::parse_hex;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Token {

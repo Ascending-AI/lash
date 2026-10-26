@@ -63,9 +63,9 @@ use lash_execution_contracts::process::ProcessStatus;
 use lash_execution_contracts::process::ProcessStatusFilter;
 use lash_execution_contracts::process::ProjectionWatermark;
 use lash_execution_contracts::process::process_child_session_id;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;

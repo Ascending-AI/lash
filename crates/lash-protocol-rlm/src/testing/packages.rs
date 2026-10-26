@@ -1,6 +1,6 @@
 //! The accepted package facts a test's model round records before a cell.
 use lash_core_store::tool_surface::RecordedPackages;
-use lash_vocabulary::{names::*, package::*};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> RecordedPackages {
     let backend = ctx.actor_context().backend();

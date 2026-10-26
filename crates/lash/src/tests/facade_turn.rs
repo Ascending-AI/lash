@@ -69,7 +69,7 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 .expect("core")
             };
             let old = build("three-steps-old");
-            let id = lash_vocabulary::identity::SessionId::try_from("three-steps".to_owned())
+            let id = lash_kernel_value::identity::SessionId::try_from("three-steps".to_owned())
                 .expect("id");
             let session = old
                 .session(id.clone())
@@ -169,7 +169,7 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown() {
     let accounts = AccountCore::new().await;
-    let session_id = lash_vocabulary::identity::SessionId::from("facade-operation-withdraw");
+    let session_id = lash_kernel_value::identity::SessionId::from("facade-operation-withdraw");
     let session = accounts
         .core
         .session(session_id.clone())
@@ -251,7 +251,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
     use lash_core::durable_port::{ActorKey, CommitLabel, NodeId, NodeSpec};
     let backend = sqlite_memory_store_backend().await;
     let core = standard_core_over(backend.clone());
-    let session_id = lash_vocabulary::identity::SessionId::from("facade-operation-settled");
+    let session_id = lash_kernel_value::identity::SessionId::from("facade-operation-settled");
     let session = core
         .session(session_id.clone())
         .create(crate::SessionCreation::root(mock_session_spec()))

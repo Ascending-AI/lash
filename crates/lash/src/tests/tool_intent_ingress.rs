@@ -81,7 +81,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
     )?;
     let ingress_key = ingress
@@ -111,7 +111,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
 
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -342,7 +342,7 @@ impl PayloadRetentionLaw {
             calls,
         } = self;
         let session_id =
-            lash_vocabulary::identity::SessionId::parse(format!("intent-retention-{name}"))
+            lash_kernel_value::identity::SessionId::parse(format!("intent-retention-{name}"))
                 .expect("nonblank host identity");
         let run = |label: &str| {
             lash_vocabulary::identity::TurnId::parse(format!("{name}-{label}"))

@@ -2,7 +2,7 @@
 //! The mutation transaction proves this independently of run/command identity
 //! and head materialization. Own actor writes use their owner fence instead.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use super::{RuntimeCommit, StoreError};

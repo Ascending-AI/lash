@@ -1,7 +1,7 @@
 use crate::session_identity::SessionRelation;
 pub use crate::session_identity::{SessionCreationHead, SessionStoreCreateRequest};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 /// What a host names to pin or to fork from: an accepted input, a turn or a
 /// head revision.

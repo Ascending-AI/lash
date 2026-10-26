@@ -18,11 +18,11 @@ impl PluginFactory for FormatPlugin {
 
     fn migrate_format(
         &self,
-        from: lash_vocabulary::providers::FormatVersion,
+        from: lash_kernel_value::providers::FormatVersion,
         namespace: lash_core::FormatNamespace,
         mut value: serde_json::Value,
     ) -> Result<serde_json::Value, lash_core::FormatRefusal> {
-        if from != lash_vocabulary::providers::FormatVersion::ONE {
+        if from != lash_kernel_value::providers::FormatVersion::ONE {
             return Err(lash_core::FormatRefusal {
                 plugin: self.id.into(),
                 namespace,
@@ -38,12 +38,12 @@ impl PluginFactory for FormatPlugin {
     }
     fn encode_format(
         &self,
-        to: lash_vocabulary::providers::FormatVersion,
+        to: lash_kernel_value::providers::FormatVersion,
         namespace: lash_core::FormatNamespace,
         value: &serde_json::Value,
     ) -> Result<serde_json::Value, lash_core::FormatRefusal> {
         let mut value = value.clone();
-        if to == lash_vocabulary::providers::FormatVersion::ONE {
+        if to == lash_kernel_value::providers::FormatVersion::ONE {
             let map = value.as_object_mut().unwrap();
             let total = map.remove("total").unwrap();
             map.insert("count".into(), total);
@@ -81,9 +81,9 @@ impl PluginFactory for FormatPlugin {
 impl crate::plugin::PluginMetadata for FormatPlugin {
     fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
         let mut declaration = lash_core::plugin::PluginDeclaration::initial(self.id);
-        declaration.format_version = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+        declaration.format_version = lash_kernel_value::providers::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![
-            lash_vocabulary::providers::FormatVersion::ONE,
+            lash_kernel_value::providers::FormatVersion::ONE,
             declaration.format_version,
         ];
         declaration
@@ -175,7 +175,7 @@ pub(super) async fn plugin_format_boundary(
     snapshot.plugins.insert(
         "format-state".into(),
         lash_core::PluginNamespaceState {
-            format_version: lash_vocabulary::providers::FormatVersion::new(version).unwrap(),
+            format_version: lash_kernel_value::providers::FormatVersion::new(version).unwrap(),
             generation: 7,
             publication: Default::default(),
             fork: Default::default(),
@@ -189,7 +189,7 @@ pub(super) async fn plugin_format_boundary(
     state.set_plugin_state(Some(snapshot));
     state.authority.plugin_config.insert_versioned(
         "format-state",
-        lash_vocabulary::providers::FormatVersion::new(version).unwrap(),
+        lash_kernel_value::providers::FormatVersion::new(version).unwrap(),
         serde_json::json!({"count": 17}),
     );
     // The fleet record permits what the plugin's registration provisions
@@ -199,9 +199,9 @@ pub(super) async fn plugin_format_boundary(
     let permitted = store
         .provision_plugin_writers(&[crate::store::plugin_writers::PluginWriterRegistration {
             plugin: "format-state".into(),
-            native: lash_vocabulary::providers::FormatVersion::new(newest).unwrap(),
+            native: lash_kernel_value::providers::FormatVersion::new(newest).unwrap(),
             writable: (1..=newest)
-                .map(|format| lash_vocabulary::providers::FormatVersion::new(format).unwrap())
+                .map(|format| lash_kernel_value::providers::FormatVersion::new(format).unwrap())
                 .collect(),
         }])
         .await

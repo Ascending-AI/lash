@@ -27,7 +27,7 @@ synthetic-next = []
 workspace = true
 
 [dependencies]
-lash-vocabulary = { workspace = true }
+lash-kernel-value = { workspace = true }
 libc = { workspace = true }
 blake3 = { workspace = true }
 num-bigint = { workspace = true }

@@ -98,7 +98,7 @@ pub(crate) struct Diagnostics(Mutex<State>);
 impl Diagnostics {
     pub(crate) fn start(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         input: &lash_vocabulary::identity::InputId,
         future: impl Future<Output = PollMarks> + Send + 'static,
     ) -> Key {

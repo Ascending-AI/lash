@@ -4,8 +4,8 @@ use lash_core::plugin::StaticPluginFactory;
 use std::sync::Arc;
 
 use lash_core::facade_support::ProviderHandle;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

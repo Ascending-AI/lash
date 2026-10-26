@@ -46,11 +46,11 @@ use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
 use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
+use lash_kernel_value::tokens::DecodeDimension;
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::durable::run_records::RunRecordStatements;
 use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
-use lash_vocabulary::tokens::DecodeDimension;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, Retired, SqliteDurableStore, integer};

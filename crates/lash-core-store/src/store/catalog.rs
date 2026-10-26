@@ -12,7 +12,7 @@ use crate::session_store_factory_types::{
     ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
     SessionStoreCreateRequest, Target,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Session admission, lookup, enumeration, forks and deletion.
 ///

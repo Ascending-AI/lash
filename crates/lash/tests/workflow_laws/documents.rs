@@ -338,7 +338,7 @@ async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
         ),
     ];
     // HOST-DOC-LIMIT: a host can narrow token recursion before reading.
-    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 0, 512, 128)
+    let limits = lash_kernel_value::data_limits::KernelDataLimits::new(64, 352, 0, 512, 128)
         .expect("narrow limits");
     assert!(matches!(
         other.decode(limits),

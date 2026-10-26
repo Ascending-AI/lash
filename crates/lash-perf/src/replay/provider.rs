@@ -21,7 +21,7 @@ use lash_core::llm::types::{
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 
 use super::script::{Reply, ScriptedTurn};
 

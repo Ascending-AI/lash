@@ -31,7 +31,7 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
 use lash_execution_contracts::backend::StoreSet;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const MODEL: &str = "core-node-model";
 
@@ -1129,7 +1129,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
 
     async fn inspect_link(
         &self,
-        _link: lash_vocabulary::LinkId,
+        _link: lash_kernel_value::LinkId,
         _selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -1137,7 +1137,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link: _link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: _selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -1153,10 +1153,10 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         lash_execution_contracts::process::linking::EnginePortError,
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
-            link: lash_vocabulary::LinkId::from_bytes([0; 32]),
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            link: lash_kernel_value::LinkId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                lash_vocabulary::StartSelector::Main,
+                lash_kernel_value::StartSelector::Main,
             ),
             operations: Default::default(),
             machine: Default::default(),
@@ -1164,7 +1164,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
             signature: None,
         })
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -1363,7 +1363,7 @@ impl lash::tools::StaticToolExecute for Write {
 /// The component a process names to call the write tool.
 const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "core-node-write",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// The `Once` write tool's definition.
@@ -1382,7 +1382,7 @@ fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     )
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
 }
 
 /// The `Once` host tool that writes to `world`.

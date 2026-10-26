@@ -19,10 +19,10 @@ use crate::checkpoint_graph::NodeKind;
 use crate::checkpoint_graph::NodeSource;
 use crate::checkpoint_graph::closure;
 use crate::store::BlobRef;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// A resident optimization with no value semantics and no serialized state.
 #[derive(Clone, Default)]

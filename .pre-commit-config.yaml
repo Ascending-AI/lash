@@ -55,6 +55,15 @@ repos:
         files: '\.rs$'
         pass_filenames: false
 
+      # A push (including scripts/land) must preserve the standalone kernel.
+      - id: kernel-boundary
+        name: kernel boundary
+        language: system
+        entry: python3 scripts/check-kernel-boundary.py
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+
       # Mirrors CI Lint "Check core/UI boundary".
       - id: core-ui-boundary
         name: core/UI boundary

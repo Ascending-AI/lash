@@ -35,7 +35,7 @@ pub(super) fn is_builtin_prototype_object(expr: &swc::Expr) -> bool {
     let swc::Expr::Ident(owner) = member.obj.as_ref() else {
         return false;
     };
-    if !crate::builtins::is_global(owner.sym.as_ref()) {
+    if !lash_ext_ts_helpers::builtins::is_global(owner.sym.as_ref()) {
         return false;
     }
     match &member.prop {

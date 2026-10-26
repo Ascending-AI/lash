@@ -138,7 +138,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("fig2764-comprehension")
+        lash_kernel_value::identity::SessionId::parse("fig2764-comprehension")
             .expect("nonblank host identity"),
     )
     .await

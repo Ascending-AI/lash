@@ -20,6 +20,7 @@ workspace = true
 ignored = ["bytes"]
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }

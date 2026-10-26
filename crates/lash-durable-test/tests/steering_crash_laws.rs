@@ -60,9 +60,9 @@ use lash_durable_test::{
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
@@ -205,7 +205,7 @@ fn steer_round(
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal, so the first
     // round's body sends the steer whatever was cut.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -245,8 +245,8 @@ fn finish_definition(tool: &str) -> lash_vocabulary::tool_contract::ToolDefiniti
         format!("tools.{tool}"),
         "Finishes the turn with its label; the first round's call sends the steer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
-        lash_vocabulary::tool_declaration::TurnControls::finish(
-            lash_vocabulary::json_schema::JsonSchema::admit(finish_value_schema(tool))
+        lash_kernel_value::tool_declaration::TurnControls::finish(
+            lash_kernel_value::json_schema::JsonSchema::admit(finish_value_schema(tool))
                 .expect("a finish tool's value schema"),
         ),
     )
@@ -254,7 +254,7 @@ fn finish_definition(tool: &str) -> lash_vocabulary::tool_contract::ToolDefiniti
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal, so the first
     // round's body sends the steer whatever was cut.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,

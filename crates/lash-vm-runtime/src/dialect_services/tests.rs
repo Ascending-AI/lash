@@ -60,7 +60,7 @@ async fn ordinary_services_are_code_only_and_use_injected_reads() {
                 .get(&format!("{}.{member}", dialect.package()))
                 .unwrap();
             assert_eq!(
-                lash_vocabulary::JsonSchema::admit(
+                lash_kernel_value::JsonSchema::admit(
                     definition.contract.output_schema.canonical().clone()
                 )
                 .unwrap()

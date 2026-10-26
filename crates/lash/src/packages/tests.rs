@@ -3,7 +3,7 @@
 use super::*;
 use lash_core::{ArtifactReferrer, HostArtifactPin};
 use lash_core_store::artifact_referrer::ResolvedArtifactCleanup;
-use lash_vocabulary::names::*;
+use lash_kernel_value::names::*;
 
 #[tokio::test]
 async fn a_publication_retains_its_link_after_the_installer_ends() {
@@ -21,10 +21,10 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
     };
     let function = lash_kernel_doc::FunctionDefinition {
         kernel: lash_kernel_doc::KERNEL_VERSION,
-        name: lash_vocabulary::names::FunctionName::new("fixture.run").unwrap(),
-        signature: lash_vocabulary::Signature {
+        name: lash_kernel_value::names::FunctionName::new("fixture.run").unwrap(),
+        signature: lash_kernel_value::Signature {
             params: Vec::new(),
-            result: lash_vocabulary::Type::Null,
+            result: lash_kernel_value::Type::Null,
         },
         errors: Default::default(),
         guard: None,
@@ -54,7 +54,7 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
         .into(),
         main: None,
         functions: [(function.identity(), function)].into(),
-        requires: lash_vocabulary::claims::NodeRequirements {
+        requires: lash_kernel_value::claims::NodeRequirements {
             kernels: [lash_kernel_doc::KERNEL_VERSION].into(),
             ..Default::default()
         },
@@ -155,14 +155,14 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
         root: Segment::new("fixture").unwrap(),
     };
     let path = PackagePath::parse("fixture").unwrap();
-    let signature = lash_vocabulary::Signature {
+    let signature = lash_kernel_value::Signature {
         params: Vec::new(),
-        result: lash_vocabulary::Type::Null,
+        result: lash_kernel_value::Type::Null,
     };
     let offer = OperationOffer {
-        requirement: lash_vocabulary::OperationRequirement {
+        requirement: lash_kernel_value::OperationRequirement {
             signature: signature.clone(),
-            contract: lash_vocabulary::ContractId::new("fixture.private"),
+            contract: lash_kernel_value::ContractId::new("fixture.private"),
         },
         intents: Default::default(),
         controls: Default::default(),
@@ -192,7 +192,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
     let slot = ImportSlot(0);
     let function = lash_kernel_doc::FunctionDefinition {
         kernel: lash_kernel_doc::KERNEL_VERSION,
-        name: lash_vocabulary::names::FunctionName::new("fixture.run").unwrap(),
+        name: lash_kernel_value::names::FunctionName::new("fixture.run").unwrap(),
         signature: signature.clone(),
         errors: Default::default(),
         guard: None,
@@ -219,7 +219,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
                     value: Expr::from(Action::Perform {
                         slot,
                         args: Vec::new(),
-                        result: lash_vocabulary::Type::Null,
+                        result: lash_kernel_value::Type::Null,
                         then_yield: false,
                     }),
                 }],
@@ -241,7 +241,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
         .into(),
         functions: [(function.identity(), function)].into(),
         main: None,
-        requires: lash_vocabulary::claims::NodeRequirements {
+        requires: lash_kernel_value::claims::NodeRequirements {
             kernels: [lash_kernel_doc::KERNEL_VERSION].into(),
             ..Default::default()
         },

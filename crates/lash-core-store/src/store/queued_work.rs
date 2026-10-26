@@ -102,7 +102,7 @@ pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize
 /// `nonce` disambiguates batches enqueued within the same millisecond;
 /// backends whose id uniqueness already comes from elsewhere pass `None`.
 pub fn derive_batch_id(
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: Option<u64>,

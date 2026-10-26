@@ -18,8 +18,10 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash-vocabulary.workspace = true
 lash-kernel-state.workspace = true
 lash-kernel-check.workspace = true
 lash-kernel-doc.workspace = true
 lash-kernel-vm.workspace = true
+
+[dependencies.lash-kernel-value]
+workspace = true

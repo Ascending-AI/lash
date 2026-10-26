@@ -12,11 +12,11 @@
 /// `main` outside every loop, in a test fixture.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
-pub fn effect_identity_fixture(label: &str, occurrence: u64) -> lash_vocabulary::sites::EffectId {
-    lash_vocabulary::sites::testkit::effect(
-        lash_vocabulary::sites::testkit::root_task(),
-        lash_vocabulary::sites::Site::new(
-            lash_vocabulary::sites::Unit::Function(lash_vocabulary::names::Name::new(label)),
+pub fn effect_identity_fixture(label: &str, occurrence: u64) -> lash_kernel_value::sites::EffectId {
+    lash_kernel_value::sites::testkit::effect(
+        lash_kernel_value::sites::testkit::root_task(),
+        lash_kernel_value::sites::Site::new(
+            lash_kernel_value::sites::Unit::Function(lash_kernel_value::names::Name::new(label)),
             Vec::new(),
         ),
         occurrence,

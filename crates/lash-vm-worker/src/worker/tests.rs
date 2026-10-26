@@ -33,7 +33,10 @@ fn work_start(
         .expect("helper");
     use lash_kernel_doc::{Expr, Literal, NumberPolicy, Rhs, Stmt};
 
-    use lash_vocabulary::{FunctionName, Name, Signature, Type};
+    use {
+        lash_kernel_value::FunctionName, lash_kernel_value::Name, lash_kernel_value::Signature,
+        lash_kernel_value::Type,
+    };
     let native = embedding
         .registry()
         .unwrap()
@@ -93,7 +96,7 @@ fn work_start(
             rest: false,
         }),
     );
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills: Default::default(),
     };
@@ -105,7 +108,7 @@ fn work_start(
     }];
     let start = Start {
         owner: VmOwner::new("process:law"),
-        dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
+        dialect: lash_kernel_releases::TYPESCRIPT.to_owned(),
         document: lash_vm_protocol::message::StoredDocument::supplied(EncodedPayload(
             document.canonical_bytes(),
         )),
@@ -121,7 +124,7 @@ fn work_start(
             wire::encode(
                 PayloadKind::Start,
                 &StartWire::of(
-                    lash_kernel_vm::Target::Entry(lash_vocabulary::names::Name::new("work")),
+                    lash_kernel_vm::Target::Entry(lash_kernel_value::names::Name::new("work")),
                     Vec::new(),
                     None,
                     &Default::default(),

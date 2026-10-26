@@ -4,7 +4,7 @@ use crate::session_store_factory_types::{
     ForkSessionReceipt, ForkSessionRequest, RetainedRevision, Retention, SessionLookup,
     SessionStoreCreateRequest, Target,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::num::NonZeroU32;
 
 /// Every [`RuntimeStore`] operation, grouped by the segment trait that

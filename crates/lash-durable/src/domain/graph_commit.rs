@@ -22,7 +22,7 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestSummary, StageFault,
 };
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::DomainWrite;
 use super::graph::{
@@ -605,7 +605,7 @@ pub fn check_candidate(
 /// the session's execution root, and it is the candidate's root.
 fn check_session_candidate(
     writes: &[DomainWrite],
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     summary: &ManifestSummary,
 ) -> Result<(), GraphRefusal> {
     let mut owned = writes.iter().filter_map(|write| match write {
@@ -1194,9 +1194,9 @@ fn merge(own: InstallEntry, manifest: InstallEntry) -> Result<InstallEntry, Grap
 
 #[cfg(test)]
 mod tests {
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
+    use lash_kernel_value::tokens::TokenReader;
     use lash_vocabulary::identity::TurnId;
-    use lash_vocabulary::tokens::TokenReader;
 
     use super::*;
     use crate::domain::{

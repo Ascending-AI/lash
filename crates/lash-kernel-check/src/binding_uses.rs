@@ -4,7 +4,7 @@ use crate::{
     Reference, StmtNode,
 };
 use lash_kernel_doc::{ActKind, Action, Atom, Callee, Document, Expr, NodeMut, Place};
-use lash_vocabulary::{Name, sites::Unit};
+use {lash_kernel_value::Name, lash_kernel_value::sites::Unit};
 
 /// Change only reads and writes resolved to `binding` in `graph`.
 /// The document must still have the graph's tree and function identities.

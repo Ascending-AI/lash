@@ -3,7 +3,7 @@ use lash_execution_contracts::process::ProcessRegistry;
 
 use lash_vocabulary::identity::ProcessId;
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 pub const SESSION: &str = "intent-ingress-session";
 pub const SCOPE: &str = "intent-ingress-turn";
@@ -80,7 +80,7 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> std::result::Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -88,7 +88,7 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -109,7 +109,7 @@ impl lash_execution_contracts::process::ProcessEngine for IngressAdmissionEngine
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -393,7 +393,7 @@ pub async fn ingress_engine_core_with(
         .await?;
     let _session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()

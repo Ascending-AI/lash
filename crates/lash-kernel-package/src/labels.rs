@@ -1,7 +1,7 @@
 //! Validate sidecar keys against the exact immutable Package and retained definitions.
 use crate::{LinkedContent, MemberKind, Package, Segment};
-use lash_helper_labels::{LabelError, Labels};
 use lash_kernel_doc::Export;
+use lash_kernel_labels::{LabelError, Labels};
 use std::collections::BTreeSet;
 
 #[cfg(test)]
@@ -17,7 +17,7 @@ pub fn read_labels(
     package: &Package,
     json: &str,
 ) -> Result<Labels, LabelError> {
-    let labels = lash_helper_labels::read_json(json)?;
+    let labels = lash_kernel_labels::read_json(json)?;
     let mut definitions = BTreeSet::new();
     let mut public = BTreeSet::new();
     let mut indexed = BTreeSet::new();

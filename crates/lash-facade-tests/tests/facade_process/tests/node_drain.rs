@@ -193,8 +193,8 @@ fn build_boot(
     .expect("core")
 }
 
-fn session_id(id: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::try_from(id.to_owned()).expect("session id")
+fn session_id(id: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::try_from(id.to_owned()).expect("session id")
 }
 
 async fn answered(core: &LashCore, id: &str, text: &str) -> lash::TurnOutput {

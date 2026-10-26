@@ -7,14 +7,15 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::{Signature, Type};
+use {lash_kernel_value::Signature, lash_kernel_value::Type};
 
 use serde::{Deserialize, Serialize};
 
-use lash_vocabulary::names::Segment;
-use lash_vocabulary::{
-    names::{Convention, PackagePath, QualifiedName},
-    package::{OperationOffer, Visibility},
+use lash_kernel_value::names::Segment;
+use {
+    lash_kernel_value::names::Convention, lash_kernel_value::names::PackagePath,
+    lash_kernel_value::names::QualifiedName, lash_kernel_value::package::OperationOffer,
+    lash_kernel_value::package::Visibility,
 };
 
 /// One export of a package, under one canonical segment.
@@ -37,8 +38,8 @@ pub enum NamespaceKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSignature {
     pub signature: Signature,
-    pub controls: lash_vocabulary::TurnControls,
-    pub mode: lash_vocabulary::OperationMode,
+    pub controls: lash_kernel_value::TurnControls,
+    pub mode: lash_kernel_value::OperationMode,
 }
 impl From<OperationOffer> for OperationSignature {
     fn from(offer: OperationOffer) -> Self {
@@ -112,13 +113,13 @@ pub struct FunctionMember {
 /// The kernel type of a slot holding a value of the package type `ty` of
 /// `package`: a record carrying exactly that brand, any other field open.
 pub fn brand_type(package: &str, ty: &str) -> Type {
-    Type::Record(lash_vocabulary::RecordType {
-        fields: vec![lash_vocabulary::RecordTypeField {
+    Type::Record(lash_kernel_value::RecordType {
+        fields: vec![lash_kernel_value::RecordTypeField {
             name: BRAND_FIELD.to_owned(),
             ty: brand_tuple(package, ty),
             optional: false,
         }],
-        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+        rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
     })
 }
 

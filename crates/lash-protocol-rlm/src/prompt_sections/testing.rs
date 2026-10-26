@@ -105,7 +105,7 @@ pub(crate) fn compose(plugins: &[lash_core::plugin::PluginRecipe], call: Call) -
     let cut = lash_core::testing::prompt::cut_with(
         PromptCutParts {
             call: PromptCall {
-                session_id: lash_vocabulary::identity::SessionId::from("rlm-prompt-laws"),
+                session_id: lash_kernel_value::identity::SessionId::from("rlm-prompt-laws"),
                 frame: None,
                 run: None,
                 turn: None,

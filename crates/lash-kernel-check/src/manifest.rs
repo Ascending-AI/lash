@@ -1,10 +1,13 @@
 //! Selected executable reach. Imports are document-local slots, never operation names.
 use lash_kernel_doc::{Document, FunctionCatalog, Node, StartConvention};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::{ImportSlot, Name, StartSelector};
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::ImportSlot, lash_kernel_value::names::Name,
+    lash_kernel_value::names::StartSelector,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Requirements {

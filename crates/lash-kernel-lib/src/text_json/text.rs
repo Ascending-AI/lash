@@ -4,9 +4,9 @@ use lash_kernel_doc::{
     TextView, Value,
 };
 
-use lash_vocabulary::{Name, Type};
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
+use {lash_kernel_value::Name, lash_kernel_value::Type};
 
 use super::{
     Function, arg, count_arg, definition, int, integer_value, materialized_text, ordering,

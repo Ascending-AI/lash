@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::Type;
+use lash_kernel_value::Type;
 
 use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
@@ -38,7 +38,7 @@ mod plain;
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
 pub(crate) use packages::{Gives, Packages};
-pub(crate) use plain::{PlainRecord, numeric_name};
+pub(crate) use plain::PlainRecord;
 
 /// The array methods whose result is a new kernel list whatever array they
 /// are called on: each returns a list it builds, from `[]` or by

@@ -386,7 +386,7 @@ fn fence_holds(
 }
 
 fn owner_bytes(owner: &RootOwner) -> Vec<u8> {
-    let mut out = lash_vocabulary::tokens::TokenWriter::new();
+    let mut out = lash_kernel_value::tokens::TokenWriter::new();
     encode_owner(&mut out, owner);
     out.into_bytes()
 }

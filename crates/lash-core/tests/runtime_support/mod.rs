@@ -167,7 +167,7 @@ pub(crate) async fn reopened_backend(
 /// the session on.
 pub(crate) fn session_view(
     store: std::sync::Arc<dyn lash_core::RuntimeStore>,
-    session_id: impl Into<lash_vocabulary::identity::SessionId>,
+    session_id: impl Into<lash_kernel_value::identity::SessionId>,
 ) -> lash_core::store::SessionStore {
     lash_core::store::SessionStore::new(store, session_id.into()).expect("a valid session id")
 }
@@ -176,7 +176,7 @@ pub(crate) fn session_view(
 /// reopen adopts it.
 pub(crate) async fn durable_state(
     store: std::sync::Arc<dyn lash_core::RuntimeStore>,
-    session_id: impl Into<lash_vocabulary::identity::SessionId>,
+    session_id: impl Into<lash_kernel_value::identity::SessionId>,
 ) -> lash_core::RuntimeSessionState {
     lash_core::store::load_session_window_state(
         &session_view(store, session_id),

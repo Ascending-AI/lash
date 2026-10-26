@@ -11,7 +11,7 @@ use crate::store::{
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 

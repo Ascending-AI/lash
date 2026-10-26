@@ -5,8 +5,8 @@ use super::*;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 
-fn integer() -> lash_vocabulary::json_schema::JsonSchema {
-    lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+fn integer() -> lash_kernel_value::json_schema::JsonSchema {
+    lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
         .expect("an integer schema is admitted")
 }
 
@@ -26,7 +26,7 @@ fn resolved_finish(
         },
         launch: None,
         declaration,
-        output_schema: lash_vocabulary::json_schema::JsonSchema::any(),
+        output_schema: lash_kernel_value::json_schema::JsonSchema::any(),
     };
     let parked = Material::journal_local(
         MaterialOwner::Run {
@@ -67,7 +67,7 @@ fn resolved_finish(
 #[test]
 fn a_parked_finish_settles_under_the_declaration_its_park_recorded() {
     let declaration = lash_vocabulary::tool_declaration::ToolDeclaration {
-        controls: lash_vocabulary::tool_declaration::TurnControls::finish(integer()),
+        controls: lash_kernel_value::tool_declaration::TurnControls::finish(integer()),
         ..Default::default()
     };
     let refused = resolved_finish(declaration.clone(), serde_json::json!("seven"));

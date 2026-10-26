@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use lash::LashCore;
 use lash::mcp::events::{McpEventClient, McpEventOccurrence, McpEventPoll, McpEventRequest};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension as _, params};
 use serde::{Deserialize, Serialize};

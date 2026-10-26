@@ -42,7 +42,7 @@ async fn registered(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
     lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        lash_vocabulary::sites::EffectLocation::authored(
+        lash_kernel_value::sites::EffectLocation::authored(
             lash_protocol_types::effect_identity_fixture(node, occurrence),
         ),
         "tool:batch_law",

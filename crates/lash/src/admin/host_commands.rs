@@ -1,6 +1,6 @@
 use super::AdminContext;
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[derive(Clone)]
 /// Facade handle for session command administration.

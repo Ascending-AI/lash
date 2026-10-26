@@ -672,7 +672,7 @@ async fn one_refused_command_publishes_none_of_its_batch() {
         .plugins
         .get_mut(LEDGER)
         .unwrap()
-        .format_version = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+        .format_version = lash_kernel_value::providers::FormatVersion::new(2).unwrap();
     let outcome = record(
         &live,
         "incompatible-writer",

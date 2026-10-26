@@ -8,7 +8,7 @@
 use lash_kernel_doc::FUNCTION_VALUE_TAG;
 use lash_kernel_doc::FunctionValue;
 use lash_kernel_doc::FunctionValueLimits;
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 use super::*;
 
@@ -109,7 +109,7 @@ fn crossing_services(dialect: &CellDialect) -> super::super::CellServices {
 /// The function value `json` carries, read as every consumer reads one:
 /// within the standard limits, validated against the build's library.
 fn function_value(json: &serde_json::Value) -> FunctionValue {
-    let functions = lash_vm_releases::helper_release()
+    let functions = lash_kernel_releases::helper_release()
         .map(|release| std::sync::Arc::new(release.functions.clone()))
         .expect("the build's library");
     FunctionValue::from_transport_json(
@@ -588,9 +588,9 @@ async fn captioned_function(dialect: CellDialect, source: &str, send: &str) {
     for args in received {
         let value = function_value(&args["run"]);
         let captions = &value.captions;
-        let encoded = lash_vocabulary::tokens::encode_body(&value);
+        let encoded = lash_kernel_value::tokens::encode_body(&value);
         let decoded: FunctionValue =
-            lash_vocabulary::tokens::decode_body(&encoded).expect("stored function value");
+            lash_kernel_value::tokens::decode_body(&encoded).expect("stored function value");
         assert_eq!(decoded, value, "captions survive the stored token boundary");
         let context = host.context();
         let backend = context.backend();
@@ -607,7 +607,7 @@ async fn captioned_function(dialect: CellDialect, source: &str, send: &str) {
             .unwrap()
             .unwrap();
         let document =
-            lash_vocabulary::tokens::decode_body::<lash_kernel_doc::Document>(&bytes).unwrap();
+            lash_kernel_value::tokens::decode_body::<lash_kernel_doc::Document>(&bytes).unwrap();
         captions.validate(&document).expect("new document sites");
         let titles: Vec<_> = captions
             .entries()

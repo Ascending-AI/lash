@@ -1,7 +1,10 @@
 //! Deterministic operand facts from source traversal, without library resolution.
 use lash_kernel_doc as k;
-use lash_vocabulary::{FunctionId, FunctionName, Name, Type};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name,
+    lash_kernel_value::Type,
+};
 
 /// Only facts needed to distinguish native operator identities.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

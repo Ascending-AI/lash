@@ -1,8 +1,8 @@
 //! Code authoring reads one accepted Package Advertisement projection.
 use crate::process::{KernelDocuments, WorkflowEnvironmentRequest};
 use lash_execution_contracts::process::linking::EnginePortError;
-use lash_vocabulary::package::{Attachment, PublicationContext};
-use lash_vocabulary::{Type, package::NamespaceSnapshot};
+use {lash_kernel_value::Type, lash_vocabulary::package::NamespaceSnapshot};
+use {lash_kernel_value::package::Attachment, lash_kernel_value::package::PublicationContext};
 #[derive(Clone, Debug)]
 pub struct HostBoundary {
     pub snapshot: NamespaceSnapshot,
@@ -24,21 +24,24 @@ impl HostBoundary {
     }
 }
 pub fn effect_controls(
-    controls: &lash_vocabulary::TurnControls,
+    controls: &lash_kernel_value::TurnControls,
 ) -> std::collections::BTreeSet<lash_kernel_dialect::EffectControl> {
     controls
         .iter()
         .map(|kind| match kind {
-            lash_vocabulary::TurnControlKind::Finish => lash_kernel_dialect::EffectControl::Finish,
-            lash_vocabulary::TurnControlKind::SwitchAgentFrame => {
+            lash_kernel_value::TurnControlKind::Finish => {
+                lash_kernel_dialect::EffectControl::Finish
+            }
+            lash_kernel_value::TurnControlKind::SwitchAgentFrame => {
                 lash_kernel_dialect::EffectControl::SwitchAgentFrame
             }
         })
         .collect()
 }
-pub use lash_vocabulary::schema::{
-    MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
-    type_of_schema,
+pub use {
+    lash_kernel_value::schema::MAX_PROJECTED_TYPE_NODES,
+    lash_kernel_value::schema::MAX_RESOLVED_REFERENCES, lash_kernel_value::schema::SchemaConflict,
+    lash_kernel_value::schema::SchemaProjectionRefusal, lash_kernel_value::schema::type_of_schema,
 };
 
 /// A tool call's input as the tool reads it, from the operands the call
@@ -125,12 +128,12 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
                     continue;
                 }
                 match &record.rest {
-                    lash_vocabulary::RecordRest::Keep(rest) => json_serves(rest, value)
+                    lash_kernel_value::RecordRest::Keep(rest) => json_serves(rest, value)
                         .map_err(|message| format!("field `{name}`: {message}"))?,
-                    lash_vocabulary::RecordRest::Closed => {
+                    lash_kernel_value::RecordRest::Closed => {
                         return Err(format!("the record has no field `{name}`"));
                     }
-                    lash_vocabulary::RecordRest::Drop => {}
+                    lash_kernel_value::RecordRest::Drop => {}
                 }
             }
             Ok(())

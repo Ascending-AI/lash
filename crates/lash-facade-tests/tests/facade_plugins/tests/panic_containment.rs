@@ -11,8 +11,10 @@ use lash_core::llm::types::LlmOutputPart;
 use std::collections::VecDeque;
 
 /// The component that serves the panicking tool to a process body.
-const PANIC_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("panic-tool", lash_vocabulary::providers::FormatVersion::ONE);
+const PANIC_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "panic-tool",
+    lash_kernel_value::providers::FormatVersion::ONE,
+);
 
 /// The fixture echo tool panics during future construction or polling.
 #[derive(Default)]
@@ -103,7 +105,7 @@ async fn session(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -263,7 +265,7 @@ await control.finish("must not finish");"#
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(if process {
+        lash_kernel_value::identity::SessionId::parse(if process {
             "process-panic"
         } else {
             "cell-panic"

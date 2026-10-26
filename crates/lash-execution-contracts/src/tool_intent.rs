@@ -313,7 +313,7 @@ pub struct ToolIntentLedgerColumns {
     pub settlement_json: Option<String>,
     /// The session and logical run that own the payload, both or neither.
     pub owning_run: Option<(
-        lash_vocabulary::identity::SessionId,
+        lash_kernel_value::identity::SessionId,
         lash_vocabulary::identity::TurnId,
     )>,
 }
@@ -810,7 +810,7 @@ impl lash_core_store::store::DurableRecord for ToolIntentSubmissionRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     fn sample_intent(kind: ToolIntentKind) -> ToolIntent {
         let session_id = SessionId::from("session");

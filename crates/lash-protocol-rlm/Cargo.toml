@@ -30,7 +30,8 @@ synthetic-next = ["lash-kernel-package/synthetic-next", "lash-core/synthetic-nex
 workspace = true
 
 [dependencies]
-lash-vm-releases = { workspace = true }
+lash-kernel-releases = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-execution-contracts = { workspace = true }

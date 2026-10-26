@@ -28,7 +28,7 @@ use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
     node_range,
 };
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{EffectAdmissionWrite, EffectKey, ExecRootWrite, RootOwner};
@@ -315,7 +315,7 @@ pub struct Owned {
 impl Owned {
     fn exec(&self, cell: &str) -> ExecKey {
         ExecKey::Cell(
-            lash_vocabulary::identity::SessionId::try_from(self.session.clone())
+            lash_kernel_value::identity::SessionId::try_from(self.session.clone())
                 .unwrap_or_else(|_| panic!("a constant session id")),
             lash_vocabulary::identity::TurnId::try_from("pages-turn".to_owned())
                 .unwrap_or_else(|_| panic!("a constant turn id")),

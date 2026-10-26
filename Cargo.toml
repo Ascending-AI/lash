@@ -3,6 +3,7 @@
 exclude = ["fuzz", ".kiln"]
 members = [
     "crates/lash-vocabulary",
+    "crates/lash-kernel-value",
     "crates/lash-render",
     "crates/lash-protocol-types",
     "crates/lash-sansio",
@@ -55,19 +56,21 @@ members = [
     "crates/lash-vm-protocol",
     "crates/lash-vm-broker",
     "crates/lash-vm-worker",
-    "crates/lash-vm-releases",
+    "crates/lash-kernel-releases",
+    "crates/lash-ext-ts-helpers",
+    "crates/lash-ext-py-helpers",
     "crates/lash-vm-client",
     "crates/lash-dialect-python",
     "crates/lash-dialect-typescript",
     "crates/lash-kernel-check",
     "crates/lash-kernel-dialect",
-    "crates/lash-dialect-services",
+    "crates/lash-kernel-services",
     "crates/lash-kernel-doc",
     "crates/lash-kernel-edit",
     "crates/lash-kernel-view",
     "crates/lash-kernel-exec",
     "crates/lash-kernel-lib",
-    "crates/lash-helper-labels",
+    "crates/lash-kernel-labels",
     "crates/lash-kernel-migrate",
     "crates/lash-kernel-package",
     "crates/lash-kernel-state",
@@ -257,12 +260,13 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
+lash-kernel-value = { path = "crates/lash-kernel-value", version = "=0.0.0-dev" }
 lash-vocabulary = { package = "lash-internal-vocabulary", path = "crates/lash-vocabulary", version = "=0.0.0-dev" }
 foldhash = "0.2.0"
 hashlink = "0.10.0"
 lash-vm-client = { package = "lash-internal-vm-client", path = "crates/lash-vm-client", version = "=0.0.0-dev" }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = "crates/lash-vm-worker", version = "=0.0.0-dev" }
-lash-vm-releases = { package = "lash-internal-vm-releases", path = "crates/lash-vm-releases", version = "=0.0.0-dev" }
+lash-kernel-releases = { package = "lash-kernel-releases", path = "crates/lash-kernel-releases", version = "=0.0.0-dev" }
 lash-vm-protocol = { package = "lash-internal-vm-protocol", path = "crates/lash-vm-protocol", version = "=0.0.0-dev" }
 lash-vm-broker = { package = "lash-internal-vm-broker", path = "crates/lash-vm-broker", version = "=0.0.0-dev" }
 lash-render = { package = "lash-internal-render", path = "crates/lash-render", version = "=0.0.0-dev" }
@@ -374,13 +378,13 @@ lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/las
 lash-dialect-python = { path = "crates/lash-dialect-python", version = "=0.0.0-dev" }
 lash-dialect-typescript = { path = "crates/lash-dialect-typescript", version = "=0.0.0-dev" }
 lash-kernel-check = { path = "crates/lash-kernel-check", version = "=0.0.0-dev" }
-lash-dialect-services = { path = "crates/lash-dialect-services", version = "=0.0.0-dev", package = "lash-internal-dialect-services" }
+lash-kernel-services = { path = "crates/lash-kernel-services", version = "=0.0.0-dev", package = "lash-kernel-services" }
 lash-kernel-dialect = { path = "crates/lash-kernel-dialect", version = "=0.0.0-dev" }
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }
 lash-kernel-view = { path = "crates/lash-kernel-view", version = "=0.0.0-dev" }
 lash-kernel-exec = { path = "crates/lash-kernel-exec", version = "=0.0.0-dev" }
-lash-helper-labels = { path = "crates/lash-helper-labels", version = "=0.0.0-dev" }
+lash-kernel-labels = { path = "crates/lash-kernel-labels", version = "=0.0.0-dev" }
 lash-kernel-lib = { path = "crates/lash-kernel-lib", version = "=0.0.0-dev" }
 lash-kernel-migrate = { path = "crates/lash-kernel-migrate", version = "=0.0.0-dev" }
 lash-kernel-package = { path = "crates/lash-kernel-package", version = "=0.0.0-dev" }
@@ -399,6 +403,8 @@ ruff_text_size = "=0.0.11"
 swc_common = "=25.0.0"
 swc_ecma_ast = "=28.0.0"
 swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["typescript"] }
+lash-ext-ts-helpers = { path = "crates/lash-ext-ts-helpers", version = "=0.0.0-dev" }
+lash-ext-py-helpers = { path = "crates/lash-ext-py-helpers", version = "=0.0.0-dev" }
 
 [profile.release]
 lto = "thin"

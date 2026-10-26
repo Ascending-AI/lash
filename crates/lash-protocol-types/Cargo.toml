@@ -31,6 +31,7 @@ schema-validation = ["lash-vocabulary/schema-validation"]
 synthetic-next = []
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
 jsonschema = { workspace = true, default-features = false }

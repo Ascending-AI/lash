@@ -21,7 +21,7 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     // empty page retains the caller's cursor instead of restarting the feed.
     for label in ["fault-a", "fault-b"] {
         core.session(
-            lash_vocabulary::identity::SessionId::parse(label).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(label).expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(super::mock_session_spec()))
         .await?;
@@ -34,7 +34,7 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
         );
         core.store_factory
             .record_session_fault(
-                &lash_vocabulary::identity::SessionId::parse(label).unwrap(),
+                &lash_kernel_value::identity::SessionId::parse(label).unwrap(),
                 &record,
                 1,
             )
@@ -46,10 +46,10 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     let second = core.session_faults(first.next.as_ref(), limit).await?;
     assert_eq!(second.changes.len(), 1);
     assert_eq!(second.next.as_ref().unwrap().as_str(), "fault-b");
-    let after = lash_vocabulary::identity::SessionId::parse("last-fault").unwrap();
+    let after = lash_kernel_value::identity::SessionId::parse("last-fault").unwrap();
     let faults: crate::ChangePage<
         crate::SessionFault,
-        Option<lash_vocabulary::identity::SessionId>,
+        Option<lash_kernel_value::identity::SessionId>,
     > = core.session_faults(Some(&after), limit).await?;
     assert!(faults.changes.is_empty());
     assert_eq!(faults.next, Some(after));
@@ -160,7 +160,7 @@ mod builder_packages {
             .filter(|package| package.publication.path.to_string() == "tools")
             .collect();
         assert_eq!(packages.len(), 1);
-        let lash_vocabulary::package::PackageAdvertisement::Enumerated(package) =
+        let lash_kernel_value::package::PackageAdvertisement::Enumerated(package) =
             &packages[0].advertisement
         else {
             panic!("builder operations are enumerated")

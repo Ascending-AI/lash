@@ -7,11 +7,14 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
 use lash_kernel_state::paged::*;
 use lash_kernel_vm::SessionEditor;
-use lash_vocabulary::{ImportKind, Name, OperationMode, OperationUse};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
+};
+use {
+    lash_kernel_value::ImportKind, lash_kernel_value::Name, lash_kernel_value::OperationMode,
+    lash_kernel_value::OperationUse,
 };
 #[derive(Clone, Default)]
 pub(crate) struct Source {

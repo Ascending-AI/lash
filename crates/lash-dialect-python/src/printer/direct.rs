@@ -1,6 +1,6 @@
 //! Recover the one authored body shared by an exact call and its packed adapter.
 use super::{Renderer, k};
-use lash_vocabulary::{FunctionId, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 fn binding(statement: &k::Stmt) -> Option<&Name> {
     match statement {

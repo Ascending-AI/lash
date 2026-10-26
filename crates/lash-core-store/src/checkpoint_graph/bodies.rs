@@ -6,10 +6,10 @@
 //! a child of a stated kind, checked by [`ExecRoot::check_children`] and
 //! [`ProcessState::check_children`].
 
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::decode::GraphDecoder;
 use super::node::NodeId;

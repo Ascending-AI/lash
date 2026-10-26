@@ -25,14 +25,14 @@ use lash_kernel_doc::print_definition;
 use lash_kernel_doc::print_document;
 use lash_kernel_doc::validate_definition;
 use lash_kernel_doc::validate_document;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
     CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
     Program, Request, Step,
 };
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
 
@@ -249,7 +249,7 @@ fn body_rules() {
             assert!(matches!(
                 *invalid.reason,
                 InvalidReason::Import {
-                    slot: lash_vocabulary::ImportSlot(0)
+                    slot: lash_kernel_value::ImportSlot(0)
                 }
             ));
         }
@@ -571,7 +571,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         panic!("effect parks")
     };
     let Request::Effect(request) = &park.requests[0];
-    let before = lash_vocabulary::tokens::encode_body(
+    let before = lash_kernel_value::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -586,7 +586,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::UnknownWait { .. })
     ));
     assert_eq!(
-        lash_vocabulary::tokens::encode_body(
+        lash_kernel_value::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -604,7 +604,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
             .unwrap(),
         Delivered::Accepted
     );
-    let accepted = lash_vocabulary::tokens::encode_body(
+    let accepted = lash_kernel_value::tokens::encode_body(
         &machine
             .seal(crate::pages::BUDGET)
             .unwrap()
@@ -619,7 +619,7 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         Err(DeliverError::AlreadyDelivered { .. })
     ));
     assert_eq!(
-        lash_vocabulary::tokens::encode_body(
+        lash_kernel_value::tokens::encode_body(
             &machine
                 .seal(crate::pages::BUDGET)
                 .unwrap()
@@ -656,12 +656,12 @@ fn identity_document(shard: &Shard) {
     // which decodes back to it, and the identity is that body's digest.
     let bytes = document.canonical_bytes();
     assert_eq!(
-        lash_vocabulary::tokens::decode_body::<Document>(&bytes).unwrap(),
+        lash_kernel_value::tokens::decode_body::<Document>(&bytes).unwrap(),
         document
     );
     assert_eq!(
         document.identity().as_bytes(),
-        &lash_vocabulary::tokens::logical_digest(&bytes)
+        &lash_kernel_value::tokens::logical_digest(&bytes)
     );
     if shard.rule == "K-ID-001" {
         // Two sources mapped onto one document share its identity.

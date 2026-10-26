@@ -17,7 +17,7 @@ use lash_core_store::store::StoreError;
 use lash_core_store::store::WriterPin;
 use lash_execution_contracts::process::ProcessRegistrar as _;
 use lash_execution_contracts::process::ProcessRetention as _;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use super::WriterFence;
 use crate::PostgresStorage;

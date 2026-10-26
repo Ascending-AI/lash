@@ -12,7 +12,7 @@ use lash_core::plugin::packages::{
 use lash_core_store::packages::{LinkRecord, PackageRecord};
 use lash_execution_contracts::process::ProcessDocumentProvider;
 use lash_execution_contracts::process::linking::{AdmissionRefusal, ContentRef, EnginePortError};
-use lash_vocabulary::package::*;
+use {lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 /// A publisher bound by the host to its owned roots and immutable accepted
 /// namespace. Guest input cannot choose a publication domain or publisher.

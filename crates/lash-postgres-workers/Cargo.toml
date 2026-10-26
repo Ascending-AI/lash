@@ -23,6 +23,7 @@ test = false
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }

@@ -5,11 +5,11 @@
 //! name: a wrong release digest is not repaired by finding a release of the
 //! same name, and a missing node is never accepted as a dangling reference.
 
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::tokens::CanonicalFault;
+use lash_kernel_value::tokens::DecodeDimension;
+use lash_kernel_value::tokens::TokenError;
 use lash_protocol_types::ToolCallId;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::tokens::CanonicalFault;
-use lash_vocabulary::tokens::DecodeDimension;
-use lash_vocabulary::tokens::TokenError;
 
 pub use lash_protocol_types::engine_fault::KernelRestoreRefusal;
 
@@ -176,7 +176,7 @@ pub struct GraphReadPolicy {
     engine_bytes: u64,
     execution_bytes: u64,
     depth: u64,
-    kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
+    kernel_data: lash_kernel_value::data_limits::KernelDataLimits,
 }
 impl GraphReadPolicy {
     /// Existing read presets: 4 GiB owners, 16 GiB engine and execution state,
@@ -187,7 +187,7 @@ impl GraphReadPolicy {
             engine_bytes: 1 << 34,
             execution_bytes: 1 << 34,
             depth: 64,
-            kernel_data: lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            kernel_data: lash_kernel_value::data_limits::KernelDataLimits::standard(),
         }
     }
     pub fn new(
@@ -195,7 +195,7 @@ impl GraphReadPolicy {
         engine_bytes: u64,
         execution_bytes: u64,
         depth: u64,
-        kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
+        kernel_data: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Option<Self> {
         (depth <= 64).then_some(Self {
             owner_bytes,
@@ -235,7 +235,7 @@ struct GraphReadPolicyWire {
     execution_bytes: u64,
     #[schemars(range(max = 64))]
     depth: u64,
-    kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
+    kernel_data: lash_kernel_value::data_limits::KernelDataLimits,
 }
 impl TryFrom<GraphReadPolicyWire> for GraphReadPolicy {
     type Error = &'static str;

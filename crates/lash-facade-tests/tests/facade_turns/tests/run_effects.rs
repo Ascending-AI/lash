@@ -102,7 +102,7 @@ async fn admitted_plugin_abort_commits_and_settles_input() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("admitted-plugin-abort")
+        lash_kernel_value::identity::SessionId::parse("admitted-plugin-abort")
             .expect("nonblank host identity"),
     )
     .await
@@ -210,7 +210,7 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("attachment-owner")
+        lash_kernel_value::identity::SessionId::parse("attachment-owner")
             .expect("nonblank host identity"),
     )
     .await
@@ -231,7 +231,7 @@ async fn stream_turn_tool_put_is_bound_to_the_turn_id() -> Result<()> {
         .expect("read the attachment's referrers");
     assert!(
         referrers.contains(&lash_core::ArtifactReferrer::Session(
-            lash_vocabulary::identity::SessionId::from("attachment-owner")
+            lash_kernel_value::identity::SessionId::from("attachment-owner")
         )),
         "the commit acquired the session's edge: {referrers:?}"
     );

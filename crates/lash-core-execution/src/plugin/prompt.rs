@@ -374,7 +374,7 @@ impl CommittedPluginNamespace {
 /// attempt of the same call and never composes again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptCall {
-    pub session_id: lash_vocabulary::identity::SessionId,
+    pub session_id: lash_kernel_value::identity::SessionId,
     pub frame: Option<lash_core_store::session_identity::FrameNodeId>,
     pub run: Option<lash_vocabulary::identity::RunId>,
     pub turn: Option<lash_vocabulary::identity::TurnId>,

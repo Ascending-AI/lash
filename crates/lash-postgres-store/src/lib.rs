@@ -42,7 +42,7 @@
 /// The dependency version used by this backend's public signatures.
 pub use sqlx;
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 #[path = "postgres/keys.rs"]
 mod keys;
 mod namespace;

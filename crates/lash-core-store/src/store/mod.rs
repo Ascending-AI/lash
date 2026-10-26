@@ -1,7 +1,7 @@
 //! The runtime's settled-session persistence contract and shared store types.
 
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 pub mod artifact_cleanup;
 pub mod attachment_referrers;

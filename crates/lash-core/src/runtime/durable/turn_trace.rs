@@ -21,7 +21,7 @@ use crate::TurnFinish;
 use crate::TurnStop;
 use crate::store::{RunCommittedOutcome, RunTerminalCause};
 use crate::trace::TraceRuntime;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// Own the terminal's emission sequence before any write or callback.

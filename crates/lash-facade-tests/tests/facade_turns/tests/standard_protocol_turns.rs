@@ -66,7 +66,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "whitespace-response-session",
         ))
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -209,7 +209,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "malformed-args-session",
         ))
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -461,7 +461,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         "discovery-refusal-all"
     };
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(session_id))
+        .session(lash_kernel_value::identity::SessionId::from(session_id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -673,7 +673,7 @@ async fn persisted_provider_parts(
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(session_id))
+        .session(lash_kernel_value::identity::SessionId::from(session_id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
@@ -787,7 +787,7 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "terminal-required-standard",
         ))
         .create(lash::SessionCreation::root(

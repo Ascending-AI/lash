@@ -35,16 +35,16 @@ pub use formats::{
 pub use host::{EffectReads, ParentHost};
 /// Why a kernel migration does not carry a document or a parked run.
 pub use lash_kernel_migrate::{AdoptionRefusal, DocumentRefusal, ParkedRefusal, Rewritten};
-pub use lash_vm_broker::kernel::loader::LoadRefusal;
 /// lash's own packages, registered once in a process: what a kernel
 /// document is linked, admitted and migrated against when the host
 /// installs no package of its own. The parent decodes them from the
 /// build's images, so it links no dialect (FIG-5812, FIG-6917).
-pub use lash_vm_releases::LibraryError;
+pub use lash_kernel_releases::LibraryError;
 /// The names of the dialects lash ships: what a session or process records
 /// at creation, and what a host passes where it names its dialect
 /// (FIG-5990).
-pub use lash_vm_releases::{PYTHON as PYTHON_DIALECT, TYPESCRIPT as TYPESCRIPT_DIALECT};
+pub use lash_kernel_releases::{PYTHON as PYTHON_DIALECT, TYPESCRIPT as TYPESCRIPT_DIALECT};
+pub use lash_vm_broker::kernel::loader::LoadRefusal;
 
 /// The machine a worker hosts, as the broker drives it, and the run's
 /// wire-level host.

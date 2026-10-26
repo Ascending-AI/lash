@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use super::observation::{
     LiveReplayEventDraft, LiveReplayStore, SessionObservationEventPayload, SessionQueueEventKind,

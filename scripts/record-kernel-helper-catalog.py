@@ -3,7 +3,7 @@
 
 Builds the same catalog the release build generates, then copies it for review.
 The helper classification recorder is:
-kiln run //crates/lash-vm-releases:record-helper-data__bin -- record_helper_classes
+kiln run //crates/lash-kernel-releases:record-helper-data__bin -- record_helper_classes
 """
 
 import argparse
@@ -24,7 +24,7 @@ def main():
                         default=ROOT / ".kiln/helper-catalog/build-report.json")
     report = parser.parse_args().build_report.resolve()
     report.parent.mkdir(parents=True, exist_ok=True)
-    label = "//crates/lash-vm-releases:build_script"
+    label = "//crates/lash-kernel-releases:build_script"
     subprocess.run(
         ["kiln", "build", f"{label}[out_dir]", "--materializations", "final",
          "--build-report", str(report)],

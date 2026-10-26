@@ -9,7 +9,10 @@ pub mod environment {
         AssemblyRefusal, EnvironmentChange, EnvironmentFragment, InputFrontier, SourceDescriptor,
         SourceId, SourceMode, SourceRevision, SourceSnapshot,
     };
-    pub use lash_vocabulary::{claims::*, names::*, package::*};
+    pub use {
+        lash_kernel_value::claims::*, lash_kernel_value::names::*, lash_kernel_value::package::*,
+        lash_vocabulary::claims::*, lash_vocabulary::package::*,
+    };
 }
 
 /// Host-only live and retained plugin evidence.

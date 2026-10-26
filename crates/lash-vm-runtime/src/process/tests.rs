@@ -6,11 +6,11 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use lash_vm_client::wire::OutcomeWire;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
@@ -47,10 +47,10 @@ fn sealed() -> ParkedPage {
 /// none. A state whose bytes name another page than the root holds is
 /// refused.
 /// The admission of a `perform` of `fetch` at `identity`.
-fn operation_use() -> lash_vocabulary::OperationUse {
-    lash_vocabulary::OperationUse {
-        link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-        slot: lash_vocabulary::ImportSlot(0),
+fn operation_use() -> lash_kernel_value::OperationUse {
+    lash_kernel_value::OperationUse {
+        link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+        slot: lash_kernel_value::ImportSlot(0),
     }
 }
 fn admitted(identity: EffectId) -> Admission {
@@ -63,7 +63,7 @@ fn admitted(identity: EffectId) -> Admission {
     })
 }
 
-fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_vocabulary::sites::WaitId>) -> SettledOutput {
+fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_kernel_value::sites::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             state: sealed(),
@@ -82,14 +82,14 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_vocabulary::sites::WaitId>) -
 /// The effect a fan-out element performs: the one site, run by the task
 /// the `element`-th execution of the spawn started.
 fn element(element: u64) -> EffectId {
-    lash_vocabulary::sites::testkit::effect(
-        lash_vocabulary::sites::testkit::spawned_task(
-            lash_vocabulary::sites::testkit::root_task(),
+    lash_kernel_value::sites::testkit::effect(
+        lash_kernel_value::sites::testkit::spawned_task(
+            lash_kernel_value::sites::testkit::root_task(),
             Site::new(Unit::Main, vec![0]),
             element,
         ),
         Site::new(
-            Unit::Function(lash_vocabulary::names::Name::new("worker")),
+            Unit::Function(lash_kernel_value::names::Name::new("worker")),
             vec![0],
         ),
         0,
@@ -100,7 +100,7 @@ fn element(element: u64) -> EffectId {
 fn effect(wait: u64, identity: EffectId) -> Issued {
     Issued::Effect {
         origin: identity.position().site().clone(),
-        wait: lash_vocabulary::sites::testkit::wait_id(wait),
+        wait: lash_kernel_value::sites::testkit::wait_id(wait),
         admission: admitted(identity),
         use_: operation_use(),
         input: serde_json::json!({ "wait": wait }),
@@ -260,7 +260,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     assert!(effects.is_empty());
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_vocabulary::sites::testkit::wait_id(11)]
+        vec![lash_kernel_value::sites::testkit::wait_id(11)]
     );
     assert!(input.parked.is_some());
     let held = |input: &KernelRunInput| {
@@ -286,7 +286,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     let (run2, input, _) = run_of(&action);
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_vocabulary::sites::testkit::wait_id(10)]
+        vec![lash_kernel_value::sites::testkit::wait_id(10)]
     );
     assert_eq!(
         held(&input),
@@ -351,7 +351,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             join_members: 16,
         },
     )
-    .observing(lash_vocabulary::observation::RunObservation::Counts);
+    .observing(lash_kernel_value::observation::RunObservation::Counts);
     let engine = recorded.clone().into_engine_settings();
     assert_eq!(
         KernelRecordedSettings::from_engine_settings(&engine).unwrap(),
@@ -417,7 +417,7 @@ fn withdrawn_operation_waits_drop_late_outcomes() {
     let (state, action) = settle(
         state,
         &run,
-        parked(vec![], vec![lash_vocabulary::sites::testkit::wait_id(1)]),
+        parked(vec![], vec![lash_kernel_value::sites::testkit::wait_id(1)]),
     );
     assert!(matches!(action, EngineAction::Idle));
     assert_eq!(state.pages, Some(sealed().root));
@@ -430,6 +430,6 @@ fn withdrawn_operation_waits_drop_late_outcomes() {
     assert_eq!(input.deliver.len(), 1);
     assert_eq!(
         input.deliver[0].wait,
-        lash_vocabulary::sites::testkit::wait_id(3)
+        lash_kernel_value::sites::testkit::wait_id(3)
     );
 }

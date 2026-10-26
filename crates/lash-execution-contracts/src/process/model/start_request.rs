@@ -8,7 +8,7 @@ use super::ProcessInput;
 use super::ProcessProvenance;
 use super::ProcessStartRegistration;
 use super::ProcessStartTarget;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A start request as a leaf tool attempt declares it: everything a process
 /// start needs except its key.

@@ -118,7 +118,7 @@ fn millis(duration: Duration) -> u64 {
 #[serde(deny_unknown_fields)]
 pub struct WorkerTuning {
     pub diagnostic_bytes: lash_protocol_types::engine_fault::DetailLimit,
-    pub kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
+    pub kernel_data: lash_kernel_value::data_limits::KernelDataLimits,
     /// Parent reads while idle or awaiting a host projection. This is not compute spend.
     pub parent_wait: Duration,
     pub inbound_buffer_bytes: std::num::NonZeroUsize,
@@ -172,7 +172,7 @@ impl WorkerTuning {
     pub const fn standard() -> Self {
         Self {
             diagnostic_bytes: lash_protocol_types::engine_fault::DetailLimit::standard(),
-            kernel_data: lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            kernel_data: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             parent_wait: Duration::from_secs(86_400),
             inbound_buffer_bytes: std::num::NonZeroUsize::MIN.saturating_add(16 * 1024 - 1),
             typescript_source_bytes: 64 * 1024,
@@ -361,7 +361,7 @@ impl PoolConfig {
     /// The shipped packages do not assemble: a defect of the build.
     pub fn worker_library(
         &self,
-    ) -> Result<std::sync::Arc<crate::packages::WorkerLibrary>, lash_vm_releases::LibraryError>
+    ) -> Result<std::sync::Arc<crate::packages::WorkerLibrary>, lash_kernel_releases::LibraryError>
     {
         match &self.library {
             Some(library) => Ok(library.clone()),

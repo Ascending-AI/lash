@@ -56,7 +56,7 @@ impl RuntimeError {
     /// cause typed.
     #[must_use]
     pub fn session_config_refused(
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
         refusal: ConfigRefusal,
     ) -> Self {
         Self::new(

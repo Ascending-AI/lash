@@ -161,9 +161,12 @@ fn check_data(datum: &Datum, depth: usize) -> Result<(), FunctionValueRefusal> {
 mod tests {
     use super::*;
     use crate::{Captions, Document, FunctionRegistry, FunctionValueLimits, NumberPolicy};
-    use lash_vocabulary::data_limits::KernelDataLimits;
-    use lash_vocabulary::{CallableId, Signature, Type, names::Name};
+    use lash_kernel_value::data_limits::KernelDataLimits;
     use std::collections::BTreeMap;
+    use {
+        lash_kernel_value::CallableId, lash_kernel_value::Signature, lash_kernel_value::Type,
+        lash_kernel_value::names::Name,
+    };
 
     fn function() -> FunctionValue {
         FunctionValue {
@@ -172,7 +175,7 @@ mod tests {
             implicit_text_conversions: Vec::new(),
             callable: CallableId {
                 link: "11".repeat(32).parse().unwrap(),
-                function: lash_vocabulary::FunctionId::parse(&"22".repeat(32)).unwrap(),
+                function: lash_kernel_value::FunctionId::parse(&"22".repeat(32)).unwrap(),
             },
             captures: BTreeMap::new(),
             signature: Signature {

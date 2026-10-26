@@ -7,7 +7,7 @@
 
 use lash_kernel_doc::{Correspondence, Survivor};
 
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::names::DocumentId;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,8 +16,8 @@ use lash_kernel_doc::{
     Action, Atom, Block, Document, Expr, Member, Node, NodeMut, Place, Rhs, Stmt,
 };
 
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use crate::edit::{Edit, Position};
 use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};
@@ -457,7 +457,8 @@ impl Working {
 
     pub(super) fn reidentify(
         &mut self,
-    ) -> Result<BTreeMap<lash_vocabulary::FunctionId, lash_vocabulary::FunctionId>, String> {
+    ) -> Result<BTreeMap<lash_kernel_value::FunctionId, lash_kernel_value::FunctionId>, String>
+    {
         let reidentified = self.document.reidentify_functions()?;
         self.shadows = std::mem::take(&mut self.shadows)
             .into_iter()

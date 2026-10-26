@@ -256,7 +256,7 @@ impl Publication {
     fn new(record: &TaskRecord, frames: &Tree<lash_kernel_state::paged::FrameRecord>) -> Self {
         Self {
             identity: record.identity.root.map(|p| p.id),
-            state: lash_vocabulary::tokens::encode_body(&record.state),
+            state: lash_kernel_value::tokens::encode_body(&record.state),
             observed: record.observed,
             passed: record.passed,
             frames: frames.version(),
@@ -275,7 +275,7 @@ impl Publication {
             && self.frames.matches(frames)
             && self.joiners.matches(&record.joiners)
             && self.occurrences.matches(&record.occurrences)
-            && self.state == lash_vocabulary::tokens::encode_body(&record.state)
+            && self.state == lash_kernel_value::tokens::encode_body(&record.state)
     }
 }
 
@@ -911,7 +911,7 @@ impl super::KernelMachine {
                     .map(|site| (*site).clone()));
                 if let Some(site) = site {
                     sources.push((
-                        lash_kernel_doc::kernel_internals::task_label(id.resolve(&access)?),
+                        lash_kernel_value::kernel_internals::task_label(id.resolve(&access)?),
                         site.position(),
                     ));
                 }
@@ -920,14 +920,14 @@ impl super::KernelMachine {
                 .into_iter()
                 .map(|id| {
                     id.resolve(&access)
-                        .map(lash_kernel_doc::kernel_internals::task_label)
+                        .map(lash_kernel_value::kernel_internals::task_label)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let unobserved = unobserved
                 .into_iter()
                 .map(|id| {
                     id.resolve(&access)
-                        .map(lash_kernel_doc::kernel_internals::task_label)
+                        .map(lash_kernel_value::kernel_internals::task_label)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(End::Error(RunError::TasksOutstanding {
@@ -958,7 +958,7 @@ pub(super) fn source_body(
     frames: &Tree<lash_kernel_state::paged::FrameRecord>,
     exe: &Executable,
     access: &Access<'_>,
-) -> Result<Option<lash_vocabulary::sites::Site>, HeapFault> {
+) -> Result<Option<lash_kernel_value::sites::Site>, HeapFault> {
     for index in 0..frames.len() {
         let (_, frame) = frames
             .rank_get(index, access)?
@@ -971,7 +971,7 @@ pub(super) fn source_body(
             .rev()
             .find_map(|length| {
                 exe.code_at(
-                    &lash_vocabulary::sites::Site::new(
+                    &lash_kernel_value::sites::Site::new(
                         statement.unit.clone(),
                         &statement.path[..length],
                     ),
@@ -1071,8 +1071,8 @@ mod laws {
         use std::sync::Arc;
         fn helpers(
             registry: &mut lash_kernel_doc::FunctionRegistry,
-            _: &std::collections::BTreeMap<&'static str, lash_vocabulary::FunctionId>,
-        ) -> Vec<(&'static str, lash_vocabulary::FunctionId)> {
+            _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+        ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
             let child = registry
                 .register(
                     lash_kernel_doc::parse_definition(

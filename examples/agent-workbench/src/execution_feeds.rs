@@ -38,8 +38,8 @@ use lash::workflow::{
     LinkedStart, WorkflowDocument, WorkflowDocumentRead, WorkflowExecutionOverlayAccumulator,
     WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 use crate::AppState;
 use crate::execution_view::ExecutionGraph;

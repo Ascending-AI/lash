@@ -68,7 +68,7 @@ async fn sleeping_cell_session(
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok((core, session))

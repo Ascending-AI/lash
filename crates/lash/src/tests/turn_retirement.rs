@@ -170,7 +170,7 @@ impl World {
     async fn session(&self, name: &str) -> Result<crate::DurableSession> {
         created_session(
             &self.core,
-            lash_vocabulary::identity::SessionId::fixture(name),
+            lash_kernel_value::identity::SessionId::fixture(name),
         )
         .await
         .durable()
@@ -244,7 +244,7 @@ async fn assert_retired(
     run: &str,
 ) -> std::collections::BTreeSet<String> {
     let journal = lash_core::ExecutionScope::turn(
-        lash_vocabulary::identity::SessionId::fixture(session),
+        lash_kernel_value::identity::SessionId::fixture(session),
         lash_vocabulary::identity::TurnId::fixture(run),
     )
     .journal_identity()
@@ -287,7 +287,7 @@ async fn assert_retired(
             .effect_host()
             .durable_reads()
             .expect("the durable reads"),
-        &lash_vocabulary::identity::SessionId::fixture(session),
+        &lash_kernel_value::identity::SessionId::fixture(session),
         &lash_vocabulary::identity::TurnId::fixture(run),
     )
     .await
@@ -584,7 +584,7 @@ async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> 
         .resolve(&key, lash_core::Resolution::Ok(serde_json::json!({})))
         .await?;
     let durable = second
-        .session(lash_vocabulary::identity::SessionId::fixture(
+        .session(lash_kernel_value::identity::SessionId::fixture(
             "retired-session-used",
         ))
         .durable()
@@ -662,7 +662,7 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
         .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &first,
-        lash_vocabulary::identity::SessionId::fixture("retired-session-unused"),
+        lash_kernel_value::identity::SessionId::fixture("retired-session-unused"),
     )
     .await
     .durable()
@@ -685,7 +685,7 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
         .build(crate::tests::host::runtime_lease_owner())?;
     if retain_state {
         let durable = second
-            .session(lash_vocabulary::identity::SessionId::fixture(
+            .session(lash_kernel_value::identity::SessionId::fixture(
                 "retired-session-unused",
             ))
             .durable()
@@ -761,7 +761,7 @@ async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> 
         .insert_typed("retired-spare", serde_json::json!({}))
         .expect("plain config");
     let error = match core
-        .session(lash_vocabulary::identity::SessionId::fixture(
+        .session(lash_kernel_value::identity::SessionId::fixture(
             "retired-session-new",
         ))
         .create(crate::SessionCreation::root(spec))
@@ -795,7 +795,7 @@ async fn settled_reads(
     input: &lash_vocabulary::identity::InputId,
 ) -> Result<Vec<lash_core::ToolCallRecord>> {
     let session = core
-        .session(lash_vocabulary::identity::SessionId::fixture(session))
+        .session(lash_kernel_value::identity::SessionId::fixture(session))
         .durable()
         .await?;
     session.attach(input.clone()).output().await?;
@@ -1005,7 +1005,7 @@ const FLAKY_OPERATION: &str = "tools.flaky_lookup";
 
 fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     tool(FLAKY, false).with_execution_policy(
-        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
             0,
             0,
@@ -1095,7 +1095,9 @@ async fn a_retried_native_call_reads_from_its_transcript_without_its_ledger() ->
     };
     let first = core()?;
     let session = first
-        .session(lash_vocabulary::identity::SessionId::fixture(session_name))
+        .session(lash_kernel_value::identity::SessionId::fixture(
+            session_name,
+        ))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session

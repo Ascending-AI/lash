@@ -140,7 +140,7 @@ async fn run(observe: bool) -> Result<(Vec<Seen>, Option<(Observed, LashCore)>)>
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;

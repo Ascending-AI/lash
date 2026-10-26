@@ -13,9 +13,9 @@ use lash_durable::{
     ActorKey, CommitLabel, DurableError, DurableReads as _, DurableStore as _, Epoch, FormatSet,
     MailKind, MailTx, NodeId, NodeLease, NodeSpec, Release,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::TurnCancelMode;
 use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::{SqliteDurableStore, SqliteStoreSet};

@@ -105,7 +105,7 @@ async fn session(world: &World) -> lash::DurableSession {
     world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+            lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned())
                 .expect("a session id"),
         )
         .durable()
@@ -300,7 +300,7 @@ async fn durable_execution_state(
 ) -> Option<lash_core::plugin::HydratedExecutionGraph> {
     let view = lash_core_execution::store::SessionStore::new(
         world.backend.stores().session_store_factory(),
-        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id"),
+        lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id"),
     )
     .expect("the session's store");
     lash_core_execution::store::load_session_window_state(
@@ -337,7 +337,7 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
     let live = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+            lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned())
                 .expect("a session id"),
         )
         .open()
@@ -481,7 +481,7 @@ async fn page_turn(world: &World, turn: usize) {
     let session = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(PAGES_SESSION.to_owned())
+            lash_kernel_value::identity::SessionId::try_from(PAGES_SESSION.to_owned())
                 .expect("a session id"),
         )
         .durable()

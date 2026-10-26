@@ -16,7 +16,7 @@ use lash::Backend;
 use lash::durable::ActorKey;
 use lash::provider::{LlmRequest, LlmResponse, LlmRole, ProviderHandle};
 use lash::tools::{ExecutionPolicy, StaticToolExecute, StaticToolProvider, ToolCall, ToolOutcome};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::events::{Event, report};

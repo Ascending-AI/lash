@@ -40,7 +40,7 @@ fn definitions(provider: &str) -> Vec<lash::tools::ToolDefinition> {
         serde_json::json!({"type":"array","items":{}}),
     )
     .unwrap()
-    .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
+    .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
     .with_execution(std::time::Duration::from_secs(120));
     definitions.push(distinct);
     definitions

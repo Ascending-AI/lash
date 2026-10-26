@@ -72,7 +72,7 @@ impl Fixture {
         );
         let scope = DurableTraceScope::admit(
             TraceScopeId::admission(TraceScopeOwner::Turn {
-                session_id: lash_vocabulary::identity::SessionId::from("extension-laws"),
+                session_id: lash_kernel_value::identity::SessionId::from("extension-laws"),
                 turn_id: lash_vocabulary::identity::TurnId::from("extension-laws-turn"),
             }),
             producer.parent().as_ref(),
@@ -659,7 +659,7 @@ fn a_body_contribution_is_refused_with_its_exact_omission() {
 fn two_bodies_of_one_callback_keep_their_own_omission_sites() {
     let fixture = Fixture::new(TraceLimits::standard());
     let owner = crate::ExecutionOwner::SessionFrame {
-        session_id: lash_vocabulary::identity::SessionId::from("extension-laws"),
+        session_id: lash_kernel_value::identity::SessionId::from("extension-laws"),
         agent_frame_id: crate::FrameNodeId::new("frame").unwrap(),
     };
     let address = |call: &str| crate::CallAddress {

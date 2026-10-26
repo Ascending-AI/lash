@@ -7,8 +7,8 @@ use super::machine;
 #[test]
 fn history_records_support_dict_reads_and_typed_key_errors() {
     use lash_kernel_doc::Datum;
+    use lash_kernel_value::Name;
     use lash_kernel_vm::{End, RunError};
-    use lash_vocabulary::Name;
     use std::collections::BTreeMap;
     let bindings = super::pages::Session::seeded([(
         Name::new("history"),
@@ -124,7 +124,7 @@ fn nested_scope_builtin_shadowing_stays_local() {
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {
     use lash_kernel_dialect::FrontEnd as _;
-    let bindings = std::collections::BTreeSet::from([lash_vocabulary::Name::new("previous")]);
+    let bindings = std::collections::BTreeSet::from([lash_kernel_value::Name::new("previous")]);
     let calls = crate::Python::default().tool_calls(
         "text = 'phantom.call()'\ndef order(items):\n    items.sort(key=lambda item: item['key'])\nprevious.sort()\n[2, 1].sort()\nprint(text)\n# phantom.comment()\nawait items.sort({})\nawait other.fetch({})\n",
         &lash_kernel_dialect::Environment::new(
@@ -143,8 +143,8 @@ machine::library(),
 #[test]
 fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
     use lash_kernel_dialect::{CellEnvironment, Environment, Mode, Namespaces};
-    use lash_vocabulary::{Name, PackagePath};
     use std::collections::{BTreeMap, BTreeSet};
+    use {lash_kernel_value::Name, lash_kernel_value::PackagePath};
 
     let deferred = Namespaces::new(
         BTreeMap::new(),
@@ -154,14 +154,14 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
     .unwrap();
     let offered = super::linked::namespaces(
         &BTreeMap::from([(
-            lash_vocabulary::EffectName::new("jev.decide").unwrap(),
-            lash_vocabulary::Signature {
-                params: vec![lash_vocabulary::Param {
+            lash_kernel_value::EffectName::new("jev.decide").unwrap(),
+            lash_kernel_value::Signature {
+                params: vec![lash_kernel_value::Param {
                     name: Name::new("input"),
-                    ty: lash_vocabulary::Type::Any,
+                    ty: lash_kernel_value::Type::Any,
                     optional: false,
                 }],
-                result: lash_vocabulary::Type::Any,
+                result: lash_kernel_value::Type::Any,
             },
         )]),
         &BTreeMap::new(),

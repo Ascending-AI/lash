@@ -250,7 +250,7 @@ pub struct Reaped {
 #[derive(Clone, Debug)]
 pub struct CommittedSessionHead {
     /// The target session, in domain-write order.
-    pub session: lash_vocabulary::identity::SessionId,
+    pub session: lash_kernel_value::identity::SessionId,
     /// The complete result constructed inside the transaction.
     pub receipt: lash_core_store::store::RuntimeCommitReceipt,
 }

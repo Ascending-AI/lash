@@ -15,7 +15,7 @@
 
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::RegistryError;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 #[rustfmt::skip]
 #[path = "generated/plans.rs"]

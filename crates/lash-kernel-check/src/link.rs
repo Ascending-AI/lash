@@ -8,12 +8,12 @@
 
 use lash_kernel_doc::{ActKind, Action, Atom, Block, Callee, Expr, Member, Place, Rhs, Stmt};
 
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode,

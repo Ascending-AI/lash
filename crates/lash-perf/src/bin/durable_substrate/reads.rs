@@ -494,7 +494,8 @@ async fn measure_with_stores(
     for sample in 0..run.samples {
         *answers.calls.lock_recover() = 0;
         answers.writes.lock_recover().clear();
-        let session_id = lash_vocabulary::identity::SessionId::try_from(format!("{id}-{sample}"))?;
+        let session_id =
+            lash_kernel_value::identity::SessionId::try_from(format!("{id}-{sample}"))?;
         let creation = lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,
             lash::TurnBudget::Unbounded,

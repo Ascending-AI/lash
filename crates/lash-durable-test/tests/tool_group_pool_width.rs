@@ -38,10 +38,10 @@ use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Tr
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 const SESSION: &str = "pool-width-session";
 const RUN: &str = "pool-width-turn";

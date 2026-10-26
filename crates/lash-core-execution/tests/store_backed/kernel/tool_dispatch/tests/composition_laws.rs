@@ -717,7 +717,7 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
 
         async fn append_session_nodes(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _request: crate::AppendSessionNodesRequest,
         ) -> Result<
             crate::SessionGraphAppendResult,

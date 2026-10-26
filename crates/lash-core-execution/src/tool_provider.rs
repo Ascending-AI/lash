@@ -1,6 +1,6 @@
 pub(crate) use completion_support::AttemptCompletionSupport;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_protocol_types::llm::types::ProviderReplayMeta;
@@ -247,7 +247,7 @@ pub struct AttemptContext<'run> {
     routes: Option<crate::SurfaceTools>,
     linked_execution: Option<crate::LinkedExecution>,
     resolution_pins: std::collections::BTreeMap<
-        lash_vocabulary::names::OperationUse,
+        lash_kernel_value::names::OperationUse,
         lash_core_store::resolutions::ResolutionEntry,
     >,
     definition_engines: crate::ProcessEngineRegistry,
@@ -1127,8 +1127,8 @@ pub trait ToolProvider: Send + Sync + 'static {
         revision: lash_core_store::environment::SourceRevision,
         config: &OwnerConfigView,
         _namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
     {
@@ -1213,7 +1213,7 @@ pub trait ToolProvider: Send + Sync + 'static {
     /// key (S8). A recorded binding whose codec is this provider and whose
     /// format is not listed parks, typed, before the call is prepared: the
     /// provider's own reader never sees it.
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
         &[]
     }
     /// The codec payload a link to the advertised tool `manifest` records:
@@ -1225,7 +1225,10 @@ pub trait ToolProvider: Send + Sync + 'static {
         &self,
         _manifest: &ToolManifest,
         _config: &OwnerConfigView,
-    ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
+    ) -> Option<(
+        lash_kernel_value::providers::FormatVersion,
+        serde_json::Value,
+    )> {
         None
     }
     /// The start of the process an isolated call (its manifest names an

@@ -90,18 +90,18 @@ impl crate::plugin::packages::PackageProvider for InventoryPackages {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }
 
-    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<lash_vocabulary::Segment> {
+    fn roots(&self, _: &OwnerConfigView) -> BTreeSet<lash_kernel_value::Segment> {
         Default::default()
     }
     fn advertise(
         &self,
         _: &OwnerConfigView,
-        _: &lash_vocabulary::package::PublicationContext,
+        _: &lash_kernel_value::package::PublicationContext,
     ) -> Result<Vec<crate::plugin::packages::PackageContribution>, PluginError> {
         Ok(Vec::new())
     }
@@ -110,7 +110,7 @@ impl crate::plugin::packages::PackageProvider for InventoryPackages {
 impl crate::plugin::packages::DeferredPackageProvider for InventoryPackages {
     fn validate_grant(
         &self,
-        grant: &lash_vocabulary::DeferredGrant,
+        grant: &lash_kernel_value::DeferredGrant,
         registry: RegistryKind,
     ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
         Err(
@@ -123,8 +123,8 @@ impl crate::plugin::packages::DeferredPackageProvider for InventoryPackages {
     async fn resolve(
         &self,
         _: &crate::deferred_provider::DeferredResolveContext<'_>,
-        _: &lash_vocabulary::DeferredGrant,
-        _: &lash_vocabulary::QualifiedName,
+        _: &lash_kernel_value::DeferredGrant,
+        _: &lash_kernel_value::QualifiedName,
     ) -> Result<crate::plugin::packages::DeferredAnswer, crate::plugin::packages::ResolverFault>
     {
         Ok(crate::plugin::packages::DeferredAnswer::Unavailable { note: None })
@@ -813,7 +813,7 @@ fn lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Read)
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Read)
 }
 
 /// What the knowledge base says about the topic `args` names.
@@ -992,9 +992,9 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
                     crate::testing::operation_environment(
                         lash_vocabulary::claims::RegistryKind::Process,
                         [(
-                            lash_vocabulary::OperationUse {
-                                link: lash_vocabulary::LinkId::from_bytes([6; 32]),
-                                slot: lash_vocabulary::ImportSlot(0),
+                            lash_kernel_value::OperationUse {
+                                link: lash_kernel_value::LinkId::from_bytes([6; 32]),
+                                slot: lash_kernel_value::ImportSlot(0),
                             },
                             definition,
                             route,

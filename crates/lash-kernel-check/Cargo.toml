@@ -21,9 +21,8 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash-vocabulary = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-kernel-doc = { workspace = true }
-lash-tool-shape = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
 schemars = { workspace = true }

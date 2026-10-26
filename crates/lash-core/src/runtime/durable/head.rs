@@ -32,7 +32,7 @@ use crate::TurnOutcome;
 use crate::runtime::{RuntimeSessionState, TurnBoundary};
 use crate::store::{SessionHeadRef, SessionStore, StoreError, WindowSelector};
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The committed window a session's turn starts from.

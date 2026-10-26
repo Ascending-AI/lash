@@ -19,9 +19,9 @@ use crate::Stmt;
 use crate::ValueKind;
 use crate::heap::{Chunk, Element, EntityId, HeapFault, Identity, PageReader, PageValue, TupleRef};
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use super::reads::CodeReads;
 
@@ -36,7 +36,7 @@ pub trait SnapshotHeap {
     fn closure_callable(
         &self,
         id: EntityId,
-    ) -> Result<lash_vocabulary::names::CallableId, HeapFault>;
+    ) -> Result<lash_kernel_value::names::CallableId, HeapFault>;
 
     /// The site the closure `id` was made at.
     ///
@@ -352,7 +352,7 @@ fn no_constant_kind(value: &PageValue) -> ValueKind {
 pub fn closure_at<'a>(
     document: &'a Document,
     site: &Site,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     helpers: &'a crate::BuildHelpers,
     selection: &crate::Selection,
 ) -> Option<&'a Closure> {
@@ -365,7 +365,7 @@ pub fn closure_at<'a>(
                 .or_else(|| {
                     selection
                         .admits_helper(
-                            &lash_vocabulary::CallableId {
+                            &lash_kernel_value::CallableId {
                                 link,
                                 function: *id,
                             },
@@ -397,7 +397,7 @@ pub fn closure_at<'a>(
 /// Frozen captures of a linked closure; code remains in its defining document.
 pub struct Gathered<F> {
     pub environment: EntityId,
-    pub callable: lash_vocabulary::names::CallableId,
+    pub callable: lash_kernel_value::names::CallableId,
     pub captures: BTreeMap<Name, F>,
     pub references: BTreeSet<EntityId>,
     pub site: std::sync::Arc<Site>,
@@ -477,11 +477,11 @@ pub fn freeze_token<H: SnapshotHeap>(
     })
 }
 
-use lash_vocabulary::tokens::CodecVariant;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::CodecVariant;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 #[doc(hidden)]
 impl CodecVariant for CaptureRefusal {

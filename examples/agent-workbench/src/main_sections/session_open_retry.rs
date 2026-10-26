@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 pub(crate) const SESSION_OPEN_MAX_ATTEMPTS: usize = 6;
 pub(crate) const SESSION_OPEN_RETRY_BUDGET: Duration = Duration::from_millis(75);

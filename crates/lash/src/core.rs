@@ -8,7 +8,7 @@ use lash_core::ActorContext;
 use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 mod drain;
 mod node;
@@ -235,12 +235,12 @@ impl LashCore {
     /// [`clear_session_fault`](Self::clear_session_fault).
     pub async fn session_faults(
         &self,
-        after: Option<&lash_vocabulary::identity::SessionId>,
+        after: Option<&lash_kernel_value::identity::SessionId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<
         crate::ChangePage<
             lash_core::store::SessionFault,
-            Option<lash_vocabulary::identity::SessionId>,
+            Option<lash_kernel_value::identity::SessionId>,
         >,
     > {
         let changes = self.store_factory.list_session_faults(after, limit).await?;
@@ -262,7 +262,7 @@ impl LashCore {
     /// makes due again. `false` when the session has no fault.
     pub async fn clear_session_fault(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> Result<bool> {
         Ok(self.store_factory.clear_session_fault(session_id).await?)
     }
@@ -1509,7 +1509,7 @@ pub(crate) fn build_plugin_host(
         core.tracing.clone(),
     )
     .with_package_namespace(lash_core::plugin::packages::HostPackageNamespace {
-        domain: lash_vocabulary::package::PublicationDomain(
+        domain: lash_kernel_value::package::PublicationDomain(
             core.backend().binding_identity().to_string(),
         ),
         packages: core.control.packages.clone(),

@@ -20,9 +20,9 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::ActorTx;
 use lash_durable::domain::{OwnerKey, RunSeq};
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
 use lash_sansio::sansio::PendingToolCall;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::super::ActorContext;
 use super::super::waits::Resolution;

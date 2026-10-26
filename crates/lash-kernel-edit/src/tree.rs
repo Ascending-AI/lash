@@ -10,7 +10,7 @@
 
 use lash_kernel_doc::Node;
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 /// What a site addresses, for a diagnostic.
 #[derive(

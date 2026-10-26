@@ -173,7 +173,7 @@ are admitted; outstanding tasks and unobserved errors are judged at cell end.
 `await p` is `await p via ts.await`. `Promise.all`,
 `allSettled`, `race` and `any` are helpers over the kernel's list joins. The
 lowering is described in `src/lower/async_fn.rs` and
-`src/helpers/promise.kernel`, and the Node witnesses are in `witness/async/`.
+`../lash-ext-ts-helpers/src/helpers/promise.kernel`, and the Node witnesses are in `witness/async/`.
 
 ## Test262
 

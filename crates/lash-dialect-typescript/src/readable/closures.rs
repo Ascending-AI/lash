@@ -5,8 +5,8 @@
 
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::Name;
+use lash_kernel_value::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{Body, Expr, Function, Param, Type};
@@ -80,7 +80,7 @@ impl Lifter<'_> {
         }
         // The callable's body, at its site: the token's fifth part.
         let site = Site::new(
-            lash_vocabulary::sites::Unit::Library(closure.function),
+            lash_kernel_value::sites::Unit::Library(closure.function),
             Vec::new(),
         );
         let wrapper = self.in_function(closure.function);
@@ -131,7 +131,7 @@ impl Lifter<'_> {
                         .block
                         .as_slice(),
                     Site::new(
-                        lash_vocabulary::sites::Unit::Library(inner.function),
+                        lash_kernel_value::sites::Unit::Library(inner.function),
                         Vec::new(),
                     ),
                 )
@@ -144,7 +144,7 @@ impl Lifter<'_> {
             .iter()
             .map(|param| &param.name)
             .collect();
-        let lash_vocabulary::sites::Unit::Library(body_function) = &site.unit else {
+        let lash_kernel_value::sites::Unit::Library(body_function) = &site.unit else {
             return refuse("a function body outside its defining unit");
         };
         let mut inner = self.in_function(*body_function);
@@ -316,8 +316,8 @@ fn arguments_before(
 }
 
 impl Lifter<'_> {
-    fn callable_annotation(&self, ty: &lash_vocabulary::Type) -> Lift<Option<Type>> {
-        if matches!(ty, lash_vocabulary::Type::Any) {
+    fn callable_annotation(&self, ty: &lash_kernel_value::Type) -> Lift<Option<Type>> {
+        if matches!(ty, lash_kernel_value::Type::Any) {
             return Ok(None);
         }
         self.ts_type(None, ty, &k::FieldRoot::Result, &mut Vec::new())

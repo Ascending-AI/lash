@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::support::TurnInput;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The RLM factory's plugin-owned `lash_vm` engine is installed for a
 /// root and for a child session alike, and again by a cold core; each
@@ -20,13 +20,13 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     };
     let core = build()?;
     core.session(
-        lash_vocabulary::identity::SessionId::parse("materialize-run")
+        lash_kernel_value::identity::SessionId::parse("materialize-run")
             .expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::root(mock_session_spec()))
     .await?;
     core.session(
-        lash_vocabulary::identity::SessionId::parse("materialize-child")
+        lash_kernel_value::identity::SessionId::parse("materialize-child")
             .expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::child_of(
@@ -35,7 +35,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     ))
     .await?;
     core.session(
-        lash_vocabulary::identity::SessionId::parse("materialize-stated")
+        lash_kernel_value::identity::SessionId::parse("materialize-stated")
             .expect("nonblank host identity"),
     )
     .create(crate::SessionCreation {
@@ -53,7 +53,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     for id in ["materialize-run", "materialize-child", "materialize-stated"] {
         let session = core
             .session(
-                lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+                lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
             )
             .open()
             .await?;
@@ -71,7 +71,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     for id in ["materialize-run", "materialize-child"] {
         let session = cold
             .session(
-                lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+                lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
             )
             .open()
             .await?;
@@ -99,7 +99,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     );
     let bad = cold
         .session(
-            lash_vocabulary::identity::SessionId::parse("materialize-refused")
+            lash_kernel_value::identity::SessionId::parse("materialize-refused")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation {
@@ -117,7 +117,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     assert!(bad.is_err(), "unknown creation options must be refused");
     assert!(matches!(
         cold.session(
-            lash_vocabulary::identity::SessionId::parse("materialize-refused")
+            lash_kernel_value::identity::SessionId::parse("materialize-refused")
                 .expect("nonblank host identity")
         )
         .open()
@@ -151,17 +151,17 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let id = "owner-operation-matrix";
     for core in [&source, &receiving] {
         core.session(
-            lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     }
     let session = source
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await?;
     let receiving_session = receiving
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await?;
     let receiving_output = receiving_session

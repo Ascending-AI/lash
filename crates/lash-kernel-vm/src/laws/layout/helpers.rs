@@ -30,8 +30,8 @@ main {
 
 pub(in crate::laws) fn helper_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut out = call_probes(registry, ids);
     let add = out.iter().find(|(name, _)| *name == "flat.add").unwrap().1;
     let kind = out.iter().find(|(name, _)| *name == "kind").unwrap().1;

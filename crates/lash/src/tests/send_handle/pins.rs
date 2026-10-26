@@ -156,7 +156,8 @@ async fn a_send_pinned_at_acceptance_keeps_its_turn_through_collection() -> Resu
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("pin-at-send").expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse("pin-at-send")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -245,7 +246,8 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("pin-running").expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse("pin-running")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -316,7 +318,8 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("pin-merged").expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse("pin-merged")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -383,7 +386,8 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("fork-empty").expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse("fork-empty")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -468,7 +472,7 @@ async fn an_empty_session_forks_before_and_after_a_config_command() -> Result<()
     let branch = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("fork-empty-configured")
+            lash_kernel_value::identity::SessionId::parse("fork-empty-configured")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -491,7 +495,7 @@ async fn a_withdrawn_or_waiting_input_refuses_typed() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("fork-refused")
+        lash_kernel_value::identity::SessionId::parse("fork-refused")
             .expect("nonblank host identity"),
     )
     .await

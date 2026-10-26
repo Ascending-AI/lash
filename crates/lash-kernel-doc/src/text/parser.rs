@@ -21,16 +21,24 @@ use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implemen
 use crate::function_value::{CallablePresentation, FunctionRepresentation, StartConvention};
 
 use crate::number::{Float, NumberPolicy};
-use lash_vocabulary::names::{FunctionId, FunctionName, FunctionName as QualifiedName, Name};
+use {
+    lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName,
+    lash_kernel_value::names::FunctionName as QualifiedName, lash_kernel_value::names::Name,
+};
 
 use crate::validate::StatementForm;
 use crate::value::Bytes;
-use lash_vocabulary::names::{
-    Brand, Convention, Import, ImportKind, ImportSlot, PackagePath, QualifiedName as ImportName,
-    Segment,
+use lash_kernel_value::type_text::is_keyword;
+use {
+    lash_kernel_value::names::Brand, lash_kernel_value::names::Convention,
+    lash_kernel_value::names::Import, lash_kernel_value::names::ImportKind,
+    lash_kernel_value::names::ImportSlot, lash_kernel_value::names::PackagePath,
+    lash_kernel_value::names::QualifiedName as ImportName, lash_kernel_value::names::Segment,
 };
-use lash_vocabulary::type_text::is_keyword;
-use lash_vocabulary::types::{Param, Signature, Type};
+use {
+    lash_kernel_value::types::Param, lash_kernel_value::types::Signature,
+    lash_kernel_value::types::Type,
+};
 
 /// Reads a document from kernel text.
 ///
@@ -50,12 +58,12 @@ use lash_vocabulary::types::{Param, Signature, Type};
 pub fn parse_document(text: &str) -> Result<Document, ParseError> {
     parse_document_with_limits(
         text,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 pub fn parse_document_with_limits(
     text: &str,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<Document, ParseError> {
     let mut document = Document::new(NumberPolicy::Float, Vec::new());
     document.main = None;
@@ -68,7 +76,7 @@ pub fn parse_document_with_limits(
 pub fn parse_document_over(
     text: &str,
     mut document: Document,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<Document, ParseError> {
     let mut parser = Parser::new(text, limits)?;
     while parser.peek() != &Token::End {
@@ -105,7 +113,7 @@ pub fn parse_document_over(
             }
             "helpers" => {
                 let library = parser.text()?.parse().map_err(
-                    |error: lash_vocabulary::content_ids::InvalidDigest| {
+                    |error: lash_kernel_value::content_ids::InvalidDigest| {
                         parser.malformed(error.to_string())
                     },
                 )?;
@@ -143,7 +151,7 @@ pub fn parse_document_over(
 pub fn parse_signature(text: &str) -> Result<Signature, ParseError> {
     let mut parser = Parser::new(
         text,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )?;
     let signature = parser.signature()?;
     if parser.peek() != &Token::End {
@@ -156,12 +164,12 @@ pub fn parse_signature(text: &str) -> Result<Signature, ParseError> {
 pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
     parse_definition_with_limits(
         text,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 pub fn parse_definition_with_limits(
     text: &str,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<FunctionDefinition, ParseError> {
     let (definition, locals) = parse_definition_with_locals_and_limits(text, limits)?;
     if !locals.is_empty() {
@@ -175,12 +183,12 @@ pub fn parse_definition_with_locals(
 ) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
     parse_definition_with_locals_and_limits(
         text,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 pub fn parse_definition_with_locals_and_limits(
     text: &str,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
     parse_definition_over(text, BTreeMap::new(), limits)
 }
@@ -190,7 +198,7 @@ pub fn parse_definition_with_locals_and_limits(
 pub fn parse_definition_over(
     text: &str,
     imports: BTreeMap<ImportSlot, Import>,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<(FunctionDefinition, Vec<FunctionDefinition>), ParseError> {
     crate::document_work::note_definition_parse();
     let mut parser = Parser::new(text, limits)?;
@@ -316,7 +324,7 @@ struct Parser {
 type Parsed<T> = Result<T, ParseError>;
 
 impl Parser {
-    fn new(text: &str, limits: lash_vocabulary::data_limits::KernelDataLimits) -> Parsed<Self> {
+    fn new(text: &str, limits: lash_kernel_value::data_limits::KernelDataLimits) -> Parsed<Self> {
         Ok(Self {
             tokens: lex(text)?,
             position: 0,
@@ -527,7 +535,7 @@ impl Parser {
         }
         let start = self.position;
         let spelling = self.qualified_name()?.to_string();
-        let operation = lash_vocabulary::operation_text::parse(&spelling)
+        let operation = lash_kernel_value::operation_text::parse(&spelling)
             .map_err(|error| self.malformed(error.to_string()))?;
         let name = ImportName {
             package: operation.package,

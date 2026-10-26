@@ -439,10 +439,10 @@ command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-feat
 [[lane]]
 name = "dialects"
 features = [
-  "lash-internal-vm-releases/dialect-typescript:on",
-  "lash-internal-vm-releases/dialect-typescript:off",
-  "lash-internal-vm-releases/dialect-python:on",
-  "lash-internal-vm-releases/dialect-python:off",
+  "lash-kernel-releases/dialect-typescript:on",
+  "lash-kernel-releases/dialect-typescript:off",
+  "lash-kernel-releases/dialect-python:on",
+  "lash-kernel-releases/dialect-python:off",
   "lash-internal-vm-runtime/dialect-typescript:on",
   "lash-internal-vm-runtime/dialect-typescript:off",
   "lash-internal-vm-runtime/dialect-python:on",
@@ -453,10 +453,10 @@ features = [
   "lash-internal-vm-worker/dialect-python:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "lash-internal-vm-releases", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-releases", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-releases", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-releases", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
@@ -570,8 +570,8 @@ features = [
   "lash-kernel-migrate/synthetic-next:off",
   "lash-internal-vm-runtime/synthetic-next:on",
   "lash-internal-vm-runtime/synthetic-next:off",
-  "lash-internal-vm-releases/synthetic-next:on",
-  "lash-internal-vm-releases/synthetic-next:off",
+  "lash-kernel-releases/synthetic-next:on",
+  "lash-kernel-releases/synthetic-next:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--locked"],
@@ -586,7 +586,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript,synthetic-next", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-releases", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-runtime", "--test", "kernel_two_build_claim", "--no-default-features", "--features", "rlm,sqlite,testing,typescript,synthetic-next", "--locked"],
 ]
 

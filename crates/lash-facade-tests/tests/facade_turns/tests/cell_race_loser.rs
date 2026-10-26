@@ -127,7 +127,7 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
     )?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("race-loser-progress")
+            lash_kernel_value::identity::SessionId::parse("race-loser-progress")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -255,7 +255,7 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
     )?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("closing-race")
+            lash_kernel_value::identity::SessionId::parse("closing-race")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -362,7 +362,7 @@ fn backoff_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinit
     let definition = definition(name);
     if name == SLOW {
         definition.with_execution_policy(
-            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                 std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
                 BACKOFF_MS,
                 BACKOFF_MS,
@@ -435,7 +435,7 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
     )?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("closing-backoff")
+            lash_kernel_value::identity::SessionId::parse("closing-backoff")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))

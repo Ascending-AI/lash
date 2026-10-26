@@ -1,0 +1,75 @@
+[package]
+name = "lash-kernel-releases"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "lash's own packages, as build-generated data, and what a parent holds of them."
+
+[lib]
+name = "lash_kernel_releases"
+doctest = false
+
+# Which dialects' helper releases the build defines and holds, each off by
+# default: a host names the dialects it builds with (FIG-5990). The
+# extensions (ECMAScript regular expressions and dates, WHATWG URLs) are the
+# TypeScript dialect's, and each dialect has its operations' natives.
+[features]
+dialect-typescript = [
+    "dep:lash-ext-ts-helpers",
+    "dep:lash-ext-date-ecma",
+    "dep:lash-ext-regex-ecma",
+    "dep:lash-ext-url-whatwg",
+    "dep:lash-ext-ts-core",
+]
+dialect-python = ["dep:lash-ext-py-helpers", "dep:lash-ext-py-core"]
+# The synthetic successor's kernel version and helper change, made by a
+# worker and its parent alike.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+]
+
+[[bin]]
+name = "record-helper-data"
+path = "src/bin/record-helper-data.rs"
+required-features = ["dialect-typescript", "dialect-python"]
+test = false
+
+[lints]
+workspace = true
+
+# The library holds data alone: a host that only edits links it, and links no
+# dialect or extension (FIG-5812). The build script defines the helpers.
+[dependencies]
+lash-kernel-value = { workspace = true }
+lash-kernel-doc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+lash-kernel-value = { workspace = true }
+thiserror = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-kernel-lib = { workspace = true }
+lash-kernel-vm = { workspace = true }
+lash-ext-ts-helpers = { workspace = true, optional = true }
+lash-ext-py-helpers = { workspace = true, optional = true }
+lash-ext-date-ecma = { workspace = true, optional = true }
+lash-ext-regex-ecma = { workspace = true, optional = true }
+lash-ext-url-whatwg = { workspace = true, optional = true }
+lash-ext-ts-core = { workspace = true, optional = true }
+lash-ext-py-core = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+lash-ext-regex-ecma = { workspace = true }
+lash-ext-date-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
+lash-kernel-lib = { workspace = true }

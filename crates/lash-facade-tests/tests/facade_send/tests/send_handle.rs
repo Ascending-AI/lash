@@ -41,7 +41,7 @@ async fn input_probe_distinguishes_unknown_refused_and_accepted() -> Result<()> 
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::fixture("probe-input-outcome"),
+        lash_kernel_value::identity::SessionId::fixture("probe-input-outcome"),
     )
     .await
     .open()
@@ -418,7 +418,7 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-no-grace")
+        lash_kernel_value::identity::SessionId::parse("send-no-grace")
             .expect("nonblank host identity"),
     )
     .await
@@ -560,7 +560,7 @@ async fn an_unbound_inputs_durable_follower_reads_its_status_once_per_floor_tick
     .await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-floor-read")
+        lash_kernel_value::identity::SessionId::parse("send-floor-read")
             .expect("nonblank host identity"),
     )
     .await
@@ -617,7 +617,7 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-withdrawn")
+        lash_kernel_value::identity::SessionId::parse("send-withdrawn")
             .expect("nonblank host identity"),
     )
     .await
@@ -706,7 +706,7 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-shared-run")
+        lash_kernel_value::identity::SessionId::parse("send-shared-run")
             .expect("nonblank host identity"),
     )
     .await
@@ -793,7 +793,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
     .build(lash_facade_tests::runtime_lease_owner())?;
     let durable = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("engine-first")
+            lash_kernel_value::identity::SessionId::parse("engine-first")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -808,7 +808,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
 
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("engine-first")
+            lash_kernel_value::identity::SessionId::parse("engine-first")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -860,7 +860,7 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("cancel-past-switch")
+        lash_kernel_value::identity::SessionId::parse("cancel-past-switch")
             .expect("nonblank host identity"),
     )
     .await
@@ -903,7 +903,7 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let fixture = fixture(4).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-attach-id")
+        lash_kernel_value::identity::SessionId::parse("send-attach-id")
             .expect("nonblank host identity"),
     )
     .await
@@ -926,7 +926,7 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let durable = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-attach-id")
+            lash_kernel_value::identity::SessionId::parse("send-attach-id")
                 .expect("nonblank host identity"),
         )
         .durable()
@@ -973,7 +973,7 @@ async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-unobserved-run")
+        lash_kernel_value::identity::SessionId::parse("send-unobserved-run")
             .expect("nonblank host identity"),
     )
     .await
@@ -1033,7 +1033,7 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("reserved-batch")
+            lash_kernel_value::identity::SessionId::parse("reserved-batch")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -1041,7 +1041,7 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     let session = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("reserved-batch")
+            lash_kernel_value::identity::SessionId::parse("reserved-batch")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -1090,7 +1090,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-batch")
+            lash_kernel_value::identity::SessionId::parse("send-batch")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -1098,7 +1098,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let session = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-batch")
+            lash_kernel_value::identity::SessionId::parse("send-batch")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -1219,7 +1219,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let created = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+            lash_kernel_value::identity::SessionId::parse("send-entry-matrix")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -1232,7 +1232,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let live = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+            lash_kernel_value::identity::SessionId::parse("send-entry-matrix")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -1240,7 +1240,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let durable = fixture
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+            lash_kernel_value::identity::SessionId::parse("send-entry-matrix")
                 .expect("nonblank host identity"),
         )
         .durable()
@@ -1333,7 +1333,7 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("exact-host-settlement")
+        lash_kernel_value::identity::SessionId::parse("exact-host-settlement")
             .expect("nonblank host identity"),
     )
     .await
@@ -1487,7 +1487,7 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::fixture("exact-host-run-observation"),
+        lash_kernel_value::identity::SessionId::fixture("exact-host-run-observation"),
     )
     .await
     .open()

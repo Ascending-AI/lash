@@ -17,7 +17,10 @@ use lash_kernel_doc::{
     TextView, Value,
 };
 
-use lash_vocabulary::{FunctionName, Name, Param, Signature, Type};
+use {
+    lash_kernel_value::FunctionName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 pub use json::{decode_number, parse_json, stringify_json};
 

@@ -31,8 +31,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 
 use crate::session_graph::{SessionGraph, WindowAnchor};
 use lash_vocabulary::identity::NodeId;

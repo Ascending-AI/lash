@@ -270,12 +270,15 @@ fn declared_package_attributes_preserve_the_typed_surface_and_defaults() {
         CellEnvironment, Environment, FunctionMember, Mode, NamespaceKind, NamespaceMember,
         Namespaces,
     };
-    use lash_vocabulary::package::Visibility;
-    use lash_vocabulary::{Convention, Name, Param, QualifiedName, Signature, Type};
+    use lash_kernel_value::package::Visibility;
     use std::collections::{BTreeMap, BTreeSet};
+    use {
+        lash_kernel_value::Convention, lash_kernel_value::Name, lash_kernel_value::Param,
+        lash_kernel_value::QualifiedName, lash_kernel_value::Signature, lash_kernel_value::Type,
+    };
     let name = QualifiedName {
-        package: lash_vocabulary::PackagePath::parse("sample").unwrap(),
-        member: lash_vocabulary::Segment::new("echo").unwrap(),
+        package: lash_kernel_value::PackagePath::parse("sample").unwrap(),
+        member: lash_kernel_value::Segment::new("echo").unwrap(),
         type_member: None,
     };
     let signature = Signature {
@@ -317,7 +320,7 @@ fn declared_package_attributes_preserve_the_typed_surface_and_defaults() {
         .collect();
     assert_eq!(members.len(), 1);
     assert!(
-        matches!(&members[0].kind, lash_vocabulary::ImportKind::Code { signature: found, convention: Convention::Direct } if found == &signature)
+        matches!(&members[0].kind, lash_kernel_value::ImportKind::Code { signature: found, convention: Convention::Direct } if found == &signature)
     );
 }
 

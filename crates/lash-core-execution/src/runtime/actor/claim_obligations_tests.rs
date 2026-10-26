@@ -14,10 +14,10 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{OwnerKey, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::{ReadScope, RecordedWork, SessionObligations, Staged};
 use crate::ToolCallId;
@@ -284,9 +284,9 @@ fn hard(requirements: &lash_vocabulary::claims::ClaimRequirements) -> Vec<String
 /// provider and a codec version.
 fn record() -> lash_vocabulary::claims::ClaimRequirements {
     lash_vocabulary::claims::ClaimRequirements {
-        machine: lash_vocabulary::claims::NodeRequirements {
+        machine: lash_kernel_value::claims::NodeRequirements {
             libraries: Default::default(),
-            natives: [lash_vocabulary::FunctionId::from_bytes([3; 32])].into(),
+            natives: [lash_kernel_value::FunctionId::from_bytes([3; 32])].into(),
             kernels: [1].into(),
         },
         providers: [lash_vocabulary::providers::ToolProviderHandle::new(
@@ -303,7 +303,7 @@ fn record() -> lash_vocabulary::claims::ClaimRequirements {
                 "o",
                 lash_vocabulary::providers::ToolProviderKey::new("q").unwrap(),
             ),
-            lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+            lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
         )]
         .into(),
     }
@@ -396,7 +396,7 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
         projection: Default::default(),
         payload: Some(lash_vocabulary::providers::ExecutionBinding {
             codec,
-            format: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+            format: lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
             payload: serde_json::json!({}),
         }),
         source: lash_core_store::tool_surface::RouteSource::Resolved {
@@ -421,7 +421,7 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
                 "o",
                 lash_vocabulary::providers::ToolProviderKey::new("q").unwrap(),
             ),
-            lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+            lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
         )]
         .into(),
         ..Default::default()

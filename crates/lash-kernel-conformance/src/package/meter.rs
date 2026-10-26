@@ -10,7 +10,7 @@ use lash_kernel_doc::Document;
 use lash_kernel_doc::Expr;
 use lash_kernel_doc::Node;
 use lash_kernel_doc::Stmt;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use crate::HarnessError;
 

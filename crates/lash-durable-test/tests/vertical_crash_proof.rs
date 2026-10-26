@@ -90,10 +90,10 @@ use lash_durable_test::{
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use dialect::Dialect;
 
@@ -402,7 +402,7 @@ fn core(
     let packages = lash::package::ToolPackageProvider::new(
         "tools",
         lash::tool_provider_key!("tools"),
-        [lash_vocabulary::Segment::new("tools").unwrap()].into(),
+        [lash_kernel_value::Segment::new("tools").unwrap()].into(),
         Arc::clone(&tools),
     );
     builder

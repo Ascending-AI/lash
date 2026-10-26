@@ -75,7 +75,7 @@ impl Lowerer<'_> {
                 Ok(())
             })?;
             let namespaces = self.namespaces;
-            let package = lash_vocabulary::PackagePath::parse(&path)
+            let package = lash_kernel_value::PackagePath::parse(&path)
                 .map_err(|_| arguments_error("invalid package path", call.range()))?;
             let entries = namespaces.exports(&package).into_iter().flatten();
             let literal = match call.arguments.args.get(1) {

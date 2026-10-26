@@ -72,9 +72,9 @@ fn probe_definition(change: Change) -> lash_vocabulary::tool_contract::ToolDefin
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(if change == Change::Retried {
-        lash_vocabulary::tool_contract::ExecutionPolicy::Once
+        lash_kernel_value::tool_contract::ExecutionPolicy::Once
     } else {
-        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(3).expect("three attempts"),
             1,
             1,
@@ -148,7 +148,7 @@ impl lash_core::ToolProvider for Probe {
 /// The component that serves the probe to a process body.
 const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "contract-probe",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// A core running RLM turns whose processes outlive them, serving the probe

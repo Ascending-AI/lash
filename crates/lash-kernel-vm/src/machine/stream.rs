@@ -19,7 +19,7 @@ use lash_kernel_doc::{NewObject, TaskId, Value};
 
 use lash_kernel_exec::charge::Crossed;
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, RegionIx};
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 use super::ops::Flow;
 use super::{
@@ -813,13 +813,13 @@ impl KernelMachine {
         code: CodeId,
         cells: &[ArenaHandle],
     ) -> Eval<ArenaHandle> {
-        let lash_vocabulary::sites::Unit::Library(function) = exe.code(code).site.unit else {
+        let lash_kernel_value::sites::Unit::Library(function) = exe.code(code).site.unit else {
             return Err(fault("closure body has no stored FunctionId").into());
         };
         let link = self.current_link();
         let identity = Arc::new(lash_kernel_doc::arena::ClosureIdentity {
             capture_names: exe.code(code).capture_names.clone(),
-            callable: lash_vocabulary::names::CallableId { link, function },
+            callable: lash_kernel_value::names::CallableId { link, function },
             site: lash_kernel_doc::linked_site::LinkedSite {
                 link,
                 site: exe

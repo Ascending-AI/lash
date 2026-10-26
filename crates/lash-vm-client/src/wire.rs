@@ -24,15 +24,15 @@ use lash_vm_broker::kernel::MachinePark;
 use lash_vm_protocol::EncodedPayload;
 use lash_vm_protocol::page::PageCapability;
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::sites::TaskLabel;
-use lash_vocabulary::tokens::{decode_body, encode_body};
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::sites::TaskLabel;
+use lash_kernel_value::types::Type;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
 
 use crate::PoolError;
 
@@ -242,7 +242,7 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sites {
-    pub entered: Vec<lash_vocabulary::sites::EffectLocation>,
+    pub entered: Vec<lash_kernel_value::sites::EffectLocation>,
     pub ran: lash_kernel_vm::SiteCounts,
     /// The statement path since the previous frame, when the start asked
     /// for it: each task's consecutive starts, as document ordinals.
@@ -349,7 +349,7 @@ pub struct StartWire {
     pub session: Option<CarryWire>,
     /// The effects the run performs as reads (`K-EFF-012`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reads: Vec<lash_vocabulary::names::OperationUse>,
+    pub reads: Vec<lash_kernel_value::names::OperationUse>,
     /// The host's read-only bindings a cell's `main` starts with.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host: Vec<(Name, Datum)>,
@@ -367,14 +367,14 @@ pub struct SaveWire {
         std::collections::BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     #[serde(with = "lash_vocabulary::ordered_pairs")]
     pub controls: std::collections::BTreeMap<
-        lash_vocabulary::names::OperationUse,
+        lash_kernel_value::names::OperationUse,
         std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
     >,
     /// What the source wrote of each function the cell's document makes,
     /// by the site of its closure ([`lash_kernel_dialect::Lowered::written`]).
     #[serde(with = "lash_kernel_dialect::written_table")]
     pub written:
-        std::collections::BTreeMap<lash_vocabulary::sites::Site, lash_kernel_dialect::Written>,
+        std::collections::BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
 }
 
 /// Heap identities use their family and ordinal on the worker wire. They
@@ -435,7 +435,7 @@ impl StartWire {
             reads: modes
                 .iter()
                 .filter_map(|(use_, mode)| {
-                    (*mode == lash_vocabulary::package::OperationMode::Read).then_some(*use_)
+                    (*mode == lash_kernel_value::package::OperationMode::Read).then_some(*use_)
                 })
                 .collect(),
             host,
@@ -453,7 +453,7 @@ impl StartWire {
     pub fn modes(&self) -> EffectModes {
         self.reads
             .iter()
-            .map(|use_| (*use_, lash_vocabulary::package::OperationMode::Read))
+            .map(|use_| (*use_, lash_kernel_value::package::OperationMode::Read))
             .collect()
     }
 }
@@ -464,10 +464,10 @@ impl StartWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectRead {
-    pub use_: lash_vocabulary::names::OperationUse,
+    pub use_: lash_kernel_value::names::OperationUse,
     pub args: Vec<Datum>,
-    pub site: lash_vocabulary::sites::PositionLabel,
-    pub origin: lash_vocabulary::sites::Site,
+    pub site: lash_kernel_value::sites::PositionLabel,
+    pub origin: lash_kernel_value::sites::Site,
 }
 
 /// The parent's answer to an [`EffectRead`]: the effect's result, or the
@@ -481,10 +481,10 @@ pub enum RequestWire {
     Effect {
         wait: WaitId,
         identity: EffectId,
-        use_: lash_vocabulary::names::OperationUse,
+        use_: lash_kernel_value::names::OperationUse,
         args: Vec<Datum>,
         result: Type,
-        origin: lash_vocabulary::sites::Site,
+        origin: lash_kernel_value::sites::Site,
     },
 }
 
@@ -611,12 +611,12 @@ pub enum EndWire {
     Failed(Datum),
     Uncaught {
         error: Datum,
-        site: Option<lash_vocabulary::sites::Site>,
+        site: Option<lash_kernel_value::sites::Site>,
     },
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_kernel_value::sites::PositionLabel)>,
     },
     Deadlock {
         waiting: Vec<TaskLabel>,

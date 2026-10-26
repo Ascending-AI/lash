@@ -7,8 +7,8 @@
 //! at its line budget.
 
 use lash_core_store::store::SessionCatalogStore;
+use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::{PostgresStorage, testing::IsolatedDatabase};
-use lash_vocabulary::identity::SessionId;
 
 use crate::support::database_url;
 

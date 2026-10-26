@@ -16,7 +16,7 @@ doctest = false
 workspace = true
 [features]
 default = []
-testing = []
+testing = ["lash-kernel-value/testing"]
 schema-validation = []
 [dependencies]
 blake3 = { workspace = true }
@@ -27,3 +27,6 @@ thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 [dev-dependencies]
 proptest = "1"
+
+[dependencies.lash-kernel-value]
+workspace = true

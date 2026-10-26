@@ -519,7 +519,7 @@ fn standard_config() -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(12),
         attachment_acceptance: Default::default(),
         generation: lash_core::GenerationOptions::default(),
-        session_id: lash_vocabulary::identity::SessionId::from("standard-protocol-scenario"),
+        session_id: lash_kernel_value::identity::SessionId::from("standard-protocol-scenario"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,

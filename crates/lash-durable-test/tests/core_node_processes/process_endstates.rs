@@ -6,12 +6,12 @@ use super::*;
 /// the store's typed cause, and no process is recorded.
 async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(tier: Tier) {
     let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
-    let missing = lash_vocabulary::LinkId::from_bytes([0x7a; 32]);
+    let missing = lash_kernel_value::LinkId::from_bytes([0x7a; 32]);
     let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
         code: lash_vm_runtime::process::InlineRequest::Linked {
-            start: lash_vocabulary::LinkedStart {
+            start: lash_kernel_value::LinkedStart {
                 link: missing,
-                selector: lash_vocabulary::StartSelector::Main,
+                selector: lash_kernel_value::StartSelector::Main,
             },
         },
         args: Default::default(),

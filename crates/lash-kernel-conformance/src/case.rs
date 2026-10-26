@@ -1,16 +1,16 @@
 //! The portable corpus envelope. Documents remain kernel text.
 
 // Corpus coordinates are kernel-owned rule oracles, not host identity tokens.
-use lash_vocabulary::sites::{EffectIdentity, TaskIdentity};
 use std::collections::BTreeMap;
+use {lash_kernel_value::sites::EffectIdentity, lash_kernel_value::sites::TaskIdentity};
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 use lash_kernel_vm::{Bound, Bounds, End, Outcome, RunError};
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 
 use crate::HarnessError;
@@ -206,17 +206,17 @@ impl ExpectedEnd {
             }) => Self::TasksOutstanding {
                 unfinished: unfinished
                     .into_iter()
-                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .map(|task| lash_kernel_value::kernel_internals::task_parts(&task).clone())
                     .collect(),
                 unobserved: unobserved
                     .into_iter()
-                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .map(|task| lash_kernel_value::kernel_internals::task_parts(&task).clone())
                     .collect(),
             },
             End::Error(RunError::Deadlock { waiting }) => Self::Deadlock {
                 waiting: waiting
                     .into_iter()
-                    .map(|task| lash_kernel_doc::kernel_internals::task_parts(&task).clone())
+                    .map(|task| lash_kernel_value::kernel_internals::task_parts(&task).clone())
                     .collect(),
             },
             End::Error(RunError::Bound(error)) => Self::Bound {

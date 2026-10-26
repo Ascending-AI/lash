@@ -24,7 +24,7 @@ use lash_kernel_doc::Nursery;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::ShortText;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 use num_traits::ToPrimitive;
 
 use crate::definitions::{BRAND, LONE_SURROGATE_ERROR, Operation, SYNTAX_ERROR};

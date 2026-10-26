@@ -399,7 +399,7 @@ pub(super) fn record_refused(
                 round::MemberPin {
                     admitted_at: tx.opened_at(),
                     tool: lash_vocabulary::tool_contract::ToolId::new(answer.tool_name.clone()),
-                    policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+                    policy: lash_kernel_value::tool_contract::ExecutionPolicy::Once,
                     limit: crate::ExecutionLimit {
                         expires_at: u64::try_from(tx.opened_at().0).unwrap_or(0),
                         max_slice: std::time::Duration::ZERO,

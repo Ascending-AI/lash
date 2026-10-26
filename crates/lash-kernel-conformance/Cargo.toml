@@ -14,11 +14,34 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+# Shipped release fixtures are opt-in; the generic rule harness needs none.
+shipped-library = ["dep:lash-kernel-releases"]
+dialect-typescript = [
+    "shipped-library",
+    "lash-kernel-releases/dialect-typescript",
+    "dep:lash-ext-date-ecma",
+    "dep:lash-ext-regex-ecma",
+    "dep:lash-ext-url-whatwg",
+    "dep:lash-ext-ts-core",
+]
+dialect-python = [
+    "shipped-library",
+    "lash-kernel-releases/dialect-python",
+    "dep:lash-ext-py-core",
+]
+
 [lints]
 workspace = true
 
 [dependencies]
-lash-vocabulary = { workspace = true }
+lash-kernel-releases = { workspace = true, optional = true }
+lash-ext-date-ecma = { workspace = true, optional = true }
+lash-ext-regex-ecma = { workspace = true, optional = true }
+lash-ext-url-whatwg = { workspace = true, optional = true }
+lash-ext-ts-core = { workspace = true, optional = true }
+lash-ext-py-core = { workspace = true, optional = true }
+lash-kernel-value = { workspace = true }
 arbitrary = "1"
 lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true
@@ -33,8 +56,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-lash-dialect-services = { workspace = true }
-lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-services = { workspace = true }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-ext-helper-compiler = { workspace = true }
 kernel-embedder = { path = "../../examples/kernel-embedder" }

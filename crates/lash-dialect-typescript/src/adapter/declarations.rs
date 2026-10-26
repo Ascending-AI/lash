@@ -632,7 +632,7 @@ impl Adapter<'_> {
                         let path = module.split('.').map(str::to_owned).collect::<Vec<_>>();
                         if path
                             .iter()
-                            .any(|part| !lash_vocabulary::Segment::is_canonical(part))
+                            .any(|part| !lash_kernel_value::Segment::is_canonical(part))
                         {
                             return Err(reject(
                                 DiagnosticCode::ImportExportUnsupported,

@@ -122,8 +122,8 @@ pub(crate) enum Stmt {
     /// Lowerer-owned handler: source catches must never observe a named exit.
     ExitHandler {
         body: Box<Stmt>,
-        break_token: lash_vocabulary::Name,
-        continue_token: Option<lash_vocabulary::Name>,
+        break_token: lash_kernel_value::Name,
+        continue_token: Option<lash_kernel_value::Name>,
     },
     Throw(Expr),
     Try {
@@ -1422,7 +1422,7 @@ impl Adapter<'_> {
             swc::MemberProp::Ident(name) => {
                 if is_prototype_chain_property(name.sym.as_ref())
                     && !(name.sym.as_ref() == "prototype"
-                        && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if crate::builtins::is_global(owner.sym.as_ref())))
+                        && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if lash_ext_ts_helpers::builtins::is_global(owner.sym.as_ref())))
                 {
                     return Err(self.prototype_member_repair(member));
                 }

@@ -10,15 +10,13 @@ use lash_execution_contracts::{
     process::{EngineSettings, linking::*},
 };
 use lash_vocabulary::package::PublicationRecord;
-use lash_vocabulary::{
-    ToolDefinition,
-    identity::ProcessId,
-    names::*,
-    package::*,
-    providers::{CallbackSlot, PluginCallbackIdentity},
-};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
+use {
+    lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::ToolDefinition,
+    lash_vocabulary::identity::ProcessId, lash_vocabulary::package::*,
+    lash_vocabulary::providers::CallbackSlot, lash_vocabulary::providers::PluginCallbackIdentity,
+};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// Package data plus route candidates. Package membership never automatically enters the Tool Catalog.
@@ -295,12 +293,12 @@ impl super::ExecutionComposition {
                 registry,
             })
         };
-        if grant.signature.result != lash_vocabulary::Type::Json
+        if grant.signature.result != lash_kernel_value::Type::Json
             || grant
                 .signature
                 .params
                 .iter()
-                .any(|param| param.ty != lash_vocabulary::Type::Json)
+                .any(|param| param.ty != lash_kernel_value::Type::Json)
         {
             return Err(EnginePortError::Refused(
                 AdmissionRefusal::InvalidDocument {
@@ -381,7 +379,7 @@ impl super::ExecutionComposition {
             || route.provider.registry() != registry
             || route.tool != manifest.id
             || route.policy != manifest.execution_policy
-            || route.policy == lash_vocabulary::ExecutionPolicy::Read
+            || route.policy == lash_kernel_value::ExecutionPolicy::Read
             || route.projection != manifest.argument_projection
             || !matches!(&route.source, RouteSource::Resolved { definition: retained } if **retained == *definition)
             || !self.tool_registry().serves(&route.provider)
@@ -636,7 +634,7 @@ impl super::ExecutionComposition {
                             || candidate.route.policy != manifest.execution_policy
                             || candidate.route.projection != manifest.argument_projection
                             || !self.tool_registry().serves(&candidate.route.provider)
-                            || candidate.route.policy == lash_vocabulary::ExecutionPolicy::Read
+                            || candidate.route.policy == lash_kernel_value::ExecutionPolicy::Read
                                 && self
                                     .tool_registry()
                                     .reads(&candidate.route.provider)
@@ -789,8 +787,8 @@ pub fn operation_packages(
             source: RouteSource::Advertised,
         };
         let offer = OperationOffer {
-            requirement: lash_vocabulary::operations::OperationRequirement {
-                signature: lash_vocabulary::json_schema::tool_signature(
+            requirement: lash_kernel_value::operations::OperationRequirement {
+                signature: lash_kernel_value::json_schema::tool_signature(
                     &definition.contract.input_schema.canonical,
                     &definition.contract.output_schema.canonical,
                 ),
@@ -803,7 +801,7 @@ pub fn operation_packages(
                 .map(|intent| Intent(intent.as_str().to_owned()))
                 .collect(),
             controls: manifest.declaration().controls.clone(),
-            mode: if manifest.execution_policy == lash_vocabulary::ExecutionPolicy::Read {
+            mode: if manifest.execution_policy == lash_kernel_value::ExecutionPolicy::Read {
                 OperationMode::Read
             } else {
                 OperationMode::Waited
@@ -914,7 +912,7 @@ impl super::ExecutionComposition {
                             },
                         ));
                     }
-                    let mode = if route.policy == lash_vocabulary::ExecutionPolicy::Read {
+                    let mode = if route.policy == lash_kernel_value::ExecutionPolicy::Read {
                         OperationMode::Read
                     } else {
                         OperationMode::Waited
@@ -939,8 +937,8 @@ impl super::ExecutionComposition {
                             _ => None,
                         })
                         .unwrap_or_else(|| OperationOffer {
-                            requirement: lash_vocabulary::OperationRequirement {
-                                signature: lash_vocabulary::json_schema::tool_signature(
+                            requirement: lash_kernel_value::OperationRequirement {
+                                signature: lash_kernel_value::json_schema::tool_signature(
                                     &candidate.definition.contract.input_schema.canonical,
                                     &candidate.definition.contract.output_schema.canonical,
                                 ),
@@ -958,7 +956,7 @@ impl super::ExecutionComposition {
                             controls: candidate.definition.manifest.declaration().controls.clone(),
                         });
                     if offer.mode != mode
-                        || !lash_vocabulary::schema::signature_serves(
+                        || !lash_kernel_value::schema::signature_serves(
                             &offer.requirement.signature,
                             &requirement.signature,
                         )

@@ -39,14 +39,14 @@ pub(super) fn check(rule: &str, case: &Case) {
                 ),
                 Err(lash_kernel_vm::OpenError::KernelVersion { .. })
             ));
-            let encoded = lash_vocabulary::tokens::encode_body(
+            let encoded = lash_kernel_value::tokens::encode_body(
                 lash_kernel_vm::kernel_internals::sealed_root(&saved),
             );
-            let decoded = lash_vocabulary::tokens::decode_body::<
+            let decoded = lash_kernel_value::tokens::decode_body::<
                 lash_kernel_state::paged::CheckpointRoot,
             >(&encoded)
             .unwrap();
-            assert_eq!(lash_vocabulary::tokens::encode_body(&decoded), encoded);
+            assert_eq!(lash_kernel_value::tokens::encode_body(&decoded), encoded);
             Ok(crate::pages::open::<KernelMachine>(
                 at.program.clone(),
                 at.bounds,

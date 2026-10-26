@@ -10,7 +10,7 @@ fn fixture() -> (LinkedContent, FunctionValue) {
     document
         .functions
         .insert(definition.identity(), definition.clone());
-    let link = lash_vocabulary::package::Link {
+    let link = lash_kernel_value::package::Link {
         document: document.identity(),
         fills: BTreeMap::new(),
     };
@@ -318,7 +318,7 @@ fn materialize_graph_preserves_instances_cycles_nested_code_and_surplus() {
         ],
     )
     .unwrap();
-    let link = lash_vocabulary::package::Link {
+    let link = lash_kernel_value::package::Link {
         document: document.identity(),
         fills: BTreeMap::new(),
     };

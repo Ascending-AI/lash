@@ -811,7 +811,7 @@
     "peak_bytes": 12685312,
     "samples": 3
   },
-  "//crates/lash-helper-labels:lash-helper-labels__unit_test": {
+  "//crates/lash-kernel-labels:lash-kernel-labels__unit_test": {
     "cpu_count": 1,
     "mean_cores": 0.93,
     "memory_kb": 262144,
@@ -1718,7 +1718,7 @@
     "peak_bytes": 111509504,
     "samples": 13
   },
-  "//crates/lash-vm-releases:lash-vm-releases__unit_test": {
+  "//crates/lash-kernel-releases:lash-kernel-releases__unit_test": {
     "cpu_count": 1,
     "mean_cores": 1.16,
     "memory_kb": 262144,

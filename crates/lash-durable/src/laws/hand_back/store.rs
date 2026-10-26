@@ -7,8 +7,8 @@ use crate::{
     DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx, NodeLease, NodeSpec,
     Reaped,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -206,7 +206,7 @@ impl DurableStore for ObservedStore {
 impl DurableReads for ObservedStore {
     async fn model_call_pins(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<crate::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -214,7 +214,7 @@ impl DurableReads for ObservedStore {
 
     async fn model_calls(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -279,7 +279,7 @@ impl DurableReads for ObservedStore {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<crate::domain::ExecRootRow>, DurableError> {

@@ -52,9 +52,9 @@ pub(super) async fn link_cell(
             .documents
             .as_ref()
             .ok_or_else(|| host_failure("the cell has no document owner"))?
-            .invoked_operations(&lash_vocabulary::LinkedStart {
+            .invoked_operations(&lash_kernel_value::LinkedStart {
                 link: envelope.link,
-                selector: lash_vocabulary::StartSelector::Main,
+                selector: lash_kernel_value::StartSelector::Main,
             })
             .await
             .map_err(package_error)?;
@@ -90,14 +90,14 @@ pub(super) async fn link_cell(
     let boundary = HostBoundary {
         snapshot: packages.snapshot.clone(),
         context: context.clone(),
-        attachment: lash_vocabulary::package::Attachment {
+        attachment: lash_kernel_value::package::Attachment {
             members: BTreeSet::new(),
             packages: packages
                 .snapshot
                 .advertisements
                 .iter()
                 .filter_map(|accepted| match &accepted.advertisement {
-                    lash_vocabulary::PackageAdvertisement::Enumerated(package) => {
+                    lash_kernel_value::PackageAdvertisement::Enumerated(package) => {
                         Some(package.path.clone())
                     }
                     _ => None,
@@ -108,7 +108,7 @@ pub(super) async fn link_cell(
                 .advertisements
                 .iter()
                 .filter_map(|accepted| match &accepted.advertisement {
-                    lash_vocabulary::PackageAdvertisement::Deferred(package) => {
+                    lash_kernel_value::PackageAdvertisement::Deferred(package) => {
                         Some(package.path.clone())
                     }
                     _ => None,
@@ -194,7 +194,7 @@ pub(super) async fn link_cell(
     // digest, and the envelope, the store and every checkout share all
     // three.
     let document =
-        IdentifiedDocument::decode(&document, lash_vocabulary::KernelDataLimits::standard())
+        IdentifiedDocument::decode(&document, lash_kernel_value::KernelDataLimits::standard())
             .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
     let claim = ctx
         .execution_claim()
@@ -205,7 +205,7 @@ pub(super) async fn link_cell(
             &lash_execution_contracts::process::linking::FulfilRequest {
                 document: document.id(),
                 selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                    lash_vocabulary::names::StartSelector::Main,
+                    lash_kernel_value::names::StartSelector::Main,
                 ),
                 snapshot: packages.snapshot.clone(),
                 context,
@@ -278,8 +278,8 @@ pub(super) async fn link_cell(
     for function in state.lowering_functions().values() {
         if let Some(facts) = &function.written {
             written.insert(
-                lash_vocabulary::sites::Site::new(
-                    lash_vocabulary::sites::Unit::Library(function.callable.function),
+                lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Library(function.callable.function),
                     Vec::new(),
                 ),
                 facts.clone(),
@@ -317,9 +317,9 @@ pub(super) async fn link_cell(
     }
 
     let invoked = documents
-        .invoked_operations(&lash_vocabulary::LinkedStart {
+        .invoked_operations(&lash_kernel_value::LinkedStart {
             link: envelope.link,
-            selector: lash_vocabulary::StartSelector::Main,
+            selector: lash_kernel_value::StartSelector::Main,
         })
         .await
         .map_err(package_error)?;

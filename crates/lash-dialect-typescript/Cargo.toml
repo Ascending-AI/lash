@@ -21,8 +21,9 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash-dialect-services = { workspace = true }
-lash-vocabulary = { workspace = true }
+lash-ext-ts-helpers = { workspace = true }
+lash-kernel-services = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
@@ -35,18 +36,16 @@ swc_ecma_ast = { workspace = true }
 swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
-lash-vm-client = { workspace = true }
 lash-ext-helper-compiler = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
-lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 libc = { workspace = true }
-lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-kernel-state = { workspace = true }
 lash-dialect-python = { path = "../lash-dialect-python" }
 arbitrary = "1"
 stats_alloc = "0.1"
 sha2 = { workspace = true }
-lash-kernel-conformance = { path = "../lash-kernel-conformance" }
+lash-kernel-conformance = { path = "../lash-kernel-conformance", features = ["dialect-typescript", "dialect-python"] }
 lash-kernel-check = { workspace = true }
 lash-kernel-edit = { workspace = true }
 lash-kernel-lib = { workspace = true }
@@ -54,7 +53,7 @@ lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
 lash-ext-ts-core = { workspace = true }
 lash-ext-py-core = { workspace = true }
-lash-kernel-vm = { workspace = true, features = ["perf-witness"] }
+lash-kernel-vm = { workspace = true, features = ["perf-witness", "testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
 

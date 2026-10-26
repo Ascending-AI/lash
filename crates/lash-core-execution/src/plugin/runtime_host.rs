@@ -4,7 +4,7 @@ pub use lash_core_store::session_append::{
 
 use lash_execution_contracts::session_types::SessionCreateRequest;
 use lash_execution_contracts::session_types::SessionHandle;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde::{Deserialize, Serialize};
 

@@ -264,7 +264,7 @@ fn imports_and_function_exports_round_trip_without_main() {
         print_document,
     };
 
-    use lash_vocabulary::names::Name;
+    use lash_kernel_value::names::Name;
     let definition=parse_definition("function app.echo(value: Text) -> Text\nkernel 1\nmetering statements\nbody { return value }").unwrap();
     let mut document = Document::new(NumberPolicy::Float, vec![]);
     document.main = None;
@@ -284,9 +284,9 @@ fn imports_and_function_exports_round_trip_without_main() {
         parse_document(&print_document(&document)).unwrap(),
         document
     );
-    let encoded = lash_vocabulary::tokens::encode_body(&document);
+    let encoded = lash_kernel_value::tokens::encode_body(&document);
     assert_eq!(
-        lash_vocabulary::tokens::decode_body::<Document>(&encoded).unwrap(),
+        lash_kernel_value::tokens::decode_body::<Document>(&encoded).unwrap(),
         document
     );
 }
@@ -295,14 +295,17 @@ fn imports_and_function_exports_round_trip_without_main() {
 /// never manufacture a type mismatch, even within a union.
 #[test]
 fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
-    use lash_vocabulary::{RecordType, RecordTypeField, Type, TypeMismatch};
+    use {
+        lash_kernel_value::RecordType, lash_kernel_value::RecordTypeField, lash_kernel_value::Type,
+        lash_kernel_value::TypeMismatch,
+    };
     let expected = Type::Record(RecordType {
         fields: vec![RecordTypeField {
             name: "x/y~z".into(),
             ty: Type::List(Box::new(Type::Text)),
             optional: false,
         }],
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     });
     let value = crate::Datum::Record(vec![(
         "x/y~z".into(),
@@ -321,7 +324,7 @@ fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
                 .within("x/y~z")
         })
     );
-    let map = Type::Map(Box::new(lash_vocabulary::MapType {
+    let map = Type::Map(Box::new(lash_kernel_value::MapType {
         key: Type::Text,
         value: Type::List(Box::new(Type::Text)),
     }));
@@ -348,7 +351,7 @@ fn decode_mismatch_retains_value_path_and_depth_is_a_limit() {
 #[test]
 fn unconstrained_decode_mismatches_keep_map_and_error_value_paths() {
     use crate::{Datum, DecodeRefusal, Decoder, ErrorDatum, NumberPolicy, NumberToken};
-    use lash_vocabulary::{Type, TypeMismatch};
+    use {lash_kernel_value::Type, lash_kernel_value::TypeMismatch};
     let decoder = Decoder {
         max_depth: 64,
         policy: NumberPolicy::Float,
@@ -465,7 +468,7 @@ fn helper_library_identity_covers_only_the_closed_build_universe() {
             .identity()
     );
     assert_eq!(
-        lash_vocabulary::HelperLibraryId::of_members([root_id, leaf_id]),
+        lash_kernel_value::HelperLibraryId::of_members([root_id, leaf_id]),
         first.identity()
     );
     let _ = crate::document_work::helper_work();
@@ -488,7 +491,7 @@ fn helper_library_identity_covers_only_the_closed_build_universe() {
 #[test]
 fn action_atom_function_literals_belong_to_static_reach() {
     use crate::{Action, Atom, Callee, FunctionTarget, Literal, Node};
-    use lash_vocabulary::{FunctionId, ImportSlot, Name};
+    use {lash_kernel_value::FunctionId, lash_kernel_value::ImportSlot, lash_kernel_value::Name};
     let function = FunctionId::from_bytes([9; 32]);
     let atom = Atom::Literal(Literal::Function(function));
     let callee = Callee::Value(Name::new("callback"));
@@ -504,7 +507,7 @@ fn action_atom_function_literals_belong_to_static_reach() {
         Action::Perform {
             slot: ImportSlot(0),
             args: vec![atom.clone()],
-            result: lash_vocabulary::Type::Any,
+            result: lash_kernel_value::Type::Any,
             then_yield: false,
         },
         Action::Await {
@@ -555,8 +558,8 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
         BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue, NumberPolicy,
         StartConvention,
     };
-    use lash_vocabulary::sites::{Site, Unit};
-    use lash_vocabulary::{CallableId, LinkId};
+    use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
+    use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
     let (owner, locals) = crate::parse_definition_with_locals(
         "function law.owner() -> Any\nkernel 1\ncharge 1\nbody { return fn(x) { return x } }",
     )
@@ -619,7 +622,7 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
         LibraryDependencies, MissingHelper, NumberPolicy, RestoreSelection, Selection,
         StartConvention,
     };
-    use lash_vocabulary::{CallableId, LinkId};
+    use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
     let child = definition("law.saved_child", false);
     let child_id = child.identity();
     let mut parent = definition("law.removed_parent", false);
@@ -706,8 +709,11 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
 /// fields and declared-field checks through JSON, tokens and kernel text.
 #[test]
 fn record_rest_modes_preserve_projection_and_contract_round_trips() {
-    use lash_vocabulary::tokens::{decode_body, encode_body};
-    use lash_vocabulary::{RecordRest, RecordType, RecordTypeField, Type};
+    use {
+        lash_kernel_value::RecordRest, lash_kernel_value::RecordType,
+        lash_kernel_value::RecordTypeField, lash_kernel_value::Type,
+    };
+    use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
     let decoder = crate::Decoder {
         max_depth: 64,
         policy: crate::NumberPolicy::Float,
@@ -740,7 +746,7 @@ fn record_rest_modes_preserve_projection_and_contract_round_trips() {
         encodings.push(encoded);
         let source = format!(
             "function take(event: {}) -> Json\nkernel 1\nmetering statements\nbody {{ return event }}",
-            lash_vocabulary::print_type(&ty)
+            lash_kernel_value::print_type(&ty)
         );
         let definition = crate::parse_definition(&source).unwrap();
         assert_eq!(definition.signature.params[0].ty, ty);
@@ -767,13 +773,13 @@ fn record_rest_modes_preserve_projection_and_contract_round_trips() {
 /// representation without being expanded into a second native inventory.
 #[test]
 fn helper_library_requirements_round_trip_in_documents() {
-    use lash_vocabulary::tokens::{decode_body, encode_body};
+    use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
     let mut document =
         crate::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap();
     document
         .requires
         .libraries
-        .insert(lash_vocabulary::HelperLibraryId::from_bytes([7; 32]));
+        .insert(lash_kernel_value::HelperLibraryId::from_bytes([7; 32]));
     let text = crate::print_document(&document);
     assert_eq!(crate::parse_document(&text).unwrap(), document);
     assert_eq!(
@@ -796,7 +802,7 @@ fn an_immutable_document_admission_never_authorizes_a_changed_body() {
     let mut document =
         Arc::new(crate::parse_document("kernel 1\nnumbers float\nmain { return null }").unwrap());
     checks.check(&document, &helpers).unwrap();
-    let absent = lash_vocabulary::FunctionId::from_bytes([219; 32]);
+    let absent = lash_kernel_value::FunctionId::from_bytes([219; 32]);
     Arc::make_mut(&mut document).library.insert(absent);
     assert!(checks.check(&document, &helpers).is_err());
 }

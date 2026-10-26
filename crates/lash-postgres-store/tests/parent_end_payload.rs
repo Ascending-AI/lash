@@ -19,7 +19,7 @@ use crate::support::{SharedDatabaseLock, database_url};
 /// refusals are proved on one.
 fn operation_scope(session: &str, operation: &str) -> lash_core_store::scope_identity::ScopeId {
     lash_core_store::scope_identity::ScopeId::session_operation(
-        lash_vocabulary::identity::SessionId::fixture(session),
+        lash_kernel_value::identity::SessionId::fixture(session),
         operation,
     )
 }

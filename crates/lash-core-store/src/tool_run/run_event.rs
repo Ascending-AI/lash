@@ -112,15 +112,15 @@ pub struct CompletionTimer {
     pub wait: String,
     pub deadline_ms: i64,
 }
-impl lash_vocabulary::tokens::TokenCodec for CompletionTimer {
-    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for CompletionTimer {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         out.seq(2);
         out.text(&self.wait);
         self.deadline_ms.encode(out);
     }
     fn decode(
-        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             wait: input.text()?.to_owned(),

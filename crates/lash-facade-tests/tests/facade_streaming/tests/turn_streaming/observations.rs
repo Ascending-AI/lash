@@ -165,7 +165,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("reasoning-single-publication")
+        lash_kernel_value::identity::SessionId::parse("reasoning-single-publication")
             .expect("nonblank host identity"),
     )
     .await
@@ -280,7 +280,7 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("reasoning-tool-publication")
+        lash_kernel_value::identity::SessionId::parse("reasoning-tool-publication")
             .expect("nonblank host identity"),
     )
     .await
@@ -340,7 +340,7 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("reasoning-buffered-text")
+        lash_kernel_value::identity::SessionId::parse("reasoning-buffered-text")
             .expect("nonblank host identity"),
     )
     .await
@@ -390,7 +390,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("identical-reasoning-publication")
+        lash_kernel_value::identity::SessionId::parse("identical-reasoning-publication")
             .expect("nonblank host identity"),
     )
     .await
@@ -426,7 +426,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("rlm-provider-retry-prose")
+        lash_kernel_value::identity::SessionId::parse("rlm-provider-retry-prose")
             .expect("nonblank host identity"),
     )
     .await
@@ -534,7 +534,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
 
     let reopened = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("rlm-provider-retry-prose")
+            lash_kernel_value::identity::SessionId::parse("rlm-provider-retry-prose")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -572,7 +572,7 @@ async fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> Result
             .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("rlm-natural-prose-single-copy")
+        lash_kernel_value::identity::SessionId::parse("rlm-natural-prose-single-copy")
             .expect("nonblank host identity"),
     )
     .await
@@ -620,7 +620,7 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
     let core = core_publishing_to(Arc::clone(&live)).await?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("session-observation-turn-identity")
+        lash_kernel_value::identity::SessionId::parse("session-observation-turn-identity")
             .expect("nonblank host identity"),
     )
     .await
@@ -706,7 +706,7 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
     ));
     let core = core_publishing_to(Arc::clone(&live)).await?;
     let session_id =
-        lash_vocabulary::identity::SessionId::parse("trimmed-gap-unseen-auxiliary-event")
+        lash_kernel_value::identity::SessionId::parse("trimmed-gap-unseen-auxiliary-event")
             .expect("nonblank identity");
     let session = created_session(&core, session_id.clone())
         .await
@@ -885,7 +885,7 @@ async fn durable_revision_requires_replacement_evidence() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("failed-commit-observation-reconciliation")
+        lash_kernel_value::identity::SessionId::parse("failed-commit-observation-reconciliation")
             .expect("nonblank host identity"),
     )
     .await
@@ -965,7 +965,7 @@ async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_c
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(
+        lash_kernel_value::identity::SessionId::parse(
             "idle-failed-commit-observation-reconciliation",
         )
         .expect("nonblank host identity"),
@@ -1124,7 +1124,7 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
         "tools.switch_frame",
         "Switch frames",
         serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     ).expect("tool schemas").with_execution(std::time::Duration::from_secs(120));
         let provider = lash::testing::TestProvider::builder()
             .kind("snapshot-frame-switch")
@@ -1281,7 +1281,7 @@ async fn payload_authority_matches_revision_transition() -> Result<()> {
     let core = core_publishing_to(Arc::clone(&live)).await?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("payload-authority-transition")
+        lash_kernel_value::identity::SessionId::parse("payload-authority-transition")
             .expect("nonblank host identity"),
     )
     .await
@@ -1345,7 +1345,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
     let core = core_publishing_to(Arc::clone(&live)).await?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("recoverable-chat-redelivery")
+        lash_kernel_value::identity::SessionId::parse("recoverable-chat-redelivery")
             .expect("nonblank host identity"),
     )
     .await
@@ -1430,7 +1430,7 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("recoverable-chat-gap")
+        lash_kernel_value::identity::SessionId::parse("recoverable-chat-gap")
             .expect("nonblank host identity"),
     )
     .await
@@ -1531,7 +1531,7 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("recoverable-chat-disconnect")
+        lash_kernel_value::identity::SessionId::parse("recoverable-chat-disconnect")
             .expect("nonblank host identity"),
     )
     .await

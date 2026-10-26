@@ -18,8 +18,8 @@ use lash_durable::domain::OwnerKey;
 use lash_durable::{ActorKey, DurableError, StoreFailureKind};
 use lash_durable_test::{SimClock, SimNodes, Tripwire};
 use lash_execution_contracts::backend::Backend;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ToolCallId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 /// One body entry, noted before the body does anything else.
 #[derive(Clone, Debug, PartialEq, Eq)]

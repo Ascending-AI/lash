@@ -34,17 +34,17 @@ use lash_kernel_doc::{
     StartConvention,
 };
 
-use lash_vocabulary::PackagePath;
-use lash_vocabulary::{Name, Param, Signature};
+use lash_kernel_value::PackagePath;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
+use {lash_kernel_value::Name, lash_kernel_value::Param, lash_kernel_value::Signature};
 
 use super::calls::arguments_error;
-use super::methods::Method;
 use super::{Buf, Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Classes;
 use crate::scope::Ty;
+use lash_ext_py_helpers::methods::Method;
 
 const SPELLING: Spelling = Spelling::Python;
 
@@ -131,26 +131,26 @@ impl<'a> Lowerer<'a> {
                 export,
                 member,
             } => {
-                let name = lash_vocabulary::QualifiedName {
+                let name = lash_kernel_value::QualifiedName {
                     package: package.clone(),
                     member: segment.clone(),
                     type_member: None,
                 };
-                let brand = lash_vocabulary::Brand {
+                let brand = lash_kernel_value::Brand {
                     package: package.clone(),
                     name: segment.clone(),
                 };
                 match export {
                     NamespaceKind::Type(_) => {
-                        self.imports.insert(lash_vocabulary::Import {
+                        self.imports.insert(lash_kernel_value::Import {
                             name,
-                            kind: lash_vocabulary::ImportKind::Type { brand },
+                            kind: lash_kernel_value::ImportKind::Type { brand },
                         });
                     }
                     NamespaceKind::Error => {
-                        self.imports.insert(lash_vocabulary::Import {
+                        self.imports.insert(lash_kernel_value::Import {
                             name,
-                            kind: lash_vocabulary::ImportKind::Error { kind: brand },
+                            kind: lash_kernel_value::ImportKind::Error { kind: brand },
                         });
                     }
                     _ => {}
@@ -497,7 +497,7 @@ impl<'a> Lowerer<'a> {
         receiver: &Operand,
         name: &str,
         targets: &[Target<'a>],
-    ) -> Lowering<(Operand, lash_vocabulary::FunctionId)> {
+    ) -> Lowering<(Operand, lash_kernel_value::FunctionId)> {
         let brand = self.invoke(
             dispatch::BRAND_OF,
             std::slice::from_ref(receiver),
@@ -525,7 +525,7 @@ impl<'a> Lowerer<'a> {
     fn branches(
         &mut self,
         selected: &Operand,
-        same: lash_vocabulary::FunctionId,
+        same: lash_kernel_value::FunctionId,
         targets: &[Target<'a>],
         mut branch: impl FnMut(&mut Self, Option<usize>) -> Lowering<Operand>,
     ) -> Lowering<Operand> {
@@ -629,7 +629,7 @@ impl<'a> Lowerer<'a> {
                     let value = this.invoke(
                         &format!("py.method.{name}"),
                         slots,
-                        method.map_or(Ty::Unknown, |method| method.result),
+                        method.map_or(Ty::Unknown, |method| method.result.into()),
                     )?;
                     if awaited {
                         return this.await_via("py.await", value);

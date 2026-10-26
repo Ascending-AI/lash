@@ -10,10 +10,10 @@ use lash_kernel_doc::NewObject;
 use lash_kernel_doc::RegistryError;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::parse_definition;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::types::RecordType;
-use lash_vocabulary::types::RecordTypeField;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::types::RecordType;
+use lash_kernel_value::types::RecordTypeField;
+use lash_kernel_value::types::Type;
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
 
@@ -95,7 +95,7 @@ fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
                 optional: false,
             })
             .collect(),
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     })
 }
 
@@ -109,7 +109,7 @@ fn brand_type(ty: &str) -> Type {
 fn url_type() -> Type {
     let state = Type::Record(RecordType {
         fields: vec![],
-        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Text)),
+        rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Text)),
     });
     let params = record_type([
         ("__lash_brand", brand_type("url_search_params")),

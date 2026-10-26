@@ -27,7 +27,7 @@ fn chat_tools_use_projected_openai_schema_and_preserve_override() {
             .expect("valid declared schema")
             .with_override(
                 lash_vocabulary::schema_contract::SchemaDialect::OpenaiToolParameters,
-                lash_vocabulary::json_schema::JsonSchema::admit(json!({
+                lash_kernel_value::json_schema::JsonSchema::admit(json!({
                     "type": "object",
                     "properties": { "raw": { "type": "string", "enum": ["x"] } }
                 }))

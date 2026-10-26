@@ -16,8 +16,8 @@ use lash_core_ids::perf_witness::latency::Stamp;
 use lash_core_ids::perf_witness::latency::Worker;
 use serde::Serialize;
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 
 use super::FollowerMode;
 #[path = "diagnostics.rs"]

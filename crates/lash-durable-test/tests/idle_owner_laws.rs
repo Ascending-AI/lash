@@ -75,7 +75,8 @@ async fn core(clock: &Arc<SimClock>, max_active: usize) -> lash::LashCore {
 async fn first_send(core: &lash::LashCore, name: &str) {
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id"),
+            lash_kernel_value::identity::SessionId::try_from(name.to_owned())
+                .expect("a session id"),
         )
         .create(lash::SessionCreation::root(served::spec(8)))
         .await

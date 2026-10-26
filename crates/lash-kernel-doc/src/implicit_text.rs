@@ -1,5 +1,8 @@
 //! Source-owned implicit conversion evidence, independent of executable identity.
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 /// What source analysis knows about an operand, independently of runtime values.
 /// Functions retain only their known result; objects and arrays distinguish proven

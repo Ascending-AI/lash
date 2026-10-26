@@ -4,12 +4,12 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::tool_shape::DefinitionId;
-use lash_vocabulary::tool_shape::ExtraKeys;
-use lash_vocabulary::tool_shape::ObjectShape;
-use lash_vocabulary::tool_shape::SchemaShape;
-use lash_vocabulary::tool_shape::ShapeImportRefusal;
-use lash_vocabulary::tool_shape::ShapeKind;
+use lash_kernel_value::tool_shape::DefinitionId;
+use lash_kernel_value::tool_shape::ExtraKeys;
+use lash_kernel_value::tool_shape::ObjectShape;
+use lash_kernel_value::tool_shape::SchemaShape;
+use lash_kernel_value::tool_shape::ShapeImportRefusal;
+use lash_kernel_value::tool_shape::ShapeKind;
 
 /// Document-local references mapped to their allocated TypeScript names.
 ///

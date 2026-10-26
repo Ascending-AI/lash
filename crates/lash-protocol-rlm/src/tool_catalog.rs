@@ -312,9 +312,9 @@ pub fn tool_catalogue_disclosure(
 pub fn discovered_tool_signature(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    operation: &lash_vocabulary::names::QualifiedOperation,
-    input: &lash_vocabulary::json_schema::JsonSchema,
-    output: &lash_vocabulary::json_schema::JsonSchema,
+    operation: &lash_kernel_value::names::QualifiedOperation,
+    input: &lash_kernel_value::json_schema::JsonSchema,
+    output: &lash_kernel_value::json_schema::JsonSchema,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     let call_path = lash_kernel_dialect::spell_operation(dialect.prompts().spelling(), operation);
     dialect

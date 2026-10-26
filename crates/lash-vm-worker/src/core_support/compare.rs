@@ -14,7 +14,7 @@ use lash_kernel_vm::perf_witness::Profiling;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
 };
-use lash_vocabulary::package::{Fill, Link};
+use {lash_kernel_value::package::Fill, lash_kernel_value::package::Link};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -80,10 +80,10 @@ impl Host for Console {
     }
     fn perform(
         &mut self,
-        _: &lash_vocabulary::OperationUse,
+        _: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         Err(lash_kernel_vm::HostFault::new(
             "compare workloads must be effect-free",
@@ -114,7 +114,11 @@ impl Kernel {
         let registry = Arc::clone(embedding.registry().map_err(failure)?);
         let library = PreparedLibrary::with_helpers(
             Arc::clone(&registry),
-            Arc::clone(&lash_vm_releases::helper_release().map_err(failure)?.helpers),
+            Arc::clone(
+                &lash_kernel_releases::helper_release()
+                    .map_err(failure)?
+                    .helpers,
+            ),
         );
         Ok(Self {
             registry,
@@ -132,7 +136,7 @@ impl Kernel {
         python: bool,
     ) -> Result<(PreparedCell, BTreeMap<String, f64>)> {
         let mut phases = BTreeMap::new();
-        let release = lash_vm_releases::helper_release().map_err(failure)?;
+        let release = lash_kernel_releases::helper_release().map_err(failure)?;
         let library =
             NamedLibrary::resolving(&self.registry, |id| release.resolver_roots().contains(id))
                 .map_err(|e| failure(format!("{e:?}")))?;
@@ -159,20 +163,21 @@ impl Kernel {
                 .imports
                 .iter()
                 .map(|(slot, import)| {
-                    let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+                    let lash_kernel_value::ImportKind::Operation { signature } = &import.kind
+                    else {
                         return Err(failure("unexpected guest import"));
                     };
                     Ok((
                         *slot,
                         Fill::Operation(
-                            lash_dialect_python::helper_operations()
+                            lash_ext_py_helpers::package::helper_operations()
                                 .iter()
-                                .chain(lash_dialect_typescript::helper_operations())
+                                .chain(lash_ext_ts_helpers::package::helper_operations())
                                 .find(|operation| operation.name == import.name)
                                 .map(|operation| operation.requirement.clone())
-                                .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
+                                .unwrap_or_else(|| lash_kernel_value::OperationRequirement {
                                     signature: signature.clone(),
-                                    contract: lash_vocabulary::ContractId::new("compare"),
+                                    contract: lash_kernel_value::ContractId::new("compare"),
                                 }),
                         ),
                     ))

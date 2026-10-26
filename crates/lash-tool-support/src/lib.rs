@@ -90,7 +90,7 @@ mod certification;
 pub struct ToolPackageProvider {
     owner: String,
     key: lash_core::plugin::ToolProviderKey,
-    roots: std::collections::BTreeSet<lash_vocabulary::names::Segment>,
+    roots: std::collections::BTreeSet<lash_kernel_value::names::Segment>,
     provider: std::sync::Arc<dyn lash_core::ToolProvider>,
 }
 impl ToolPackageProvider {
@@ -100,7 +100,7 @@ impl ToolPackageProvider {
     pub fn new(
         owner: impl Into<String>,
         key: lash_core::plugin::ToolProviderKey,
-        roots: std::collections::BTreeSet<lash_vocabulary::names::Segment>,
+        roots: std::collections::BTreeSet<lash_kernel_value::names::Segment>,
         provider: std::sync::Arc<dyn lash_core::ToolProvider>,
     ) -> Self {
         Self {
@@ -141,8 +141,8 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
     fn environment_snapshot(
         &self,
         config: &lash_core::OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &lash_core::plugin::ToolProviderHandle,
         observation: (
             lash_core_store::environment::SourceId,
@@ -190,8 +190,8 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
     fn environment_fragment(
         &self,
         config: &lash_core::OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &lash_core::plugin::ToolProviderHandle,
         tools: Option<&[lash_core::SurfaceEntry]>,
     ) -> Result<
@@ -232,7 +232,7 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }
@@ -240,13 +240,13 @@ impl lash_core::plugin::packages::PackageProvider for ToolPackageProvider {
     fn roots(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
         self.roots.clone()
     }
     fn advertise(
         &self,
         config: &lash_core::OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
+        context: &lash_kernel_value::package::PublicationContext,
     ) -> Result<
         Vec<lash_core::plugin::packages::PackageContribution>,
         lash_execution_contracts::PluginError,

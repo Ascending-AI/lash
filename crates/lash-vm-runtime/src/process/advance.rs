@@ -369,7 +369,7 @@ fn run_settled(
                             step,
                             use_,
                             input,
-                            site: Some(Box::new(lash_vocabulary::sites::EffectLocation {
+                            site: Some(Box::new(lash_kernel_value::sites::EffectLocation {
                                 at: identity,
                                 origin,
                             })),
@@ -390,7 +390,7 @@ fn run_settled(
             }
             // The run consumed every outcome it was handed: a wait the
             // parked run still holds is open, or settled since.
-            let held: std::collections::BTreeSet<lash_vocabulary::sites::WaitId> = state
+            let held: std::collections::BTreeSet<lash_kernel_value::sites::WaitId> = state
                 .waits
                 .keys()
                 .copied()

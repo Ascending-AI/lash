@@ -1306,7 +1306,7 @@ impl Lifecycle {
         let pinned = execution.policy();
         let honours_capacity = matches!(
             pinned,
-            lash_vocabulary::tool_contract::ExecutionPolicy::Repeatable { .. }
+            lash_kernel_value::tool_contract::ExecutionPolicy::Repeatable { .. }
         ) && self
             .policies
             .permits_repeat(execution.draft().tool(), pinned);

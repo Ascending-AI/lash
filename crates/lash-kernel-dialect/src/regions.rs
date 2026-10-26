@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use lash_kernel_doc::{self as k, FunctionCatalog, SourceMap};
 
-use lash_vocabulary::{FunctionId, FunctionName, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
 
 use crate::{NamespaceRefusal, Namespaces, PrintError, PrintOptions, PrintedSource, SourceFormat};
 
@@ -49,10 +49,10 @@ pub fn reachable(
 /// Reconstruct source-name metadata from signature-only Imports. This never
 /// fulfils a Link or queries providers; source reading keeps the base's slots.
 pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal> {
-    use lash_vocabulary::{ImportKind, package::Visibility};
+    use {lash_kernel_value::ImportKind, lash_kernel_value::package::Visibility};
     let mut packages = BTreeMap::<
-        lash_vocabulary::PackagePath,
-        BTreeMap<lash_vocabulary::Segment, crate::NamespaceMember>,
+        lash_kernel_value::PackagePath,
+        BTreeMap<lash_kernel_value::Segment, crate::NamespaceMember>,
     >::new();
     let terminal = terminal_operations(document);
     let mut requirements = BTreeMap::new();
@@ -74,11 +74,11 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
                     // wrapper. Reconstruct its lowering fact, not the host's
                     // declaration (which is outside the document).
                     controls: if terminal.contains(slot) {
-                        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any())
+                        lash_kernel_value::TurnControls::finish(lash_kernel_value::JsonSchema::any())
                     } else {
-                        lash_vocabulary::TurnControls::none()
+                        lash_kernel_value::TurnControls::none()
                     },
-                    mode: lash_vocabulary::OperationMode::Waited,
+                    mode: lash_kernel_value::OperationMode::Waited,
                 })
             }
             ImportKind::Code {
@@ -92,7 +92,7 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
                 rest: false,
             }),
             ImportKind::Type { .. } => crate::NamespaceKind::Type(crate::ValueType {
-                representation: lash_vocabulary::Type::Any,
+                representation: lash_kernel_value::Type::Any,
                 members: BTreeMap::new(),
             }),
             ImportKind::Error { .. } => crate::NamespaceKind::Error,
@@ -111,7 +111,7 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
 /// The exact terminal-call shape authored lowering emits, keyed by the
 /// owning unit's import contract and projected onto matching root imports.
 /// A local slot or display name alone never supplies a control fact.
-fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::ImportSlot> {
+fn terminal_operations(document: &k::Document) -> BTreeSet<lash_kernel_value::ImportSlot> {
     let mut terminal = BTreeSet::new();
     let mut roots = BTreeMap::<_, Vec<_>>::new();
     for (slot, import) in &document.imports {
@@ -119,10 +119,10 @@ fn terminal_operations(document: &k::Document) -> BTreeSet<lash_vocabulary::Impo
     }
     for (unit, block) in document.units() {
         let imports = match unit {
-            lash_vocabulary::sites::Unit::Main | lash_vocabulary::sites::Unit::Function(_) => {
+            lash_kernel_value::sites::Unit::Main | lash_kernel_value::sites::Unit::Function(_) => {
                 &document.imports
             }
-            lash_vocabulary::sites::Unit::Library(function) => {
+            lash_kernel_value::sites::Unit::Library(function) => {
                 let Some(body) = document.functions.get(&function).and_then(|f| f.body()) else {
                     continue;
                 };
@@ -221,7 +221,7 @@ pub fn print_verified(
         });
     }
     let unprintable = || PrintError::Unprintable {
-        site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+        site: lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, Vec::new()),
     };
     let read = regions.read(&whole.source).map_err(|_| unprintable())?;
     let identities = if read.document.canonical_bytes() == document.canonical_bytes() {
@@ -233,8 +233,8 @@ pub fn print_verified(
     } else {
         crate::normalization::module(document, &read.document, library).ok_or_else(unprintable)?
     };
-    let remap = |site: &mut lash_vocabulary::sites::Site| {
-        if let lash_vocabulary::sites::Unit::Library(id) = &mut site.unit {
+    let remap = |site: &mut lash_kernel_value::sites::Site| {
+        if let lash_kernel_value::sites::Unit::Library(id) = &mut site.unit {
             *id = identities.get(id).copied().unwrap_or(*id);
         }
     };
@@ -312,7 +312,7 @@ fn complete_source_sites(document: &k::Document, sites: Vec<k::SourceSite>) -> V
         .map(|entry| (entry.site.clone(), entry))
         .collect();
     for (unit, body) in document.units() {
-        let root = lash_vocabulary::sites::Site::new(unit, Vec::new());
+        let root = lash_kernel_value::sites::Site::new(unit, Vec::new());
         let mut pending = vec![(k::Node::Block(body), root, 0)];
         while let Some((node, site, inherited)) = pending.pop() {
             let entry = located

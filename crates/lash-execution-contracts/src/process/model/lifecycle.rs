@@ -16,9 +16,9 @@ use super::ProcessRegistration;
 use super::ProcessStatus;
 use super::StartKey;
 use super::process_session_id;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::CancelRequest;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ pub struct WaitState {
     pub since_ms: i64,
     /// The node that blocked, and which occurrence of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub site: Option<lash_vocabulary::sites::EffectLocation>,
+    pub site: Option<lash_kernel_value::sites::EffectLocation>,
 }
 
 /// Why a process wait has no workflow coordinate.
@@ -45,7 +45,9 @@ pub enum WaitSiteUnavailable {
 impl WaitState {
     /// Workflow waits name their task's occurrence. A document-free engine
     /// may wait without one; callers receive a typed explanation for that case.
-    pub fn execution_site(&self) -> Result<&lash_vocabulary::sites::EffectId, WaitSiteUnavailable> {
+    pub fn execution_site(
+        &self,
+    ) -> Result<&lash_kernel_value::sites::EffectId, WaitSiteUnavailable> {
         self.site
             .as_ref()
             .map(|site| &site.at)

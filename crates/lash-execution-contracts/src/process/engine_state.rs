@@ -148,7 +148,7 @@ impl StepRequest {
 
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&lash_vocabulary::sites::EffectId> {
+    pub fn site(&self) -> Option<&lash_kernel_value::sites::EffectId> {
         match self {
             Self::Tool { site, .. } => site.as_deref().map(|site| &site.at),
             Self::Engine { .. } => None,
@@ -156,7 +156,7 @@ impl StepRequest {
     }
 
     /// The performing identity and authored origin supplied by the engine.
-    pub fn location(&self) -> Option<&lash_vocabulary::sites::EffectLocation> {
+    pub fn location(&self) -> Option<&lash_kernel_value::sites::EffectLocation> {
         match self {
             Self::Tool { site, .. } => site.as_deref(),
             Self::Engine { .. } => None,
@@ -213,7 +213,7 @@ pub trait EngineEffectReads: Send + Sync {
     /// stays a typed, catchable read error.
     async fn read(
         &self,
-        use_: &lash_vocabulary::names::OperationUse,
+        use_: &lash_kernel_value::names::OperationUse,
         input: Result<serde_json::Value, String>,
         cancel: &tokio_util::sync::CancellationToken,
         deadline: std::time::Instant,
@@ -457,7 +457,7 @@ pub enum EngineStepRefusal {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineWake {
     pub until: DurableInstant,
-    pub site: Option<lash_vocabulary::sites::EffectId>,
+    pub site: Option<lash_kernel_value::sites::EffectId>,
 }
 
 /// What an engine asks lash to do next.
@@ -487,7 +487,7 @@ pub enum EngineAction {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -497,14 +497,14 @@ pub enum EngineAction {
         /// lash default or ceiling.
         bound: lash_vocabulary::tool_contract::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)
@@ -600,9 +600,9 @@ use crate::process::EngineSettings;
 use lash_core_ids::clock::Clock;
 use lash_core_store::tool_surface::ExecutionEnvironment;
 
-use lash_vocabulary::{ExecutionPolicy, claims::*, names::*};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use {lash_kernel_value::ExecutionPolicy, lash_kernel_value::names::*, lash_vocabulary::claims::*};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -615,7 +615,7 @@ pub enum StepRequest {
         step: StepName,
         use_: OperationUse,
         input: serde_json::Value,
-        site: Option<Box<lash_vocabulary::sites::EffectLocation>>,
+        site: Option<Box<lash_kernel_value::sites::EffectLocation>>,
     },
     Engine {
         step: StepName,

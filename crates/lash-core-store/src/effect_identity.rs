@@ -2,8 +2,8 @@ use crate::CausalRef;
 use serde::{Deserialize, Serialize};
 
 use crate::EffectAddress;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::runtime_error::RuntimeEffectControllerError;

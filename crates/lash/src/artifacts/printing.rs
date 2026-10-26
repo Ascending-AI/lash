@@ -35,12 +35,15 @@ impl HostArtifacts {
             self.materialized_workflow(definition, captions),
         )
         .await?;
-        if matches!(opened.selector, lash_vocabulary::names::StartSelector::Main) {
+        if matches!(
+            opened.selector,
+            lash_kernel_value::names::StartSelector::Main
+        ) {
             return Err(crate::EmbedError::WorkflowSource(
                 lash_vm_client::service::SourceServiceError::Print(
                     crate::dialect::PrintError::Unprintable {
-                        site: lash_vocabulary::sites::Site::new(
-                            lash_vocabulary::sites::Unit::Main,
+                        site: lash_kernel_value::sites::Site::new(
+                            lash_kernel_value::sites::Unit::Main,
                             [],
                         ),
                     },

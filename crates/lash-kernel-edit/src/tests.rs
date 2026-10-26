@@ -7,13 +7,13 @@ use lash_kernel_doc::{
     Node, NumberPolicy, Rhs, StartConvention, Stmt, parse_definition,
 };
 use lash_kernel_package::{LinkedContent, Namespace};
-use lash_vocabulary::{names::*, package::*, types::*};
 use std::collections::{BTreeMap, BTreeSet};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_kernel_value::types::*};
 
 fn site(path: &[u32]) -> Site {
     Site::new(Unit::Main, path)
 }
-use lash_vocabulary::sites::{Site, Unit};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 fn text(value: &str) -> Expr {
     Expr::Literal(Literal::Text(value.into()))
@@ -850,12 +850,12 @@ fn service(doc: &Document, contract: &str) -> PackageAdvertisement {
             Member {
                 visibility: Visibility::Public,
                 kind: MemberKind::Operation(OperationOffer {
-                    requirement: lash_vocabulary::operations::OperationRequirement {
+                    requirement: lash_kernel_value::operations::OperationRequirement {
                         signature: signature.clone(),
-                        contract: lash_vocabulary::operations::ContractId::new(contract),
+                        contract: lash_kernel_value::operations::ContractId::new(contract),
                     },
                     intents: BTreeSet::new(),
-                    controls: lash_vocabulary::TurnControls::none(),
+                    controls: lash_kernel_value::TurnControls::none(),
                     mode: OperationMode::Waited,
                 }),
             },
@@ -916,11 +916,11 @@ fn relink_rebinds_each_import_without_rewriting_document_or_function_ids() {
         };
         assert_eq!(
             before.contract,
-            lash_vocabulary::operations::ContractId::new("old")
+            lash_kernel_value::operations::ContractId::new("old")
         );
         assert_eq!(
             after.contract,
-            lash_vocabulary::operations::ContractId::new("new")
+            lash_kernel_value::operations::ContractId::new("new")
         );
     }
     let before = draft.correspondence_since_open().clone();
@@ -1105,7 +1105,7 @@ fn relink_closure_keeps_alias_slots_and_transitive_link_pins() {
         };
         assert_eq!(
             requirement.contract,
-            lash_vocabulary::operations::ContractId::new(contract)
+            lash_kernel_value::operations::ContractId::new(contract)
         );
     }
     assert_eq!(

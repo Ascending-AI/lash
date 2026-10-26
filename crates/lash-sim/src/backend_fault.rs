@@ -6,7 +6,7 @@
 //! The script sits at the store trait, so the same arm faults the same call
 //! of the same operation on every backend.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

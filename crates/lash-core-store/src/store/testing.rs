@@ -1,6 +1,6 @@
 use super::{RuntimeCommit, RuntimeTurnCommitStamp, StoreError};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 /// Rows a store decoded since it opened, by kind (ADR 0112 §14): what the
 /// residency conformance cases compare before and after a read.

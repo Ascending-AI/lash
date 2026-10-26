@@ -4,9 +4,13 @@
 use super::engine::ProcessDocument;
 use lash_core_store::artifact_referrer::ArtifactName;
 
-use lash_vocabulary::{claims::*, names::*, operations::*, package::*, types::*};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::claims::*, lash_kernel_value::names::*, lash_kernel_value::operations::*,
+    lash_kernel_value::package::*, lash_kernel_value::types::*, lash_vocabulary::claims::*,
+    lash_vocabulary::package::*,
+};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -118,13 +122,13 @@ pub struct LoadedContent {
 /// Typed deterministic admission refusal retained across the plugin/host boundary.
 pub enum AdmissionRefusal {
     CallableIdentity {
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
     },
     EntryAnnotation {
-        source: Box<lash_vocabulary::EntryAnnotationRefusal>,
+        source: Box<lash_kernel_value::EntryAnnotationRefusal>,
     },
     SignatureRequired {
-        source: Box<lash_vocabulary::SignatureRequired>,
+        source: Box<lash_kernel_value::SignatureRequired>,
     },
     CallableTooLarge {
         bytes: u64,

@@ -4,15 +4,13 @@
 //! to `adapter`, which reads the source into this crate's own tree and
 //! refuses what the dialect does not have; `lower` walks that tree. The
 //! operations whose JavaScript meaning differs from the kernel's are calls
-//! to the helpers [`define_helpers`] defines, written in kernel text under
+//! to the helpers [`lash_ext_ts_helpers::package::define_helpers`] defines, written in kernel text under
 //! `helpers/`.
 
 mod adapter;
-mod builtins;
 mod captions;
 mod diagnostics;
 mod lower;
-mod package;
 mod printer;
 mod readable;
 mod regex;
@@ -22,12 +20,10 @@ mod types;
 mod tests;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
-pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
-pub use package::{builtin_names, define_helpers, helper_operations};
 pub use readable::{print, read};
 
 /// The captions the dialect spells: a JSDoc block before the
@@ -237,7 +233,7 @@ impl FrontEnd for TypeScript {
         if lash_kernel_dialect::value_constructors::Constructor::reserves(root) {
             return Some("a typed value constructor".into());
         }
-        if builtins::is_global(root) {
+        if lash_ext_ts_helpers::builtins::is_global(root) {
             Some("a TypeScript global".to_owned())
         } else if !printer::legal_identifier(root) {
             Some("a name the TypeScript printer generates".to_owned())
@@ -254,7 +250,7 @@ impl FrontEnd for TypeScript {
 /// is refused with the spelling a cell writes.
 fn candidate(path: &str, environment: &Environment<'_>) -> Result<Option<String>, Diagnostic> {
     use lash_kernel_dialect::{SpellKind, Spelling};
-    use lash_vocabulary::Segment;
+    use lash_kernel_value::Segment;
     let segments = path.split('.').collect::<Vec<_>>();
     let Some((name, package)) = segments.split_last() else {
         return Ok(None);

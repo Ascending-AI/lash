@@ -2,8 +2,8 @@ use crate::driver::history::build_rlm_history_messages_from_turn;
 use lash_core::llm::types::LlmRole;
 use lash_core::sansio::ContextProjector;
 use lash_core::{LlmRequest, ProjectorContext};
+use lash_kernel_value::identity::SessionId;
 use lash_rlm_types::RlmTurnOptions;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use super::*;

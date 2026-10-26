@@ -2,15 +2,20 @@
 use lash_kernel_dialect::{
     EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
 };
-use lash_vocabulary::package::{Fill, Link, Visibility};
-use lash_vocabulary::{
-    EffectName, ImportKind, OperationMode, OperationUse, QualifiedName, QualifiedOperation,
-    Signature, TurnControls,
-};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::ImportKind, lash_kernel_value::OperationMode,
+    lash_kernel_value::OperationUse, lash_kernel_value::QualifiedName,
+    lash_kernel_value::QualifiedOperation, lash_kernel_value::Signature,
+    lash_kernel_value::TurnControls,
+};
+use {
+    lash_kernel_value::package::Fill, lash_kernel_value::package::Link,
+    lash_kernel_value::package::Visibility,
 };
 
 pub(super) fn namespaces(
@@ -24,7 +29,7 @@ pub(super) fn namespaces(
         let flags = controls.get(name);
         let mut accepted = TurnControls::none();
         if flags.is_some_and(|flags| flags.contains(&EffectControl::Finish)) {
-            accepted = accepted.with_finish(lash_vocabulary::JsonSchema::any());
+            accepted = accepted.with_finish(lash_kernel_value::JsonSchema::any());
         }
         if flags.is_some_and(|flags| flags.contains(&EffectControl::SwitchAgentFrame)) {
             accepted = accepted.with_switch_agent_frame();
@@ -68,7 +73,10 @@ pub(super) fn operation(use_: &OperationUse) -> EffectName {
 /// independently in the prepared library and contribute no retained Documents.
 pub(super) fn content(
     document: &lash_kernel_doc::Document,
-) -> (lash_kernel_package::LinkedContent, lash_vocabulary::LinkId) {
+) -> (
+    lash_kernel_package::LinkedContent,
+    lash_kernel_value::LinkId,
+) {
     let link = link(document);
     let root = link.identity();
     let mut content = lash_kernel_package::LinkedContent::default();
@@ -91,14 +99,14 @@ fn link(document: &lash_kernel_doc::Document) -> Link {
                 (
                     *slot,
                     Fill::Operation(
-                        lash_dialect_services::TYPESCRIPT
+                        lash_kernel_services::TYPESCRIPT
                             .iter()
-                            .chain(lash_dialect_services::PYTHON.iter())
+                            .chain(lash_kernel_services::PYTHON.iter())
                             .find(|operation| operation.name == import.name)
                             .map(|operation| operation.requirement.clone())
-                            .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
+                            .unwrap_or_else(|| lash_kernel_value::OperationRequirement {
                                 signature: signature.clone(),
-                                contract: lash_vocabulary::ContractId::new("fixture"),
+                                contract: lash_kernel_value::ContractId::new("fixture"),
                             }),
                     ),
                 )

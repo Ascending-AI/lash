@@ -716,7 +716,7 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
         definition.contract.output_contract = ToolOutputContract::from_input_schema(
             "projection",
             Some(
-                lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
+                lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({
                     "type": "object",
                     "properties": {
                         "id": { "type": "string" },

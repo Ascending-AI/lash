@@ -2,7 +2,7 @@
 //! component deletion. The test observes PostgreSQL's lock wait directly; no
 //! timing sleep decides which transaction won.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::time::Duration;
 
 use lash_core_store::session_identity::SessionRelation;

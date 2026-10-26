@@ -5,7 +5,7 @@ use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{Datum, Document, FunctionDefinition, FunctionRegistry};
 use lash_kernel_package::{LinkedContent, Namespace};
-use lash_vocabulary::OperationRequirement;
+use lash_kernel_value::OperationRequirement;
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{KernelMachine, Machine, Program, Step};
@@ -170,7 +170,7 @@ fn rewritten(
     b: &[FunctionDefinition],
 ) -> lash_kernel_migrate::Rewritten {
     use lash_kernel_doc::{Correspondence, Node, Survivor};
-    use lash_vocabulary::sites::{Site, Unit};
+    use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
     let mut functions: BTreeMap<_, _> = a
         .iter()
         .zip(b)
@@ -236,10 +236,10 @@ pub(super) async fn publish(
                 kind: MemberKind::Operation(OperationOffer {
                     requirement: OperationRequirement::new(
                         signature.clone(),
-                        lash_vocabulary::ContractId::new(contract),
+                        lash_kernel_value::ContractId::new(contract),
                     ),
                     intents: Default::default(),
-                    controls: lash_vocabulary::TurnControls::none(),
+                    controls: lash_kernel_value::TurnControls::none(),
                     mode: lash::package::OperationMode::Waited,
                 }),
             },
@@ -358,7 +358,7 @@ pub(super) fn park_with(
 }
 pub(super) fn finish(
     machine: &mut KernelMachine,
-    wait: lash_vocabulary::sites::WaitId,
+    wait: lash_kernel_value::sites::WaitId,
     retained: LinkId,
     root: LinkId,
 ) -> Datum {
@@ -377,7 +377,7 @@ pub(super) fn finish(
         };
         assert_eq!(
             request.use_,
-            lash_vocabulary::OperationUse {
+            lash_kernel_value::OperationUse {
                 link,
                 slot: ImportSlot(0)
             },
@@ -611,7 +611,7 @@ async fn atomic_carry(tier: super::served::Tier) {
             decodes: vec![FormatSet::new("paged-carry-law")],
             serves: Vec::new(),
             capabilities: NodeCapabilities {
-                machine: lash_vocabulary::claims::NodeRequirements {
+                machine: lash_kernel_value::claims::NodeRequirements {
                     kernels: [1].into(),
                     ..Default::default()
                 },

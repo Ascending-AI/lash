@@ -13,7 +13,7 @@ struct LinkedCatalog<'a> {
 impl FunctionCatalog for LinkedCatalog<'_> {
     fn definition(
         &self,
-        function: &lash_vocabulary::FunctionId,
+        function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::FunctionDefinition> {
         self.document.functions.get(function).or_else(|| {
             self.selection
@@ -159,7 +159,7 @@ impl Graph {
                     heap.heap.variable_get(cell)?,
                 );
             }
-            if site.unit == lash_vocabulary::sites::Unit::Main
+            if site.unit == lash_kernel_value::sites::Unit::Main
                 && let Some(body) = definition.body()
             {
                 let params = definition
@@ -238,7 +238,7 @@ impl Graph {
             token,
             captions: lash_kernel_doc::Captions::new(
                 defining_document(run, callable)?,
-                run.captions.iter().filter(|entry| entry.target.site().is_some_and(|site| matches!(&site.unit, lash_vocabulary::sites::Unit::Library(function) if captioned.contains(function)))).cloned().collect(),
+                run.captions.iter().filter(|entry| entry.target.site().is_some_and(|site| matches!(&site.unit, lash_kernel_value::sites::Unit::Library(function) if captioned.contains(function)))).cloned().collect(),
             ).map_err(|error| raised("not_data", error.to_string()))?,
         })))
     }

@@ -45,10 +45,10 @@ use lash_protocol_types::ToolFailureClass;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
 
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use lash_vocabulary::tool_contract::ToolId;
 use serde::Serialize;
 use tokio::sync::oneshot;

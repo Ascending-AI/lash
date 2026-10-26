@@ -19,12 +19,12 @@ use lash_kernel_doc::{
     NumberPolicy, Place, Rhs, Stmt, TryStmt,
 };
 
-use lash_vocabulary::{FunctionId, FunctionName, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
 
 use crate::adapter as ast;
-use crate::builtins::{self, Table};
 use crate::types::{Facts, PlainRecord, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use lash_ext_ts_helpers::builtins::{self, Table};
 use lash_kernel_dialect::Spelling;
 
 mod async_fn;
@@ -421,7 +421,7 @@ pub(crate) fn lower_beside(
         library: environment.library,
         namespaces: environment.namespaces,
         imports: lash_kernel_dialect::authoring::Imports::default().reserving(
-            crate::helper_operations()
+            lash_ext_ts_helpers::package::helper_operations()
                 .iter()
                 .map(|operation| operation.slot),
         ),
@@ -459,7 +459,7 @@ pub(crate) fn lower_beside(
                 .filter(|(_, offered)| {
                     offered
                         .controls
-                        .contains(lash_vocabulary::TurnControlKind::Finish)
+                        .contains(lash_kernel_value::TurnControlKind::Finish)
                 })
                 .map(|(operation, _)| {
                     lash_kernel_dialect::spell_operation(Spelling::TypeScript, &operation)
@@ -1096,7 +1096,7 @@ impl Lowerer<'_> {
         let ty = if ty == Ty::Unknown
             && header
                 .as_ref()
-                .is_some_and(|header| header.signature.result == lash_vocabulary::Type::Text)
+                .is_some_and(|header| header.signature.result == lash_kernel_value::Type::Text)
         {
             Ty::Text
         } else {

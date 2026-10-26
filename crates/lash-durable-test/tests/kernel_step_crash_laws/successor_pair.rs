@@ -16,7 +16,7 @@ use lash_durable::domain::{ExecKey, OwnerKey, RootOwner, RunFacts};
 use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
-use lash_kernel_state::paged::CheckpointRoot;
+use lash_kernel_state::paged::Checkpoint;
 use lash_vocabulary::identity::ProcessId;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -79,7 +79,7 @@ struct Stored {
     payload: Value,
     env: ProcessEnv,
     state: Value,
-    page: CheckpointRoot,
+    page: Checkpoint,
     facts: RunFacts,
     calls: Vec<lash_core::ToolCallId>,
     waits: PinnedWaits,
@@ -151,7 +151,7 @@ async fn stored(core: &lash::LashCore, process: &ProcessId) -> Stored {
         payload: payload.clone(),
         env,
         state: serde_json::from_slice(&state.bytes).unwrap(),
-        page: CheckpointRoot::of_answer(&answer).unwrap(),
+        page: Checkpoint::of_answer(&answer).unwrap(),
         facts,
         calls,
         waits,
@@ -180,7 +180,8 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
         "mixed successor pair: engine payload and record"
     );
     assert_eq!(
-        value.page.link, pair.start.link,
+        value.page.header().link,
+        pair.start.link,
         "mixed successor pair: parked page and record"
     );
     assert_eq!(
@@ -207,11 +208,11 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
             "carry changed {field}"
         );
     }
-    assert_eq!(value.page.owner, before.page.owner);
-    assert_eq!(value.page.meters.charged, before.page.meters.charged);
-    assert_eq!(value.page.limits, before.page.limits);
-    assert_eq!(
-        value.page.waits, before.page.waits,
+    assert_eq!(value.page.header().owner, before.page.header().owner);
+    assert_eq!(value.page.header().charged, before.page.header().charged);
+    assert_eq!(value.page.header().limits, before.page.header().limits);
+    assert!(
+        value.page.same_pending_waits(&before.page),
         "parked waits keep their identities"
     );
     assert_eq!(
@@ -326,7 +327,7 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
     assert_eq!(before.state["phase"], "parked");
     assert_eq!(before.state["waits"].as_object().unwrap().len(), 1);
     assert_eq!(before.state["admissions"].as_object().unwrap().len(), 1);
-    assert_eq!(before.page.waits.len(), 1);
+    assert_eq!(before.page.header().pending_waits, 1);
     assert_eq!(
         before.calls.len(),
         1,

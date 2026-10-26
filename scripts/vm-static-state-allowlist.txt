@@ -4,10 +4,10 @@
 # build tables and opt-in diagnostics belong here: guest-derived state
 # lives in the machine instance a worker hosts, which a worker reset drops.
 
-crates/lash-dialect-typescript/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
+crates/lash-ext-ts-helpers/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
 crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the constant empty binding set a process body lowers against; no guest input
-crates/lash-dialect-services/src/lib.rs::<module>::TYPESCRIPT  # immutable clock, random and sleep operation declarations derived only from the fixed typescript package name and signatures; no guest input or host routes
-crates/lash-dialect-services/src/lib.rs::<module>::PYTHON  # immutable clock, random and sleep operation declarations derived only from the fixed python package name and signatures; no guest input or host routes
+crates/lash-kernel-services/src/lib.rs::<module>::TYPESCRIPT  # immutable clock, random and sleep operation declarations derived only from the fixed typescript package name and signatures; no guest input or host routes
+crates/lash-kernel-services/src/lib.rs::<module>::PYTHON  # immutable clock, random and sleep operation declarations derived only from the fixed python package name and signatures; no guest input or host routes
 crates/lash-kernel-dialect/src/dialect.rs::first::BINDINGS  # immutable empty binding set for the first cell; no guest input
 crates/lash-kernel-dialect/src/dialect.rs::first::FUNCTIONS  # immutable empty function map for the first cell; no guest input
 crates/lash-kernel-doc/src/identified.rs::<module>::DEFINITION_PARSES  # opt-in definition parse count, enabled per thread by document_work::take_definition_parses; holds only an aggregate integer, no definitions, identities or guest values (ADR 0123)
@@ -19,7 +19,7 @@ crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_MODIFIER_SEQUENCE 
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_TAG_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_ZWJ_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI  # Unicode property data table; no guest input
-crates/lash-vm-releases/src/lib.rs::helper_release::STANDARD  # helper release assembled once from the build's constant images and service declarations; no guest input
+crates/lash-kernel-releases/src/lib.rs::helper_release::STANDARD  # helper release assembled once from the build's constant images and service declarations; no guest input
 crates/lash-vm-runtime/src/dialect_services/mod.rs::<module>::DIALECT_SERVICE_PACKAGES  # immutable clock, random and sleep declarations derived from fixed dialect names and service requirements; no guest input or host routes
 crates/lash-vm-runtime/src/dialect_services/mod.rs::<module>::TIMER_OPERATIONS  # exact sleep symbols derived only from the immutable dialect service packages; no guest input
 crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value

@@ -5,9 +5,9 @@ use super::tree::{Cell, Tree};
 use super::*;
 use lash_kernel_doc::heap::PageReader as _;
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue, TupleRef};
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::{CallableId, LinkId};
+use lash_kernel_value::sites::Unit;
 use std::{collections::BTreeSet, sync::Arc};
+use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
 
 /// Defining code still owed by a parked execution's frames and function values.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -15,9 +15,9 @@ pub struct RetainedCode {
     pub callables: BTreeSet<CallableId>,
     pub frames: BTreeSet<(LinkId, Unit)>,
     /// Exact transient continuation coordinates, including every caller frame.
-    pub sites: BTreeSet<(LinkId, lash_vocabulary::sites::Site)>,
+    pub sites: BTreeSet<(LinkId, lash_kernel_value::sites::Site)>,
     /// Convention imports retained outside executable body syntax.
-    pub imports: BTreeSet<(LinkId, lash_vocabulary::ImportSlot)>,
+    pub imports: BTreeSet<(LinkId, lash_kernel_value::ImportSlot)>,
 }
 /// Read code identities from the existing root walk; never scan unreferenced
 /// directory rows or infer identity from function names or positions.
@@ -262,7 +262,7 @@ impl Scan<'_> {
 pub(super) fn restore_selection(
     live: RetainedCode,
     documents: &std::collections::BTreeMap<LinkId, lash_kernel_doc::Document>,
-    code_imports: &std::collections::BTreeMap<(LinkId, lash_vocabulary::ImportSlot), CallableId>,
+    code_imports: &std::collections::BTreeMap<(LinkId, lash_kernel_value::ImportSlot), CallableId>,
     build: &lash_kernel_doc::BuildHelpers,
 ) -> Result<lash_kernel_doc::RestoreSelection, HeapFault> {
     use lash_kernel_doc::Node;
@@ -433,7 +433,7 @@ fn enqueue(
     node: lash_kernel_doc::Node<'_>,
     link: LinkId,
     document: &lash_kernel_doc::Document,
-    code_imports: &std::collections::BTreeMap<(LinkId, lash_vocabulary::ImportSlot), CallableId>,
+    code_imports: &std::collections::BTreeMap<(LinkId, lash_kernel_value::ImportSlot), CallableId>,
     pending: &mut Vec<(LinkId, Unit)>,
 ) -> Result<(), HeapFault> {
     for function in node.functions_within() {

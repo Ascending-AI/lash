@@ -33,8 +33,8 @@ main {
 
 fn guarded_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
     let mut probes = call_probes(registry, ids);
     struct Not;
@@ -94,7 +94,7 @@ type Guarded = (
     String,
     Vec<Datum>,
     Vec<(&'static str, crate::Meters)>,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 /// A run of [`GUARDED`]; `record` keeps a charge tape, which no guarded

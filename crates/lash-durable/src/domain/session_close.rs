@@ -16,7 +16,7 @@
 //! batch, so the session re-drives it on every claim until it is done.
 
 use crate::ids::{CommitLabel, DurableInstant, Epoch};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use super::keys::ScopeKey;
 

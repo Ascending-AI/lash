@@ -26,10 +26,10 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::RootSource;
 use lash_core_store::checkpoint_graph::TypedBody;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tokens::TokenWriter;
 use lash_protocol_types::ToolCallId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tokens::TokenWriter;
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{

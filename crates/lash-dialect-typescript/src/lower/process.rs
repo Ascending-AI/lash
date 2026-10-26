@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, HashSet};
 
 use lash_kernel_doc::{Expr, Literal};
 
-use lash_vocabulary::{
-    AnnotationOrigin, EffectName, Name, Param, Signature, SignatureOrigin, Type,
+use {
+    lash_kernel_value::AnnotationOrigin, lash_kernel_value::EffectName, lash_kernel_value::Name,
+    lash_kernel_value::Param, lash_kernel_value::Signature, lash_kernel_value::SignatureOrigin,
+    lash_kernel_value::Type,
 };
 
 use lash_kernel_dialect::workflow::{self, ModuleRefusal};
@@ -69,7 +71,7 @@ impl Lowerer<'_> {
                 });
                 origins.push(AnnotationOrigin {
                     span,
-                    refusal: Some(lash_vocabulary::AnnotationResolutionReason::Unsupported {
+                    refusal: Some(lash_kernel_value::AnnotationResolutionReason::Unsupported {
                         construct: "a destructured or rest public parameter".into(),
                     }),
                 });
@@ -151,7 +153,7 @@ impl Lowerer<'_> {
         origin
             .require(
                 &signature,
-                lash_vocabulary::FunctionLocation {
+                lash_kernel_value::FunctionLocation {
                     name: Some(name.into()),
                     site: None,
                 },
@@ -452,7 +454,7 @@ impl Lowerer<'_> {
 }
 
 /// The value a reference to the declared function `entry` is.
-fn reference(entry: lash_vocabulary::FunctionId) -> Operand {
+fn reference(entry: lash_kernel_value::FunctionId) -> Operand {
     Operand {
         plain: None,
         text_prefix: None,

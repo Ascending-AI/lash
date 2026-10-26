@@ -40,7 +40,7 @@ const START_TURN_CHILD_OPERATION: &str = "tools.start_turn_child";
 /// The component that serves the law's tools to a process body.
 const BLOB_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "attachment-referrer-tools",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// How long a law waits for a referrer state, running the cleanup relay's due
@@ -540,8 +540,8 @@ impl Law {
 
     /// Create the root session `name` on `core` and open it.
     async fn session_on(core: &lash::LashCore, name: &str) -> lash::LashSession {
-        let session_id =
-            lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id");
+        let session_id = lash_kernel_value::identity::SessionId::try_from(name.to_owned())
+            .expect("a session id");
         core.session(session_id.clone())
             .create(lash::SessionCreation::root(served::spec(1024)))
             .await
@@ -893,7 +893,7 @@ await control.finish(started);"
     law.process_terminal(&child).await;
     law.prune(&child).await;
     let child_session =
-        lash_vocabulary::identity::SessionId::fixture(format!("session:process:{child}"));
+        lash_kernel_value::identity::SessionId::fixture(format!("session:process:{child}"));
     let committed = law
         .wait_referrers(&id, "the child session's edge alone", |found| {
             found == [ArtifactReferrer::Session(child_session.clone())]
@@ -1006,7 +1006,7 @@ fn upload_store(
         law.backend.attachment_store(),
         law.backend.attachment_referrers(),
         lash_vocabulary::identity::RuntimeOwner::Session(
-            lash_vocabulary::identity::SessionId::fixture(name),
+            lash_kernel_value::identity::SessionId::fixture(name),
         ),
         Arc::clone(&law.clock) as Arc<dyn lash_core::Clock>,
         lash_core::facade_support::AttachmentPolicy::standard(),
@@ -1056,7 +1056,7 @@ async fn upload_expiry_is_local(tier: Tier) {
     assert_ne!(upload_a, upload_b, "each put mints its own upload");
     assert!(
         held_b.contains(&ArtifactReferrer::Session(
-            lash_vocabulary::identity::SessionId::from(session_id)
+            lash_kernel_value::identity::SessionId::from(session_id)
         )),
         "B's commit acquired the session: {held_b:?}"
     );
@@ -1105,7 +1105,7 @@ async fn queued_input_outlives_its_upload_expiry(tier: Tier) {
     .expect("the drained core still accepts the input");
     law.wait_referrers(&queued.id, "the enqueue's session edge", |found| {
         found.contains(&ArtifactReferrer::Session(
-            lash_vocabulary::identity::SessionId::from(session_id),
+            lash_kernel_value::identity::SessionId::from(session_id),
         ))
     })
     .await;
@@ -1121,7 +1121,7 @@ async fn queued_input_outlives_its_upload_expiry(tier: Tier) {
     );
 
     let serving = Law::core(&law.backend, &law.queue, &law.witness, "second-build");
-    let _ = serving.session(lash_vocabulary::identity::SessionId::from(session_id));
+    let _ = serving.session(lash_kernel_value::identity::SessionId::from(session_id));
     let output = tokio::time::timeout(WATCHDOG, accepted.output())
         .await
         .expect("deadlock watchdog: the queued turn never settled")
@@ -1267,7 +1267,7 @@ impl lash_core::AttachmentReferrers for AdoptionCut {
 
     async fn session_referrer_state(
         &self,
-        id: &lash_vocabulary::identity::SessionId,
+        id: &lash_kernel_value::identity::SessionId,
     ) -> Result<lash_core::store::SessionReferrerState, lash_core::StoreError> {
         self.inner.session_referrer_state(id).await
     }

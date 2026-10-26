@@ -5,8 +5,11 @@
 //! dialects they accept for each purpose and resolve contracts lazily at the
 //! request boundary.
 
-pub use crate::json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
 use std::collections::BTreeSet;
+use {
+    lash_kernel_value::json_schema::JsonSchema,
+    lash_kernel_value::json_schema::SchemaAdmissionError,
+};
 
 use serde_json::{Map, Value, json};
 

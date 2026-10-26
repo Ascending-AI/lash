@@ -18,7 +18,7 @@
 //! pages and owns its own directory version from then on.
 
 use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageRef, PageValue};
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 use super::heap::HeapWriteError;
 use super::root::KeyedRoot;

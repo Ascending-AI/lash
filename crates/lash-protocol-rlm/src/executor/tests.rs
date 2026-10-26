@@ -317,7 +317,7 @@ async fn a_session_whose_host_names_no_staging_refuses_to_stage() {
 
 async fn open_host() -> DurableHost {
     DurableHost::open(lash_core::AdmittedScope::turn(
-        lash_vocabulary::identity::SessionId::from(SESSION),
+        lash_kernel_value::identity::SessionId::from(SESSION),
         lash_vocabulary::identity::TurnId::from(TURN),
     ))
     .await
@@ -972,7 +972,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
 
     // K-SES-003 requires both the unbound-variable kind and exact data.
     let dropped = std::collections::BTreeMap::from([(
-        lash_vocabulary::names::Name::new("format"),
+        lash_kernel_value::names::Name::new("format"),
         lash_kernel_dialect::NotSaved::Task.to_string(),
     )]);
     for (kind, binding, expected) in [
@@ -1054,7 +1054,7 @@ async fn a_held_cell_hands_off_its_registered_execution_for_atomic_retirement() 
     )
     .with_cell_end(handoff.clone());
     let expected = lash_core_store::resolutions::ExecutionId::cell(
-        &lash_vocabulary::identity::SessionId::from(SESSION),
+        &lash_kernel_value::identity::SessionId::from(SESSION),
         TURN,
         "membership:0",
     );

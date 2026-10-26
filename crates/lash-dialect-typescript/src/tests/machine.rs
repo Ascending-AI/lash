@@ -14,16 +14,17 @@ use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Request,
     RunError, Step, Target, WaitId,
 };
-use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 /// The real kernel registry, with every dialect helper defined against it.
 pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: OnceLock<Arc<FunctionRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let embedding =
-            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
-        Arc::clone(embedding.registry().expect("installed package natives"))
+        Arc::new(lash_kernel_conformance::installed_functions().expect("installed package natives"))
     })
 }
 
@@ -34,7 +35,7 @@ pub(super) fn prepared() -> &'static PreparedLibrary {
         PreparedLibrary::with_helpers(
             Arc::clone(registry()),
             Arc::clone(
-                &lash_vm_releases::helper_release()
+                &lash_kernel_releases::helper_release()
                     .expect("build helpers")
                     .helpers,
             ),
@@ -80,10 +81,10 @@ struct Console {
 impl Host for Console {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked_reads::read(use_, 0)
     }
@@ -283,7 +284,7 @@ fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
             ),
             "{text}"
         );
-        let work = lash_kernel_vm::kernel_internals::register_work(&tape);
+        let work = lash_kernel_vm::perf_witness::register_work(&tape);
         assert!(
             work.blocks > 0,
             "Number loop executed no typed scalar block: {work:?}\n{text}"

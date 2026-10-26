@@ -28,7 +28,7 @@ use lash_durable::domain::pages::PageStore;
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier, LockHold, ServerProbe};
 use lash_durable::laws::pages::{self, PageTier};
 use lash_durable::{DurableError, DurableReads as _, DurableStore};
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::super::PostgresDurableStore;
@@ -505,7 +505,7 @@ impl PageTier for Tier {
 
     async fn delete_session(&self, session: &str) -> u64 {
         let factory = self._storage.session_store_factory();
-        let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
+        let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
             .expect("a law session id");
         let (answer, receipt) = sql::collect(
             "pages.session-delete",

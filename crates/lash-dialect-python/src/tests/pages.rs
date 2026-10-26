@@ -2,8 +2,8 @@
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
 use lash_kernel_state::paged::*;
+use lash_kernel_value::Name;
 use lash_kernel_vm::SessionEditor;
-use lash_vocabulary::Name;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},

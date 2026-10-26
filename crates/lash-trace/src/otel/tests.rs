@@ -692,9 +692,9 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             name: Some("example".into()),
         },
         TraceDomainSubject::WorkflowNode {
-            at: lash_vocabulary::sites::testkit::effect(
-                lash_vocabulary::sites::testkit::root_task(),
-                lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, [2, 0]),
+            at: lash_kernel_value::sites::testkit::effect(
+                lash_kernel_value::sites::testkit::root_task(),
+                lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, [2, 0]),
                 1,
                 Vec::new(),
             ),

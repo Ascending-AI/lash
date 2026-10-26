@@ -422,7 +422,7 @@ impl Backend {
     /// The store's refusal.
     pub async fn wake_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<(), DurableError> {
         let actor = lash_durable::ActorKey::session(session.as_str()).map_err(|error| {
             DurableError::Store(lash_durable::StoreFailure {
@@ -484,7 +484,7 @@ impl Backend {
     /// The store's refusal.
     pub async fn redrive_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         requester: &str,
     ) -> Result<bool, DurableError> {
         let actor = lash_durable::ActorKey::session(session.as_str()).map_err(corrupt_key)?;

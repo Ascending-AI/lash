@@ -3,9 +3,9 @@
 
 use lash_kernel_doc::{Datum, Float, Handle, Integer};
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
 use crate::{CellStart, End, Layout, Machine, Target};

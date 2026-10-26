@@ -125,7 +125,7 @@ fn controls_spec(
     let packages = lash_tool_support::ToolPackageProvider::new(
         CONTROLS_OWNER,
         CONTROLS_PROVIDER_KEY,
-        [lash_vocabulary::names::Segment::new(CONTROLS_OWNER)
+        [lash_kernel_value::names::Segment::new(CONTROLS_OWNER)
             .unwrap_or_else(|_| unreachable!("static process root"))]
         .into(),
         Arc::clone(&provider),
@@ -157,7 +157,7 @@ pub const SESSION_PROCESS_CONTROLS_PROVIDER: lash_core::plugin::ToolProviderHand
 pub const PROCESS_CONTROLS_CONFIG: lash_core::ProcessConfigKey<()> =
     lash_core::ProcessConfigKey::new(
         CONTROLS_OWNER,
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
     );
 
 /// The process controls as a process component (FIG-6034 §3.2): a process
@@ -782,9 +782,9 @@ pub mod policy {
     use lash_core_store::process_env::ProcessComponentEntry;
     use lash_core_store::resolutions::{ResolutionEntry, ResolutionSeed};
     use lash_core_store::tool_surface::{ExecutionEnvironment, OperationRoute, UseBinding};
-    use lash_vocabulary::{claims::*, providers::*};
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use {lash_vocabulary::claims::*, lash_vocabulary::providers::*};
 
     fn refused(reason: impl Into<String>) -> ProcessEnvPolicyError {
         ProcessEnvPolicyError::Refused(ProcessEnvRefusal::Policy {

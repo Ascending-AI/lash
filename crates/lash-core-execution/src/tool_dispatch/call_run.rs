@@ -9,8 +9,11 @@
 //! reruns a `Repeatable` one from its admission at the same ordinal. No
 //! code here is ever run again against a recorded history.
 
-use lash_vocabulary::{DeclarationRefusal, ExecutionPolicy, OutcomeShape};
 use std::sync::Arc;
+use {
+    lash_kernel_value::ExecutionPolicy, lash_vocabulary::DeclarationRefusal,
+    lash_vocabulary::OutcomeShape,
+};
 
 use tokio_util::sync::CancellationToken;
 

@@ -7,7 +7,7 @@
 //! guest object is held until its statement commits ([`Held`]): a
 //! statement that misses drops it, having written nothing.
 
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 use std::ops::Range;
 
 use lash_kernel_doc::arena::{ArenaHandle, ShortText};
@@ -21,7 +21,7 @@ use lash_kernel_doc::{
 };
 
 use lash_kernel_state::arena::Arena;
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 use crate::compile::{
     Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, ReadSite, Source,

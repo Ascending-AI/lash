@@ -114,7 +114,7 @@ impl PluginDiagnostics {
     pub async fn explain_claimability(
         &self,
         node: Option<&NodeServingSnapshot>,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<ClaimExplanation, DiagnosticError> {
         self.explain_actor_claimability(node, &ActorKey::session(session.as_str())?)
             .await
@@ -137,7 +137,7 @@ impl PluginDiagnostics {
     /// Retained plan; no session activation or writer access.
     pub async fn prompt_plan(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Option<crate::prompt::PromptPlan>, DiagnosticError> {
         let store = lash_core::store::SessionStore::new(
             Arc::clone(&self.core.store_factory) as Arc<dyn lash_core::store::RuntimeStore>,
@@ -155,7 +155,7 @@ impl PluginDiagnostics {
     /// A changed actor revision invalidates the projection, without retrying.
     pub async fn obligation_evidence(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         expected_revision: StateRevision,
         after: usize,
         limit: std::num::NonZeroUsize,

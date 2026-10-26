@@ -193,7 +193,7 @@ impl DurableProcessWorker {
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         execution: &AdmittedExecution,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: serde_json::Value,
     ) -> MemberOutcome {
         let call = lash_core_execution::sansio::PendingToolCall {
@@ -585,7 +585,7 @@ impl ProcessSteps for WorkerSteps {
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record) => record,
                         lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked { unmet, .. } => return Err(StepRefusal::CompositionUnavailable { reason: unmet.to_string() }),
                     };
-                    let requested_operation = lash_vocabulary::names::QualifiedOperation {
+                    let requested_operation = lash_kernel_value::names::QualifiedOperation {
                         package: record.requested.package,
                         name: record.requested.member,
                     };
@@ -981,7 +981,7 @@ fn failure_outcome(process: &ProcessRecord, failure: crate::ToolFailure) -> Memb
 fn dispatch_missing(
     process: &ProcessRecord,
     call: &lash_core_execution::sansio::PendingToolCall,
-    effect: &lash_vocabulary::names::OperationUse,
+    effect: &lash_kernel_value::names::OperationUse,
     execution: &AdmittedExecution,
     error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> MemberOutcome {
@@ -1002,7 +1002,7 @@ fn dispatch_missing(
 fn negative_resolution(
     process: &ProcessRecord,
     now_ms: u64,
-    operation: lash_vocabulary::names::QualifiedOperation,
+    operation: lash_kernel_value::names::QualifiedOperation,
     code: &str,
     note: String,
 ) -> StepAdmission {

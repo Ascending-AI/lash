@@ -18,7 +18,7 @@ use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::SessionMeta;
 use lash_core_store::store::StoreError;
 use lash_execution_contracts::process::ProcessRegistrar as _;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use rusqlite::Connection;
 
 use crate::compat::AdvanceStep;

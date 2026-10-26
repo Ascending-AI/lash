@@ -555,7 +555,7 @@ impl KernelMachine {
         &mut self,
         task: TaskId,
         exe: &Executable,
-        (lib, link): (LibId, lash_vocabulary::content_ids::LinkId),
+        (lib, link): (LibId, lash_kernel_value::content_ids::LinkId),
         invocation: super::exec::Invocation<'_>,
     ) -> Status {
         let caller = self.active_link;

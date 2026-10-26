@@ -150,7 +150,7 @@ pub struct PluginHarness {
     counts: CallbackCounts,
     core: Option<crate::LashCore>,
     worker: Option<Worker>,
-    session: lash_vocabulary::identity::SessionId,
+    session: lash_kernel_value::identity::SessionId,
 }
 impl PluginHarness {
     /// Construct an isolated database and boot the real runtime.
@@ -184,7 +184,7 @@ impl PluginHarness {
             counts: CallbackCounts::default(),
             core: None,
             worker: None,
-            session: lash_vocabulary::identity::SessionId::parse("plugin-certification")
+            session: lash_kernel_value::identity::SessionId::parse("plugin-certification")
                 .map_err(|error| PluginHarnessError::Worker(error.to_string()))?,
         };
         harness
@@ -218,7 +218,7 @@ impl PluginHarness {
         self.supporting_protocol = Some(factory);
         self.reopen().await
     }
-    pub fn session_id(&self) -> &lash_vocabulary::identity::SessionId {
+    pub fn session_id(&self) -> &lash_kernel_value::identity::SessionId {
         &self.session
     }
     pub fn requests(&self) -> Vec<crate::provider::LlmRequest> {

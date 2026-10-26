@@ -17,7 +17,7 @@ use lash_durable::{ActorTx, ClaimPurpose, CommitLabel, DomainWrite, DurableError
 
 use super::{TurnError, TurnRestoreError};
 use crate::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Why a session actor parked: the actor row's typed reason. A parked
 /// session runs nothing until an operator redrives it, a control wake (a

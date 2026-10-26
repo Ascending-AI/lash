@@ -25,7 +25,7 @@ use lash_core::{ToolProvider, TurnActivity};
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::Arc;
 
 use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent};
@@ -301,7 +301,7 @@ pub async fn durable_history(
 /// The agent frames `history` records, oldest first.
 pub fn history_frames(
     history: Vec<lash_core::store::HistoryNode>,
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
 ) -> Vec<lash_core::AgentFrameRecord> {
     use lash_core::facade_support::SessionGraphFacadeOps as _;
     let records = history
@@ -418,7 +418,7 @@ pub fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
 /// Create with the host's default config, then return the public open builder.
 pub async fn created_session(
     core: &LashCore,
-    id: lash_vocabulary::identity::SessionId,
+    id: lash_kernel_value::identity::SessionId,
 ) -> lash::SessionBuilder {
     created_session_with(core, id, mock_session_spec()).await
 }
@@ -426,7 +426,7 @@ pub async fn created_session(
 /// Match the original fixture's create-or-open behavior through the public API.
 pub async fn created_session_with(
     core: &LashCore,
-    id: lash_vocabulary::identity::SessionId,
+    id: lash_kernel_value::identity::SessionId,
     spec: lash::SessionSpec,
 ) -> lash::SessionBuilder {
     match core

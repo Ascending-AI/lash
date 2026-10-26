@@ -17,9 +17,9 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Document, FunctionDefinition, Span};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Signature;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Signature;
 
 use crate::{Diagnostic, DiagnosticKind, Note};
 

@@ -1,7 +1,7 @@
 //! Checkout-owned canonical sources for process-local document cache misses.
 use super::*;
+use lash_kernel_value::DocumentId;
 use lash_vm_protocol::message::StoredDocument;
-use lash_vocabulary::DocumentId;
 
 impl Checkout {
     /// Takes the run for the worker: with the run's first slice, it

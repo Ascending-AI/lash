@@ -5,9 +5,12 @@ use lash_kernel_doc::{
     CallablePresentation, FunctionRepresentation, SourceLanguage, StartConvention,
 };
 
-use lash_vocabulary::{AnnotationOrigin, Name, Param, Signature, SignatureOrigin, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
+use {
+    lash_kernel_value::AnnotationOrigin, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::SignatureOrigin, lash_kernel_value::Type,
+};
 
 use super::Lowerer;
 
@@ -168,7 +171,7 @@ impl Lowerer<'_> {
     pub(super) fn resolve_annotation(
         &self,
         annotation: &PyExpr,
-    ) -> Result<Type, lash_vocabulary::AnnotationResolutionReason> {
+    ) -> Result<Type, lash_kernel_value::AnnotationResolutionReason> {
         super::typed_dicts::annotation_type(
             annotation,
             &self.typed_dicts,

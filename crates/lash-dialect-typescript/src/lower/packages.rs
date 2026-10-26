@@ -25,7 +25,7 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc::{ActKind, Callee, Expr, Literal, Place, Rhs, Stmt};
 
-use lash_vocabulary::{PackagePath, Segment};
+use {lash_kernel_value::PackagePath, lash_kernel_value::Segment};
 
 use super::calls::Key;
 use super::{Lowerer, Lowering, Operand, Ty};
@@ -99,26 +99,26 @@ impl<'a> Lowerer<'a> {
                 export,
                 member,
             } => {
-                let name = lash_vocabulary::QualifiedName {
+                let name = lash_kernel_value::QualifiedName {
                     package: package.clone(),
                     member: segment.clone(),
                     type_member: None,
                 };
-                let brand = lash_vocabulary::Brand {
+                let brand = lash_kernel_value::Brand {
                     package: package.clone(),
                     name: segment.clone(),
                 };
                 match export {
                     NamespaceKind::Type(_) => {
-                        self.imports.insert(lash_vocabulary::Import {
+                        self.imports.insert(lash_kernel_value::Import {
                             name,
-                            kind: lash_vocabulary::ImportKind::Type { brand },
+                            kind: lash_kernel_value::ImportKind::Type { brand },
                         });
                     }
                     NamespaceKind::Error => {
-                        self.imports.insert(lash_vocabulary::Import {
+                        self.imports.insert(lash_kernel_value::Import {
                             name,
-                            kind: lash_vocabulary::ImportKind::Error { kind: brand },
+                            kind: lash_kernel_value::ImportKind::Error { kind: brand },
                         });
                     }
                     _ => {}
@@ -797,7 +797,7 @@ impl<'a> Lowerer<'a> {
                     self.invoke("ts.callable", std::slice::from_ref(&value), Ty::Unknown)?
                         .expr()
                 };
-                let params: Vec<lash_vocabulary::Name> =
+                let params: Vec<lash_kernel_value::Name> =
                     signature.params.iter().map(|_| self.fresh("arg")).collect();
                 let wrapped = |this: &mut Self| -> Lowering<Operand> {
                     let callable = this.let_expr(callable.clone(), Ty::Unknown);

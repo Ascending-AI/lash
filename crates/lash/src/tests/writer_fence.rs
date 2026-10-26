@@ -39,7 +39,7 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
         .build(crate::tests::host::runtime_lease_owner())
         .expect("the core");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("create the session before the finalize");
@@ -76,7 +76,7 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
     );
     let unfenced = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
-        &lash_vocabulary::identity::SessionId::from(ID),
+        &lash_kernel_value::identity::SessionId::from(ID),
     )
     .await
     .expect("a reader is never fenced")

@@ -234,8 +234,8 @@ async fn http_catalog_storm_coalesces_wire_notifications_and_keeps_control_live(
         lash_core::tool_provider_key!("servers"),
     );
     let source = lash_core_store::environment::SourceId("mcp".into());
-    let domain = lash_vocabulary::package::PublicationDomain("fixture".into());
-    let scope = lash_vocabulary::package::PublicationScope::Host;
+    let domain = lash_kernel_value::package::PublicationDomain("fixture".into());
+    let scope = lash_kernel_value::package::PublicationScope::Host;
     let empty = pool.environment_snapshot(
         &provider,
         &source,
@@ -338,7 +338,7 @@ fn guidance_sections(
     );
     let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
-            session_id: lash_vocabulary::identity::SessionId::from("mcp-cut"),
+            session_id: lash_kernel_value::identity::SessionId::from("mcp-cut"),
             frame: None,
             run: None,
             turn: None,

@@ -4,7 +4,7 @@ use lash_kernel_doc::{
     AssignOrder, Expr, Float, Integer, Literal, MapEntry, Member, Place, Rhs, Stmt,
 };
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 

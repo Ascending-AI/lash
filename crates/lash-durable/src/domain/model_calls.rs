@@ -90,7 +90,7 @@ impl ModelCallPinRow {
 
 /// Decode a reservation's keys without interpreting opaque call ids.
 pub fn pin_row(
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     owner: &str,
     call: String,
     call_id: String,

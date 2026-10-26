@@ -43,7 +43,7 @@ use lash::provider::{
 };
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::{StreamBlockEvent, StreamBlockKind};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use lash::TurnEvent;

@@ -163,7 +163,7 @@ impl std::error::Error for RlmSessionConfigDecodeError {}
 
 #[cfg(test)]
 mod tests {
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
     use std::sync::Arc;
 
     use super::*;
@@ -177,7 +177,7 @@ mod tests {
     impl lash_core::plugin::SessionReadService for NoopPromptManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
@@ -264,7 +264,7 @@ mod tests {
                 ..Default::default()
             }),
             ..lash_core::SessionSnapshot::new(
-                lash_vocabulary::identity::SessionId::from("session"),
+                lash_kernel_value::identity::SessionId::from("session"),
                 policy,
             )
         };
@@ -313,7 +313,7 @@ mod tests {
                 ..Default::default()
             }),
             ..lash_core::SessionSnapshot::new(
-                lash_vocabulary::identity::SessionId::from("session"),
+                lash_kernel_value::identity::SessionId::from("session"),
                 policy,
             )
         };
@@ -368,7 +368,7 @@ mod tests {
                 ..Default::default()
             }),
             ..lash_core::SessionSnapshot::new(
-                lash_vocabulary::identity::SessionId::from("session"),
+                lash_kernel_value::identity::SessionId::from("session"),
                 policy,
             )
         };

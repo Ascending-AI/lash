@@ -1,5 +1,5 @@
 //! Declared reads (ADR 0144): what answers a call of a tool whose manifest
-//! declares [`ExecutionPolicy::Read`](lash_vocabulary::tool_contract::ExecutionPolicy::Read) inside
+//! declares [`ExecutionPolicy::Read`](lash_kernel_value::tool_contract::ExecutionPolicy::Read) inside
 //! a code cell.
 //!
 //! A provider that serves `Read` tools registers a reader beside itself

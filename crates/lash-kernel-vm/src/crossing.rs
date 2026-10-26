@@ -25,10 +25,10 @@ use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog};
 
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::SemanticHeap;
-use lash_vocabulary::content_ids::LinkId;
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::{CallableId, DocumentId};
-use lash_vocabulary::types::Type;
+use lash_kernel_value::content_ids::LinkId;
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::types::Type;
+use {lash_kernel_value::names::CallableId, lash_kernel_value::names::DocumentId};
 
 pub(crate) struct CrossingHeap<'m> {
     pub heap: &'m mut PagedHeap,

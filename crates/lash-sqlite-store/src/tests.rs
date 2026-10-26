@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use lash_core_store::store::RunStore as _;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::SessionHistoryStore as _;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::sync::atomic::Ordering;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);

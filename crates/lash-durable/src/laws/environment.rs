@@ -9,8 +9,8 @@ use lash_core_store::{
     artifact_referrer::{ReferrerClaim, ReferrerGuard},
     environment::*,
 };
-use lash_vocabulary::identity::{SessionId, TurnId};
 use std::sync::Arc;
+use {lash_kernel_value::identity::SessionId, lash_vocabulary::identity::TurnId};
 
 #[async_trait::async_trait]
 pub trait EnvironmentTier: GraphTier {
@@ -48,7 +48,7 @@ fn head(owner: &VersionOwner) -> EnvironmentHead {
     }
 }
 async fn prepare(tier: &dyn EnvironmentTier, owned: &Owned) -> Result<VersionOwner, LawBroken> {
-    use lash_vocabulary::{names::*, package::*};
+    use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
     let package = Package {
         path: PackagePath::parse("environment").map_err(broken)?,
         members: Default::default(),
@@ -171,8 +171,8 @@ async fn clear(tier: &dyn EnvironmentTier, owned: &Owned, owner: &VersionOwner) 
 async fn retained_package(
     tier: &dyn EnvironmentTier,
     owner: &VersionOwner,
-) -> Result<lash_vocabulary::package::PackageId, LawBroken> {
-    use lash_vocabulary::package::PackageAdvertisement;
+) -> Result<lash_kernel_value::package::PackageId, LawBroken> {
+    use lash_kernel_value::package::PackageAdvertisement;
     let record = tier
         .store()
         .environments()

@@ -7,10 +7,10 @@ use lash_kernel_doc::{
     ParamTarget, Stmt,
 };
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::{Site, Unit};
+use lash_kernel_value::Name;
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use super::{Lowerer, Lowering};
 

@@ -253,7 +253,7 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     let code = "rate = 3\nasync def scale(value: int = 14) -> int:\n    return value * rate";
     saved_cell(&mut source, &host, "exec-code:0", tools.clone(), code).await;
     let held = source.lowering_functions();
-    let written = held[&lash_vocabulary::names::Name::new("scale")]
+    let written = held[&lash_kernel_value::names::Name::new("scale")]
         .written
         .as_ref()
         .expect("Python metadata");
@@ -292,7 +292,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     assert!(
         source
             .lowering_functions()
-            .contains_key(&lash_vocabulary::names::Name::new("shout")),
+            .contains_key(&lash_kernel_value::names::Name::new("shout")),
         "{:?}",
         source.not_carried()
     );
@@ -369,10 +369,10 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     assert_eq!(
         state
             .not_carried()
-            .get(&lash_vocabulary::names::Name::new("later")),
+            .get(&lash_kernel_value::names::Name::new("later")),
         Some(
             &lash_kernel_dialect::NotSaved::Capture {
-                name: lash_vocabulary::names::Name::new("pending"),
+                name: lash_kernel_value::names::Name::new("pending"),
                 why: lash_kernel_dialect::CaptureRefusal::Task,
             }
             .to_string()

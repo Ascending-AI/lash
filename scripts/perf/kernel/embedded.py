@@ -21,7 +21,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
 PROGRAMS = Path(__file__).with_name("embedded")
-LABEL = "//crates/lash-dialect-typescript:kernel_perf__example"
+LABEL = "//crates/lash-vm-worker:kernel_perf__example"
 # Official optimized Linux x86_64 distributions, not workspace dependencies.
 RELEASES = {
     "quickjs": (

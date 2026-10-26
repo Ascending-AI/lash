@@ -102,7 +102,10 @@ pub use lash_core_store::packages::PackageRefusal;
 use lash_core_store::artifact_referrer::{ArtifactName, ReferrerClaim, ResolvedArtifactCleanup};
 pub use lash_core_store::packages::{LinkRecord, PackageRecord};
 pub use lash_vocabulary as vocabulary;
-use lash_vocabulary::package::{LinkId, PackageId, PublicationKey, PublicationRecord};
+use {
+    lash_kernel_value::package::LinkId, lash_kernel_value::package::PackageId,
+    lash_vocabulary::package::PublicationKey, lash_vocabulary::package::PublicationRecord,
+};
 
 /// One execution admission. Every entry retains its own root and complete
 /// provenance under the supplied execution claim, in one store transaction.
@@ -110,7 +113,7 @@ use lash_vocabulary::package::{LinkId, PackageId, PublicationKey, PublicationRec
 /// already published immutable records.
 pub enum PackageHold<'a> {
     Document {
-        id: lash_vocabulary::names::DocumentId,
+        id: lash_kernel_value::names::DocumentId,
         body: &'a [u8],
     },
     Link {
@@ -266,7 +269,7 @@ pub fn package_reference(id: &PackageId) -> String {
 }
 #[must_use]
 pub fn publication_reference(key: &PublicationKey) -> String {
-    let bytes = lash_vocabulary::tokens::encode_body(key);
+    let bytes = lash_kernel_value::tokens::encode_body(key);
     format!("{PUBLICATION_REF_PREFIX}{}", blake3::hash(&bytes).to_hex())
 }
 
@@ -288,7 +291,10 @@ fn module_reference(artifact: &ArtifactName) -> Result<String, DurableError> {
 /// # Errors
 /// A record is malformed or does not match its content identity.
 pub fn content_dependencies(reference: &str, bytes: &[u8]) -> Result<Vec<String>, DurableError> {
-    use lash_vocabulary::package::{Fill, MemberKind, PublishedContent};
+    use {
+        lash_kernel_value::package::Fill, lash_kernel_value::package::MemberKind,
+        lash_vocabulary::package::PublishedContent,
+    };
     let mut children = Vec::new();
     if let Some(id) = reference.strip_prefix(LINK_REF_PREFIX) {
         let stored: StoredLink = decode(bytes)?;
@@ -430,8 +436,8 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
             let (reference, bytes, document, roots) = match hold {
                 PackageHold::Document { id, body } => {
                     if *id
-                        != lash_vocabulary::names::DocumentId::from_bytes(
-                            lash_vocabulary::tokens::logical_digest(body),
+                        != lash_kernel_value::names::DocumentId::from_bytes(
+                            lash_kernel_value::tokens::logical_digest(body),
                         )
                     {
                         return Err(PackageRefusal::Identity(id.to_string()).into());
@@ -499,7 +505,7 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         roots.extend(record.link.fills.values().filter_map(|fill| match fill {
-            lash_vocabulary::package::Fill::Export { link, .. } => Some(link_reference(link)),
+            lash_kernel_value::package::Fill::Export { link, .. } => Some(link_reference(link)),
             _ => None,
         }));
         let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
@@ -524,7 +530,7 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
             .members
             .values()
             .filter_map(|member| match &member.kind {
-                lash_vocabulary::package::MemberKind::Export { link, .. } => {
+                lash_kernel_value::package::MemberKind::Export { link, .. } => {
                     Some(link_reference(link))
                 }
                 _ => None,
@@ -575,7 +581,7 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
                     .members
                     .values()
                     .filter_map(|member| match &member.kind {
-                        lash_vocabulary::package::MemberKind::Export { link, .. } => Some(*link),
+                        lash_kernel_value::package::MemberKind::Export { link, .. } => Some(*link),
                         _ => None,
                     })
                     .collect();
@@ -824,8 +830,8 @@ mod work_laws {
     async fn retaining_a_link_never_materializes_terminal_artifact_bodies() {
         use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
         let store = CountedStorage::default();
-        let document = lash_vocabulary::names::DocumentId::from_bytes([0x71; 32]);
-        let link = lash_vocabulary::package::Link {
+        let document = lash_kernel_value::names::DocumentId::from_bytes([0x71; 32]);
+        let link = lash_kernel_value::package::Link {
             document,
             fills: BTreeMap::new(),
         };

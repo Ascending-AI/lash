@@ -4,7 +4,7 @@ use crate::session_model::{MessageRole, Part};
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, shared_parts,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
 fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
     Message {

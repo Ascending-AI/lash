@@ -4,7 +4,7 @@ pub use lash_core_store::session_identity::{
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
 };
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use serde::{Deserialize, Serialize};
 

@@ -6,7 +6,7 @@ use crate::{
     ProcessRetention as _,
 };
 use lash_core::testing::{Script, StoreOp};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A transient registry failure during fork-observer publication is best
 /// effort: it does not fail session creation and the durable intent is

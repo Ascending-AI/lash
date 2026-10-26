@@ -17,9 +17,12 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_vm::{End, Outcome, Request};
-use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
 use serde_json::Value as Json;
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use super::machine;
 

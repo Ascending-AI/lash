@@ -397,7 +397,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         recorded.push(
             lash_execution_contracts::process::ProcessEffectOccurrence::new(
-                lash_vocabulary::sites::EffectLocation::authored(
+                lash_kernel_value::sites::EffectLocation::authored(
                     lash_protocol_types::effect_identity_fixture("repeated-node", occurrence),
                 ),
                 if is_failure { "fixture.write" } else { "now" },

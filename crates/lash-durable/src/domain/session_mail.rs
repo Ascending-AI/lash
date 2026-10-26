@@ -11,9 +11,9 @@
 //! mails its own session with [`SessionMailWrite::Enqueue`]: a frame switch
 //! commits its follow-on that way, in its `turn.commit`.
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The set of a session actor before its first turn: the one every producer

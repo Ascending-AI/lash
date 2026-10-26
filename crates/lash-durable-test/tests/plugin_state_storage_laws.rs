@@ -61,8 +61,8 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -189,7 +189,7 @@ fn tool_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -1053,7 +1053,7 @@ async fn a_fork_copies_and_resets_namespaces_as_declared_at_its_revision(tier: T
     served::assert_answered("second", &world.send(&parent, "fork-second").await);
 
     let child_id =
-        lash_vocabulary::identity::SessionId::try_from("fork-child-session".to_owned()).unwrap();
+        lash_kernel_value::identity::SessionId::try_from("fork-child-session".to_owned()).unwrap();
     world
         .core
         .fork_at(

@@ -1,5 +1,5 @@
 //! Admit canvas targets before any private tree write.
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 use std::collections::BTreeMap;
 
 use crate::apply::{Fault, Working, at, node};
@@ -14,7 +14,7 @@ use lash_kernel_doc::{
     Rhs, Stmt, TryStmt,
 };
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 fn has_action(node: Node<'_>) -> bool {
     matches!(node, Node::Action(_) | Node::Expr(Expr::Act(_)))
@@ -399,7 +399,7 @@ impl Working {
                 {
                     let declaration = self.document.main.as_ref().and_then(|body| body.iter().enumerate().find_map(|(index, stmt)| {
                         matches!(stmt, Stmt::Let { name, value: Rhs::Expr(Expr::Literal(Literal::Function(id))) } if name == from && *id == function.function)
-                            .then(|| Site::new(lash_vocabulary::sites::Unit::Main, [index as u32]))
+                            .then(|| Site::new(lash_kernel_value::sites::Unit::Main, [index as u32]))
                     }));
                     if let Some(declaration) = declaration.and_then(|site| self.origin(&site)) {
                         self.rename_binding(&declaration, to, catalog)?;
@@ -544,12 +544,13 @@ impl Working {
                     .collect::<Result<_, _>>()?;
                 // Source calls retain the operation's declared reply contract.
                 // A canvas client may leave its result facet unconstrained.
-                let result = if source != Source::Kernel && *result == lash_vocabulary::Type::Any {
+                let result = if source != Source::Kernel && *result == lash_kernel_value::Type::Any
+                {
                     self.document
                         .imports
                         .get(slot)
                         .and_then(|import| match &import.kind {
-                            lash_vocabulary::ImportKind::Operation { signature } => {
+                            lash_kernel_value::ImportKind::Operation { signature } => {
                                 Some(signature.result.clone())
                             }
                             _ => None,

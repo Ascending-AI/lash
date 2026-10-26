@@ -27,9 +27,9 @@ use futures_util::future::BoxFuture;
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use tokio::sync::mpsc;
 

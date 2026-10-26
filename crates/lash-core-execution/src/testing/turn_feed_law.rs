@@ -20,7 +20,7 @@ use crate::store::{
     SessionFaultOrigin, SessionFaultRecord, SessionFaultStore, TurnChangeCursor, TurnChangeKind,
 };
 use lash_execution_contracts::deployment::DeploymentStore;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// How long the law lets the other writers commit while the late one is
 /// held. A store that orders its commits behind the held one cannot commit

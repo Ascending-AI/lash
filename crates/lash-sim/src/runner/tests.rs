@@ -1,6 +1,6 @@
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[tokio::test]
 async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {

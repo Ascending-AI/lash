@@ -345,10 +345,10 @@ pub async fn check_parked_helpers(
 /// Project validated operation contexts intact. A code Import's exact Link
 /// and export determines its function; operation contracts remain untouched.
 type HelperCode = (
-    std::collections::BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+    std::collections::BTreeMap<lash_kernel_value::LinkId, lash_kernel_doc::Document>,
     std::collections::BTreeMap<
-        (lash_vocabulary::LinkId, lash_vocabulary::ImportSlot),
-        lash_vocabulary::CallableId,
+        (lash_kernel_value::LinkId, lash_kernel_value::ImportSlot),
+        lash_kernel_value::CallableId,
     >,
 );
 
@@ -356,7 +356,7 @@ pub(super) fn helper_code(
     content: &lash_kernel_package::LinkedContent,
 ) -> Result<HelperCode, lash_kernel_state::paged::HelperCompatibilityError> {
     use lash_kernel_doc::heap::HeapFault;
-    use lash_vocabulary::package::Fill;
+    use lash_kernel_value::package::Fill;
     let mut documents = std::collections::BTreeMap::new();
     let mut imports = std::collections::BTreeMap::new();
     for (link, instance) in &content.links {
@@ -376,7 +376,7 @@ pub(super) fn helper_code(
             {
                 imports.insert(
                     (*link, *slot),
-                    lash_vocabulary::CallableId {
+                    lash_kernel_value::CallableId {
                         link: *target,
                         function: function.function,
                     },

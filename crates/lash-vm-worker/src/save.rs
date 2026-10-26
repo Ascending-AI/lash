@@ -11,7 +11,7 @@ use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_vm::{CellSave, CellSaveContext, SaveCell, SavedCell};
 use lash_vm_client::service::LowerFunction;
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 /// How a cell of one dialect saves its functions.
 pub(crate) struct DialectSave {
@@ -19,7 +19,7 @@ pub(crate) struct DialectSave {
         BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     /// The dialect's function values; none keeps no function.
     pub(crate) values: Option<lash_kernel_doc::FunctionRepresentation>,
-    pub(crate) controls: BTreeMap<lash_vocabulary::names::OperationUse, BTreeSet<EffectControl>>,
+    pub(crate) controls: BTreeMap<lash_kernel_value::names::OperationUse, BTreeSet<EffectControl>>,
     /// What the cell's source wrote of each function its document makes,
     /// by the site of its closure.
     pub(crate) written: BTreeMap<Site, lash_kernel_dialect::Written>,

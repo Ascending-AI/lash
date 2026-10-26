@@ -132,7 +132,7 @@ async fn held_round(id: &str, tools: &Tools) -> Result<(Observed, LashCore, lash
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("use both tools")).await?;

@@ -305,8 +305,8 @@ pub trait SingletonToolHandlers: Send + Sync {
     }
 
     /// The execution policy the call is admitted under.
-    fn execution_policy(&self, _call: &SingletonToolCall) -> lash_vocabulary::ExecutionPolicy {
-        lash_vocabulary::ExecutionPolicy::Once
+    fn execution_policy(&self, _call: &SingletonToolCall) -> lash_kernel_value::ExecutionPolicy {
+        lash_kernel_value::ExecutionPolicy::Once
     }
 
     /// The capture of a before-check's cached success.

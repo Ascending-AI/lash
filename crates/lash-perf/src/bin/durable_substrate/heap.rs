@@ -421,7 +421,7 @@ async fn sample_with_stores(
     let pool = service.pool()?;
     let spools = service.spools()?;
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
+        lash_kernel_value::identity::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
     let meter = Arc::new(Meter {
         actor: super::turn::session_actor(&session_id)?.to_string(),
         recorder,

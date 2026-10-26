@@ -24,10 +24,10 @@ use crate::checkpoint_graph::NodeKind;
 use crate::checkpoint_graph::NodeSource;
 use crate::checkpoint_graph::StoredNode;
 use crate::checkpoint_graph::bodies::{OpaqueLeaf, OpaquePayload};
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::{BlobRef, CheckpointComponentDescriptor, SessionCheckpoint};
 

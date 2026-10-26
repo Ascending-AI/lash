@@ -53,7 +53,7 @@ use super::turn_scope::{continue_scope_ends, end_turn_scope, mark_until_children
 use crate::ActorContext;
 use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The reason a session close's `cancel` step gives the open turn's cancel.
 pub const SESSION_CLOSED: &str = "session_closed";

@@ -26,6 +26,7 @@ schema-validation = ["lash-protocol-types/schema-validation"]
 synthetic-next = ["lash-protocol-types/synthetic-next"]
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-protocol-types = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }

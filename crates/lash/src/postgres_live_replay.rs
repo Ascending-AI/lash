@@ -44,6 +44,7 @@ use lash_core::{
     LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionCursor, SessionObservationEvent,
     SessionRevision,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::host::{
     ConnectionRole, PostgresHostConfig, ReplayDataPolicy, ReplaySchemaMode, RetryPolicy,
 };
@@ -51,7 +52,6 @@ use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 

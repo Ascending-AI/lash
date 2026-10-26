@@ -1,8 +1,8 @@
 //! Segment index for package roots and member leaves. Insertion visits only
 //! the path and its immediate declared members, never every prior package.
-use lash_vocabulary::names::{PackagePath, Segment};
-use lash_vocabulary::package::PackageAdvertisement;
+use lash_kernel_value::package::PackageAdvertisement;
 use std::collections::BTreeMap;
+use {lash_kernel_value::names::PackagePath, lash_kernel_value::names::Segment};
 
 #[derive(Default)]
 struct Node {

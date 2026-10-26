@@ -374,7 +374,7 @@ fn processes_area_witnesses_b() {
     // W0614: lash::testing::RuntimeTurnPhaseProbeSlot::set_for_session [function]
     let _ = lash::testing::RuntimeTurnPhaseProbeSlot::set_for_session(
         todo!(),
-        lash_vocabulary::identity::SessionId::from("x"),
+        lash_kernel_value::identity::SessionId::from("x"),
         todo!(),
     );
     // W0623: lash::plugins::ProcessEngineRegistry [struct]

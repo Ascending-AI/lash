@@ -32,7 +32,7 @@ fn ingress_start_without_lifetime_is_refused_before_submission() {
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
     let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
     )?;
 
@@ -163,7 +163,7 @@ async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<(
     let first = node(5, "first")?;
     let later = node(6, "later")?;
     let session =
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity");
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity");
     let _session = created_session(&first, session.clone())
         .await
         .open()

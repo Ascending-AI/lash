@@ -34,9 +34,12 @@ use lash_core_store::checkpoint_graph::{
     GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
 use lash_kernel_doc::Datum;
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 /// Items per page and children per index.
 pub const FANOUT: u64 = 32;

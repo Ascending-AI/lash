@@ -4,7 +4,7 @@
 
 use lash_kernel_doc::{Expr, Node, Stmt};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::{Lowerer, Lowering};
 use crate::adapter::{self as ast, VarKind};
@@ -102,8 +102,8 @@ impl Lowerer<'_> {
             if let Some(caption) = caption {
                 self.declared_captions
                     .push(lash_kernel_doc::CaptionEntry::site(
-                        lash_vocabulary::sites::Site::new(
-                            lash_vocabulary::sites::Unit::Library(function),
+                        lash_kernel_value::sites::Site::new(
+                            lash_kernel_value::sites::Unit::Library(function),
                             Vec::new(),
                         ),
                         caption.clone(),

@@ -102,9 +102,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
                     document: crate::TraceExecutionCode::Start(
-                        lash_vocabulary::names::LinkedStart {
-                            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                            selector: lash_vocabulary::names::StartSelector::Main,
+                        lash_kernel_value::names::LinkedStart {
+                            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+                            selector: lash_kernel_value::names::StartSelector::Main,
                         },
                     ),
                     entry_name: "main".to_string(),

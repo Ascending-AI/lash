@@ -72,10 +72,10 @@ use lash_durable::{CommitLabel, DomainWrite, DurableError};
 use lash_kernel_doc::{Datum, ErrorDatum, KERNEL_VERSION};
 
 use lash_kernel_state::paged::CheckpointHeader;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
 use lash_kernel_vm::{End, Outcome, WaitId};
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;

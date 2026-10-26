@@ -1,5 +1,5 @@
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use lash::tracing::{TraceRuntimeScope, TraceRuntimeSubject};

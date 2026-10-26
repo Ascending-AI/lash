@@ -5,7 +5,7 @@ use lash_kernel_doc::heap::PageValue;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::tokens::encode_body;
 
 fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
     embedder.reopen(crate::compile::Layout::default(), true)
@@ -74,7 +74,7 @@ fn a_projection_refusal_preserves_the_typed_heap_cause() {
 fn main_and_entry_keep_their_distinct_checkpoint_roots() {
     use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::Datum;
-    use lash_vocabulary::Name;
+    use lash_kernel_value::Name;
     use tree::{SealWork, Tree};
     for entry in [false, true] {
         let mut embedder = Embedder::new(
@@ -88,8 +88,8 @@ main { let v = perform 0(7) as Any return v }"#,
         // their payload. Use a real frozen page and the canonical function table.
         let pin = lash_kernel_state::paged::FunctionRecord {
             environment: heap.allocate_object(ObjectInit::Record(vec![])).unwrap(),
-            callable: lash_vocabulary::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([4; 32]),
+            callable: lash_kernel_value::CallableId {
+                link: lash_kernel_value::LinkId::from_bytes([4; 32]),
                 function: *embedder.document.functions.keys().next().unwrap(),
             },
             name: lash_kernel_state::paged::NameRef::new(&Name::new("host pin"), heap.pages())
@@ -565,7 +565,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
     use super::embedder::{ROOMY, census};
     use crate::{CellStart, EffectModes, StartError, Target};
     use lash_kernel_doc::Datum;
-    use lash_vocabulary::Name;
+    use lash_kernel_value::Name;
     let embedder = Embedder::new("main { }");
     let limit = CheckpointRoot::HOST_METADATA_LIMIT;
     // A long name takes five framing bytes; an empty-name list takes
@@ -672,7 +672,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     assert!(matches!(run.run(), crate::Step::Parked(_)));
     let (root, _) = run.checkpoint();
     let snapshot = |root: &CheckpointRoot| {
-        crate::conformance::checkpoint(root, Box::new(run.source.clone())).unwrap()
+        lash_kernel_state::semantic::checkpoint(root, Box::new(run.source.clone())).unwrap()
     };
     let original = snapshot(&root);
     let mut heap =
@@ -700,8 +700,8 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
     let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
     frame.statement = lash_kernel_state::paged::SiteRef::new(
-        &lash_vocabulary::sites::Site {
-            unit: lash_vocabulary::sites::Unit::Main,
+        &lash_kernel_value::sites::Site {
+            unit: lash_kernel_value::sites::Unit::Main,
             path: vec![0],
         },
         heap.pages(),
@@ -723,7 +723,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     assert_ne!(snapshot(&moved), original, "a frame pc is exact");
     let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
     let key = lash_kernel_state::kernel_internals::metadata::metadata_key(
-        &lash_vocabulary::names::Name::new("b"),
+        &lash_kernel_value::names::Name::new("b"),
     );
     let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
     let independent = heap

@@ -3,8 +3,8 @@
 use std::fmt;
 
 use crate::ids::ActorKey;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// A code cell's identity within its turn.

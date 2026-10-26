@@ -173,7 +173,7 @@ impl<'a> Values<'a> {
                     policy: self.numbers,
                     declared: &|_| false,
                 }
-                .decode(value, &lash_vocabulary::Type::Any)?;
+                .decode(value, &lash_kernel_value::Type::Any)?;
                 return self.datum(node, path, &decoded, depth);
             }
             Datum::Timestamp(v) => {

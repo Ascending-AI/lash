@@ -77,7 +77,7 @@ impl AdmittedBinding {
     }
 }
 
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 
 /// What cancelling an issued call asks of the external work it started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

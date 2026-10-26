@@ -19,8 +19,8 @@ pub fn workflow_overlay_document(
                     lash_kernel_doc::Node::Action(_)
                         | lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(_))
                 ) {
-                    sites.push(lash_vocabulary::sites::Site::new(
-                        lash_vocabulary::sites::Unit::Library(*id),
+                    sites.push(lash_kernel_value::sites::Site::new(
+                        lash_kernel_value::sites::Unit::Library(*id),
                         path.clone(),
                     ));
                 }

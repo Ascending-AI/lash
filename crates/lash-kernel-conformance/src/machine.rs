@@ -180,11 +180,12 @@ pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Pro
 pub(crate) fn prepare_document(
     library: &PreparedLibrary,
     document: Arc<lash_kernel_doc::Document>,
-    offered: Option<&BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::Signature>>,
+    offered: Option<&BTreeMap<lash_kernel_value::EffectName, lash_kernel_value::Signature>>,
 ) -> Option<Program> {
-    use lash_vocabulary::{
-        ContractId, ImportKind, OperationRequirement,
-        package::{Fill, Link},
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::ImportKind,
+        lash_kernel_value::OperationRequirement, lash_kernel_value::package::Fill,
+        lash_kernel_value::package::Link,
     };
     // Dialect witnesses share the ordinary operation-script fixture while
     // their helper image stays installed separately. The authored corpus has
@@ -206,9 +207,8 @@ pub(crate) fn prepare_document(
                 return None;
             };
             let signature = match offered {
-                Some(offered) => {
-                    offered.get(&lash_vocabulary::EffectName::new(import.name.to_string()).ok()?)?
-                }
+                Some(offered) => offered
+                    .get(&lash_kernel_value::EffectName::new(import.name.to_string()).ok()?)?,
                 None => signature,
             };
             Some((
@@ -253,7 +253,7 @@ pub(crate) fn run_program_in<M: Machine>(
     let env = &case.environment;
     if env.reads.iter().any(|name| {
         !program.document.imports.values().any(|import| {
-            matches!(import.kind, lash_vocabulary::ImportKind::Operation { .. })
+            matches!(import.kind, lash_kernel_value::ImportKind::Operation { .. })
                 && name.as_str() == import.name.to_string()
         })
     }) {
@@ -286,11 +286,11 @@ pub(crate) fn run_program_in<M: Machine>(
             })
             .map(|(slot, _)| {
                 (
-                    lash_vocabulary::OperationUse {
+                    lash_kernel_value::OperationUse {
                         link: program.link,
                         slot: *slot,
                     },
-                    lash_vocabulary::package::OperationMode::Read,
+                    lash_kernel_value::package::OperationMode::Read,
                 )
             })
             .collect(),
@@ -317,7 +317,7 @@ pub(crate) fn run_program_in<M: Machine>(
                     .iter()
                     .map(move |(slot, import)| {
                         (
-                            lash_vocabulary::OperationUse {
+                            lash_kernel_value::OperationUse {
                                 link: *link,
                                 slot: *slot,
                             },
@@ -388,7 +388,7 @@ pub(crate) fn run_program_in<M: Machine>(
                             waits.push(effect.wait);
                             trace.push(Trace::Effect {
                                 identity: Some(
-                                    lash_kernel_doc::kernel_internals::effect_parts(
+                                    lash_kernel_value::kernel_internals::effect_parts(
                                         &effect.identity,
                                     )
                                     .clone(),
@@ -446,7 +446,7 @@ struct ScriptHost<'r> {
     prints: Vec<Datum>,
     fault: Option<String>,
     printed: &'r mut dyn FnMut(),
-    operations: BTreeMap<lash_vocabulary::OperationUse, String>,
+    operations: BTreeMap<lash_kernel_value::OperationUse, String>,
 }
 
 impl ScriptHost<'_> {
@@ -460,10 +460,10 @@ impl ScriptHost<'_> {
 impl Host for ScriptHost<'_> {
     fn perform(
         &mut self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
-        _site: &lash_vocabulary::sites::PositionLabel,
-        _origin: &lash_vocabulary::sites::Site,
+        _site: &lash_kernel_value::sites::PositionLabel,
+        _origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         match self.answers.pop_front() {
             Some(HostAnswer::Perform(perform))

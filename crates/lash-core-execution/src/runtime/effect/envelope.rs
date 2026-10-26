@@ -1,7 +1,7 @@
 use crate::AttachmentRef;
 pub use lash_core_store::effect_identity::*;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -448,7 +448,7 @@ pub enum RuntimeEffectCommand {
     /// the head, and a repeated compaction records a base of its own. The
     /// envelope names only the session: the base is the step's outcome.
     RecordCompactionBase {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
     },
     /// Resolve a config transaction once, before anything publishes
     /// (FIG-4379): the base revision it resolved against and either the
@@ -458,7 +458,7 @@ pub enum RuntimeEffectCommand {
     /// envelope names only the session and the transaction id: the
     /// resolution is the step's outcome.
     ResolveConfigTransaction {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         transaction: String,
     },
     /// Read the session's leading open command run for a command run to
@@ -470,7 +470,7 @@ pub enum RuntimeEffectCommand {
     /// commits that landed, even after those commits settled the lane. The
     /// envelope names only the session: the run is the step's outcome.
     ReadSessionCommandRun {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
     },
     /// Close a logical run's scope after its terminal evidence (FIG-3600
     /// S7, FIG-3607 item 7). Recorded under the run's scope at

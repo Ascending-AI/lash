@@ -9,11 +9,13 @@ use super::{HeapWriteError, ObjectKind, SemanticHeap};
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::text_summary;
-use lash_vocabulary::tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
-};
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body,
+};
 
 #[derive(Clone, Debug)]
 struct Part {

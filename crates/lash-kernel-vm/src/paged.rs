@@ -16,8 +16,8 @@ use lash_kernel_doc::{Datum, Invalid};
 use lash_kernel_state::paged::{
     Checkpoint, CheckpointRoot, FunctionRecord, PageSource, SealBudget, SessionRoot,
 };
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::Name;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::interface::{
@@ -81,8 +81,8 @@ pub trait CellSave {
 
 /// A cell's end as its saving reads it.
 pub struct SaveCell<'a> {
-    pub link: lash_vocabulary::content_ids::LinkId,
-    pub documents: &'a BTreeMap<lash_vocabulary::content_ids::LinkId, lash_kernel_doc::Document>,
+    pub link: lash_kernel_value::content_ids::LinkId,
+    pub documents: &'a BTreeMap<lash_kernel_value::content_ids::LinkId, lash_kernel_doc::Document>,
     pub document: &'a lash_kernel_doc::Document,
     /// The execution closure the cell's code calls into.
     pub closure: PageRef,
@@ -166,11 +166,11 @@ pub enum MachineError {
 pub enum OpenError {
     #[error("build helper {function} is missing")]
     MissingHelper {
-        function: lash_vocabulary::FunctionId,
+        function: lash_kernel_value::FunctionId,
     },
     #[error("the registry has no function {function}, which the checkpoint pins")]
     MissingFunction {
-        function: lash_vocabulary::names::FunctionId,
+        function: lash_kernel_value::names::FunctionId,
     },
     #[error("the document is not admitted: {0}")]
     NotAdmitted(#[from] Invalid),

@@ -1,0 +1,26 @@
+[package]
+name = "lash-kernel-value"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Kernel names, types, links and canonical value encodings."
+[lib]
+name = "lash_kernel_value"
+doctest = false
+[lints]
+workspace = true
+[features]
+default = []
+testing = []
+[dependencies]
+blake3 = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+jsonschema = { workspace = true, default-features = false }

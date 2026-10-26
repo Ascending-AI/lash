@@ -15,7 +15,7 @@ fn answer_tool(value_schema: serde_json::Value) -> lash_vocabulary::tool_contrac
     lash_core::finish_tool(
         "answer.submit",
         "End the turn with this call's input as its answer. It returns nothing, and nothing after the call runs: call it once every other piece of work has finished.",
-        lash_vocabulary::json_schema::JsonSchema::admit(value_schema).expect("valid value schema"),
+        lash_kernel_value::json_schema::JsonSchema::admit(value_schema).expect("valid value schema"),
     )
     .expect("a canonical operation")
 }
@@ -251,11 +251,11 @@ type SubmitBody = fn(&serde_json::Value) -> lash_core::ToolOutcome;
 /// `value`, whose body is `body`.
 struct SubmitTool {
     body: SubmitBody,
-    value: lash_vocabulary::json_schema::JsonSchema,
+    value: lash_kernel_value::json_schema::JsonSchema,
 }
 
 fn submit_definition(
-    value: lash_vocabulary::json_schema::JsonSchema,
+    value: lash_kernel_value::json_schema::JsonSchema,
 ) -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_vocabulary::tool_contract::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
@@ -267,7 +267,7 @@ fn submit_definition(
             "required": ["answer"],
             "additionalProperties": false
         }),
-        lash_vocabulary::tool_declaration::TurnControls::finish(value),
+        lash_kernel_value::tool_declaration::TurnControls::finish(value),
     )
     .expect("valid declared tool schema")
     .with_execution(std::time::Duration::from_secs(30))
@@ -350,7 +350,7 @@ async fn run_submit_turn(
         lash::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body,
-            value: lash_vocabulary::json_schema::JsonSchema::any(),
+            value: lash_kernel_value::json_schema::JsonSchema::any(),
         }),
     )
     .plugin(plugin)
@@ -554,7 +554,7 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
         lash::tool_provider_key!("tools"),
         Arc::new(SubmitTool {
             body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
-            value: lash_vocabulary::json_schema::JsonSchema::admit(
+            value: lash_kernel_value::json_schema::JsonSchema::admit(
                 serde_json::json!({ "type": "integer" }),
             )
             .expect("an integer schema is admitted"),

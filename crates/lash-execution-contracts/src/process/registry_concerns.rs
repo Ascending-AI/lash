@@ -31,8 +31,8 @@ use super::registry::{
     NonTerminalProcessPage, ParentEndPlan, ProcessPruneReport, ProcessRegistry,
     ProcessRegistryCursor, ProjectionWatermark,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 /// Point reads and scans over registered processes.
 ///
@@ -711,7 +711,7 @@ pub trait ProcessClockRebind: Send + Sync {
 ///     ProcessRegistryCursor, NonTerminalProcessPage, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
 /// };
 /// use lash_execution_contracts::{ProcessLifecycle, ProcessObserverRegistry, ProcessQuery};
-/// use lash_vocabulary::identity::SessionId;
+/// use lash_kernel_value::identity::SessionId;
 /// use std::num::NonZeroUsize;
 ///
 /// struct ObserverOnly;

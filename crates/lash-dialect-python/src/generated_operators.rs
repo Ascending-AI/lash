@@ -1,8 +1,10 @@
 //! Native tokens resolve by operand facts, then by a unique full identity.
 use lash_kernel_dialect::source_types::{Kind, Types};
 use lash_kernel_doc as k;
-use lash_vocabulary::{FunctionId, FunctionName, ImportSlot};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::ImportSlot,
+};
 
 #[derive(Default)]
 pub(crate) struct Operators {

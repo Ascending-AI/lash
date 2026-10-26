@@ -5,13 +5,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_vocabulary::tokens::RefForm;
-use lash_vocabulary::tokens::TokenEvent;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
-use lash_vocabulary::tokens::check_ascending;
-use lash_vocabulary::tokens::encode_body;
-use lash_vocabulary::tokens::{CanonicalFault, DecodeDimension};
+use lash_kernel_value::tokens::RefForm;
+use lash_kernel_value::tokens::TokenEvent;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
+use lash_kernel_value::tokens::check_ascending;
+use lash_kernel_value::tokens::encode_body;
+use {lash_kernel_value::tokens::CanonicalFault, lash_kernel_value::tokens::DecodeDimension};
 
 use super::bodies::{
     ExecRoot, ExecRootKind, ExecStatus, OpaqueLeaf, OpaquePayload, OwnerBinding, ProcessState,
@@ -110,9 +110,9 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
         envelope: None,
         owed: Vec::new(),
         requirements: lash_vocabulary::claims::ClaimRequirements {
-            machine: lash_vocabulary::claims::NodeRequirements {
+            machine: lash_kernel_value::claims::NodeRequirements {
                 libraries: Default::default(),
-                natives: [lash_vocabulary::FunctionId::from_bytes([1; 32])].into(),
+                natives: [lash_kernel_value::FunctionId::from_bytes([1; 32])].into(),
                 kernels: [1].into(),
             },
             providers: [lash_vocabulary::providers::ToolProviderHandle::new(
@@ -127,7 +127,7 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
                     "host",
                     lash_vocabulary::providers::ToolProviderKey::new("codec").unwrap(),
                 ),
-                lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+                lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
             )]
             .into(),
             ..Default::default()
@@ -945,7 +945,8 @@ fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
     let id = staged
         .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
         .unwrap();
-    let policy = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let policy =
+        lash_kernel_value::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
     let mut decoder = GraphDecoder::new(
         &staged,
         DecodeLimits {
@@ -1082,8 +1083,8 @@ fn repeated_captures_share_unchanged_graph_materialization() {
 /// than materializing another complete copy before the typed decoder runs.
 #[test]
 fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
-    use lash_vocabulary::tokens::TokenCodec;
-    use lash_vocabulary::tokens::TokenError;
+    use lash_kernel_value::tokens::TokenCodec;
+    use lash_kernel_value::tokens::TokenError;
 
     struct ReadText {
         address: usize,

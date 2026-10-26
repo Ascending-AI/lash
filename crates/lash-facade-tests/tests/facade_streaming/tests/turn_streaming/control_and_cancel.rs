@@ -14,7 +14,7 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("turn-stream-last-group")
+        lash_kernel_value::identity::SessionId::parse("turn-stream-last-group")
             .expect("nonblank host identity"),
     )
     .await
@@ -44,7 +44,7 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("retry-status")
+        lash_kernel_value::identity::SessionId::parse("retry-status")
             .expect("nonblank host identity"),
     )
     .await
@@ -117,7 +117,7 @@ async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("queued-input")
+        lash_kernel_value::identity::SessionId::parse("queued-input")
             .expect("nonblank host identity"),
     )
     .await
@@ -281,7 +281,7 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("queued-work-live-lease")
+        lash_kernel_value::identity::SessionId::parse("queued-work-live-lease")
             .expect("nonblank host identity"),
     )
     .await
@@ -296,7 +296,7 @@ async fn next_turn_notification_during_a_live_turn_has_bounded_hydrations() -> R
     let baseline_builds = builds.load(Ordering::SeqCst);
 
     core.session(
-        lash_vocabulary::identity::SessionId::parse("queued-work-live-lease")
+        lash_kernel_value::identity::SessionId::parse("queued-work-live-lease")
             .expect("nonblank host identity"),
     )
     .durable()
@@ -494,7 +494,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("active-steer-interrupt-cancel")
+        lash_kernel_value::identity::SessionId::parse("active-steer-interrupt-cancel")
             .expect("nonblank host identity"),
     )
     .await
@@ -648,7 +648,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("accepted-active-steer-interrupt")
+        lash_kernel_value::identity::SessionId::parse("accepted-active-steer-interrupt")
             .expect("nonblank host identity"),
     )
     .await
@@ -798,7 +798,7 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     let session_id = SessionId::from("checkpoint-admitted-steer-cancel");
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("checkpoint-admitted-steer-cancel")
+        lash_kernel_value::identity::SessionId::parse("checkpoint-admitted-steer-cancel")
             .expect("nonblank host identity"),
     )
     .await
@@ -871,7 +871,7 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("fanout-tool-events")
+        lash_kernel_value::identity::SessionId::parse("fanout-tool-events")
             .expect("nonblank host identity"),
     )
     .await

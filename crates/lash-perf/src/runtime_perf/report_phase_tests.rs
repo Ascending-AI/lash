@@ -15,7 +15,7 @@ use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// FIG-6620: changing phase observation or losing its identity refuses history.
 #[test]
@@ -145,7 +145,7 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
         lash_core::perf_witness::Collector::install().expect("install pool checkout witness");
 
     let batches = store
-        .list_queued_work(&lash_vocabulary::identity::SessionId::from(
+        .list_queued_work(&lash_kernel_value::identity::SessionId::from(
             "pool-wait-witness",
         ))
         .await
@@ -423,7 +423,7 @@ async fn checkpoint_publisher_claims_only_its_session() {
             .unwrap(),
     ))
     .unwrap();
-    let session = lash_vocabulary::identity::SessionId::from("checkpoint-publisher-law");
+    let session = lash_kernel_value::identity::SessionId::from("checkpoint-publisher-law");
     let actor = ActorKey::session(session.as_str()).unwrap();
     let sibling = ActorKey::session("checkpoint-edit-law").unwrap();
     let mut created = MailTx::new();

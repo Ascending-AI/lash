@@ -6,8 +6,8 @@ use lash_core_store::effect_identity::RuntimeAttribution;
 use lash_core_store::effect_identity::RuntimeEffectKind;
 use lash_core_store::effect_identity::RuntimeInvocation;
 use lash_core_store::effect_identity::RuntimeReplay;
+use lash_kernel_value::identity::SessionId;
 use lash_sansio::sansio::EffectId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 #[expect(

@@ -21,6 +21,7 @@ workspace = true
 
 [dependencies]
 lash-kernel-dialect = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-protocol-types = { workspace = true }
 lash-tool-shape = { workspace = true }

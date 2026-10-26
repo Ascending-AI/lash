@@ -1,4 +1,4 @@
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};

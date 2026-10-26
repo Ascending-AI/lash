@@ -795,7 +795,7 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
 
         let derived_root = lash_vocabulary::identity::NodeId::from("derived-root");
         graph.remap_node_ids(
-            &lash_vocabulary::identity::SessionId::from("remap-test"),
+            &lash_kernel_value::identity::SessionId::from("remap-test"),
             &[("root".into(), derived_root.clone())],
         );
 

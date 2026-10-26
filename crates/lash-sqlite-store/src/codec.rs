@@ -1,7 +1,7 @@
 //! Shared blob/record codecs for the SQLite store: JSON + msgpack envelopes
 //! and the compressed artifact-blob encoding.
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A content address bound at the SQLite boundary. Domain values stay hex;
 /// SQLite keys are the digest's 32 bytes, ordered identically to canonical hex.
@@ -98,7 +98,7 @@ fn blob_envelope_admits(version: u32) -> bool {
 /// store error [`sqlite_error`](crate::sqlite_error) unwraps.
 pub(crate) fn sql_identity<T>(value: String) -> rusqlite::Result<T>
 where
-    T: std::str::FromStr<Err = lash_vocabulary::identity::BlankIdentity>,
+    T: std::str::FromStr<Err = lash_kernel_value::identity::BlankIdentity>,
 {
     value
         .parse()

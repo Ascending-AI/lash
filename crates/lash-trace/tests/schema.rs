@@ -207,10 +207,10 @@ fn token_usage_sample() -> LlmUsage {
 fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
     TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
-        document: lash_trace::TraceExecutionCode::Start(lash_vocabulary::names::LinkedStart {
-            link: lash_vocabulary::content_ids::LinkId::from_bytes([1; 32]),
-            selector: lash_vocabulary::names::StartSelector::Export(
-                lash_vocabulary::names::Name::new("worker"),
+        document: lash_trace::TraceExecutionCode::Start(lash_kernel_value::names::LinkedStart {
+            link: lash_kernel_value::content_ids::LinkId::from_bytes([1; 32]),
+            selector: lash_kernel_value::names::StartSelector::Export(
+                lash_kernel_value::names::Name::new("worker"),
             ),
         }),
         entry_name: "main".to_string(),
@@ -749,13 +749,13 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             subject: TraceRuntimeSubject::Process {
                 process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
             },
-            observation: lash_vocabulary::observation::RunObservation::Off,
+            observation: lash_kernel_value::observation::RunObservation::Off,
         },
         TraceLanguageExecutionPayload::ExecutionStarted {
             subject: TraceRuntimeSubject::Process {
                 process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
             },
-            observation: lash_vocabulary::observation::RunObservation::Counts,
+            observation: lash_kernel_value::observation::RunObservation::Counts,
         },
         TraceLanguageExecutionPayload::Counts {
             counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {
@@ -1048,9 +1048,9 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     // One site of the two the execution touched is the document's; the
     // other is reported as a mismatch.
     let document = lash_trace::WorkflowOverlayDocument::new(
-        lash_vocabulary::names::LinkedStart {
-            link: lash_vocabulary::content_ids::LinkId::from_bytes([2; 32]),
-            selector: lash_vocabulary::names::StartSelector::Main,
+        lash_kernel_value::names::LinkedStart {
+            link: lash_kernel_value::content_ids::LinkId::from_bytes([2; 32]),
+            selector: lash_kernel_value::names::StartSelector::Main,
         }
         .into(),
         [lash_protocol_types::effect_identity_fixture("then", 1).position()],
@@ -1475,21 +1475,21 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
     const REFERENCE: &str = "https://private.example/PRIVATE-REFERENCE-SENTINEL";
     let cases = [
         (
-            lash_vocabulary::json_schema::SchemaAdmissionError::Compilation {
+            lash_kernel_value::json_schema::SchemaAdmissionError::Compilation {
                 schema_path: "/properties/mode".into(),
                 message: COMPILATION.into(),
             },
             "compilation",
         ),
         (
-            lash_vocabulary::json_schema::SchemaAdmissionError::NonLocalReference {
+            lash_kernel_value::json_schema::SchemaAdmissionError::NonLocalReference {
                 schema_path: "/properties/mode/$ref".into(),
                 reference: REFERENCE.into(),
             },
             "non_local_reference",
         ),
         (
-            lash_vocabulary::json_schema::SchemaAdmissionError::Unprojectable {
+            lash_kernel_value::json_schema::SchemaAdmissionError::Unprojectable {
                 schema_path: "/properties/mode/allOf".into(),
                 message: COMPILATION.into(),
             },
@@ -1498,18 +1498,19 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
     ];
     for (diagnostic, kind) in cases {
         let path = match &diagnostic {
-            lash_vocabulary::json_schema::SchemaAdmissionError::Compilation {
-                schema_path, ..
-            }
-            | lash_vocabulary::json_schema::SchemaAdmissionError::NonLocalReference {
+            lash_kernel_value::json_schema::SchemaAdmissionError::Compilation {
                 schema_path,
                 ..
             }
-            | lash_vocabulary::json_schema::SchemaAdmissionError::Unprojectable {
+            | lash_kernel_value::json_schema::SchemaAdmissionError::NonLocalReference {
+                schema_path,
+                ..
+            }
+            | lash_kernel_value::json_schema::SchemaAdmissionError::Unprojectable {
                 schema_path,
                 ..
             } => schema_path.clone(),
-            lash_vocabulary::json_schema::SchemaAdmissionError::InvalidKind { .. } => {
+            lash_kernel_value::json_schema::SchemaAdmissionError::InvalidKind { .. } => {
                 unreachable!()
             }
         };

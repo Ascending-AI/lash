@@ -16,7 +16,7 @@ pub fn tool_hook_context(
 ) -> crate::plugin::ToolHookContext {
     crate::plugin::ToolHookContext {
         owner: lash_vocabulary::identity::RuntimeOwner::Session(
-            lash_vocabulary::identity::SessionId::from("session"),
+            lash_kernel_value::identity::SessionId::from("session"),
         ),
         call_id: crate::ToolCallId::fixture("hook"),
         tool_id: lash_vocabulary::tool_contract::ToolId::from(format!("tool:{tool_name}")),

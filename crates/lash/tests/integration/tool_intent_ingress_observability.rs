@@ -3,8 +3,8 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::sync::{Arc, Mutex};
 
 const SESSION: &str = "intent-ingress-observability-session";
@@ -121,7 +121,7 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
         runtime.block_on(async {
             let (core, process, other_process) = test_core().await?;
             let ingress = core.tool_intents(
-                lash_vocabulary::identity::SessionId::parse(SESSION)
+                lash_kernel_value::identity::SessionId::parse(SESSION)
                     .expect("nonblank host identity"),
                 lash::runtime::ExecutionScope::turn(SESSION, SCOPE),
             )?;

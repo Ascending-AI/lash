@@ -53,7 +53,7 @@ impl PostgresDurableStore {
         }
         let turn_cancel =
             if let (Some(session), Some(run)) = (session, get::<Option<String>>(first, 11)?) {
-                let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
+                let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
                 let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("turn id", &run))?;

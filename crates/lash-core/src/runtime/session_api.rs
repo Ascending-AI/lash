@@ -1,7 +1,7 @@
 use super::*;
 use crate::ActorContext;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 impl LashRuntime {
     pub fn session_id(&self) -> &SessionId {

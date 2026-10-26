@@ -237,7 +237,7 @@ pub struct RetainedProcessView {
 /// is still observed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessDocumentIdentity {
-    Available(lash_vocabulary::names::LinkedStart),
+    Available(lash_kernel_value::names::LinkedStart),
     /// Nothing retains an artifact the definition reads.
     ArtifactUnavailable {
         artifact: crate::ArtifactName,

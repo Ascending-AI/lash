@@ -98,7 +98,7 @@ impl HostArtifactRefusal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkTarget {
     /// A linked workflow that need not have a published process definition.
-    Linked(lash_vocabulary::names::LinkedStart),
+    Linked(lash_kernel_value::names::LinkedStart),
     /// A published linked or callable workflow, decoded by its owning engine.
     Definition(ProcessDefinitionId),
 }
@@ -151,7 +151,7 @@ impl HostArtifacts {
     #[cfg(feature = "codemode")]
     pub fn package_publisher(
         &self,
-        context: lash_vocabulary::package::PublicationContext,
+        context: lash_kernel_value::package::PublicationContext,
         snapshot: lash_vocabulary::package::NamespaceSnapshot,
     ) -> Result<crate::packages::ScopedPackagePublisher> {
         let runtime = self
@@ -278,15 +278,15 @@ impl HostArtifacts {
         &self,
         pin: &HostArtifactPin,
         env: &ProcessEnv,
-        consumer: lash_vocabulary::package::PublicationContext,
+        consumer: lash_kernel_value::package::PublicationContext,
     ) -> Result<lash_core_store::tool_surface::RecordedPackages> {
-        use lash_vocabulary::package::*;
+        use lash_kernel_value::package::*;
         let domain = PublicationDomain(self.core.backend().binding_identity().to_string());
         if consumer.domain != domain || consumer.scope != PublicationScope::Host {
             return Err(lash_execution_contracts::PluginError::Package(Box::new(
                 lash_execution_contracts::process::linking::EnginePortError::Refused(
                     lash_execution_contracts::process::linking::AdmissionRefusal::NotOwner {
-                        path: lash_vocabulary::names::Vec1::new(consumer.root),
+                        path: lash_kernel_value::names::Vec1::new(consumer.root),
                     },
                 ),
             ))
@@ -399,7 +399,7 @@ impl HostArtifacts {
         target: &LinkTarget,
     ) -> Result<(
         lash_execution_contracts::process::linking::LinkInspection,
-        std::collections::BTreeSet<lash_vocabulary::LinkId>,
+        std::collections::BTreeSet<lash_kernel_value::LinkId>,
     )> {
         Ok(match target {
             LinkTarget::Linked(start) => (
@@ -452,7 +452,7 @@ impl HostArtifacts {
         target: &LinkTarget,
         packages: &lash_core_store::tool_surface::RecordedPackages,
         selected: &std::collections::BTreeMap<
-            lash_vocabulary::names::OperationUse,
+            lash_kernel_value::names::OperationUse,
             (
                 lash_vocabulary::providers::ToolProviderHandle,
                 lash_vocabulary::ToolId,
@@ -503,7 +503,7 @@ impl HostArtifacts {
                 let Some(fixed) = execution.fixed(use_) else {
                     continue;
                 };
-                let operation = lash_vocabulary::names::QualifiedOperation {
+                let operation = lash_kernel_value::names::QualifiedOperation {
                     package: name.package.clone(),
                     name: name.member.clone(),
                 };
@@ -815,16 +815,16 @@ impl HostArtifacts {
         &self,
         pin: &HostArtifactPin,
         document: &crate::workflow::document::DocumentBytes,
-        selector: &lash_vocabulary::names::StartSelector,
+        selector: &lash_kernel_value::names::StartSelector,
         environment: &lash_vm_runtime::WorkflowEnvironmentRequest,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
-    ) -> Result<lash_vocabulary::names::LinkedStart> {
+    ) -> Result<lash_kernel_value::names::LinkedStart> {
         let typed = diagnostics::phase(
             "check",
             tracing::debug_span!("lash.artifacts.check"),
             async {
-                let typed = document.decode(lash_vocabulary::KernelDataLimits::standard())?;
+                let typed = document.decode(lash_kernel_value::KernelDataLimits::standard())?;
                 let retained: Vec<_> = document.source_evidence().cloned().collect();
                 limits
                     .map(|limits| limits.implicit_text_conversion)
@@ -1138,7 +1138,7 @@ impl HostArtifacts {
             Arc::clone(documents.helpers()),
         )
         .map_err(|error| lash_execution_contracts::PluginError::Invoke(error.to_string()))?;
-        let release = lash_vm_releases::helper_release()
+        let release = lash_kernel_releases::helper_release()
             .map_err(|error| lash_execution_contracts::PluginError::Invoke(error.to_string()))?;
         let helper_labels = release
             .labels
@@ -1174,7 +1174,7 @@ impl HostArtifacts {
     #[cfg(feature = "codemode")]
     pub async fn execution_document(
         &self,
-        reference: &lash_vocabulary::names::LinkedStart,
+        reference: &lash_kernel_value::names::LinkedStart,
     ) -> Result<crate::workflow::WorkflowDocumentRead> {
         use crate::workflow::{WorkflowDocumentRead, WorkflowUnavailable};
         let Some(provider) = self

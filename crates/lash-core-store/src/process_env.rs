@@ -15,7 +15,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::provider::AttachmentCapabilitySnapshot;
@@ -368,8 +368,8 @@ pub enum ProcessEnvRefusal {
     ContractChanged {
         effect: String,
         tool: String,
-        pinned: lash_vocabulary::operations::ContractId,
-        live: lash_vocabulary::operations::ContractId,
+        pinned: lash_kernel_value::operations::ContractId,
+        live: lash_kernel_value::operations::ContractId,
     },
     /// Capture matched an effect to a tool of the run's recorded surface,
     /// or of the declaring cell's committed deferred match, that no
@@ -638,4 +638,7 @@ fn capture_missing(effect: &str, tool: &str) -> String {
 #[path = "process_env_tests.rs"]
 mod tests;
 
-pub use lash_vocabulary::providers::{ProcessComponentId, ProcessComponentIdError};
+pub use {
+    lash_kernel_value::providers::ProcessComponentId,
+    lash_kernel_value::providers::ProcessComponentIdError,
+};

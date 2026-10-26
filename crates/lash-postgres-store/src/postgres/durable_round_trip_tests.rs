@@ -24,9 +24,9 @@ use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DurableReads as _, DurableStore as _, Epoch, FormatSet, MailTx,
     NodeId, NodeSpec, Release,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tokens::TokenWriter;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tokens::TokenWriter;
 
 use crate::PostgresStorage;
 use crate::observed_sql::ROUND_TRIPS;

@@ -3,7 +3,7 @@
 //! [`lower`] turns a subset of Python into a kernel document. The parser is
 //! `ruff_python_parser`; nothing of its tree leaves this crate. Where
 //! Python's meaning differs from the kernel's, the lowerer emits a call to
-//! one of the helpers [`define_helpers`] defines, written in kernel text
+//! one of the helpers [`lash_ext_py_helpers::package::define_helpers`] defines, written in kernel text
 //! under `helpers/`. What the dialect does not have it refuses with a
 //! [`Code`]. `README.md` states the subset and `deviations.md` where the
 //! dialect is deliberately not Python.
@@ -16,9 +16,7 @@ mod diagnostics;
 mod exceptions;
 mod generated_operators;
 mod lower;
-mod package;
 mod printer;
-mod pure_modules;
 mod readable;
 mod scope;
 
@@ -29,7 +27,6 @@ pub use diagnostics::{Code, GeneratedSourceCode};
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
-pub use package::{define_helpers, helper_operations};
 pub use readable::{print, read};
 
 /// The captions the dialect spells: every kind, as `#:` comment lines

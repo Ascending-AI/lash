@@ -9,11 +9,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 use lash_kernel_doc::Document;
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 #[repr(C)]
 #[derive(Default)]
@@ -174,23 +174,23 @@ fn lower(
     let functions = BTreeMap::new();
     let mut packages: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     for (name, signature) in &effects {
-        let operation = lash_vocabulary::operation_text::parse(name.as_str()).ok()?;
-        let mut allowed = lash_vocabulary::TurnControls::none();
+        let operation = lash_kernel_value::operation_text::parse(name.as_str()).ok()?;
+        let mut allowed = lash_kernel_value::TurnControls::none();
         if controls
             .get(name)
             .is_some_and(|flags| flags.contains(&lash_kernel_dialect::EffectControl::Finish))
         {
-            allowed = allowed.with_finish(lash_vocabulary::JsonSchema::any());
+            allowed = allowed.with_finish(lash_kernel_value::JsonSchema::any());
         }
         packages.entry(operation.package).or_default().insert(
             operation.name,
             lash_kernel_dialect::NamespaceMember {
-                visibility: lash_vocabulary::Visibility::Public,
+                visibility: lash_kernel_value::Visibility::Public,
                 kind: lash_kernel_dialect::NamespaceKind::Operation(
                     lash_kernel_dialect::OperationSignature {
                         signature: signature.clone(),
                         controls: allowed,
-                        mode: lash_vocabulary::OperationMode::Waited,
+                        mode: lash_kernel_value::OperationMode::Waited,
                     },
                 ),
             },

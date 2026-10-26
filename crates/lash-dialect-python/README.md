@@ -67,7 +67,7 @@ Where Python's meaning is the kernel's, the lowerer emits the kernel form:
 reads, an awaited coroutine call is an ordinary call, `asyncio.create_task`
 is `spawn`, `await t` on a task is `await t via py.await`, which takes no
 turn of its own, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer calls a helper: the functions
-named `py.*`, written in kernel text under `src/helpers/` and installed
+named `py.*`, written in kernel text under `../lash-ext-py-helpers/src/helpers/` and installed
 as the `python` package. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the
 check that a dict or set did not change size under a `for` or a

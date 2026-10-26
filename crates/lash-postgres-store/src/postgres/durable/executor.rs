@@ -874,7 +874,7 @@ pub(super) fn answer(
     };
     let turn_cancel = match (actor.kind(), text(0)) {
         (lash_durable::ActorKind::Session, Some(run)) => {
-            let session = lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned())
+            let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
                 .map_err(|_| super::corrupt("session id", actor.id()))?;
             let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                 .map_err(|_| super::corrupt("turn id", &run))?;

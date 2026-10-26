@@ -1,8 +1,11 @@
 //! Execution-owned immutable deferred resolution outcomes.
 //! Absent means unresolved; infrastructure failures create no terminal row.
 use crate::tool_surface::OperationRoute;
-use lash_vocabulary::{ToolDefinition, claims::*, names::*, operations::*, package::*};
 use serde::{Deserialize, Serialize};
+use {
+    lash_kernel_value::names::*, lash_kernel_value::operations::*, lash_kernel_value::package::*,
+    lash_vocabulary::ToolDefinition, lash_vocabulary::claims::*,
+};
 
 // resolutions: ExecutionId wraps the existing stable execution address encoding.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -69,7 +72,8 @@ impl ResolutionEntry {
         else {
             return Ok(());
         };
-        if *mode != OperationMode::Waited || route.policy == lash_vocabulary::ExecutionPolicy::Read
+        if *mode != OperationMode::Waited
+            || route.policy == lash_kernel_value::ExecutionPolicy::Read
         {
             return Err("deferred resolutions must be waited".into());
         }
@@ -103,7 +107,7 @@ impl ExecutionId {
     }
 
     /// Cell occurrence is length-delimited so user-controlled addresses cannot alias.
-    pub fn cell(session: &lash_vocabulary::identity::SessionId, turn: &str, cell: &str) -> Self {
+    pub fn cell(session: &lash_kernel_value::identity::SessionId, turn: &str, cell: &str) -> Self {
         let session = session.to_string();
         Self(format!(
             "cell:{}:{session}{}:{turn}{}:{cell}",

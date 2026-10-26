@@ -123,7 +123,7 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 /// segment's tape (FIG-6370).
 struct StepHost {
     trace: Option<super::trace::ProcessTrace>,
-    observe: lash_vocabulary::observation::RunObservation,
+    observe: lash_kernel_value::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
@@ -144,20 +144,20 @@ impl StepHost {
 
     /// The segment's tape, at `observe: counts`.
     fn tape(&self) -> Option<HostReads> {
-        (self.observe == lash_vocabulary::observation::RunObservation::Counts)
+        (self.observe == lash_kernel_value::observation::RunObservation::Counts)
             .then(|| std::mem::take(&mut *self.taped()))
     }
 }
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
-    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
+    fn observe(&self) -> lash_kernel_value::observation::RunObservation {
         self.observe
     }
 
     /// A live delta is provisional: the segment's commit makes its total
     /// exact, as `process.ran`.
-    fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
+    fn ran(&self, delta: &lash_kernel_value::observation::SiteCounts) {
         if let Some(trace) = &self.trace {
             let frame = self
                 .deltas
@@ -170,7 +170,7 @@ impl RunHost for StepHost {
         self.trace.is_some()
     }
 
-    fn enter_site(&self, location: &lash_vocabulary::sites::EffectLocation) {
+    fn enter_site(&self, location: &lash_kernel_value::sites::EffectLocation) {
         if let Some(trace) = &self.trace {
             trace.origin(&location.at, &location.origin);
             trace.node(
@@ -183,10 +183,10 @@ impl RunHost for StepHost {
     /// Read through the runner the process's environment recorded.
     async fn perform(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let requirement = self
             .environment
@@ -216,7 +216,7 @@ impl RunHost for StepHost {
                 .await
                 .map_err(|error| ParentFault(error.to_string()))?,
         );
-        if self.observe == lash_vocabulary::observation::RunObservation::Counts {
+        if self.observe == lash_kernel_value::observation::RunObservation::Counts {
             self.taped().effects.push(super::state::EffectRead {
                 use_: *effect,
                 args: args.to_vec(),
@@ -242,7 +242,7 @@ fn ended(
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
-            ran: lash_vocabulary::observation::SiteCounts::new(),
+            ran: lash_kernel_value::observation::SiteCounts::new(),
             caught: Vec::new(),
             reads: None,
             start: None,
@@ -436,8 +436,8 @@ async fn kernel_run(
     });
     // A recovered wait is reported by the occurrence it was delivered as.
     let delivered: Vec<(
-        lash_vocabulary::sites::WaitId,
-        lash_vocabulary::sites::EffectId,
+        lash_kernel_value::sites::WaitId,
+        lash_kernel_value::sites::EffectId,
     )> = input
         .deliver
         .iter()
@@ -452,7 +452,7 @@ async fn kernel_run(
                 *use_,
                 run.environment
                     .mode(use_)
-                    .unwrap_or(lash_vocabulary::package::OperationMode::Waited),
+                    .unwrap_or(lash_kernel_value::package::OperationMode::Waited),
             )
         })
         .collect();
@@ -463,7 +463,7 @@ async fn kernel_run(
             read_effects: modes
                 .iter()
                 .filter_map(|(use_, mode)| {
-                    (*mode == lash_vocabulary::package::OperationMode::Read).then_some(*use_)
+                    (*mode == lash_kernel_value::package::OperationMode::Read).then_some(*use_)
                 })
                 .collect(),
             ..HostReads::default()
@@ -576,7 +576,7 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let withdrawn: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
+            let withdrawn: Vec<lash_kernel_value::sites::WaitId> = park.withdrawn.clone();
             let issued = park
                 .requests
                 .into_iter()
@@ -619,7 +619,7 @@ async fn kernel_run(
 fn recorded_start(
     code: super::InlineRequest,
     input: &KernelRunInput,
-    retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
+    retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
 ) -> RecordedStart {
     let from = match &input.parked {
         None => StartedFrom::Entry,
@@ -659,10 +659,10 @@ fn recorded_start(
 pub(super) struct Driven {
     pub(super) step: MachineStep,
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
-    pub(super) ran: lash_vocabulary::observation::SiteCounts,
-    pub(super) path: lash_vocabulary::observation::ExecutionPath,
+    pub(super) ran: lash_kernel_value::observation::SiteCounts,
+    pub(super) path: lash_kernel_value::observation::ExecutionPath,
     /// The waits whose failed outcome a `catch` recovered from.
-    pub(super) caught: Vec<lash_vocabulary::sites::WaitId>,
+    pub(super) caught: Vec<lash_kernel_value::sites::WaitId>,
 }
 
 /// Starts or resumes the machine over a page activation of the process's
@@ -728,7 +728,7 @@ pub(super) async fn run_machine(
     activation: &mut StepActivation,
     binding: lash_core_store::checkpoint_graph::NodeId,
     deliver: Vec<(
-        lash_vocabulary::sites::WaitId,
+        lash_kernel_value::sites::WaitId,
         lash_vm_client::wire::OutcomeWire,
     )>,
     slice: u64,
@@ -901,7 +901,7 @@ pub(super) fn entry_args(
     helpers: &lash_kernel_doc::BuildHelpers,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<Vec<Datum>, EntryArgumentsError> {
-    use lash_vocabulary::names::StartSelector;
+    use lash_kernel_value::names::StartSelector;
     let mut supplied = std::collections::BTreeMap::new();
     let signature = match &input.code {
         super::InlineRequest::Linked { start } => match &start.selector {
@@ -921,13 +921,13 @@ pub(super) fn entry_args(
     };
     let callable = match &input.code {
         super::InlineRequest::Linked { start } => {
-            let lash_vocabulary::StartSelector::Export(name) = &start.selector else {
+            let lash_kernel_value::StartSelector::Export(name) = &start.selector else {
                 unreachable!("Main returned above")
             };
             let Some(lash_kernel_doc::Export::Function(export)) = document.exports.get(name) else {
                 unreachable!("checked above")
             };
-            lash_vocabulary::CallableId {
+            lash_kernel_value::CallableId {
                 link: start.link,
                 function: export.function,
             }
@@ -948,7 +948,7 @@ pub(super) fn entry_args(
             |error| match error {
                 lash_kernel_doc::DecodeRefusal::Type { mismatch } => EntryArgumentsError::Boundary(
                     lash_kernel_check::StartBoundaryRefusal::TypeMismatch(Box::new(
-                        lash_vocabulary::EntryTypeMismatch {
+                        lash_kernel_value::EntryTypeMismatch {
                             callable,
                             mismatch: mismatch.within(param.name.as_str()).within("input"),
                         },
@@ -957,13 +957,14 @@ pub(super) fn entry_args(
                 other => EntryArgumentsError::Decode(other),
             },
         )?;
-        supplied.insert(lash_vocabulary::names::Name::new(name), value);
+        supplied.insert(lash_kernel_value::names::Name::new(name), value);
     }
     if let super::InlineRequest::Linked { start } = &input.code {
         lash_kernel_check::validate_start_input(document, &start.selector, start.link, &supplied)?;
     } else {
         let decoder = lash_kernel_doc::Decoder {
-            max_depth: lash_vocabulary::data_limits::KernelDataLimits::standard().document_depth(),
+            max_depth: lash_kernel_value::data_limits::KernelDataLimits::standard()
+                .document_depth(),
             policy: document.numbers,
             declared: &|id| document.functions.contains_key(&id.function),
         };
@@ -986,7 +987,7 @@ pub(super) fn entry_args(
                     lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
                         EntryArgumentsError::Boundary(
                             lash_kernel_check::StartBoundaryRefusal::TypeMismatch(Box::new(
-                                lash_vocabulary::EntryTypeMismatch {
+                                lash_kernel_value::EntryTypeMismatch {
                                     callable,
                                     mismatch: mismatch.within(param.name.as_str()).within("input"),
                                 },
@@ -1005,7 +1006,7 @@ pub(super) fn entry_args(
 }
 
 /// The wait a request names and its admission.
-pub(super) fn admission_of(request: &Request) -> (lash_vocabulary::sites::WaitId, Admission) {
+pub(super) fn admission_of(request: &Request) -> (lash_kernel_value::sites::WaitId, Admission) {
     let Request::Effect(request) = request;
     (
         request.wait,
@@ -1132,7 +1133,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
 /// cause, its message as the failure's, its data as the raw value.
 fn uncaught(
     error: Datum,
-    site: Option<lash_vocabulary::sites::Site>,
+    site: Option<lash_kernel_value::sites::Site>,
 ) -> lash_execution_contracts::process::ProcessOutcome {
     let json = |value: &Datum| -> Option<serde_json::Value> {
         datum_to_json(value)
@@ -1195,14 +1196,14 @@ mod tests {
     /// FIG-7143: the plugin/host boundary keeps the kernel's typed mismatch.
     #[test]
     fn entry_mismatch_stays_typed_in_process_failure() {
-        let source = lash_vocabulary::EntryTypeMismatch {
-            callable: lash_vocabulary::CallableId {
-                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-                function: lash_vocabulary::FunctionId::from_bytes([2; 32]),
+        let source = lash_kernel_value::EntryTypeMismatch {
+            callable: lash_kernel_value::CallableId {
+                link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+                function: lash_kernel_value::FunctionId::from_bytes([2; 32]),
             },
-            mismatch: lash_vocabulary::TypeMismatch::new(
-                lash_vocabulary::Type::Text,
-                lash_vocabulary::Type::Bool,
+            mismatch: lash_kernel_value::TypeMismatch::new(
+                lash_kernel_value::Type::Text,
+                lash_kernel_value::Type::Bool,
             )
             .within("actor")
             .within("output"),

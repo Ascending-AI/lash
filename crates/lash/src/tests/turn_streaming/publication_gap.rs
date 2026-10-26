@@ -111,7 +111,7 @@ fn commits_rows(event: &lash_core::SessionObservationEventPayload) -> bool {
 impl lash_core::LiveReplayStore for CommitPublicationStore {
     async fn publish(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -155,7 +155,7 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
 
     fn current_cursor(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session, revision)
@@ -163,7 +163,7 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
 
     fn tail_cursor(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> lash_core::SessionCursor {
         self.inner.tail_cursor(session_id)
     }
@@ -174,14 +174,14 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
 
     async fn invalidate_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_session(session).await
     }
 
     async fn trim_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
@@ -201,7 +201,7 @@ pub(super) async fn publication_failure_preserves_committed_turn_and_exposes_gap
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("publication-failure")
+        lash_kernel_value::identity::SessionId::parse("publication-failure")
             .expect("nonblank host identity"),
     )
     .await
@@ -263,7 +263,7 @@ pub(super) async fn a_reader_inside_a_commits_publication_window_replays_the_com
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("publication-window")
+        lash_kernel_value::identity::SessionId::parse("publication-window")
             .expect("nonblank host identity"),
     )
     .await
@@ -321,7 +321,7 @@ async fn two_commit_session(
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(name).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(name).expect("nonblank host identity"),
     )
     .await
     .open()

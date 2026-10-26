@@ -18,7 +18,7 @@ use lash_core_store::checkpoint_graph::stage::{
 use lash_durable::domain::{OwnerKey, RunFactKind, RunFactWrite};
 use lash_durable::{CommitLabel, DomainWrite};
 use lash_execution_contracts::process::{StepCandidate, StepManifest, StepPublication};
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// How many outcomes `tx` records.
 fn outcomes(tx: &lash_durable::ActorTx) -> usize {

@@ -402,6 +402,15 @@ pub use attachments::{
     AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
     AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
+pub use lash_kernel_value::json_schema::JsonSchema;
+pub use lash_kernel_value::json_schema::SchemaAdmissionError;
+pub use lash_kernel_value::json_schema::ValueMismatch;
+pub use lash_kernel_value::names::QualifiedOperation;
+pub use lash_kernel_value::tool_contract::Backoff;
+pub use lash_kernel_value::tool_contract::BoundedRetry;
+pub use lash_kernel_value::tool_contract::ExecutionPolicy;
+pub use lash_kernel_value::tool_declaration::TurnControlKind;
+pub use lash_kernel_value::tool_declaration::TurnControls;
 pub use lash_protocol_types::AttachmentCreateMeta;
 pub use lash_protocol_types::AttachmentId;
 pub use lash_protocol_types::AttachmentRef;
@@ -500,18 +509,11 @@ pub use lash_vocabulary::identity::BatchId;
 pub use lash_vocabulary::identity::InputId;
 pub use lash_vocabulary::identity::NodeId;
 pub use lash_vocabulary::identity::TurnId;
-pub use lash_vocabulary::json_schema::JsonSchema;
-pub use lash_vocabulary::json_schema::SchemaAdmissionError;
-pub use lash_vocabulary::json_schema::ValueMismatch;
-pub use lash_vocabulary::names::QualifiedOperation;
 pub use lash_vocabulary::schema_contract::ProjectionMode;
 pub use lash_vocabulary::schema_contract::SchemaContract;
 pub use lash_vocabulary::schema_contract::SchemaDialect;
 pub use lash_vocabulary::schema_contract::SchemaProjectionOverride;
 pub use lash_vocabulary::schema_contract::SchemaProjectionPolicy;
-pub use lash_vocabulary::tool_contract::Backoff;
-pub use lash_vocabulary::tool_contract::BoundedRetry;
-pub use lash_vocabulary::tool_contract::ExecutionPolicy;
 pub use lash_vocabulary::tool_contract::IntoOperation;
 pub use lash_vocabulary::tool_contract::LimitCause;
 pub use lash_vocabulary::tool_contract::ParkBound;
@@ -530,8 +532,6 @@ pub use lash_vocabulary::tool_contract::ToolOutputSchema;
 pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
 pub use lash_vocabulary::tool_declaration::OutcomeShape;
 pub use lash_vocabulary::tool_declaration::ToolDeclaration;
-pub use lash_vocabulary::tool_declaration::TurnControlKind;
-pub use lash_vocabulary::tool_declaration::TurnControls;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// The stop a tool control other than a declared turn control ends the turn
 /// with: a tool-requested failure, or a plugin's abort. A declared turn
@@ -573,17 +573,19 @@ pub use lash_core_store::tool_surface::{
     DeferredMatch, DeferredOutcome, Judgement, OperationRoute, ProviderKey, RecordedSurface,
     RouteSource, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
 };
+pub use lash_kernel_value::names::EffectName;
 pub use lash_vocabulary::claims::{ObligationToken, RegistryKind};
-pub use lash_vocabulary::names::EffectName;
-pub use lash_vocabulary::providers::{
-    DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
-};
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
 pub use tool_registry::{
     SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind, operation_contract_changed,
 };
 pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
+pub use {
+    lash_kernel_value::providers::DeferredResolutionPolicy,
+    lash_vocabulary::providers::ExecutionBinding,
+    lash_vocabulary::providers::ExecutionBindingUnreadable,
+};
 
 pub(crate) mod facade_ops {}
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -746,7 +748,7 @@ pub use lash_core_store::session_identity::FrameNodeIdError;
 pub use lash_core_store::session_identity::SessionLineage;
 pub use lash_core_store::session_identity::SessionRelation;
 pub use lash_core_store::session_identity::SessionSnapshot;
-pub use lash_vocabulary::providers::FormatVersion;
+pub use lash_kernel_value::providers::FormatVersion;
 pub use plugin::AppendSessionNodesOutcome;
 pub use plugin::AppendSessionNodesRequest;
 pub use plugin::PluginExtensions;
@@ -843,9 +845,9 @@ pub use lash_core_store::turn_input_vocabulary::PendingTurnInputDraft;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputRead;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputReadStatus;
 pub use lash_core_store::turn_input_vocabulary::PendingTurnInputSuffixCancelOutcome;
+pub use lash_kernel_value::providers::ProcessComponentId;
+pub use lash_kernel_value::providers::ProcessComponentIdError;
 pub use lash_vocabulary::identity::ProcessId;
-pub use lash_vocabulary::providers::ProcessComponentId;
-pub use lash_vocabulary::providers::ProcessComponentIdError;
 pub use runtime::ForkSessionReceipt;
 pub use runtime::ForkSessionRequest;
 pub use runtime::HandleId;
@@ -937,7 +939,7 @@ pub use lash_core_store::turn_input_vocabulary::TurnInputCompletion;
 pub use lash_core_store::turn_input_vocabulary::TurnInputCompletionData;
 pub use lash_core_store::turn_input_vocabulary::TurnInputIngress;
 pub use lash_core_store::turn_input_vocabulary::TurnInputState;
-pub use lash_vocabulary::identity::SessionId;
+pub use lash_kernel_value::identity::SessionId;
 pub use runtime::ProcessTerminalWait;
 pub use runtime::ProcessWorkSubstrate;
 pub use runtime::ProcessWorkWiring;

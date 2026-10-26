@@ -5,7 +5,7 @@
 //! [`ConformanceDeployment`](crate::store::ConformanceDeployment) for each
 //! case: a deployment store with the test seams that corrupt its accelerators.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;

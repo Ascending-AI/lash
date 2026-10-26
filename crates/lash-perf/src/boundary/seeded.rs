@@ -263,7 +263,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     // inherits that environment (FIG-6034).
     const TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
         "seeded-plan-tools",
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
     );
     let components = [TOOLS, lash_plugin_process_controls::PROCESS_CONTROLS_CONFIG];
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(workload.clone(), &meter)?);

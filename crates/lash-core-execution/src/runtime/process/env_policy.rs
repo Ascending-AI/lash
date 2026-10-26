@@ -74,7 +74,7 @@ pub struct EnclosingProcess {
     pub env: ProcessEnv,
     pub execution: lash_core_store::resolutions::ExecutionId,
     pub resolutions: BTreeMap<
-        lash_vocabulary::names::OperationUse,
+        lash_kernel_value::names::OperationUse,
         lash_core_store::resolutions::ResolutionEntry,
     >,
     pub engine_kind: String,
@@ -101,7 +101,7 @@ pub struct ProcessEnvCx<'a> {
     pub enclosing: Option<&'a EnclosingProcess>,
     pub execution: Option<&'a lash_core_store::tool_surface::ExecutionEnvironment>,
     pub resolutions: &'a BTreeMap<
-        lash_vocabulary::names::OperationUse,
+        lash_kernel_value::names::OperationUse,
         lash_core_store::resolutions::ResolutionEntry,
     >,
     engines: &'a ProcessEngineRegistry,
@@ -118,7 +118,7 @@ impl<'a> ProcessEnvCx<'a> {
         engines: &'a ProcessEngineRegistry,
     ) -> Self {
         static NO_RESOLUTIONS: BTreeMap<
-            lash_vocabulary::names::OperationUse,
+            lash_kernel_value::names::OperationUse,
             lash_core_store::resolutions::ResolutionEntry,
         > = BTreeMap::new();
         Self {
@@ -138,7 +138,7 @@ impl<'a> ProcessEnvCx<'a> {
         mut self,
         environment: Option<&'a lash_core_store::tool_surface::ExecutionEnvironment>,
         resolutions: &'a BTreeMap<
-            lash_vocabulary::names::OperationUse,
+            lash_kernel_value::names::OperationUse,
             lash_core_store::resolutions::ResolutionEntry,
         >,
     ) -> Self {

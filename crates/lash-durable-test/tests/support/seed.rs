@@ -6,8 +6,8 @@ use lash_core::runtime::durable::session::{TurnError, TurnRow};
 use lash_core::{Message, MessageRole, Part, facade_support::shared_parts};
 use lash_core_execution::{InputItem, PendingTurnInputDraft, TurnInput, TurnInputIngress};
 use lash_execution_contracts::backend::Backend;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// Admit `session` to the catalog at its creation head, and send it `text`

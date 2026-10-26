@@ -21,7 +21,9 @@ path = "src/bin/regenerate.rs"
 workspace = true
 
 [dependencies]
-lash-vocabulary = { workspace = true }
+lash-ext-py-helpers = { workspace = true }
+lash-ext-ts-helpers = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-dialect-python = { workspace = true }
 lash-dialect-typescript = { workspace = true }
 lash-ext-date-ecma = { workspace = true }

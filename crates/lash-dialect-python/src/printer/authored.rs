@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use super::{Renderer, k};
-use lash_vocabulary::{Name, Type};
+use {lash_kernel_value::Name, lash_kernel_value::Type};
 
 /// A clause of an `except` chain: the classes it names, or none for a
 /// bare `except`, and its body.

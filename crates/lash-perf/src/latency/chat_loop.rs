@@ -17,7 +17,7 @@ use super::runner::{
     measure_send, observer_poll_store,
 };
 use crate::runtime_perf::providers::BenchmarkEchoTool;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The benchmark echo tool, stamping each execution's own start and return
 /// under its session.

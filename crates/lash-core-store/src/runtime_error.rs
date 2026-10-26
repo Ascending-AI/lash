@@ -7,8 +7,8 @@
 
 use crate::RuntimeEffectKind;
 pub use crate::executable_generation::{ExecutableGeneration, ExecutableGenerationRefusal};
+use lash_kernel_value::identity::SessionId;
 pub use lash_protocol_types::engine_fault::HostResource;
-use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 mod attachment_retention;
@@ -1139,7 +1139,7 @@ impl RuntimeError {
 
     /// Extracts the deleted session ID for effect-host implementors only from structured
     /// session-deletion causes, returning `None` for all other errors.
-    pub fn deleted_session_id(&self) -> Option<&lash_vocabulary::identity::SessionId> {
+    pub fn deleted_session_id(&self) -> Option<&lash_kernel_value::identity::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::HostPayloadTooLarge { .. }

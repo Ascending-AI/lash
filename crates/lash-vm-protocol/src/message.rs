@@ -281,7 +281,7 @@ pub struct Start {
     /// validates it before compilation.
     pub document: StoredDocument,
     /// The immutable root Link and the reached linked-instance table.
-    pub link: lash_vocabulary::content_ids::LinkId,
+    pub link: lash_kernel_value::content_ids::LinkId,
     /// PreparedInstance rows in the runtime's bounded encoding.
     pub instances: EncodedPayload,
     /// Ordinary retained documents keyed by content identity. Build helpers
@@ -295,7 +295,7 @@ pub struct Start {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub definitions: Vec<StoredDefinition>,
     /// The selected executable reach; retained documents can contain unrelated code.
-    pub functions: std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
+    pub functions: std::collections::BTreeSet<lash_kernel_value::names::FunctionId>,
     pub from: StartFrom,
     pub bounds: RunBounds,
     /// The OwnerBinding node of the execution every checkpoint root of the
@@ -343,26 +343,26 @@ pub enum StoredDocument {
     /// A process-local verified body. A miss requests canonical bytes from
     /// the parent; it never falls back to image-owned content.
     Cached {
-        document: lash_vocabulary::names::DocumentId,
+        document: lash_kernel_value::names::DocumentId,
     },
     Image {
-        document: lash_vocabulary::names::DocumentId,
+        document: lash_kernel_value::names::DocumentId,
     },
     Supplied {
-        document: lash_vocabulary::names::DocumentId,
+        document: lash_kernel_value::names::DocumentId,
         body: EncodedPayload,
     },
 }
 impl StoredDocument {
     pub fn supplied(body: EncodedPayload) -> Self {
         Self::Supplied {
-            document: lash_vocabulary::names::DocumentId::from_bytes(
-                lash_vocabulary::tokens::logical_digest(&body.0),
+            document: lash_kernel_value::names::DocumentId::from_bytes(
+                lash_kernel_value::tokens::logical_digest(&body.0),
             ),
             body,
         }
     }
-    pub fn identity(&self) -> lash_vocabulary::names::DocumentId {
+    pub fn identity(&self) -> lash_kernel_value::names::DocumentId {
         match self {
             Self::Image { document }
             | Self::Supplied { document, .. }
@@ -386,7 +386,7 @@ pub struct StoredDefinition {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delivery {
-    pub wait: lash_vocabulary::sites::WaitId,
+    pub wait: lash_kernel_value::sites::WaitId,
     pub outcome: EncodedPayload,
 }
 
@@ -523,7 +523,7 @@ pub enum ParentMessage {
     /// One committed outcome, for the wait the machine named: a delivery
     /// that does not fit one frame with the slice it precedes.
     Deliver {
-        wait: lash_vocabulary::sites::WaitId,
+        wait: lash_kernel_value::sites::WaitId,
         outcome: EncodedPayload,
     },
     /// The answer to the worker's pending [`WorkerMessage::HostRead`].
@@ -553,7 +553,7 @@ pub enum ParentMessage {
 pub enum WorkerMessage {
     /// Verified-body cache misses, by identity, before compilation.
     Documents {
-        documents: Vec<lash_vocabulary::names::DocumentId>,
+        documents: Vec<lash_kernel_value::names::DocumentId>,
     },
     /// The worker refuses the exchange or the run. How a worker ended is
     /// never its own to say.

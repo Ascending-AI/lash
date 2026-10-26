@@ -306,8 +306,8 @@ pub const MCP_RUN_OPTIONS: lash_core::RunOptionsKey<lash_tool_support::ToolSelec
 /// `{"kind": "mcp", "server": <server>, "tool_id": <tool id>}`.
 /// version_surface = "coexist"
 /// version_guard(items(MCP_BINDING_FORMAT, mcp_binding))
-pub const MCP_BINDING_FORMAT: lash_vocabulary::providers::FormatVersion =
-    lash_vocabulary::providers::FormatVersion::ONE;
+pub const MCP_BINDING_FORMAT: lash_kernel_value::providers::FormatVersion =
+    lash_kernel_value::providers::FormatVersion::ONE;
 
 /// Non-resident MCP catalog provider for explicit code mode execution grants.
 ///
@@ -356,8 +356,8 @@ impl ToolProvider for McpToolProvider {
         _revision: lash_core_store::environment::SourceRevision,
         config: &lash_core::OwnerConfigView,
         namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
         let selection =
@@ -397,7 +397,7 @@ impl ToolProvider for McpToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
         &[MCP_BINDING_FORMAT]
     }
 
@@ -406,7 +406,10 @@ impl ToolProvider for McpToolProvider {
         &self,
         manifest: &ToolManifest,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
+    ) -> Option<(
+        lash_kernel_value::providers::FormatVersion,
+        serde_json::Value,
+    )> {
         self.pool
             .link_payload(&manifest.id)
             .map(|payload| (MCP_BINDING_FORMAT, payload))
@@ -467,7 +470,7 @@ impl ToolProvider for McpDeferredToolProvider {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
         &[MCP_BINDING_FORMAT]
     }
 
@@ -689,8 +692,8 @@ impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
     fn environment_fragment(
         &self,
         config: &lash_core::OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &lash_core::plugin::ToolProviderHandle,
         tools: Option<&[lash_core::SurfaceEntry]>,
     ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
@@ -724,7 +727,7 @@ impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }
@@ -732,7 +735,7 @@ impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
     fn roots(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
         self.pool
             .advertised_tools()
             .into_iter()
@@ -742,7 +745,7 @@ impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
     fn advertise(
         &self,
         config: &lash_core::OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
+        context: &lash_kernel_value::package::PublicationContext,
     ) -> Result<Vec<lash_core::plugin::packages::PackageContribution>, PluginError> {
         let provider = lash_core::plugin::ToolProviderHandle::new(
             config.registry_kind(),

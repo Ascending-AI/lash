@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_state::paged::SealBudget;
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::tokens::encode_body;
 
 use super::embedder::{Embedder, ROOMY, Setup};
 use crate::observe::{GuestContext, WorkReport};
@@ -85,7 +85,7 @@ struct Seen {
 struct Facts {
     counts: crate::SiteCounts,
     path: crate::ExecutionPath,
-    sites: Vec<lash_vocabulary::sites::EffectLocation>,
+    sites: Vec<lash_kernel_value::sites::EffectLocation>,
     samples: Vec<(
         u64,
         u32,
@@ -107,7 +107,7 @@ impl crate::Host for AtSites<'_> {
     fn observes_sites(&self) -> bool {
         true
     }
-    fn enter_site(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
+    fn enter_site(&mut self, at: &lash_kernel_value::sites::EffectLocation) {
         self.facts.sites.push(at.clone());
         let mut sample = crate::observe::GuestSample::new();
         self.context.read(&mut sample).unwrap();
@@ -120,10 +120,10 @@ impl crate::Host for AtSites<'_> {
     }
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, crate::HostFault> {
         crate::Host::perform(self.world, use_, args, site, origin)
     }
@@ -585,8 +585,8 @@ pub(super) fn fully_observe(machine: &mut crate::KernelMachine) {
 
 fn observation_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut probes = super::layout::allocation_probes(registry, ids);
     probes.extend(super::layout::scalar_probes(registry, ids));
     probes.extend(

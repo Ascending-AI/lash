@@ -1,7 +1,7 @@
 //! Native expression and statement rendering; exact generic suites live in the parent.
 use super::authored::authored_awaits;
 use super::{BindingScope, PrintError, Renderer, attribute_identifier, k};
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 /// The binding strength of atoms, calls and members.
 const PRIMARY: u8 = 10;
@@ -387,10 +387,10 @@ impl Renderer<'_> {
     }
     /// Spell declared input fields as keywords. Other record inputs stay
     /// positional dictionaries, preserving open fields and non-identifiers.
-    pub(super) fn operation_args(&mut self, import: &lash_vocabulary::Import, args: &[k::Expr]) {
-        if let lash_vocabulary::ImportKind::Operation { signature } = &import.kind
+    pub(super) fn operation_args(&mut self, import: &lash_kernel_value::Import, args: &[k::Expr]) {
+        if let lash_kernel_value::ImportKind::Operation { signature } = &import.kind
             && let [param] = signature.params.as_slice()
-            && let lash_vocabulary::Type::Record(record) = &param.ty
+            && let lash_kernel_value::Type::Record(record) = &param.ty
             && let [input] = args
         {
             if let Some(k::Expr::Record(fields)) = self.resolved(input).cloned()
@@ -420,8 +420,8 @@ impl Renderer<'_> {
 
     /// A dictionary literal at a declared record boundary lowers directly to
     /// that record; dictionaries in untyped positions remain Python maps.
-    fn operation_input(&mut self, value: &k::Expr, ty: &lash_vocabulary::Type) {
-        if let lash_vocabulary::Type::Record(record) = ty
+    fn operation_input(&mut self, value: &k::Expr, ty: &lash_kernel_value::Type) {
+        if let lash_kernel_value::Type::Record(record) = ty
             && let Some(k::Expr::Record(fields)) = self.resolved(value).cloned()
         {
             if self.expression_depth >= self.max_depth {
@@ -574,7 +574,7 @@ impl Renderer<'_> {
                 self.out.write(":\n");
                 self.root_block(
                     &body.block,
-                    Some(&lash_vocabulary::sites::Unit::Library(c.function)),
+                    Some(&lash_kernel_value::sites::Unit::Library(c.function)),
                 );
                 self.main = outer_main;
                 self.scope = parent;
@@ -779,14 +779,14 @@ impl Renderer<'_> {
 }
 
 fn record_field<'a>(
-    record: &'a lash_vocabulary::RecordType,
+    record: &'a lash_kernel_value::RecordType,
     name: &str,
-) -> &'a lash_vocabulary::Type {
+) -> &'a lash_kernel_value::Type {
     record
         .fields
         .iter()
         .find(|field| field.name == name)
         .map(|field| &field.ty)
         .or(record.rest.kept_type())
-        .unwrap_or(&lash_vocabulary::Type::Any)
+        .unwrap_or(&lash_kernel_value::Type::Any)
 }

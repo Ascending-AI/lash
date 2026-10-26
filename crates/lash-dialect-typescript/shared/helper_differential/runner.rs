@@ -7,15 +7,15 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::Timestamp;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
     Step, Target,
 };
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -391,17 +391,17 @@ pub fn modes(program: &Program) -> lash_kernel_vm::EffectModes {
                 .imports
                 .iter()
                 .filter_map(move |(slot, import)| {
-                    (lash_dialect_services::TYPESCRIPT
+                    (lash_kernel_services::TYPESCRIPT
                         .iter()
-                        .chain(lash_dialect_services::PYTHON.iter())
+                        .chain(lash_kernel_services::PYTHON.iter())
                         .any(|operation| operation.name == import.name)
                         && import.name.member.as_str() != "sleep")
                         .then_some((
-                            lash_vocabulary::OperationUse {
+                            lash_kernel_value::OperationUse {
                                 link: *link,
                                 slot: *slot,
                             },
-                            lash_vocabulary::OperationMode::Read,
+                            lash_kernel_value::OperationMode::Read,
                         ))
                 })
         })
@@ -416,10 +416,10 @@ struct ScriptHost {
 impl Host for ScriptHost {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let name = crate::linked::operation(use_);
         Ok(Ok(if name.as_str().ends_with(".clock") {

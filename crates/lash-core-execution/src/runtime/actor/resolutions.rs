@@ -10,8 +10,11 @@ use lash_durable::resolutions::ExecutionRegistration;
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
-use lash_vocabulary::{ExecutionPolicy, claims::*, names::*, package::*};
 use tokio_util::sync::CancellationToken;
+use {
+    lash_kernel_value::ExecutionPolicy, lash_kernel_value::names::*, lash_kernel_value::package::*,
+    lash_vocabulary::claims::*,
+};
 
 use crate::deferred_provider::DeferredResolveContext;
 use crate::plugin::packages::{DeferredAnswer, DeferredPackageProvider, ResolverFault};

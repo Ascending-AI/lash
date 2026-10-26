@@ -11,8 +11,8 @@
 //! Everything here serializes, because the report's second reader is a deploy
 //! gate.
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 
 use lash_core::DurableSurface;

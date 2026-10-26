@@ -5,9 +5,9 @@ use lash_protocol_types::engine_fault::{FrameEpoch, OwnerEpoch};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
 use lash_vm_protocol::{EncodedPayload, VmOwner};
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
 use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
@@ -87,8 +87,8 @@ pub enum Request {
 pub struct LowerFunction {
     pub name: Name,
     pub document: lash_kernel_doc::IdentifiedDocument,
-    pub link: lash_vocabulary::content_ids::LinkId,
-    pub callable: lash_vocabulary::names::CallableId,
+    pub link: lash_kernel_value::content_ids::LinkId,
+    pub callable: lash_kernel_value::names::CallableId,
     pub environment: lash_kernel_doc::heap::EntityId,
     pub references: BTreeSet<lash_kernel_doc::heap::EntityId>,
     pub written: Option<lash_kernel_dialect::Written>,
@@ -148,7 +148,7 @@ impl LowerFunction {
     /// held it and the signatures of its library functions.
     #[must_use]
     pub fn description(&self) -> Vec<u8> {
-        use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter};
+        use {lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenWriter};
         let mut out = TokenWriter::with_capacity(self.document.body().len() + 64);
         out.seq(9);
         self.name.encode(&mut out);
@@ -171,8 +171,8 @@ impl LowerFunction {
     /// Any token the description does not hold.
     pub fn from_description(
         description: &[u8],
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         Self::from_description_with(description, limits, |body| {
             lash_kernel_doc::IdentifiedDocument::decode(body, limits)
         })
@@ -183,30 +183,30 @@ impl LowerFunction {
     /// checks always read this description; the decoder must honor `limits`.
     pub fn from_description_with(
         description: &[u8],
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
         decode_document: impl FnOnce(
             &[u8],
         ) -> Result<
             lash_kernel_doc::IdentifiedDocument,
-            lash_vocabulary::tokens::TokenError,
+            lash_kernel_value::tokens::TokenError,
         >,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
-        use lash_vocabulary::tokens::{TokenCodec as _, TokenReader};
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
+        use {lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenReader};
         let mut input = TokenReader::new(description).with_data_limits(limits);
         input.expect_struct(9)?;
         let name = Name::decode(&mut input)?;
         let body = input.tree()?;
         let document = decode_document(body)?;
         if document.body() != body {
-            return Err(lash_vocabulary::tokens::TokenError::Invalid(
+            return Err(lash_kernel_value::tokens::TokenError::Invalid(
                 "the decoded document differs from the current description".into(),
             ));
         }
         let function = Self {
             name,
             document,
-            link: lash_vocabulary::content_ids::LinkId::decode(&mut input)?,
-            callable: lash_vocabulary::names::CallableId::decode(&mut input)?,
+            link: lash_kernel_value::content_ids::LinkId::decode(&mut input)?,
+            callable: lash_kernel_value::names::CallableId::decode(&mut input)?,
             environment: lash_kernel_doc::heap::EntityId::decode(&mut input)?,
             references: BTreeSet::decode(&mut input)?,
             written: Option::decode(&mut input)?,
@@ -215,7 +215,7 @@ impl LowerFunction {
         };
         input.finish()?;
         if function.link != function.callable.link {
-            return Err(lash_vocabulary::tokens::TokenError::Invalid(
+            return Err(lash_kernel_value::tokens::TokenError::Invalid(
                 "saved function Link mismatch".into(),
             ));
         }
@@ -235,7 +235,7 @@ impl<'de> Deserialize<'de> for LowerFunction {
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         Self::from_description(
             &bytes,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
         .map_err(serde::de::Error::custom)
     }

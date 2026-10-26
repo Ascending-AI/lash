@@ -133,7 +133,7 @@ struct TypedWriteConfig {
 const TYPED_WRITE_COMPONENT: lash_core::ProcessConfigKey<TypedWriteConfig> =
     lash_core::ProcessConfigKey::new(
         "core-node-typed-write",
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
     );
 
 /// A component that contributes the write tool over `world` and decodes a
@@ -253,7 +253,7 @@ on_every_tier!(a_typed_config_components_unsettled_step_is_served_after_release)
 async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     let world = Arc::new(World::default());
     let (stores, _keep) = stores(Tier::SqliteMemory).await;
-    let two = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+    let two = lash_kernel_value::providers::FormatVersion::new(2).unwrap();
     let (backend, core) = node_over(
         Arc::clone(&stores),
         lash_core_execution::DurableSettings::default(),
@@ -265,7 +265,7 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
             lash::LashCore::standard_builder(backend.clone()).process_component(
                 Arc::new(FormatWrite {
                     world: Arc::clone(&world),
-                    native: lash_vocabulary::providers::FormatVersion::ONE,
+                    native: lash_kernel_value::providers::FormatVersion::ONE,
                     conversions: Arc::new(AtomicUsize::new(0)),
                     seen: Arc::default(),
                 }),
@@ -358,7 +358,7 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
     assert!(
         requires.contains(
             &lash_vocabulary::claims::ObligationToken::for_component(
-                &lash_vocabulary::providers::ProcessComponentId::new(WRITE_COMPONENT.component())
+                &lash_kernel_value::providers::ProcessComponentId::new(WRITE_COMPONENT.component())
                     .unwrap(),
                 two
             )
@@ -370,7 +370,7 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
 
 struct FormatWrite {
     world: Arc<World>,
-    native: lash_vocabulary::providers::FormatVersion,
+    native: lash_kernel_value::providers::FormatVersion,
     conversions: Arc<AtomicUsize>,
     seen: Arc<Mutex<Vec<(serde_json::Value, serde_json::Value)>>>,
 }
@@ -384,7 +384,7 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
         if self.native.get() == 2 {
             declaration
                 .readable_formats
-                .insert(0, lash_vocabulary::providers::FormatVersion::ONE);
+                .insert(0, lash_kernel_value::providers::FormatVersion::ONE);
         }
         declaration
     }
@@ -400,11 +400,11 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
     }
     fn migrate_format(
         &self,
-        from: lash_vocabulary::providers::FormatVersion,
+        from: lash_kernel_value::providers::FormatVersion,
         namespace: lash::plugins::FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, lash::plugins::FormatRefusal> {
-        assert_eq!(from, lash_vocabulary::providers::FormatVersion::ONE);
+        assert_eq!(from, lash_kernel_value::providers::FormatVersion::ONE);
         assert_eq!(self.native.get(), 2);
         match namespace {
             lash::plugins::FormatNamespace::State => {
@@ -510,7 +510,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
         Arc::clone(&stores),
         lash_core_execution::DurableSettings::default(),
         engine(),
-        build(lash_vocabulary::providers::FormatVersion::ONE),
+        build(lash_kernel_value::providers::FormatVersion::ONE),
     );
     let process = start_under(
         &first,
@@ -549,7 +549,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
             Arc::clone(&stores),
             lash_core_execution::DurableSettings::default(),
             engine(),
-            build(lash_vocabulary::providers::FormatVersion::new(2).unwrap()),
+            build(lash_kernel_value::providers::FormatVersion::new(2).unwrap()),
         );
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {

@@ -31,17 +31,17 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_vocabulary::tokens::CanonicalFault;
-use lash_vocabulary::tokens::ChildRef;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenEvent;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
-use lash_vocabulary::tokens::encode_body;
-use lash_vocabulary::tokens::logical_digest;
-use lash_vocabulary::tokens::put_varint;
-use lash_vocabulary::tokens::varint_len;
+use lash_kernel_value::tokens::CanonicalFault;
+use lash_kernel_value::tokens::ChildRef;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenEvent;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
+use lash_kernel_value::tokens::encode_body;
+use lash_kernel_value::tokens::logical_digest;
+use lash_kernel_value::tokens::put_varint;
+use lash_kernel_value::tokens::varint_len;
 
 use super::node::{
     EncodedNode, Framing, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,

@@ -58,7 +58,7 @@ fn tool_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition
     .with_execution(std::time::Duration::from_secs(120));
     if name == RETRY {
         definition.with_execution_policy(
-            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                 std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
                 RETRY_AFTER_MS,
                 RETRY_AFTER_MS,
@@ -255,7 +255,7 @@ async fn session_with(
     .tools(lash::tool_provider_key!("tools"), tools)
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok((core, session))
@@ -1047,7 +1047,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let tool = TokenWatchingTool::default();
     let core = deploy(tool.clone())?;
     let session_id =
-        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
+        lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -1130,7 +1130,7 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
     };
     let core = deploy()?;
     let session_id =
-        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
+        lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))

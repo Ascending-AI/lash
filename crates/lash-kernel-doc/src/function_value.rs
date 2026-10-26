@@ -4,13 +4,13 @@
 //! capture graph and public presentation. Nothing is stored at the crossing;
 //! the receiver decides whether to start, store or ignore the value.
 
-use lash_vocabulary::ImportSlot;
+use lash_kernel_value::ImportSlot;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Signature;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Signature;
 
 /// The record key a function value's transport wraps it under:
 /// `{"$lash_function": <FunctionValue>}`. Only the typed encoder writes it;
@@ -50,16 +50,16 @@ pub struct FunctionValue {
     pub written_signature: Option<WrittenSignature>,
     /// Source coordinates for diagnostics, independent of executable identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
+    pub signature_origin: Option<lash_kernel_value::SignatureOrigin>,
     /// Source evidence used when this callable becomes a saved workflow.
     pub implicit_text_conversions: Vec<crate::ImplicitTextConversion>,
-    pub callable: lash_vocabulary::names::CallableId,
+    pub callable: lash_kernel_value::names::CallableId,
     pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,
     pub convention: StartConvention,
     pub captions: crate::Captions,
     pub representation: FunctionRepresentation,
-    pub creation: Option<lash_vocabulary::sites::Site>,
+    pub creation: Option<lash_kernel_value::sites::Site>,
     /// Token members other than its callable slot, which is Null.
     pub token: Option<Vec<crate::Datum>>,
 }
@@ -72,7 +72,7 @@ pub struct WrittenSignature {
     pub signature: String,
 }
 
-pub use lash_vocabulary::WorkflowReference;
+pub use lash_kernel_value::WorkflowReference;
 
 /// How a function a closure makes is started from outside its run: the
 /// signature it is started under, how the dialect holds the function as a
@@ -199,7 +199,7 @@ pub enum FunctionValueRefusal {
     SignatureRequired { source: Box<SignatureRequired> },
     #[error(transparent)]
     EntryAnnotation {
-        source: Box<lash_vocabulary::EntryAnnotationRefusal>,
+        source: Box<lash_kernel_value::EntryAnnotationRefusal>,
     },
     #[error("function value metadata differs from its defining callable")]
     Identity,
@@ -270,7 +270,7 @@ impl FunctionValue {
         &self,
         catalog: &dyn crate::FunctionCatalog,
         limits: FunctionValueLimits,
-        data: lash_vocabulary::data_limits::KernelDataLimits,
+        data: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<(), FunctionValueRefusal> {
         let bytes = self
             .counted_bytes()
@@ -301,7 +301,7 @@ impl FunctionValue {
         json: &serde_json::Value,
         catalog: &dyn crate::FunctionCatalog,
         limits: FunctionValueLimits,
-        data: lash_vocabulary::data_limits::KernelDataLimits,
+        data: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<Self, FunctionValueRefusal> {
         let serde_json::Value::Object(wrapper) = json else {
             return Err(FunctionValueRefusal::NotTagged);
@@ -316,7 +316,7 @@ impl FunctionValue {
 
     fn from_payload(
         payload: &serde_json::Value,
-        _data: lash_vocabulary::data_limits::KernelDataLimits,
+        _data: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<Self, FunctionValueRefusal> {
         serde_json::from_value(payload.clone()).map_err(|error| FunctionValueRefusal::Decode {
             problem: error.to_string(),
@@ -324,8 +324,9 @@ impl FunctionValue {
     }
 }
 
-pub use lash_vocabulary::{
-    FunctionLocation, SignaturePosition, SignatureRequired, require_entry_signature,
+pub use {
+    lash_kernel_value::FunctionLocation, lash_kernel_value::SignaturePosition,
+    lash_kernel_value::SignatureRequired, lash_kernel_value::require_entry_signature,
 };
 
 impl CallablePresentation {
@@ -337,13 +338,13 @@ impl CallablePresentation {
         location: FunctionLocation,
         asynchronous: bool,
         rest: bool,
-        origin: Option<&lash_vocabulary::SignatureOrigin>,
-    ) -> Result<crate::FunctionExport, lash_vocabulary::EntrySignatureRefusal> {
+        origin: Option<&lash_kernel_value::SignatureOrigin>,
+    ) -> Result<crate::FunctionExport, lash_kernel_value::EntrySignatureRefusal> {
         if let Some(origin) = origin {
             origin.require(&self.signature, location)?;
         } else {
             require_entry_signature(&self.signature, location)
-                .map_err(lash_vocabulary::EntrySignatureRefusal::Required)?;
+                .map_err(lash_kernel_value::EntrySignatureRefusal::Required)?;
         }
         Ok(crate::FunctionExport {
             function,
@@ -448,10 +449,10 @@ impl FunctionValue {
                 self.signature_origin.as_ref(),
             )
             .map_err(|refusal| match refusal {
-                lash_vocabulary::EntrySignatureRefusal::Required(source) => {
+                lash_kernel_value::EntrySignatureRefusal::Required(source) => {
                     FunctionValueRefusal::SignatureRequired { source }
                 }
-                lash_vocabulary::EntrySignatureRefusal::Annotation(source) => {
+                lash_kernel_value::EntrySignatureRefusal::Annotation(source) => {
                     FunctionValueRefusal::EntryAnnotation { source }
                 }
             })

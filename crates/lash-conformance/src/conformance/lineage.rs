@@ -1,4 +1,4 @@
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 

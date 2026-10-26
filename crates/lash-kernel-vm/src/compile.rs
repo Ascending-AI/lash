@@ -33,11 +33,11 @@ use lash_kernel_exec::{
     ActIx, BoundaryKind, KirError, Op, OpRange, Reg, RegionTable, StepEdge, StmtRanges,
     Tables as StreamTables, verify_stream,
 };
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::types::Type;
 
 use crate::costs::Costs;
 use crate::functions::{MachineFunction, machine_function, machine_name};
@@ -272,7 +272,10 @@ impl PreparedLibrary {
         Self::with_layout_and_charge(registry, Layout::default(), charge)
     }
 
-    pub(crate) fn in_charge(&self, charge: crate::Charge) -> Self {
+    /// Selects the run's charge policy while preserving this library's
+    /// preparation strategy and closed helper image. The alternate preparation
+    /// is shared by subsequent selections of the same policy.
+    pub fn in_charge(&self, charge: crate::Charge) -> Self {
         if self.0.charge == charge {
             self.clone()
         } else {
@@ -363,7 +366,7 @@ fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
 /// The document's codes, blocks and statements are numbered after the
 /// library's.
 pub(crate) struct Executable {
-    pub(crate) instances: BTreeMap<lash_vocabulary::content_ids::LinkId, Arc<Document>>,
+    pub(crate) instances: BTreeMap<lash_kernel_value::content_ids::LinkId, Arc<Document>>,
     // Immutable census boundaries, beside the document hot path.
     code_base: usize,
     block_base: usize,
@@ -372,7 +375,7 @@ pub(crate) struct Executable {
     document: Arc<Document>,
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
-    helper_origins: Box<[(lash_vocabulary::LinkId, Box<[FunctionId]>)]>,
+    helper_origins: Box<[(lash_kernel_value::LinkId, Box<[FunctionId]>)]>,
     library_reached: Box<[FunctionId]>,
     origin_cache_bytes: u64,
 }
@@ -400,7 +403,7 @@ impl std::ops::Deref for Executable {
 }
 
 impl Executable {
-    pub(crate) fn admits_callable(&self, callable: &lash_vocabulary::CallableId) -> bool {
+    pub(crate) fn admits_callable(&self, callable: &lash_kernel_value::CallableId) -> bool {
         self.instances.get(&callable.link).is_some_and(|document| {
             document.functions.contains_key(&callable.function)
                 || self
@@ -729,7 +732,7 @@ impl Executable {
     pub(crate) fn library_name(
         &self,
         function: &FunctionId,
-    ) -> Option<&lash_vocabulary::names::FunctionName> {
+    ) -> Option<&lash_kernel_value::names::FunctionName> {
         self.library
             .0
             .registry
@@ -1021,7 +1024,7 @@ pub(crate) enum ActionKind {
         args: Vec<Atom>,
     },
     Perform {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
         args: Vec<Atom>,
         result: Type,
         then_yield: bool,
@@ -1057,7 +1060,7 @@ pub(crate) enum Callee {
     Library(LibId),
     /// A document's body-helper call retains its typed boundary.
     CheckedHelper(LibId),
-    Import(lash_vocabulary::names::ImportSlot, Option<LibId>),
+    Import(lash_kernel_value::names::ImportSlot, Option<LibId>),
 }
 
 impl Callee {
@@ -1141,7 +1144,7 @@ struct Resolve<'a> {
     library: &'a Prepared,
     /// The functions a document lists; a library body's calls resolve
     /// against the whole registry, which its registration checked.
-    listed: Option<&'a BTreeMap<FunctionId, lash_vocabulary::names::FunctionName>>,
+    listed: Option<&'a BTreeMap<FunctionId, lash_kernel_value::names::FunctionName>>,
 }
 
 /// How a library function runs when it is called inside an expression.
@@ -1212,7 +1215,7 @@ struct Compiler<'a> {
     sites: u32,
     declared: BTreeMap<FunctionId, CodeId>,
     resolve: Resolve<'a>,
-    imports: BTreeMap<(Unit, lash_vocabulary::ImportSlot), LibId>,
+    imports: BTreeMap<(Unit, lash_kernel_value::ImportSlot), LibId>,
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
     unit: Unit,
@@ -1495,9 +1498,9 @@ impl From<doc::Literal> for Constant {
 }
 
 /// The public result kinds checked without reading or warming an arena object.
-pub(crate) fn import_result_check(ty: &lash_vocabulary::Type) -> Option<fn(doc::Value) -> bool> {
+pub(crate) fn import_result_check(ty: &lash_kernel_value::Type) -> Option<fn(doc::Value) -> bool> {
     use doc::Value;
-    use lash_vocabulary::Type;
+    use lash_kernel_value::Type;
     Some(match ty {
         Type::Any => |_| true,
         Type::Null => |v| matches!(v, Value::Null),
@@ -1512,6 +1515,6 @@ pub(crate) fn import_result_check(ty: &lash_vocabulary::Type) -> Option<fn(doc::
     })
 }
 
-pub(crate) fn import_result_fits(ty: &lash_vocabulary::Type, value: doc::Value) -> bool {
+pub(crate) fn import_result_fits(ty: &lash_kernel_value::Type, value: doc::Value) -> bool {
     import_result_check(ty).is_some_and(|fits| fits(value))
 }

@@ -3,8 +3,8 @@ use crate::{
     ActKind, Action, Callee, Document, Expr, FunctionId, FunctionTarget, Node, NodeMut, Protocol,
     StartConvention, Stmt,
 };
-use lash_vocabulary::names::ImportSlot;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::names::ImportSlot;
+use lash_kernel_value::sites::Site;
 use std::collections::BTreeSet;
 
 macro_rules! inventory {
@@ -114,8 +114,8 @@ impl StartConvention {
             Self::PyDirect { cleanup } => vec![cleanup],
         }
     }
-    pub fn semantic(&self) -> lash_vocabulary::names::Convention {
-        use lash_vocabulary::names::Convention;
+    pub fn semantic(&self) -> lash_kernel_value::names::Convention {
+        use lash_kernel_value::names::Convention;
         match self {
             Self::Direct => Convention::Direct,
             Self::PyArgsList { .. } => Convention::PyArgsList,

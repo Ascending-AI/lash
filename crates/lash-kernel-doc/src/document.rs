@@ -5,9 +5,9 @@ use serde::de::DeserializeOwned;
 
 use crate::ast::{Block, Node};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::tokens::{encode_body, logical_digest};
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::sites::Site;
+use {lash_kernel_value::tokens::encode_body, lash_kernel_value::tokens::logical_digest};
 
 /// The kernel version this crate's forms, values, evaluation order,
 /// nested-action positions, task scheduling, site derivation and canonical form are
@@ -24,9 +24,12 @@ pub const MAX_NESTING_DEPTH: usize = 64;
 use crate::NumberPolicy;
 use crate::function::FunctionDefinition;
 use crate::function_value::StartConvention;
-use lash_vocabulary::{claims::NodeRequirements, names::*, types::*};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::claims::NodeRequirements, lash_kernel_value::names::*,
+    lash_kernel_value::types::*,
+};
 /// Direct exact-ID references to immutable build library code. These are
 /// disjoint from the document's own definitions and participate in its identity.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -345,13 +348,13 @@ impl Document {
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
         Self::from_json_with_limits(
             text,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
     }
     /// Read under the host's recursive JSON safety policy.
     pub fn from_json_with_limits(
         text: &str,
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         crate::document_work::note(|work| work.json_decodes += 1);
         from_versioned_json_with_limits(text, limits)
@@ -392,7 +395,7 @@ pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<String, EncodeError> {
 
 pub(crate) fn from_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     let limit = limits.document_json_depth();
     let depth = json_depth(text);
@@ -450,7 +453,7 @@ fn json_depth(text: &str) -> usize {
 /// build cannot disguise an unsupported version as a form decoding fault.
 pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     #[derive(Deserialize)]
     struct RequirementsHeader {
@@ -634,7 +637,7 @@ pub fn validate_restored_document_with_limits(
     helpers: &crate::BuildHelpers,
     catalog: &dyn crate::FunctionCatalog,
     selection: &RestoreSelection,
-    limits: lash_vocabulary::KernelDataLimits,
+    limits: lash_kernel_value::KernelDataLimits,
 ) -> Result<(), crate::Invalid> {
     crate::validate_document_structure_with_limits(document, limits)?;
     let missing = |function| crate::Invalid {

@@ -74,7 +74,7 @@ impl SimEngine {
     /// ([`crate::session_hold`]).
     pub fn hold_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<crate::session_hold::SessionHold, FixedScriptRunnerError> {
         self.holds
             .hold(session)

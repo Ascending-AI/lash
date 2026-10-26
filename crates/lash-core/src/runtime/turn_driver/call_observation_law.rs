@@ -11,7 +11,9 @@ async fn legal_tool_identities_remain_visible_in_call_ledger_projections() {
     use lash_durable::domain::{OwnerKey, RunSeq};
     use lash_trace::{DurableTraceScope, TraceScopeId, TraceScopeOwner, TraceToolOwner};
     use lash_vocabulary::identity::TurnId;
-    use lash_vocabulary::tool_contract::{ExecutionPolicy, ToolId};
+    use {
+        lash_kernel_value::tool_contract::ExecutionPolicy, lash_vocabulary::tool_contract::ToolId,
+    };
 
     let backend = crate::testing::sqlite_recording_backend().await;
     let session = SessionId::fixture("call-observation-law");

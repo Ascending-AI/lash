@@ -19,7 +19,7 @@ pub enum PluginOperationInvokeError {
     /// session command, e.g. a tool-catalog refresh, then retry the query.
     #[error("no plugin view of session `{session_id}` is published")]
     NotPublished {
-        session_id: lash_vocabulary::identity::SessionId,
+        session_id: lash_kernel_value::identity::SessionId,
     },
     #[error("plugin operation failed: {0}")]
     Failed(Box<PluginOperationFailure>),
@@ -121,7 +121,7 @@ impl crate::core_internal::RuntimeService for NoopSessionManager {}
 impl SessionReadService for NoopSessionManager {
     async fn committed_turn(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
         _turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<
         Option<lash_core_store::transcript::CommittedTurnWithCalls>,
@@ -146,7 +146,7 @@ impl SessionReadService for NoopSessionManager {
     }
     async fn snapshot_session(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
     ) -> Result<crate::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError> {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
@@ -156,7 +156,7 @@ impl SessionReadService for NoopSessionManager {
     }
     async fn tool_catalog(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
     ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError> {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
@@ -170,7 +170,7 @@ impl SessionReadService for NoopSessionManager {
 impl ProcessReadService for NoopSessionManager {
     async fn list_visible(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
         _mode: lash_execution_contracts::process::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -189,7 +189,7 @@ impl ProcessReadService for NoopSessionManager {
 impl SessionStateService for NoopSessionManager {
     async fn turn_scope(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
         _turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<crate::ExecutionScope, lash_execution_contracts::plugin_error::PluginError> {
         Err(
@@ -221,7 +221,7 @@ impl SessionLifecycleService for NoopSessionManager {
 impl SessionGraphService for NoopSessionManager {
     async fn append_session_nodes(
         &self,
-        _session_id: &lash_vocabulary::identity::SessionId,
+        _session_id: &lash_kernel_value::identity::SessionId,
         _request: crate::AppendSessionNodesRequest,
     ) -> Result<crate::SessionGraphAppendResult, lash_execution_contracts::plugin_error::PluginError>
     {

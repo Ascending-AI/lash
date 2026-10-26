@@ -11,15 +11,15 @@ use lash_kernel_check::{Environment as Checker, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, PrintOptions};
 use lash_kernel_doc::{self as k, Captions, Document, Expr, Node, SourceLanguage};
 use lash_kernel_edit::{Draft, Transaction};
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use serde::{Deserialize, Serialize};
 
 mod cell;
 mod namespace;
-use lash_vocabulary::names::{LinkedStart, StartSelector};
 use namespace::FixtureNamespace;
+use {lash_kernel_value::names::LinkedStart, lash_kernel_value::names::StartSelector};
 mod printed;
 mod readable;
 
@@ -244,17 +244,20 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
 
 /// Source-only corpus operation fixtures, projected from explicit Packages.
 pub fn corpus_namespaces(
-    effects: &BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::Signature>,
-    controls: &BTreeMap<lash_vocabulary::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+    effects: &BTreeMap<lash_kernel_value::EffectName, lash_kernel_value::Signature>,
+    controls: &BTreeMap<
+        lash_kernel_value::EffectName,
+        BTreeSet<lash_kernel_dialect::EffectControl>,
+    >,
 ) -> Result<lash_kernel_dialect::Namespaces> {
     let requirements = effects
         .iter()
         .map(|(name, signature)| {
             (
                 name.clone(),
-                lash_vocabulary::OperationRequirement::new(
+                lash_kernel_value::OperationRequirement::new(
                     signature.clone(),
-                    lash_vocabulary::ContractId::new("1"),
+                    lash_kernel_value::ContractId::new("1"),
                 ),
             )
         })
@@ -262,11 +265,11 @@ pub fn corpus_namespaces(
     let controls = controls
         .iter()
         .map(|(name, kinds)| {
-            let mut controls = lash_vocabulary::TurnControls::none();
+            let mut controls = lash_kernel_value::TurnControls::none();
             for kind in kinds {
                 controls = match kind {
                     lash_kernel_dialect::EffectControl::Finish => {
-                        controls.with_finish(lash_vocabulary::JsonSchema::any())
+                        controls.with_finish(lash_kernel_value::JsonSchema::any())
                     }
                     lash_kernel_dialect::EffectControl::SwitchAgentFrame => {
                         controls.with_switch_agent_frame()
@@ -299,8 +302,8 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
     for definition in tools()? {
         effects.insert(
             definition.operation().effect_name(),
-            lash_vocabulary::OperationRequirement::new(
-                lash_vocabulary::json_schema::tool_signature(
+            lash_kernel_value::OperationRequirement::new(
+                lash_kernel_value::json_schema::tool_signature(
                     &definition.contract.input_schema.canonical,
                     &definition.contract.output_schema.canonical,
                 ),
@@ -319,38 +322,38 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
         "web.search",
     ] {
         effects.insert(
-            lash_vocabulary::EffectName::new(name)?,
-            lash_vocabulary::OperationRequirement::new(
-                lash_vocabulary::Signature {
-                    params: vec![lash_vocabulary::Param {
+            lash_kernel_value::EffectName::new(name)?,
+            lash_kernel_value::OperationRequirement::new(
+                lash_kernel_value::Signature {
+                    params: vec![lash_kernel_value::Param {
                         name: "input".into(),
-                        ty: lash_vocabulary::Type::Any,
+                        ty: lash_kernel_value::Type::Any,
                         optional: false,
                     }],
-                    result: lash_vocabulary::Type::Any,
+                    result: lash_kernel_value::Type::Any,
                 },
-                lash_vocabulary::ContractId::new("1"),
+                lash_kernel_value::ContractId::new("1"),
             ),
         );
     }
     // Finish belongs only to cells; it is not a process tool offered by the example.
     effects.insert(
-        lash_vocabulary::EffectName::new("control.finish")?,
-        lash_vocabulary::OperationRequirement::new(
-            lash_vocabulary::Signature {
-                params: vec![lash_vocabulary::Param {
+        lash_kernel_value::EffectName::new("control.finish")?,
+        lash_kernel_value::OperationRequirement::new(
+            lash_kernel_value::Signature {
+                params: vec![lash_kernel_value::Param {
                     name: Name::new("input"),
-                    ty: lash_vocabulary::Type::Any,
+                    ty: lash_kernel_value::Type::Any,
                     optional: false,
                 }],
-                result: lash_vocabulary::Type::Any,
+                result: lash_kernel_value::Type::Any,
             },
-            lash_vocabulary::ContractId::new("1"),
+            lash_kernel_value::ContractId::new("1"),
         ),
     );
     let controls = BTreeMap::from([(
-        lash_vocabulary::EffectName::new("control.finish")?,
-        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any()),
+        lash_kernel_value::EffectName::new("control.finish")?,
+        lash_kernel_value::TurnControls::finish(lash_kernel_value::JsonSchema::any()),
     )]);
     let namespace = FixtureNamespace::new(effects, &controls)?;
     let env_namespaces = namespace.namespaces()?;

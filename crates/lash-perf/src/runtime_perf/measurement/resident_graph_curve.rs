@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::session_graph::RealizedNodeTimestamp;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Resident-graph sizes swept by the curve. The defect under measurement is
 /// per-turn cost linear in resident history, so the sizes span two orders of

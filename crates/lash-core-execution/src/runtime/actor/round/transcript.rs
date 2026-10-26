@@ -17,10 +17,10 @@ use lash_core_store::checkpoint_graph::GraphStaging;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_durable::domain::{RunFactKind, RunFactRow, RunFacts, RunSeq};
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::graph::{self, AdmitMember, CallBody, CallOutcome, MaterialNode, RoundFact};
 

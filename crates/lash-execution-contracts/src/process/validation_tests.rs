@@ -40,7 +40,7 @@ fn plan_append(
 
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     ProcessEffectOccurrence::new(
-        lash_vocabulary::sites::EffectLocation::authored(
+        lash_kernel_value::sites::EffectLocation::authored(
             lash_protocol_types::effect_identity_fixture("operation:node", 1),
         ),
         "fixture.operation",
@@ -261,7 +261,7 @@ fn a_resume_ends_only_its_own_wait() {
     let sleep = WaitState {
         since_ms: 1,
         kind: WaitKind::Sleep { until_ms: 900 },
-        site: Some(lash_vocabulary::sites::EffectLocation::authored(
+        site: Some(lash_kernel_value::sites::EffectLocation::authored(
             lash_protocol_types::effect_identity_fixture("nap", 1),
         )),
     };

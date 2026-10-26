@@ -84,10 +84,10 @@ pub use waits::{
 use crate::error::DurableError;
 use crate::ids::ActorKey;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::ToolCallId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// One owner-state write inside a fenced [`ActorTx`](crate::ActorTx) commit.

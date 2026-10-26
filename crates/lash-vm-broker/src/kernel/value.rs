@@ -19,7 +19,7 @@
 
 use lash_kernel_doc::{Datum, NumberToken};
 
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 /// The field a package value holds its brand in
 /// (`lash_kernel_dialect::BRAND_FIELD`).
@@ -419,19 +419,22 @@ impl Reader<'_> {
 /// These are ordinary type encodings, independent of operation names.
 pub fn datum_from_tool_json(
     value: &serde_json::Value,
-    expected: &lash_vocabulary::types::Type,
+    expected: &lash_kernel_value::types::Type,
 ) -> Result<Datum, lash_kernel_doc::DecodeRefusal> {
     fn decode(
         value: &serde_json::Value,
-        expected: &lash_vocabulary::types::Type,
+        expected: &lash_kernel_value::types::Type,
         depth: usize,
     ) -> Result<Datum, lash_kernel_doc::DecodeRefusal> {
         use lash_kernel_doc::{Bytes, DecodeRefusal, Integer, Timestamp};
         let mismatch = || DecodeRefusal::Type {
-            mismatch: lash_vocabulary::TypeMismatch::new(expected.clone(), json_value_type(value)),
+            mismatch: lash_kernel_value::TypeMismatch::new(
+                expected.clone(),
+                json_value_type(value),
+            ),
         };
 
-        use lash_vocabulary::types::Type;
+        use lash_kernel_value::types::Type;
         if depth > KernelDataLimits::standard().document_depth() {
             return Err(DecodeRefusal::DepthLimit {
                 limit: KernelDataLimits::standard().document_depth(),
@@ -486,7 +489,7 @@ pub fn datum_from_tool_json(
                 let object = value.as_object().ok_or_else(mismatch)?;
                 let mut fields = Vec::with_capacity(object.len());
                 for (name, value) in object {
-                    if matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                    if matches!(record.rest, lash_kernel_value::RecordRest::Drop)
                         && !record.fields.iter().any(|field| field.name == *name)
                     {
                         continue;
@@ -498,7 +501,7 @@ pub fn datum_from_tool_json(
                         .map(|field| &field.ty)
                         .or(record.rest.kept_type())
                         .ok_or_else(|| DecodeRefusal::Type {
-                            mismatch: lash_vocabulary::TypeMismatch::new(
+                            mismatch: lash_kernel_value::TypeMismatch::new(
                                 Type::Absent,
                                 json_value_type(value),
                             )
@@ -558,8 +561,8 @@ pub fn datum_from_tool_json(
 }
 
 /// A bounded witness of the JSON value's kind; no data enters a diagnostic.
-fn json_value_type(value: &serde_json::Value) -> lash_vocabulary::Type {
-    use lash_vocabulary::{RecordType, Type};
+fn json_value_type(value: &serde_json::Value) -> lash_kernel_value::Type {
+    use {lash_kernel_value::RecordType, lash_kernel_value::Type};
     match value {
         serde_json::Value::Null => Type::Null,
         serde_json::Value::Bool(_) => Type::Bool,
@@ -568,7 +571,7 @@ fn json_value_type(value: &serde_json::Value) -> lash_vocabulary::Type {
         serde_json::Value::Array(_) => Type::List(Box::new(Type::Json)),
         serde_json::Value::Object(_) => Type::Record(RecordType {
             fields: vec![],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
         }),
     }
 }
@@ -579,7 +582,7 @@ mod tests {
     #[test]
     fn typed_tool_scalars_do_not_reinterpret_plain_json_text() {
         use lash_kernel_doc::Datum;
-        use lash_vocabulary::types::Type;
+        use lash_kernel_value::types::Type;
         let timestamp = serde_json::json!("1700000000123456789");
         let bytes = serde_json::json!("0000000000000001");
         let Datum::Timestamp(actual) =

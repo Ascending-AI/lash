@@ -1,6 +1,6 @@
 //! SQLite's answer to the store maintenance outcome contract (ADR 0067 §4).
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_execution_contracts::deployment::DeploymentStore;

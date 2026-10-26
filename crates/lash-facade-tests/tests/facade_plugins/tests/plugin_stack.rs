@@ -122,7 +122,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("plugin-surface")
+        lash_kernel_value::identity::SessionId::parse("plugin-surface")
             .expect("nonblank host identity"),
     )
     .await
@@ -212,7 +212,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
             .build(lash_facade_tests::runtime_lease_owner())?;
         let standard_session = created_session(
             &standard_core,
-            lash_vocabulary::identity::SessionId::parse("standard-projection")
+            lash_kernel_value::identity::SessionId::parse("standard-projection")
                 .expect("nonblank host identity"),
         )
         .await
@@ -260,7 +260,7 @@ await control.finish("done");"#,
                     .build(lash_facade_tests::runtime_lease_owner())?;
             let rlm_session = created_session(
                 &rlm_core,
-                lash_vocabulary::identity::SessionId::parse("rlm-projection")
+                lash_kernel_value::identity::SessionId::parse("rlm-projection")
                     .expect("nonblank host identity"),
             )
             .await
@@ -369,7 +369,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
     let id = "builder-sentinels";
     let mut session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -400,7 +400,7 @@ async fn builder_configured_tools_and_hooks_are_never_discarded(backend: Backend
             session.close().await?;
             session = core
                 .session(
-                    lash_vocabulary::identity::SessionId::parse(id)
+                    lash_kernel_value::identity::SessionId::parse(id)
                         .expect("nonblank host identity"),
                 )
                 .open()

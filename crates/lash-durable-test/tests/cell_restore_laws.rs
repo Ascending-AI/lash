@@ -106,11 +106,11 @@ use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::StepRequest;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::claims::ObligationToken;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 use dialect::Dialect;
@@ -244,7 +244,7 @@ struct ExternalWorld {
     redeployed: std::sync::atomic::AtomicBool,
     /// The format of the execution binding the resolver's grant carries:
     /// none when it carries none.
-    binding: Mutex<Option<lash_vocabulary::providers::FormatVersion>>,
+    binding: Mutex<Option<lash_kernel_value::providers::FormatVersion>>,
     /// How many `ext_slow` bodies were told of their call's cancel.
     cancelled: std::sync::atomic::AtomicUsize,
 }
@@ -401,12 +401,12 @@ impl lash_core::ToolProvider for DeferredTools {
 
     /// It reads its bindings in formats 1 and 2: a grant in format 1 is an
     /// older format it still reads.
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
-        const READS: [lash_vocabulary::providers::FormatVersion; 2] = [
-            lash_vocabulary::providers::FormatVersion::ONE,
-            match lash_vocabulary::providers::FormatVersion::new(2) {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
+        const READS: [lash_kernel_value::providers::FormatVersion; 2] = [
+            lash_kernel_value::providers::FormatVersion::ONE,
+            match lash_kernel_value::providers::FormatVersion::new(2) {
                 Some(format) => format,
-                None => lash_vocabulary::providers::FormatVersion::ONE,
+                None => lash_kernel_value::providers::FormatVersion::ONE,
             },
         ];
         &READS
@@ -465,7 +465,7 @@ impl CancelTarget {
 impl lash_core::plugin::packages::DeferredPackageProvider for GrantingResolver {
     fn validate_grant(
         &self,
-        grant: &lash_vocabulary::package::DeferredGrant,
+        grant: &lash_kernel_value::package::DeferredGrant,
         registry: lash_vocabulary::claims::RegistryKind,
     ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
         packages::validate_grant("tools", "deferred", "dynamic", grant, registry)
@@ -473,8 +473,8 @@ impl lash_core::plugin::packages::DeferredPackageProvider for GrantingResolver {
     async fn resolve(
         &self,
         _: &lash_core::DeferredResolveContext<'_>,
-        _: &lash_vocabulary::package::DeferredGrant,
-        requested: &lash_vocabulary::names::QualifiedName,
+        _: &lash_kernel_value::package::DeferredGrant,
+        requested: &lash_kernel_value::names::QualifiedName,
     ) -> Result<
         lash_core::plugin::packages::DeferredAnswer,
         lash_core::plugin::packages::ResolverFault,
@@ -637,7 +637,7 @@ impl ProcessEngine for SleepEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -645,7 +645,7 @@ impl ProcessEngine for SleepEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -662,14 +662,14 @@ impl ProcessEngine for SleepEngine {
     > {
         // This engine executes no linked code and owes no operation or machine debt.
         self.inspect_link(
-            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            lash_kernel_value::LinkId::from_bytes([0; 32]),
             &lash_execution_contracts::process::linking::ReachSelector::Start(
-                lash_vocabulary::StartSelector::Main,
+                lash_kernel_value::StartSelector::Main,
             ),
         )
         .await
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -1716,7 +1716,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
 async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
     use std::sync::atomic::Ordering;
     let turn = CellTurn::new(Cell::Deferred, dialect, postgres_url);
-    *turn.world.binding.lock_recover() = Some(lash_vocabulary::providers::FormatVersion::ONE);
+    *turn.world.binding.lock_recover() = Some(lash_kernel_value::providers::FormatVersion::ONE);
     let (clock, database, nodes) = simulated(&turn).await;
     turn.send().await.expect("the turn is sent");
     nodes.start("a");
@@ -1822,7 +1822,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
 /// to it is admitted, and the codec version its binding is in.
 async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
     let turn = CellTurn::new(Cell::Deferred, dialect, None);
-    *turn.world.binding.lock_recover() = Some(lash_vocabulary::providers::FormatVersion::ONE);
+    *turn.world.binding.lock_recover() = Some(lash_kernel_value::providers::FormatVersion::ONE);
     let (clock, database, nodes) = simulated(&turn).await;
     let written = Arc::new(Mutex::new(None::<Vec<String>>));
     nodes.script().observe_commits({
@@ -1956,7 +1956,7 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
 /// reads, runs: [`deferred_grant_across_a_crash`].)
 async fn an_unreadable_binding_parks_before_its_provider_reads_it(dialect: Dialect) {
     let turn = CellTurn::new(Cell::Deferred, dialect, None);
-    *turn.world.binding.lock_recover() = lash_vocabulary::providers::FormatVersion::new(3);
+    *turn.world.binding.lock_recover() = lash_kernel_value::providers::FormatVersion::new(3);
     let (clock, database, nodes) = simulated(&turn).await;
     turn.send().await.expect("the turn is sent");
     nodes.start("a");

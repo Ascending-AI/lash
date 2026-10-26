@@ -12,9 +12,9 @@
 use crate::{ActorKey, DurableError, Epoch, StoreFailure, StoreFailureKind};
 use lash_core_store::checkpoint_graph::{GraphRefusal, GraphStaging, NodeId, NodeKind, TypedBody};
 pub use lash_core_store::environment::*;
-use lash_vocabulary::{
-    identity::SessionId,
-    tokens::{TokenReader, TokenWriter},
+use {
+    lash_kernel_value::identity::SessionId, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
 };
 
 /// Owner writes join the actor's existing transaction with phase/run writes.

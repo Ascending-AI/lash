@@ -27,8 +27,8 @@ use lash_execution_contracts::process::ProcessOutcome;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use lash_vocabulary::tool_contract::ToolId;
 use serde_json::{Value, json};
 
@@ -95,7 +95,7 @@ impl ProcessEngine for WorkerEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -103,7 +103,7 @@ impl ProcessEngine for WorkerEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -124,7 +124,7 @@ impl ProcessEngine for WorkerEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 

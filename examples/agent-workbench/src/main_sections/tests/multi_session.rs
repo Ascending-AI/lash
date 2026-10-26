@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 // The multi-session workbench: a roster of sessions surviving the web process
 // that created them (FIG-1306).

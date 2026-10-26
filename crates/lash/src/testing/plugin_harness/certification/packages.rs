@@ -12,7 +12,10 @@ mod api {
         AdmissionRefusal, EnginePortError,
     };
     pub(super) use lash_tool_support::ToolPackageProvider;
-    pub(super) use lash_vocabulary::{claims::*, names::*, package::*};
+    pub(super) use {
+        lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::claims::*,
+        lash_vocabulary::package::*,
+    };
 }
 pub(super) fn resolver_callback() -> PluginCallbackIdentity {
     PluginCallbackIdentity {

@@ -292,9 +292,9 @@ pub mod plugin_registrations;
 /// Retained model-call facts and read vocabulary.
 pub mod model_calls;
 
+use lash_kernel_value::identity::SessionId;
 #[doc(hidden)]
 pub use lash_protocol_types::AttachmentId;
-use lash_vocabulary::identity::SessionId;
 
 pub mod packages;
 pub mod resolutions;

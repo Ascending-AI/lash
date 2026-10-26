@@ -35,7 +35,7 @@ impl PreparedLibrary {
             totals[2] += census.stmts;
             totals[3] += census.sites;
             for site in &census.occurrences {
-                let encoded = lash_vocabulary::tokens::encode_body(site);
+                let encoded = lash_kernel_value::tokens::encode_body(site);
                 occurrences.extend((encoded.len() as u32).to_le_bytes());
                 occurrences.extend(encoded);
             }
@@ -141,7 +141,7 @@ impl PreparedLibrary {
         while at < end {
             let len = word(at) as usize;
             at += 4;
-            let site: Site = lash_vocabulary::tokens::decode_body(
+            let site: Site = lash_kernel_value::tokens::decode_body(
                 index
                     .get(at..at + len)
                     .ok_or_else(|| std::io::Error::other("truncated occurrence site"))?,

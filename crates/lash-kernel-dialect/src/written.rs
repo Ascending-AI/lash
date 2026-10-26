@@ -14,10 +14,13 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Expr, Node, SourceLanguage, Stmt};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_value::Name;
+use lash_kernel_value::sites::Site;
 use serde::{Deserialize, Serialize};
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 /// A function as its dialect's source wrote it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,7 +28,7 @@ use serde::{Deserialize, Serialize};
 pub struct Written {
     /// Retained annotation coordinates and typed resolution evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature_origin: Option<lash_vocabulary::SignatureOrigin>,
+    pub signature_origin: Option<lash_kernel_value::SignatureOrigin>,
     /// Implicit conversion evidence retained from source authoring.
     pub implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
     /// The language the function was written in.

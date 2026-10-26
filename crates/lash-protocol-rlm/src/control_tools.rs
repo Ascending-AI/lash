@@ -3,10 +3,10 @@ use lash_core::ToolCall;
 use lash_core::ToolOutcome;
 use lash_core::ToolProvider;
 use lash_core::TurnControl;
+use lash_kernel_value::tool_declaration::TurnControls;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use lash_vocabulary::tool_contract::ToolManifest;
-use lash_vocabulary::tool_declaration::TurnControls;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -49,8 +49,8 @@ pub(crate) fn register(
     })
 }
 
-fn control_root() -> lash_vocabulary::names::Segment {
-    lash_vocabulary::names::Segment::new("control")
+fn control_root() -> lash_kernel_value::names::Segment {
+    lash_kernel_value::names::Segment::new("control")
         .unwrap_or_else(|_| unreachable!("static control root"))
 }
 
@@ -78,8 +78,8 @@ impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
     fn environment_fragment(
         &self,
         config: &lash_core::OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &lash_core::plugin::ToolProviderHandle,
         tools: Option<&[lash_core::SurfaceEntry]>,
     ) -> Result<
@@ -104,21 +104,21 @@ impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
     fn roots(
         &self,
         _: &lash_core::OwnerConfigView,
-    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
         [control_root()].into()
     }
 
     fn advertise(
         &self,
         config: &lash_core::OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
+        context: &lash_kernel_value::package::PublicationContext,
     ) -> Result<
         Vec<lash_core::plugin::packages::PackageContribution>,
         lash_execution_contracts::PluginError,
     > {
         use lash_core::plugin::packages::{PackageContribution, operation_publication};
         use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
-        use lash_vocabulary::package::PackageAdvertisement;
+        use lash_kernel_value::package::PackageAdvertisement;
         use std::collections::{BTreeMap, btree_map::Entry};
 
         let mut packages: BTreeMap<_, PackageContribution> = BTreeMap::new();
@@ -166,7 +166,7 @@ impl lash_core::plugin::packages::PackageProvider for RlmControlPackages {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }
@@ -235,7 +235,7 @@ impl RlmFinishProvider {
             .ok()
             .flatten()
             .and_then(|recorded| recorded.finish_value_schema)
-            .and_then(|schema| lash_vocabulary::json_schema::JsonSchema::admit(schema).ok());
+            .and_then(|schema| lash_kernel_value::json_schema::JsonSchema::admit(schema).ok());
         match schema {
             Some(schema) => definition
                 .clone()
@@ -304,7 +304,7 @@ pub(crate) fn finish_tool_definition_for(
     lash_core::finish_tool(
         FINISH_TOOL_NAME,
         definition_description,
-        lash_vocabulary::json_schema::JsonSchema::any(),
+        lash_kernel_value::json_schema::JsonSchema::any(),
     )
     .expect("a canonical operation")
 }
@@ -396,9 +396,9 @@ fn required_string(args: &Value, key: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::projection::{decode_rlm_protocol_event, rlm_protocol_event};
+    use lash_kernel_value::identity::SessionId;
     use lash_protocol_types::sync::MutexExt;
     use lash_vocabulary::identity::ProcessId;
-    use lash_vocabulary::identity::SessionId;
     use std::sync::{Arc, Mutex};
 
     use lash_core::SessionAppendNode;
@@ -446,7 +446,7 @@ mod tests {
     impl lash_core::plugin::SessionReadService for BatonManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
@@ -483,7 +483,7 @@ mod tests {
     impl SessionStateService for BatonManager {
         async fn turn_scope(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
         {
@@ -519,7 +519,7 @@ mod tests {
     impl SessionGraphService for BatonManager {
         async fn append_session_nodes(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
         ) -> Result<
             lash_core::SessionGraphAppendResult,
@@ -639,7 +639,7 @@ mod tests {
         }
         async fn start_from_request(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _request: lash_execution_contracts::process::ProcessStartRequest,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<

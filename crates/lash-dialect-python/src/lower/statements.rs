@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Place, Protocol, Rhs, Stmt};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -162,7 +162,7 @@ impl Lowerer<'_> {
                     }
                     if !module
                         .split('.')
-                        .all(lash_vocabulary::Segment::is_canonical)
+                        .all(lash_kernel_value::Segment::is_canonical)
                     {
                         return Err(unsupported_import(module, None, alias.range));
                     }
@@ -180,7 +180,7 @@ impl Lowerer<'_> {
                 if module.is_empty()
                     || !module
                         .split('.')
-                        .all(lash_vocabulary::Segment::is_canonical)
+                        .all(lash_kernel_value::Segment::is_canonical)
                 {
                     return Err(unsupported_import(module, None, import.range));
                 }

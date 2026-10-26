@@ -224,9 +224,10 @@ pub(crate) fn program(
     document: std::sync::Arc<lash_kernel_doc::Document>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
-    use lash_vocabulary::{
-        ContractId, ImportKind, OperationRequirement,
-        package::{Fill, Link},
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::ImportKind,
+        lash_kernel_value::OperationRequirement, lash_kernel_value::package::Fill,
+        lash_kernel_value::package::Link,
     };
     let fills = document
         .imports

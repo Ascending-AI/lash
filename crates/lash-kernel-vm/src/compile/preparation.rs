@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use lash_kernel_doc::{Document, Invalid, validate_document_with_limits};
 
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::names::DocumentId;
 
 use super::*;
 use crate::{OpenError, StartError};
@@ -21,7 +21,7 @@ pub(super) struct Documents(
         (
             usize,
             usize,
-            lash_vocabulary::HelperLibraryId,
+            lash_kernel_value::HelperLibraryId,
             doc::Selection,
         ),
         Arc<Admission>,
@@ -29,7 +29,7 @@ pub(super) struct Documents(
     /// The identities validated against this library, with the document
     /// depth they were validated under: a later admission of one skips
     /// validation (FIG-6931).
-    BTreeSet<(DocumentId, usize, lash_vocabulary::HelperLibraryId)>,
+    BTreeSet<(DocumentId, usize, lash_kernel_value::HelperLibraryId)>,
     BTreeMap<usize, Arc<ImmutableIdentity>>,
 );
 
@@ -67,8 +67,8 @@ struct CodeContent {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct ImportResolution {
     source: DocumentId,
-    slot: lash_vocabulary::ImportSlot,
-    target: Option<(DocumentId, FunctionId, lash_vocabulary::ExportName)>,
+    slot: lash_kernel_value::ImportSlot,
+    target: Option<(DocumentId, FunctionId, lash_kernel_value::ExportName)>,
 }
 
 /// Only a resolution shared by every loaded instance of a source unit is
@@ -77,8 +77,8 @@ fn code_imports(
     root: DocumentId,
     documents: &BTreeMap<DocumentId, Arc<Document>>,
     functions: &BTreeSet<FunctionId>,
-    instances: &BTreeMap<lash_vocabulary::LinkId, crate::interface::PreparedInstance>,
-) -> BTreeMap<(Unit, lash_vocabulary::ImportSlot), (DocumentId, FunctionId)> {
+    instances: &BTreeMap<lash_kernel_value::LinkId, crate::interface::PreparedInstance>,
+) -> BTreeMap<(Unit, lash_kernel_value::ImportSlot), (DocumentId, FunctionId)> {
     let mut units = BTreeMap::<_, Option<(DocumentId, FunctionId)>>::new();
     for instance in instances.values() {
         let Some(source) = documents.get(&instance.document) else {
@@ -394,9 +394,9 @@ impl Admission {
         document: &Arc<Document>,
         library: &PreparedLibrary,
         documents: &BTreeMap<DocumentId, Arc<Document>>,
-        functions: &BTreeSet<lash_vocabulary::FunctionId>,
+        functions: &BTreeSet<lash_kernel_value::FunctionId>,
         instances: &BTreeMap<
-            lash_vocabulary::content_ids::LinkId,
+            lash_kernel_value::content_ids::LinkId,
             crate::interface::PreparedInstance,
         >,
     ) -> Result<Arc<Executable>, Missing> {
@@ -529,7 +529,7 @@ impl Admission {
         library: &PreparedLibrary,
         documents: &BTreeMap<DocumentId, Arc<Document>>,
         functions: &BTreeSet<FunctionId>,
-        imports: &BTreeMap<(Unit, lash_vocabulary::ImportSlot), (DocumentId, FunctionId)>,
+        imports: &BTreeMap<(Unit, lash_kernel_value::ImportSlot), (DocumentId, FunctionId)>,
         selection: &doc::Selection,
     ) -> Result<PreparedCode, Missing> {
         // Link tables are instance-specific; compile the reached documents together,
@@ -707,10 +707,12 @@ impl Executable {
 mod tests {
     use super::*;
     use crate::{PreparedInstance, PreparedSlot};
-    use lash_vocabulary::{
-        ContractId, Import, ImportKind, ImportSlot, OperationRequirement, OperationUse,
-        QualifiedName, Signature, Type,
-        package::{Fill, Link},
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::Import, lash_kernel_value::ImportKind,
+        lash_kernel_value::ImportSlot, lash_kernel_value::OperationRequirement,
+        lash_kernel_value::OperationUse, lash_kernel_value::QualifiedName,
+        lash_kernel_value::Signature, lash_kernel_value::Type, lash_kernel_value::package::Fill,
+        lash_kernel_value::package::Link,
     };
 
     /// A closure creation before the saved continuation can refer to a helper
@@ -897,7 +899,7 @@ mod tests {
                     ImportSlot(0),
                     Fill::Export {
                         link: helper_link.identity(),
-                        export: lash_vocabulary::ExportName {
+                        export: lash_kernel_value::ExportName {
                             name: Name::new(name),
                             member: None,
                         },
@@ -981,7 +983,7 @@ mod tests {
         let mut changed = program.clone();
         Arc::make_mut(&mut changed.document)
             .private_bindings
-            .insert(lash_vocabulary::Name::new("changed"));
+            .insert(lash_kernel_value::Name::new("changed"));
         assert!(
             changed.validate_links().is_err(),
             "root mutation reused an old identity"
@@ -994,7 +996,7 @@ mod tests {
                 .expect("retained document"),
         )
         .private_bindings
-        .insert(lash_vocabulary::Name::new("changed"));
+        .insert(lash_kernel_value::Name::new("changed"));
         assert!(
             changed.validate_links().is_err(),
             "retained mutation reused an old identity"
@@ -1015,8 +1017,8 @@ mod tests {
             ImportSlot(0),
             Import {
                 name: QualifiedName {
-                    package: lash_vocabulary::PackagePath::parse("host").expect("package"),
-                    member: lash_vocabulary::Segment::new("tick").expect("member"),
+                    package: lash_kernel_value::PackagePath::parse("host").expect("package"),
+                    member: lash_kernel_value::Segment::new("tick").expect("member"),
                     type_member: None,
                 },
                 kind: ImportKind::Operation {

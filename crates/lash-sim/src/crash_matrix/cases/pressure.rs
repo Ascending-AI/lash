@@ -24,7 +24,7 @@ use lash_core::sync::MutexExt as _;
 use lash_core_store::store::RunTerminalKind;
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, SimNodes};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use super::compaction::CompletionAdmissions;

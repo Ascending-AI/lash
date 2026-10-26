@@ -3,10 +3,10 @@ use crate::{Graph, Refusal, RefusalReason, Refused};
 use crate::{link::Linker, typing::Typer};
 use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::Name;
 
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Unit;
 use std::collections::BTreeSet;
 
 pub struct Environment<'a> {

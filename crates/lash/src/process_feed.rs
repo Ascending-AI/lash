@@ -395,17 +395,17 @@ impl ProcessFeedSource {
     fn observation(
         &self,
         process: &lash_execution_contracts::process::ObservedProcess,
-    ) -> lash_vocabulary::observation::RunObservation {
+    ) -> lash_kernel_value::observation::RunObservation {
         let lash_execution_contracts::process::ProcessInput::Engine { kind, launch, .. } =
             &process.input
         else {
-            return lash_vocabulary::observation::RunObservation::Off;
+            return lash_kernel_value::observation::RunObservation::Off;
         };
         match self.engines.document_provider(kind) {
             Some(provider) if provider.counts_statements(launch.settings.as_ref()) => {
-                lash_vocabulary::observation::RunObservation::Counts
+                lash_kernel_value::observation::RunObservation::Counts
             }
-            _ => lash_vocabulary::observation::RunObservation::Off,
+            _ => lash_kernel_value::observation::RunObservation::Off,
         }
     }
 
@@ -428,7 +428,7 @@ impl ProcessFeedSource {
             lash_execution_contracts::process::ProcessDocumentRefRead::Named { link, selector } => {
                 match selector {
                     lash_execution_contracts::process::linking::ReachSelector::Start(selector) => {
-                        ProcessDocumentIdentity::Available(lash_vocabulary::names::LinkedStart {
+                        ProcessDocumentIdentity::Available(lash_kernel_value::names::LinkedStart {
                             link,
                             selector,
                         })

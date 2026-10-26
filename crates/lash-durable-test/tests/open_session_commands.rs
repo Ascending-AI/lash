@@ -299,7 +299,8 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
             lash::persistence::LeaseIncarnationId::new("boot"),
         ))
         .unwrap();
-    let id = lash_vocabulary::identity::SessionId::try_from("command-refusal".to_owned()).unwrap();
+    let id =
+        lash_kernel_value::identity::SessionId::try_from("command-refusal".to_owned()).unwrap();
     let durable = core
         .session(id.clone())
         .create(lash::SessionCreation::root(served::spec(8)))

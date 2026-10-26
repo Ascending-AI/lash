@@ -27,7 +27,7 @@ use lash_core::ToolCallOutput;
 use lash_core::ToolCallRecord;
 use lash_core::runtime::RuntimeAttribution;
 use lash_core_execution::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::tool_contract::ToolId;
 
 use super::*;

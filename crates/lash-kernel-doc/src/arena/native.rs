@@ -35,7 +35,7 @@ use crate::heap::{IMMUTABLE_INLINE_MAX, LogicalBytes, NormalKey};
 use crate::native::{GuardExceeded, WorkCounter};
 
 use crate::number::Integer;
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 /// What the machine must do before a call can answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -235,7 +235,7 @@ impl<'call> Args<'call> {
     pub fn function(
         &self,
         value: &Value,
-    ) -> Result<Option<lash_vocabulary::names::CallableId>, NativeError> {
+    ) -> Result<Option<lash_kernel_value::names::CallableId>, NativeError> {
         match value {
             Value::Function(handle) => match self.body(*handle)? {
                 Body::Function(callable) => Ok(Some(**callable)),
@@ -604,7 +604,7 @@ pub enum NewObject {
     Record(Vec<(Value, Value)>),
     LongText(Arc<str>),
     /// A function reference by a name past [`ShortText::MAX`] bytes.
-    Function(lash_vocabulary::names::CallableId),
+    Function(lash_kernel_value::names::CallableId),
     Bytes(Arc<[u8]>),
     BigInt(Integer),
     /// A timestamp whose nanoseconds pass a word.
@@ -797,7 +797,7 @@ impl<'call> Nursery<'call> {
 
     /// A function reference by `name`: inline when it is short, otherwise
     /// built.
-    pub fn function(&mut self, callable: lash_vocabulary::names::CallableId) -> Value {
+    pub fn function(&mut self, callable: lash_kernel_value::names::CallableId) -> Value {
         self.allocate(NewObject::Function(callable))
     }
 

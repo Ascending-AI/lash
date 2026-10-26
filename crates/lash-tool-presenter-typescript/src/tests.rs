@@ -474,9 +474,9 @@ fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
     for _ in 0..10 {
         schema = json!({"type":"array", "items":schema});
     }
-    let doc = lash_vocabulary::tool_shape::SchemaDocument::import(
+    let doc = lash_kernel_value::tool_shape::SchemaDocument::import(
         &schema,
-        lash_vocabulary::tool_shape::ImportLimits {
+        lash_kernel_value::tool_shape::ImportLimits {
             max_depth: 2,
             max_nodes: 2,
         },

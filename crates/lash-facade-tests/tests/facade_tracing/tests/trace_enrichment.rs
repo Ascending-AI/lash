@@ -280,7 +280,7 @@ async fn the_enricher_sees_every_span_before_sampling_on_every_owner_and_nothing
         (BLOCKED_SESSION, "l10-blocked-turn"),
     ] {
         let receipt = first
-            .session(lash_vocabulary::identity::SessionId::parse(session).expect("an id"))
+            .session(lash_kernel_value::identity::SessionId::parse(session).expect("an id"))
             .create(lash::SessionCreation::root(mock_session_spec()))
             .await?
             .send(TurnInput::text("enriched"))
@@ -523,7 +523,7 @@ async fn flooded_tool_span(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let output = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("l22-flooded").expect("an id"),
+        lash_kernel_value::identity::SessionId::parse("l22-flooded").expect("an id"),
     )
     .await
     .open()

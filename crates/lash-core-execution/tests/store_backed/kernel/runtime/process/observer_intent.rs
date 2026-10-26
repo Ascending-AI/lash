@@ -5,7 +5,7 @@ mod tests {
         ProcessEventLogTestSupport, ProcessLifecycle, ProcessObserverRegistry, ProcessRegistrar,
         ProcessRetention,
     };
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     use crate::support::sqlite_memory_process_store_set;
 

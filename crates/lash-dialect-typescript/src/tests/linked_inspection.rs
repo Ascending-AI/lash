@@ -1,7 +1,10 @@
 //! Authored definitions and import inspection for dialect unit laws.
 use lash_kernel_dialect::Library as _;
-use lash_vocabulary::{EffectName, ImportKind, Name, QualifiedOperation};
 use std::collections::BTreeSet;
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::ImportKind, lash_kernel_value::Name,
+    lash_kernel_value::QualifiedOperation,
+};
 pub(super) fn exported<'a>(
     document: &'a lash_kernel_doc::Document,
     name: &Name,
@@ -87,7 +90,7 @@ pub(super) fn main(
 pub(super) fn helper_reference(
     document: &lash_kernel_doc::Document,
     helper: &str,
-) -> Option<lash_vocabulary::FunctionId> {
+) -> Option<lash_kernel_value::FunctionId> {
     let id = super::library().resolve(helper)?;
     document.library.contains(&id).then_some(id)
 }
@@ -96,7 +99,7 @@ pub(super) fn helper_reference(
 pub(super) fn operation_slot(
     document: &lash_kernel_doc::Document,
     operation: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
+) -> Option<lash_kernel_value::ImportSlot> {
     let name = QualifiedOperation::from_effect(
         &EffectName::new(operation).expect("the authored fixture is valid"),
     )

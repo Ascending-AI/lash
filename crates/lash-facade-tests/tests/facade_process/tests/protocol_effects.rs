@@ -194,7 +194,7 @@ async fn a_failed_cell(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("protocol-effects")
+            lash_kernel_value::identity::SessionId::parse("protocol-effects")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -246,7 +246,7 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     }
     let backend = sqlite_memory_store_backend().await;
     let running = core(backend.clone())?;
-    let id = lash_vocabulary::identity::SessionId::from("runtime-stop-cause");
+    let id = lash_kernel_value::identity::SessionId::from("runtime-stop-cause");
     let run = lash_vocabulary::identity::TurnId::from("runtime-stop-cause-run");
     let session = running
         .session(id.clone())

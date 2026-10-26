@@ -5,7 +5,7 @@ use lash_kernel_doc::{Datum, NewObject, Value};
 pub(super) use lash_kernel_state::arena::Bench;
 
 /// The identity `compile_check` stamps the records it builds with.
-pub(super) fn built() -> lash_vocabulary::names::FunctionId {
+pub(super) fn built() -> lash_kernel_value::names::FunctionId {
     crate::definitions::Operation::CompileCheck
         .definition()
         .identity()

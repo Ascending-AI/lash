@@ -128,7 +128,7 @@ fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
         &lash_execution_contracts::process::ProcessListFilter {
             status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             until: Some(lash_core_store::scope_identity::ScopeId::turn(
-                lash_vocabulary::identity::SessionId::from("plan-session"),
+                lash_kernel_value::identity::SessionId::from("plan-session"),
                 lash_vocabulary::identity::TurnId::from("plan-turn"),
             )),
             ..lash_execution_contracts::process::ProcessListFilter::default()

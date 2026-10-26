@@ -18,6 +18,7 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{Datum, ErrorDatum, Integer};
 
+use lash_kernel_value::names::EffectName;
 use lash_kernel_vm::{
     CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
     Request, Step, Target,
@@ -25,7 +26,6 @@ use lash_kernel_vm::{
 use lash_vm_broker::kernel::next_stage_lease;
 use lash_vm_broker::kernel::pages::{CommittedPages, LocalPages, SpoolRoot};
 use lash_vm_client::WorkerTuning;
-use lash_vocabulary::names::EffectName;
 
 use crate::embedding::tests::every_dialect;
 
@@ -38,10 +38,10 @@ struct Answering {
 impl Host for Answering {
     fn perform(
         &mut self,
-        _effect: &lash_vocabulary::OperationUse,
+        _effect: &lash_kernel_value::OperationUse,
         _args: &[Datum],
-        _site: &lash_vocabulary::sites::PositionLabel,
-        _origin: &lash_vocabulary::sites::Site,
+        _site: &lash_kernel_value::sites::PositionLabel,
+        _origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         Ok(self.answer.take().expect("the cell reads once"))
     }
@@ -94,7 +94,7 @@ fn run(
         _ => panic!("operation slot"),
     };
     let modes = if read {
-        [(use_, lash_vocabulary::OperationMode::Read)].into()
+        [(use_, lash_kernel_value::OperationMode::Read)].into()
     } else {
         EffectModes::new()
     };
@@ -168,13 +168,13 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
     let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
-        lash_vocabulary::json_schema::tool_signature(
-            &lash_vocabulary::JsonSchema::admit(serde_json::json!({
+        lash_kernel_value::json_schema::tool_signature(
+            &lash_kernel_value::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "x": { "type": "number" } }
             }))
             .expect("an admissible input schema"),
-            &lash_vocabulary::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+            &lash_kernel_value::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
                 .expect("an admissible result schema"),
         ),
     )]);

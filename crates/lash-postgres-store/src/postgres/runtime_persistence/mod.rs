@@ -1,6 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 pub(crate) async fn allocate_ingress_sequence_tx(

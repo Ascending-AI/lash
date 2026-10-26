@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use lash_kernel_doc::{FunctionDefinition, Node};
 
-use lash_vocabulary::{FunctionId, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use super::{Emitter, Plan, Unsupported, Var};
 use crate::library::Library;

@@ -229,7 +229,7 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
             let session = world
                 .core
                 .session(
-                    lash_vocabulary::identity::SessionId::try_from(name.clone())
+                    lash_kernel_value::identity::SessionId::try_from(name.clone())
                         .expect("a session id"),
                 )
                 .durable()
@@ -329,7 +329,7 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     if discard {
         world
             .core
-            .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
+            .session(lash_kernel_value::identity::SessionId::try_from(name.to_owned()).unwrap())
             .durable()
             .await
             .unwrap()
@@ -353,7 +353,8 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     let session = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id"),
+            lash_kernel_value::identity::SessionId::try_from(name.to_owned())
+                .expect("a session id"),
         )
         .durable()
         .await
@@ -507,7 +508,7 @@ fn held_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
     // A call its node lost while it ran runs again on the node that takes
     // the cell over, which builds its body without the candidate.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -681,7 +682,7 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     let session = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(name.clone()).expect("a session id"),
+            lash_kernel_value::identity::SessionId::try_from(name.clone()).expect("a session id"),
         )
         .durable()
         .await

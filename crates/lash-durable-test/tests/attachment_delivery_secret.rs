@@ -325,7 +325,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
                 .1,
         );
         let session_id =
-            lash_vocabulary::identity::SessionId::try_from("delivery-secret".to_owned())
+            lash_kernel_value::identity::SessionId::try_from("delivery-secret".to_owned())
                 .expect("an id");
         let session = core
             .session(session_id.clone())

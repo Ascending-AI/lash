@@ -3,12 +3,12 @@ pub use crate::Draft;
 use crate::Position;
 use lash_kernel_doc::{Expr, Literal, MapEntry, RecordEntry};
 
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::names::DocumentId;
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Type;
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -18,11 +18,11 @@ use serde::{Deserialize, Serialize};
 pub enum DataValue {
     /// Ordinary pure construction through the exact installed helper.
     Timestamp {
-        constructor: lash_vocabulary::FunctionId,
+        constructor: lash_kernel_value::FunctionId,
         nanoseconds: lash_kernel_doc::Integer,
     },
     Error {
-        constructor: lash_vocabulary::FunctionId,
+        constructor: lash_kernel_value::FunctionId,
         kind: String,
         message: String,
         data: Box<DataValue>,

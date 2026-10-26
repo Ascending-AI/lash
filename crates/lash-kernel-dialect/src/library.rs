@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionRegistry, RegisteredFunction};
 
-use lash_vocabulary::{FunctionId, FunctionName};
+use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName};
 
 /// One function per name: the choice of identities a front end lowers
 /// against.

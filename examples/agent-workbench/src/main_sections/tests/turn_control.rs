@@ -36,7 +36,7 @@ use super::tests::{
     GatedProvider, RecordingTrace, Workbench, send_text, silent_provider, started_turn_id,
     wait_for_turn_released,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The attach deadline a law hands the cancel route when the turn cannot end

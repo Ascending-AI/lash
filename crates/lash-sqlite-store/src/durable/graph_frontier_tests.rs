@@ -51,7 +51,7 @@ async fn lo_root_retirement_work_ignores_unrelated_edges() {
     use lash_core_store::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
     };
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
     let mut work = Vec::new();
     for size in [32, 4096] {
         let set = crate::SqliteStoreSet::memory().await.unwrap();
@@ -123,7 +123,7 @@ async fn an_install_reuses_a_stored_root_instead_of_revisiting_its_chain() {
     use lash_core_store::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
     };
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
     let mut work = Vec::new();
     for length in [8_usize, 128] {
         let set = crate::SqliteStoreSet::memory().await.unwrap();

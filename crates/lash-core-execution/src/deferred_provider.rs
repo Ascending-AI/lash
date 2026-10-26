@@ -27,7 +27,7 @@ use crate::{DeferredOutcome, ToolProvider};
 #[derive(Clone)]
 pub struct DeferredToolProviderRegistration {
     pub(crate) provider: std::sync::Arc<dyn DeferredToolProvider>,
-    resolution_policy: lash_vocabulary::providers::DeferredResolutionPolicy,
+    resolution_policy: lash_kernel_value::providers::DeferredResolutionPolicy,
     pub(crate) grants: BTreeMap<lash_vocabulary::tool_contract::ToolId, DispatchGrant>,
 }
 
@@ -37,7 +37,7 @@ impl DeferredToolProviderRegistration {
     pub fn new(provider: std::sync::Arc<dyn DeferredToolProvider>) -> Self {
         Self {
             provider,
-            resolution_policy: lash_vocabulary::providers::DeferredResolutionPolicy::default(),
+            resolution_policy: lash_kernel_value::providers::DeferredResolutionPolicy::default(),
             grants: BTreeMap::new(),
         }
     }
@@ -46,7 +46,7 @@ impl DeferredToolProviderRegistration {
     #[must_use]
     pub fn with_resolution_policy(
         mut self,
-        policy: lash_vocabulary::providers::DeferredResolutionPolicy,
+        policy: lash_kernel_value::providers::DeferredResolutionPolicy,
     ) -> Self {
         self.resolution_policy = policy;
         self

@@ -9,7 +9,7 @@ use crate::{DomainWrite, DurableError, DurableStore, Epoch};
 use lash_core_store::store::{
     AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause, SessionCatalogStore,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 fn text(name: &str) -> PromptText {

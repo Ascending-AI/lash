@@ -139,8 +139,8 @@ fn owner(build: &'static str) -> lash::persistence::LeaseOwnerIdentity {
     )
 }
 
-fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 /// Send `input` on `session`'s core, with `options` as its run's protocol

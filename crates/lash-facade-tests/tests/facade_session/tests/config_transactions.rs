@@ -6,7 +6,7 @@ use super::*;
 
 /// A session created on `core` and opened there.
 async fn opened(core: &LashCore, id: &str) -> Result<lash::LashSession> {
-    let id = lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity");
+    let id = lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity");
     core.session(id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;

@@ -596,7 +596,7 @@ mod tests {
             &env,
             policy.clone(),
             crate::RuntimeSessionState {
-                session_id: lash_vocabulary::identity::SessionId::fixture(SESSION_ID.to_string()),
+                session_id: lash_kernel_value::identity::SessionId::fixture(SESSION_ID.to_string()),
                 policy: policy.clone(),
                 ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,

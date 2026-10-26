@@ -2,12 +2,15 @@
 use crate::{Graph, Refusal};
 use lash_kernel_doc::{Document, Export, FunctionDeclarations, FunctionExport};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::names::{ExportName, LinkedStart, StartSelector};
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::types::Signature;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::types::Signature;
 use std::sync::Arc;
+use {
+    lash_kernel_value::names::ExportName, lash_kernel_value::names::LinkedStart,
+    lash_kernel_value::names::StartSelector,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum StartRefusal {
@@ -35,7 +38,7 @@ pub fn startable_export<'a>(
         &function.signature,
         lash_kernel_doc::FunctionLocation {
             name: Some(name.to_string()),
-            site: Some(lash_vocabulary::sites::Site::new(
+            site: Some(lash_kernel_value::sites::Site::new(
                 Unit::Library(function.function),
                 [],
             )),
@@ -45,8 +48,8 @@ pub fn startable_export<'a>(
         .signature
         .params
         .iter()
-        .all(|param| lash_vocabulary::type_relations::data_only(&param.ty))
-        || !lash_vocabulary::type_relations::data_only(&function.signature.result)
+        .all(|param| lash_kernel_value::type_relations::data_only(&param.ty))
+        || !lash_kernel_value::type_relations::data_only(&function.signature.result)
     {
         return Err(StartRefusal::NotDataOnly { export });
     }
@@ -91,7 +94,7 @@ impl WorkflowDocument {
         function.check(
             helpers,
             lash_kernel_doc::FunctionValueLimits::standard(),
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )?;
         function.entry_export(&document, helpers, &lash_kernel_doc::Selection::Fresh)?;
         let definition = document
@@ -180,7 +183,7 @@ pub enum StartBoundaryRefusal {
     #[error("missing start argument {name}")]
     MissingArgument { name: Name },
     #[error(transparent)]
-    TypeMismatch(#[from] Box<lash_vocabulary::EntryTypeMismatch>),
+    TypeMismatch(#[from] Box<lash_kernel_value::EntryTypeMismatch>),
     #[error(transparent)]
     Decode(#[from] lash_kernel_doc::DecodeRefusal),
 }
@@ -188,7 +191,7 @@ pub enum StartBoundaryRefusal {
 pub fn validate_start_input(
     document: &Document,
     selector: &StartSelector,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     args: &std::collections::BTreeMap<Name, lash_kernel_doc::Datum>,
 ) -> Result<(), StartBoundaryRefusal> {
     let signature = match selector {
@@ -239,7 +242,7 @@ pub fn validate_start_input(
 pub fn validate_start_result(
     document: &Document,
     selector: &StartSelector,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     result: &lash_kernel_doc::Datum,
 ) -> Result<(), StartBoundaryRefusal> {
     let StartSelector::Export(name) = selector else {
@@ -259,7 +262,7 @@ pub fn validate_start_result(
 fn entry_decode_refusal(
     document: &Document,
     selector: &StartSelector,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     error: lash_kernel_doc::DecodeRefusal,
 ) -> StartBoundaryRefusal {
     let StartSelector::Export(name) = selector else {
@@ -270,8 +273,8 @@ fn entry_decode_refusal(
     };
     match error {
         lash_kernel_doc::DecodeRefusal::Type { mismatch } => {
-            Box::new(lash_vocabulary::EntryTypeMismatch {
-                callable: lash_vocabulary::CallableId {
+            Box::new(lash_kernel_value::EntryTypeMismatch {
+                callable: lash_kernel_value::CallableId {
                     link,
                     function: function.function,
                 },

@@ -10,10 +10,10 @@ use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::tool_run::*;
 use lash_execution_contracts::tool_intent::ToolIntents;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::{ExecutionPolicy, OutcomeShape};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use {lash_kernel_value::ExecutionPolicy, lash_vocabulary::OutcomeShape};
 
 mod cell;
 mod hooks;

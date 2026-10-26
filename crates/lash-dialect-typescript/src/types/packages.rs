@@ -52,7 +52,7 @@ impl Gives {
 pub(crate) struct Packages {
     /// Every package path's first segment.
     roots: BTreeSet<String>,
-    pub(crate) boundary_types: BTreeMap<String, lash_vocabulary::Type>,
+    pub(crate) boundary_types: BTreeMap<String, lash_kernel_value::Type>,
     /// Each package function and static, by the dotted path the source
     /// spells it with: `dataframe.col`, `dataframe.Context.create`.
     calls: BTreeMap<String, Gives>,

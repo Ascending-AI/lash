@@ -1,7 +1,11 @@
 //! Kernel signature and type grammar, including record projection modes.
 
 use super::{Parsed, Parser, Token};
-use lash_vocabulary::types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
+use {
+    lash_kernel_value::types::MapType, lash_kernel_value::types::Param,
+    lash_kernel_value::types::RecordType, lash_kernel_value::types::RecordTypeField,
+    lash_kernel_value::types::Signature, lash_kernel_value::types::Type,
+};
 
 impl Parser {
     pub(super) fn signature(&mut self) -> Parsed<Signature> {
@@ -100,14 +104,14 @@ impl Parser {
                     parser.expect(&Token::LBrace)?;
                     let mut record = RecordType {
                         fields: Vec::new(),
-                        rest: lash_vocabulary::RecordRest::Closed,
+                        rest: lash_kernel_value::RecordRest::Closed,
                     };
                     while !parser.eat(&Token::RBrace) {
                         if parser.eat(&Token::DotDot) {
                             record.rest = if parser.eat_word("drop") {
-                                lash_vocabulary::RecordRest::Drop
+                                lash_kernel_value::RecordRest::Drop
                             } else {
-                                lash_vocabulary::RecordRest::Keep(Box::new(parser.ty()?))
+                                lash_kernel_value::RecordRest::Keep(Box::new(parser.ty()?))
                             };
                             parser.expect(&Token::RBrace)?;
                             break;

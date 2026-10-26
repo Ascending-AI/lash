@@ -342,7 +342,7 @@ async fn parked_cell(
     backend: &lash::Backend,
     session: &str,
 ) -> lash_core::durable_port::ActorSnapshot {
-    let id = lash_vocabulary::identity::SessionId::parse(session).expect("a session id");
+    let id = lash_kernel_value::identity::SessionId::parse(session).expect("a session id");
     let actor = ActorKey::session(session).expect("a session actor key");
     let reads = backend.durable();
     let mut last = None;
@@ -475,7 +475,7 @@ async fn launch_of(
 
 /// The session `id` of `core`, created if it is not there.
 async fn session(core: &lash::LashCore, id: &str) -> lash::LashSession {
-    let id = lash_vocabulary::identity::SessionId::parse(id).expect("a session id");
+    let id = lash_kernel_value::identity::SessionId::parse(id).expect("a session id");
     match core
         .session(id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -593,7 +593,7 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
         idle.formats
     );
     let read = new
-        .session(lash_vocabulary::identity::SessionId::fixture(SESSION))
+        .session(lash_kernel_value::identity::SessionId::fixture(SESSION))
         .durable()
         .await
         .unwrap()
@@ -618,7 +618,7 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
     ] {
         let stores: Arc<dyn StoreSet> =
             Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
-        let id = lash_vocabulary::identity::SessionId::fixture("refused-cell-carry");
+        let id = lash_kernel_value::identity::SessionId::fixture("refused-cell-carry");
         let actor = ActorKey::session(id.as_str()).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -788,7 +788,7 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
     assert_eq!(
         cell_finishes(
             &closing
-                .session(lash_vocabulary::identity::SessionId::fixture(SESSION))
+                .session(lash_kernel_value::identity::SessionId::fixture(SESSION))
                 .durable()
                 .await
                 .expect("durable session")
@@ -834,9 +834,9 @@ fn hold_definition() -> lash::tools::ToolDefinition {
     )
     .expect("the hold tool's schemas")
     // The contract the laws' kernel texts pin.
-    .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
+    .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(4).unwrap(),
         1,
         1,
@@ -848,7 +848,7 @@ fn hold_definition() -> lash::tools::ToolDefinition {
 fn hold_definition_under(contract: &str) -> lash::tools::ToolDefinition {
     let mut definition = hold_definition();
     definition.manifest.contract = lash_vocabulary::tool_contract::ContractSource::Declared {
-        id: lash_vocabulary::operations::ContractId::new(contract),
+        id: lash_kernel_value::operations::ContractId::new(contract),
     };
     definition
 }
@@ -972,7 +972,7 @@ fn worker_document(text: &str, kernel: KernelVersion) -> lash::workflow::documen
         if import.name.package.to_string() == "hold" {
             let tool = hold_definition();
             import.kind = ImportKind::Operation {
-                signature: lash_vocabulary::json_schema::tool_signature(
+                signature: lash_kernel_value::json_schema::tool_signature(
                     &tool.contract.input_schema.canonical,
                     &tool.contract.output_schema.canonical,
                 ),

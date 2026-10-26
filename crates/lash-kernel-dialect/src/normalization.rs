@@ -1,7 +1,7 @@
 //! Printer verification allows alpha-renaming of private lexical bindings only.
 use lash_kernel_doc as k;
-use lash_vocabulary::{FunctionId, Name, sites::Site};
 use std::collections::BTreeMap;
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name, lash_kernel_value::sites::Site};
 
 /// Verify a module after private alpha-renaming, local function naming and
 /// exact import-slot renumbering. Executable node shapes stay identical.
@@ -84,7 +84,7 @@ pub fn module(
     let after = lash_kernel_check::derive(new, library).ok()?;
     let site = |at: &Site| {
         let mut at = at.clone();
-        if let lash_vocabulary::sites::Unit::Library(id) = &mut at.unit {
+        if let lash_kernel_value::sites::Unit::Library(id) = &mut at.unit {
             *id = functions.get(id).copied().unwrap_or(*id);
         }
         at
@@ -294,12 +294,12 @@ pub(super) fn rename(node: k::NodeMut<'_>, names: &BTreeMap<Name, Name>) {
 fn translate(
     mut node: k::NodeMut<'_>,
     functions: &BTreeMap<FunctionId, FunctionId>,
-    slots: &BTreeMap<lash_vocabulary::ImportSlot, lash_vocabulary::ImportSlot>,
+    slots: &BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::ImportSlot>,
 ) {
     for id in node.functions_mut() {
         *id = functions.get(id).copied().unwrap_or(*id);
     }
-    let slot = |s: &mut lash_vocabulary::ImportSlot| {
+    let slot = |s: &mut lash_kernel_value::ImportSlot| {
         *s = slots.get(s).copied().unwrap_or(*s);
     };
     let target = |t: &mut k::FunctionTarget| {

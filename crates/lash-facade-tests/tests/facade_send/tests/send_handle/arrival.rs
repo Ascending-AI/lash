@@ -78,7 +78,7 @@ async fn sends_run_once_each_in_arrival_order_one_at_a_time() -> Result<()> {
     let (core, witness) = witnessed_core().await?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("arrival-order")
+        lash_kernel_value::identity::SessionId::parse("arrival-order")
             .expect("nonblank host identity"),
     )
     .await
@@ -151,7 +151,7 @@ async fn dropping_a_send_handle_stops_nothing() -> Result<()> {
     let (core, witness) = witnessed_core().await?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("dropped-handle")
+        lash_kernel_value::identity::SessionId::parse("dropped-handle")
             .expect("nonblank host identity"),
     )
     .await

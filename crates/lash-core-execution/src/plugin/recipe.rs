@@ -58,7 +58,7 @@ pub enum ContributionDetails {
         /// For a tool provider, the execution binding formats it reads,
         /// declared with its key (S8): what its node offers as the codec of
         /// those versions (FIG-6993). Empty for every other callback.
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
     },
     Operation(PluginOperationDef),
     PromptSection(PromptSectionSpec),
@@ -114,7 +114,7 @@ impl InstalledInventory {
     /// tool provider, by key, and the codec of each binding format it
     /// declares it reads. What a node advertises beside its package code.
     pub fn offers(&self) -> lash_vocabulary::claims::NodeCapabilities {
-        use lash_vocabulary::{claims::*, package::ProviderName};
+        use {lash_kernel_value::package::ProviderName, lash_vocabulary::claims::*};
         let mut offers = NodeCapabilities::default();
         for (entry, readiness) in self.entries.iter().zip(&self.readiness) {
             let (
@@ -774,7 +774,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub fn provider_reading(
         self,
         key: ToolProviderKey,
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
         + Send
         + Sync
@@ -816,7 +816,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_provider_with_reads(
         self,
         key: ToolProviderKey,
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<crate::ToolProviderRegistration, PluginError>
         + Send
         + Sync
@@ -852,7 +852,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_provider(
         self,
         key: ToolProviderKey,
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
         + Send
         + Sync
@@ -901,7 +901,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub fn deferred_reading(
         self,
         key: ToolProviderKey,
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
         binder: impl Fn(
             &T,
             &PluginStateView,
@@ -923,7 +923,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_deferred(
         self,
         key: ToolProviderKey,
-        reads: &'static [lash_vocabulary::providers::FormatVersion],
+        reads: &'static [lash_kernel_value::providers::FormatVersion],
         binder: impl Fn(
             &T,
             &PluginStateView,
@@ -954,7 +954,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
 /// than `declared`, what its registration offers (S8, FIG-6993).
 fn declared_reads(
     key: ToolProviderKey,
-    declared: &'static [lash_vocabulary::providers::FormatVersion],
+    declared: &'static [lash_kernel_value::providers::FormatVersion],
     provider: &(impl ToolProvider + ?Sized),
 ) -> Result<(), PluginError> {
     let reads = provider.readable_binding_formats();

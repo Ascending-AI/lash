@@ -87,8 +87,10 @@ impl StaticToolExecute for ExtWrite {
 }
 
 /// The component a process names to call `ext_write`.
-const EXT_WRITE: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("ext-write", lash_vocabulary::providers::FormatVersion::ONE);
+const EXT_WRITE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "ext-write",
+    lash_kernel_value::providers::FormatVersion::ONE,
+);
 
 fn ext_write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_vocabulary::tool_contract::ToolDefinition::raw(
@@ -105,7 +107,7 @@ fn ext_write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     )
     .expect("ext_write's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
 }
 
 /// The process component that contributes `ext_write` over `world`.
@@ -153,7 +155,7 @@ impl ProcessEngine for WriteEngine {
 
     async fn inspect_link(
         &self,
-        _link: lash_vocabulary::LinkId,
+        _link: lash_kernel_value::LinkId,
         _selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -178,7 +180,7 @@ impl ProcessEngine for WriteEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 

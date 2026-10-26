@@ -367,7 +367,7 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
     let producer = build(false);
     let session = producer
         .session(
-            lash_vocabulary::identity::SessionId::try_from("coalesced-input-rows".to_owned())
+            lash_kernel_value::identity::SessionId::try_from("coalesced-input-rows".to_owned())
                 .unwrap(),
         )
         .create(lash::SessionCreation::root(served::spec(8)))
@@ -516,7 +516,7 @@ async fn assert_input_rows(
 /// Record a composed admission, then release its actor for the serving node.
 async fn admit_composed_inputs(
     backend: &lash::Backend,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
     inputs: Vec<lash_vocabulary::identity::InputId>,
 ) {
@@ -764,7 +764,7 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         ))
         .expect("core builds");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse("cancel-model-backoff").unwrap())
+        .session(lash_kernel_value::identity::SessionId::parse("cancel-model-backoff").unwrap())
         .create(lash::SessionCreation::root(served::spec(8)))
         .await
         .expect("session created");

@@ -8,7 +8,7 @@ use crate::RuntimeError;
 use crate::TurnCancelMode;
 use crate::TurnCancelUndeliveredInputPolicy;
 use crate::TurnCancellationEvidence;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde::{Deserialize, Serialize};
 

@@ -7,17 +7,20 @@
 //! a check refuses only what can never be right.
 
 use lash_kernel_doc::FunctionTarget;
-use lash_vocabulary::names::{Import, ImportKind, ImportSlot};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::names::Import, lash_kernel_value::names::ImportKind,
+    lash_kernel_value::names::ImportSlot,
+};
 
 use lash_kernel_doc::{FunctionCatalog, JoinMode, Literal};
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::MapType;
-use lash_vocabulary::types::RecordType;
-use lash_vocabulary::types::RecordTypeField;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::MapType;
+use lash_kernel_value::types::RecordType;
+use lash_kernel_value::types::RecordTypeField;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, Graph, MemberNode, NodeId, NodeKind,
@@ -272,7 +275,7 @@ impl Typer<'_> {
                         optional: false,
                     })
                     .collect(),
-                rest: lash_vocabulary::RecordRest::Closed,
+                rest: lash_kernel_value::RecordRest::Closed,
             }),
             ExprNode::Member(member) => {
                 let (target, _) = self.member_parts(&member);
@@ -404,7 +407,7 @@ impl Typer<'_> {
         signature: &Signature,
         index: usize,
         found: &Type,
-        site: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::Site,
     ) {
         let Some(param) = signature.params.get(index) else {
             return;
@@ -500,8 +503,10 @@ fn field_facet(target: &Type, field: &str) -> Type {
             Some(found) if found.optional => union([found.ty.clone(), Type::Absent]),
             Some(found) => found.ty.clone(),
             None => match &record.rest {
-                lash_vocabulary::RecordRest::Keep(rest) => union([(**rest).clone(), Type::Absent]),
-                lash_vocabulary::RecordRest::Closed | lash_vocabulary::RecordRest::Drop => {
+                lash_kernel_value::RecordRest::Keep(rest) => {
+                    union([(**rest).clone(), Type::Absent])
+                }
+                lash_kernel_value::RecordRest::Closed | lash_kernel_value::RecordRest::Drop => {
                     Type::Absent
                 }
             },

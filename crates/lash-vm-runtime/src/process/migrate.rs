@@ -8,7 +8,7 @@ use lash_kernel_doc::{Document, FunctionRegistry, KernelVersion, validate_docume
 
 pub use lash_kernel_migrate::KernelMigrationRefusal;
 use lash_kernel_migrate::{DocumentRefusal, Rewritten, migration_from};
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::names::DocumentId;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedMigration {
     pub from: DocumentId,
@@ -35,7 +35,7 @@ pub fn plan_migration(
     impl lash_kernel_doc::FunctionCatalog for MigrationCatalog<'_> {
         fn definition(
             &self,
-            id: &lash_vocabulary::FunctionId,
+            id: &lash_kernel_value::FunctionId,
         ) -> Option<&lash_kernel_doc::FunctionDefinition> {
             self.0
                 .functions
@@ -141,7 +141,7 @@ pub struct RefusedKernelCell {
 /// stopped in, if any.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct UnmigratedKernelSession {
-    pub session: lash_vocabulary::identity::SessionId,
+    pub session: lash_kernel_value::identity::SessionId,
     /// Each cell of its open turn this build would not resume, with why.
     pub refused: Vec<RefusedKernelCell>,
 }
@@ -164,7 +164,7 @@ pub struct KernelMigrationSurvey {
     /// Each library function with no counterpart in the next version, by
     /// identity, with the processes whose documents list it.
     pub retired_functions:
-        std::collections::BTreeMap<lash_vocabulary::names::FunctionId, Vec<ProcessId>>,
+        std::collections::BTreeMap<lash_kernel_value::names::FunctionId, Vec<ProcessId>>,
 }
 
 /// Why a survey did not finish.

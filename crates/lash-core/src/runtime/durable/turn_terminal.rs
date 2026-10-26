@@ -20,7 +20,7 @@ use lash_durable::domain::{OwnerKey, RunFacts, TurnWrite};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
 
 use crate::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// End `run` of `session` in `tx` with `cause` and the head revision its

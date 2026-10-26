@@ -25,7 +25,7 @@ use crate::runtime::logical_turn::LogicalTurnAdmissions;
 use crate::runtime::turn_driver::{DriveParts, RuntimeDrive};
 use crate::runtime::turn_loop::{DurableTurn, TurnStart};
 use crate::runtime::{LashRuntime, ObservationSource as _, TurnObserver};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The runtimes a node's sessions run in. A deployment implements it over

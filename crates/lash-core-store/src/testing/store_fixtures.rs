@@ -221,7 +221,7 @@ pub fn execution_graph(state: &str) -> crate::plugin::ExecutionGraphCapture {
     use crate::checkpoint_graph::MAX_NODE_BYTES;
     use crate::checkpoint_graph::NodeKind;
     use crate::checkpoint_graph::node::frame_direct;
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
     let mut body = TokenWriter::new();
     body.text(state);
     let root = frame_direct(NodeKind::SESSION_ROOT, &body.into_bytes(), MAX_NODE_BYTES)

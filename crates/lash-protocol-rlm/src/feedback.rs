@@ -25,10 +25,10 @@ use std::collections::BTreeMap;
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::SourceMap;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::TaskLabel;
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::TaskLabel;
 
 use crate::dialect::DialectPrompts;
 
@@ -226,7 +226,7 @@ pub(crate) enum CellObservation {
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_kernel_value::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the host can answer.
     Deadlock { waiting: Vec<TaskLabel> },
@@ -247,7 +247,11 @@ impl CellObservation {
         packages: Option<&lash_vocabulary::package::NamespaceSnapshot>,
         ctx: &lash_core::RuntimeExecutionContext<'_>,
     ) -> CellFailure {
-        use lash_vocabulary::package::{MemberKind, PackageAdvertisement, Visibility};
+        use {
+            lash_kernel_value::package::MemberKind,
+            lash_kernel_value::package::PackageAdvertisement,
+            lash_kernel_value::package::Visibility,
+        };
         let mut grants = BTreeMap::new();
         for accepted in packages
             .into_iter()
@@ -260,7 +264,7 @@ impl CellObservation {
                 if member.visibility == Visibility::Public
                     && matches!(&member.kind, MemberKind::Operation(_))
                 {
-                    let operation = lash_vocabulary::names::QualifiedOperation {
+                    let operation = lash_kernel_value::names::QualifiedOperation {
                         package: package.path.clone(),
                         name: name.clone(),
                     };
@@ -385,7 +389,7 @@ impl CellObservation {
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
         let place = |tasks: &[TaskLabel],
-                     sources: &[(TaskLabel, lash_vocabulary::sites::PositionLabel)]|
+                     sources: &[(TaskLabel, lash_kernel_value::sites::PositionLabel)]|
          -> String {
             tasks
                 .iter()
@@ -552,7 +556,7 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 /// A task as a typed label: the site that spawned it and which run of
 /// that site it is.
 pub(crate) fn task_label(task: &TaskLabel) -> String {
-    lash_vocabulary::sites::ObservationReader::task_label(task)
+    lash_kernel_value::sites::ObservationReader::task_label(task)
 }
 
 /// Which task, for the model: the source line of the async code it runs
@@ -562,13 +566,13 @@ fn task_place(
     task: &TaskLabel,
     source: &str,
     map: Option<&SourceMap>,
-    body: Option<&lash_vocabulary::sites::PositionLabel>,
+    body: Option<&lash_kernel_value::sites::PositionLabel>,
 ) -> String {
-    if lash_vocabulary::sites::ObservationReader::task_is_root(task) {
+    if lash_kernel_value::sites::ObservationReader::task_is_root(task) {
         return "the program itself".to_owned();
     }
     match map
-        .and_then(|map| lash_vocabulary::sites::ObservationReader::task_source(task, map, body))
+        .and_then(|map| lash_kernel_value::sites::ObservationReader::task_source(task, map, body))
     {
         Some(start) => {
             let (line, _) = line_column(source, start);
@@ -652,7 +656,7 @@ mod tests {
                 bound: Bound::Memory,
                 limit: 67_108_864,
                 function: function.map(|name| {
-                    lash_vocabulary::names::FunctionName::new(name).expect("function name")
+                    lash_kernel_value::names::FunctionName::new(name).expect("function name")
                 }),
             });
             let failure = observation.failure("", None, prompts.as_ref());
@@ -762,7 +766,7 @@ mod tests {
             let definition_text =
                 serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).unwrap();
             let document = parse_document(&format!("kernel 1\nnumbers by_spelling\ndefinition {definition_text}\nnative @{function}\nmain {{ return work.spin() }}")).unwrap();
-            let link = lash_vocabulary::Link {
+            let link = lash_kernel_value::Link {
                 document: document.identity(),
                 fills: Default::default(),
             };

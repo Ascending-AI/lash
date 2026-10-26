@@ -3,7 +3,7 @@
 use super::*;
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::plan as p;
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 use std::collections::BTreeMap;
 
 fn probes(
@@ -55,7 +55,7 @@ type Observation = (
     String,
     Vec<Datum>,
     Vec<(&'static str, crate::Meters)>,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -> Observation {

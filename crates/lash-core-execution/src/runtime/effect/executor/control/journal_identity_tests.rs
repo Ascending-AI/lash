@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[test]
 fn journal_identity_is_typed_and_session_qualified() {

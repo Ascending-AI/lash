@@ -563,7 +563,7 @@ fn host_history() -> History {
                 table: "pending_turn_inputs".to_owned(),
                 session: "s".to_owned(),
                 id: lash_core::PendingTurnInputDraft::keyed_input_id(
-                    &lash_vocabulary::identity::SessionId::from("s"),
+                    &lash_kernel_value::identity::SessionId::from("s"),
                     run,
                 )
                 .to_string(),

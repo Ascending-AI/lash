@@ -13,7 +13,7 @@ use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::Op;
 use lash_kernel_state::paged::PhaseRecord;
-use lash_vocabulary::package::OperationMode;
+use lash_kernel_value::package::OperationMode;
 
 impl KernelMachine {
     #[inline(always)]

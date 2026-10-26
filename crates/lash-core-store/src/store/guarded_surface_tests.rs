@@ -5,7 +5,7 @@
 
 use crate::SessionNodeRecord;
 use crate::testing::guarded_surfaces::{self as laws, SurfaceProbe};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use super::{
     BlobRef, CHECKPOINT_COMPONENT_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,

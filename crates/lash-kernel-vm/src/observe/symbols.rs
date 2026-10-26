@@ -3,9 +3,9 @@
 //! site. Resolved after the fact, from the executable, never while a run
 //! is observed.
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use super::work::{CodeCounts, Counting, NativeCounts, Owner};
 use crate::compile::{CodeId, Executable, LibId, LibRun};

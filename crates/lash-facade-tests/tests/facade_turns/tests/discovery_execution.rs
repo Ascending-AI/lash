@@ -164,7 +164,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build(lash_facade_tests::runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash_vocabulary::identity::SessionId::fixture(format!("discovery-{mode}")),
+            lash_kernel_value::identity::SessionId::fixture(format!("discovery-{mode}")),
         )
         .await
         .open()

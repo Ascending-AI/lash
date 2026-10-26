@@ -15,8 +15,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageRef, PageValue};
-use lash_vocabulary::names::Name;
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_value::names::Name;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 use super::heap_impl::PagedHeap;
 use super::metadata::metadata_key;
@@ -89,7 +92,7 @@ impl PagedHeap {
     /// The value the session binds `name` to, if it binds it.
     pub fn session_binding(
         &self,
-        name: &lash_vocabulary::names::Name,
+        name: &lash_kernel_value::names::Name,
     ) -> Result<Option<PageValue>, HeapFault> {
         self.session_binding_at(&super::metadata::metadata_key(name))
     }

@@ -1,5 +1,5 @@
 use crate::backend_fault::BackendFault;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

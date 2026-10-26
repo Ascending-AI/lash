@@ -18,9 +18,9 @@ use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessReplayEventDraft, ProcessReplayStore,
     ProcessSequence, SessionRevision,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use tokio::sync::Notify;
 
 use super::ingress::{Ingress, Work};

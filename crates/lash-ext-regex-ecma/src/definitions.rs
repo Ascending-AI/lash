@@ -9,13 +9,13 @@ use lash_kernel_doc::Guard;
 use lash_kernel_doc::Implementation;
 use lash_kernel_doc::KERNEL_VERSION;
 use lash_kernel_doc::Operand;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::RecordType;
-use lash_vocabulary::types::RecordTypeField;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::RecordType;
+use lash_kernel_value::types::RecordTypeField;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 /// The package path in every regex record's canonical brand.
 pub const BRAND: &str = "regex.ecma";
@@ -203,7 +203,7 @@ fn record<const N: usize>(fields: [(&str, Type); N]) -> Type {
                 optional: false,
             })
             .collect(),
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     })
 }
 
@@ -239,7 +239,7 @@ fn match_type() -> Type {
                 Type::Null,
                 Type::Record(RecordType {
                     fields: Vec::new(),
-                    rest: lash_vocabulary::RecordRest::Keep(Box::new(text_or_null())),
+                    rest: lash_kernel_value::RecordRest::Keep(Box::new(text_or_null())),
                 }),
             ]),
         ),
@@ -257,7 +257,7 @@ fn match_type() -> Type {
                     Type::Null,
                     Type::Record(RecordType {
                         fields: Vec::new(),
-                        rest: lash_vocabulary::RecordRest::Keep(Box::new(span)),
+                        rest: lash_kernel_value::RecordRest::Keep(Box::new(span)),
                     }),
                 ]),
             ),

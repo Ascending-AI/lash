@@ -12,8 +12,8 @@ fn submit() -> lash_vocabulary::tool_contract::ToolDefinition {
         "answer.submit",
         "End the turn with an integer",
         lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
-        lash_vocabulary::tool_declaration::TurnControls::finish(
-            lash_vocabulary::json_schema::JsonSchema::admit(
+        lash_kernel_value::tool_declaration::TurnControls::finish(
+            lash_kernel_value::json_schema::JsonSchema::admit(
                 serde_json::json!({ "type": "integer" }),
             )
             .expect("an integer schema is admitted"),

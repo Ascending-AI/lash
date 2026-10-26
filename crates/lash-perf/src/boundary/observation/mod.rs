@@ -343,7 +343,7 @@ fn environment(_marks: bool) -> Result<ProcessEnv> {
 /// A retained Link with the exact namespace and routes used to publish it.
 pub(super) struct Published {
     pin: HostArtifactPin,
-    start: lash_vocabulary::LinkedStart,
+    start: lash_kernel_value::LinkedStart,
     environment: lash::vm::WorkflowEnvironmentRequest,
     env: ProcessEnv,
     settings: Option<lash::process::EngineSettings>,
@@ -455,15 +455,15 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
         .unwrap_or_else(|error| panic!("generated workload document: {error}"));
     let definition =
         mark_definition().unwrap_or_else(|error| panic!("generated mark definition: {error}"));
-    let signature = lash_vocabulary::json_schema::tool_signature(
+    let signature = lash_kernel_value::json_schema::tool_signature(
         &definition.contract.input_schema.canonical,
         &definition.contract.output_schema.canonical,
     );
     document
         .imports
-        .get_mut(&lash_vocabulary::ImportSlot(0))
+        .get_mut(&lash_kernel_value::ImportSlot(0))
         .unwrap_or_else(|| panic!("generated workload has no mark import"))
-        .kind = lash_vocabulary::ImportKind::Operation { signature };
+        .kind = lash_kernel_value::ImportKind::Operation { signature };
     lash::workflow::document::print_document(&document)
 }
 

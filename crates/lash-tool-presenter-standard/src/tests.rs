@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::json_schema::JsonSchema;
+use lash_kernel_value::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolDefinition;
 
 /// `tool` compacted under its own name and the standard config.

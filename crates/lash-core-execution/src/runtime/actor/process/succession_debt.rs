@@ -4,7 +4,7 @@ use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, ReachSelector,
 };
 use lash_execution_contracts::process::{ProcessEngine, SuccessionContext};
-use lash_vocabulary::CallableId;
+use lash_kernel_value::CallableId;
 use std::collections::{BTreeMap, BTreeSet};
 
 fn refused(message: impl Into<String>) -> EnginePortError {
@@ -119,7 +119,10 @@ async fn retain_code_publications(
     code: &BTreeSet<CallableId>,
 ) -> Result<(), EnginePortError> {
     use lash_core_store::artifact_referrer::{ArtifactName, ArtifactStoreId};
-    use lash_vocabulary::package::{MemberKind, PublishedContent, Visibility};
+    use {
+        lash_kernel_value::package::MemberKind, lash_kernel_value::package::Visibility,
+        lash_vocabulary::package::PublishedContent,
+    };
     if code.is_empty() {
         return Ok(());
     }

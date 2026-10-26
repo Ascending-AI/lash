@@ -14,7 +14,7 @@ pub use lash_core_store::transcript::TranscriptDecoderPlugin;
 /// consuming the cell's saved root. The references contain no copied body.
 pub use crate::runtime::actor::round::graph::ReportView as CellCallReferences;
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::Arc;
 
 use crate::runtime::RuntimeSessionState;
@@ -229,7 +229,7 @@ impl<'a> ProtocolSessionContext<'a> {
     }
 
     /// Authenticated consumer identity recorded with this round.
-    pub fn publication_context(&self) -> Option<&lash_vocabulary::package::PublicationContext> {
+    pub fn publication_context(&self) -> Option<&lash_kernel_value::package::PublicationContext> {
         self.packages.consumer.as_ref()
     }
 

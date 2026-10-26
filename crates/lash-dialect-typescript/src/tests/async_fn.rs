@@ -251,7 +251,7 @@ fn the_promise_constructor_is_refused() {
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {
     let bindings =
-        std::collections::BTreeSet::from([lash_vocabulary::names::Name::new("previous")]);
+        std::collections::BTreeSet::from([lash_kernel_value::names::Name::new("previous")]);
     let calls = crate::Parser::default()
         .tool_calls(
             r#"
@@ -334,8 +334,8 @@ fn an_async_body_resumes_with_identical_values_and_charge() {
 #[test]
 fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
     use lash_kernel_dialect::{CellEnvironment, Environment, Mode, Namespaces};
-    use lash_vocabulary::{Name, PackagePath};
     use std::collections::{BTreeMap, BTreeSet};
+    use {lash_kernel_value::Name, lash_kernel_value::PackagePath};
 
     let deferred = Namespaces::new(
         BTreeMap::new(),
@@ -345,14 +345,14 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
     .unwrap();
     let offered = super::linked::namespaces(
         &BTreeMap::from([(
-            lash_vocabulary::EffectName::new("jev.decide").unwrap(),
-            lash_vocabulary::Signature {
-                params: vec![lash_vocabulary::Param {
+            lash_kernel_value::EffectName::new("jev.decide").unwrap(),
+            lash_kernel_value::Signature {
+                params: vec![lash_kernel_value::Param {
                     name: Name::new("input"),
-                    ty: lash_vocabulary::Type::Any,
+                    ty: lash_kernel_value::Type::Any,
                     optional: false,
                 }],
-                result: lash_vocabulary::Type::Any,
+                result: lash_kernel_value::Type::Any,
             },
         )]),
         &BTreeMap::new(),

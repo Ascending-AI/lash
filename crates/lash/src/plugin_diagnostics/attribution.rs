@@ -543,16 +543,16 @@ impl PluginDiagnostics {
         Ok(calls
             .into_iter()
             .filter_map(|call| {
-                let effect = lash_vocabulary::EffectName::new(&call.tool).ok()?;
+                let effect = lash_kernel_value::EffectName::new(&call.tool).ok()?;
                 let operation =
-                    lash_vocabulary::names::QualifiedOperation::from_effect(&effect).ok()?;
+                    lash_kernel_value::names::QualifiedOperation::from_effect(&effect).ok()?;
                 surface
                     .packages()
                     .snapshot
                     .advertisements
                     .iter()
                     .find_map(|accepted| {
-                        let lash_vocabulary::package::PackageAdvertisement::Deferred(package) =
+                        let lash_kernel_value::package::PackageAdvertisement::Deferred(package) =
                             &accepted.advertisement
                         else {
                             return None;

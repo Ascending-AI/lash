@@ -287,7 +287,7 @@ include!("canonical_pages.rs");
 
 #[test]
 fn relative_references_in_error_data_inherit_the_page_family() {
-    use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
+    use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
     let (heap, _) = fresh();
     let mut out = TokenWriter::new();
     out.seq(1);
@@ -414,7 +414,10 @@ fn an_edge_visitor_fault_stops_before_the_next_leaf() {
 
 #[test]
 fn a_forged_membership_aggregate_is_a_corrupt_page() {
-    use lash_vocabulary::tokens::{TokenCodec, TokenWriter, decode_body};
+    use {
+        lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter,
+        lash_kernel_value::tokens::decode_body,
+    };
     let (heap, pages) = fresh();
     let mut actual = tree::Tree::new(false);
     for i in 0..32 {
@@ -489,10 +492,10 @@ fn outbound_integer_digits_are_read_only_and_keep_their_sign() {
 #[test]
 fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
     use super::super::tree::{Cell, SealWork, Tree};
-    use lash_vocabulary::tokens::encode_body;
-    use lash_vocabulary::{
-        names::Name,
-        sites::{Site, Unit},
+    use lash_kernel_value::tokens::encode_body;
+    use {
+        lash_kernel_value::names::Name, lash_kernel_value::sites::Site,
+        lash_kernel_value::sites::Unit,
     };
     let (mut heap, pages) = fresh();
     let mut error = ErrorRef::new(&"kind".repeat(100_000), &"message".repeat(100_000));
@@ -506,7 +509,7 @@ fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
     assert!(matches!(error.data, Payload::Paged(_)));
     let site = Site::new(Unit::Main, vec![0]);
     let mut frame = FrameRecord::fresh(
-        lash_vocabulary::LinkId::from_bytes([1; 32]),
+        lash_kernel_value::LinkId::from_bytes([1; 32]),
         SiteRef::new(&(site.clone()), &heap.access).unwrap(),
     );
     frame
@@ -611,7 +614,7 @@ fn a_small_map_needs_no_collection_pages() {
 fn nested_trees_choose_one_form_across_growth_and_shrink() {
     use super::super::directory::{Ordinal, ordinal_key};
     use super::super::tree::{SealWork, Tree};
-    use lash_vocabulary::tokens::{decode_body, encode_body};
+    use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
     let (heap, _) = fresh();
     let budget = || {
         SealWork::new(SealBudget {
@@ -651,7 +654,10 @@ fn nested_trees_choose_one_form_across_growth_and_shrink() {
 fn an_inline_nested_trees_references_are_its_holders_children() {
     use super::super::directory::ordinal_key;
     use super::super::tree::{SealWork, Tree};
-    use lash_vocabulary::tokens::{ChildRef, TokenEvent, TokenReader, encode_body};
+    use {
+        lash_kernel_value::tokens::ChildRef, lash_kernel_value::tokens::TokenEvent,
+        lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::encode_body,
+    };
     let (heap, _) = fresh();
     let held = PageRef {
         id: PageId([9; 32]),
@@ -682,7 +688,7 @@ fn an_inline_nested_trees_references_are_its_holders_children() {
 /// D-EQ: an unequal prefix decides before any later member page is read.
 #[test]
 fn unequal_prefixes_do_not_read_missing_later_members() {
-    use lash_vocabulary::tokens::TokenReader;
+    use lash_kernel_value::tokens::TokenReader;
     let (mut heap, pages) = fresh();
     let left = heap
         .allocate_object(ObjectInit::List((0..200).map(int).collect()))
@@ -934,7 +940,7 @@ fn paged_text_cursor_linear() {
 #[test]
 fn paged_text_cursor_preserves_boundary_fault_order() {
     let (heap, pages) = fresh();
-    use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
+    use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
     let mut text = heap.text(&format!("{}é😀", "A".repeat(4096))).unwrap();
     let missing = pages
         .borrow()
@@ -1069,9 +1075,9 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
 #[test]
 fn every_seal_saves_the_counted_capacity_and_reopens_it() {
     use crate::paged::tree::Tree;
-    use lash_vocabulary::{
-        names::Name,
-        sites::{Site, Unit},
+    use {
+        lash_kernel_value::names::Name, lash_kernel_value::sites::Site,
+        lash_kernel_value::sites::Unit,
     };
     let (mut heap, pages) = fresh();
     for round in 1..=3_u64 {

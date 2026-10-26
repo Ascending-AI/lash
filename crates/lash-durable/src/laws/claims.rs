@@ -308,7 +308,7 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
         );
         crate::ClaimRequirements {
             providers: [provider.clone()].into(),
-            codecs: [(provider, lash_vocabulary::providers::FormatVersion::ONE)].into(),
+            codecs: [(provider, lash_kernel_value::providers::FormatVersion::ONE)].into(),
             callbacks: [lash_vocabulary::claims::CallbackRequirement {
                 registry,
                 callback: PluginCallbackIdentity::tool_provider(owner, "tools"),

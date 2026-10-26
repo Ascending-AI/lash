@@ -2,7 +2,7 @@ use crate::PreparedToolCall;
 use crate::ToolContext;
 use crate::ToolOutcome;
 use futures_util::FutureExt as _;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 
 use super::atomic_attempt::AttemptAuthority;
 use super::context::{ToolDispatchContext, ToolDispatchOutcome};

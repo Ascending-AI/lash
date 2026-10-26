@@ -84,15 +84,15 @@ pub use feedback::{
 /// The schema shapes a [`DialectPrompts`] and a tool presenter spell: the
 /// shared reading of a tool's JSON Schemas, also constructed directly by
 /// runtime-value inference.
-pub use lash_vocabulary::tool_shape::ExtraKeys;
-pub use lash_vocabulary::tool_shape::ObjectShape;
-pub use lash_vocabulary::tool_shape::ProcessParamShape;
-pub use lash_vocabulary::tool_shape::ProcessShape;
-pub use lash_vocabulary::tool_shape::SchemaShape;
-pub use lash_vocabulary::tool_shape::ShapeConstraints;
-pub use lash_vocabulary::tool_shape::ShapeField;
-pub use lash_vocabulary::tool_shape::ShapeKind;
-pub use lash_vocabulary::tool_shape::ShapeRow;
+pub use lash_kernel_value::tool_shape::ExtraKeys;
+pub use lash_kernel_value::tool_shape::ObjectShape;
+pub use lash_kernel_value::tool_shape::ProcessParamShape;
+pub use lash_kernel_value::tool_shape::ProcessShape;
+pub use lash_kernel_value::tool_shape::SchemaShape;
+pub use lash_kernel_value::tool_shape::ShapeConstraints;
+pub use lash_kernel_value::tool_shape::ShapeField;
+pub use lash_kernel_value::tool_shape::ShapeKind;
+pub use lash_kernel_value::tool_shape::ShapeRow;
 /// The tool presenters a [`CellDialect`] ships with, and their building
 /// blocks for a host presenter that spells the same way.
 pub mod tool_presenters {

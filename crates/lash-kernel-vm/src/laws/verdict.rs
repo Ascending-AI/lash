@@ -3,7 +3,7 @@
 //! control as they grow, and decides at its next verdict point (FIG-6791).
 
 use lash_kernel_doc::Datum;
-use lash_vocabulary::names::FunctionName;
+use lash_kernel_value::names::FunctionName;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::machine::Boundary;

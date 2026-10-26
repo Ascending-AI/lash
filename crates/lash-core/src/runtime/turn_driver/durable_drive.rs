@@ -395,7 +395,7 @@ async fn restore_working(
 /// None for a store that publishes no heap pages.
 fn working_pages(
     cx: &ActorContext,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
     root: lash_core_store::checkpoint_graph::NodeId,
 ) -> Option<crate::plugin::SessionPages> {

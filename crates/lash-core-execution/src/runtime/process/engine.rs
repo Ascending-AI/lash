@@ -7,7 +7,7 @@ pub struct ProcessEngineRegistration {
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_vocabulary::tool_contract::ExecutionPolicy,
+        lash_kernel_value::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -155,7 +155,7 @@ impl ProcessEngineRegistration {
     pub fn with_engine_step_retry(
         mut self,
         kind: lash_execution_contracts::process::EngineStepKind,
-        policy: lash_vocabulary::tool_contract::ExecutionPolicy,
+        policy: lash_kernel_value::tool_contract::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
         self
@@ -197,7 +197,7 @@ struct RetriedEngineSteps {
     steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
     retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_vocabulary::tool_contract::ExecutionPolicy,
+        lash_kernel_value::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -217,7 +217,7 @@ impl lash_execution_contracts::process::EngineSteps for RetriedEngineSteps {
     fn retry(
         &self,
         kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+    ) -> lash_kernel_value::tool_contract::ExecutionPolicy {
         self.retries
             .get(kind)
             .copied()
@@ -473,7 +473,7 @@ impl ProcessEngineRegistry {
     pub async fn inspect_link(
         &self,
         kind: &str,
-        start: &lash_vocabulary::names::LinkedStart,
+        start: &lash_kernel_value::names::LinkedStart,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,

@@ -1,19 +1,19 @@
 use chrono::{TimeZone, Utc};
-use lash_vocabulary::LinkId;
+use lash_kernel_value::LinkId;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::names::StartSelector;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::names::StartSelector;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 
 use super::*;
 use crate::{StepBodyStarted, TraceBranchSelection, TraceContext, TraceLanguageExecution};
 
-const VISIT_0: lash_vocabulary::sites::VisitId = lash_vocabulary::sites::testkit::visit(0);
-const VISIT_1: lash_vocabulary::sites::VisitId = lash_vocabulary::sites::testkit::visit(1);
-const VISIT_2: lash_vocabulary::sites::VisitId = lash_vocabulary::sites::testkit::visit(2);
+const VISIT_0: lash_kernel_value::sites::VisitId = lash_kernel_value::sites::testkit::visit(0);
+const VISIT_1: lash_kernel_value::sites::VisitId = lash_kernel_value::sites::testkit::visit(1);
+const VISIT_2: lash_kernel_value::sites::VisitId = lash_kernel_value::sites::testkit::visit(2);
 
 fn subject() -> TraceRuntimeSubject {
     TraceRuntimeSubject::Effect {
@@ -60,11 +60,11 @@ fn reference() -> LinkedStart {
 /// persisted history and document mismatch checks without a Linked selector.
 #[test]
 fn callable_observations_retain_their_selected_function() {
-    let callable = lash_vocabulary::names::CallableId {
+    let callable = lash_kernel_value::names::CallableId {
         link: reference().link,
-        function: lash_vocabulary::names::FunctionId::from_bytes([7; 32]),
+        function: lash_kernel_value::names::FunctionId::from_bytes([7; 32]),
     };
-    let reference = lash_vocabulary::WorkflowReference::Callable(callable);
+    let reference = lash_kernel_value::WorkflowReference::Callable(callable);
     let document = WorkflowOverlayDocument::new(reference.clone(), [site("branch").site]);
     let events = [
         started_event("start"),
@@ -113,13 +113,13 @@ fn callable_observations_retain_their_selected_function() {
 fn site(node: &str) -> WorkflowTaskSite {
     WorkflowTaskSite {
         site: Site::new(Unit::Function(Name::new(node)), Vec::new()).position(),
-        task: lash_vocabulary::sites::testkit::root_task(),
+        task: lash_kernel_value::sites::testkit::root_task(),
     }
 }
 
 /// Occurrence `occurrence` of `site`, outside every loop.
-fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_vocabulary::sites::EffectId {
-    lash_vocabulary::sites::testkit::effect(
+fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_kernel_value::sites::EffectId {
+    lash_kernel_value::sites::testkit::effect(
         site.task.clone(),
         site.site.clone(),
         occurrence,
@@ -154,7 +154,7 @@ fn document() -> WorkflowOverlayDocument {
 fn arg_site(node: &str, arg: u32) -> WorkflowTaskSite {
     WorkflowTaskSite {
         site: Site::new(Unit::Function(Name::new(node)), vec![arg]).position(),
-        task: lash_vocabulary::sites::testkit::root_task(),
+        task: lash_kernel_value::sites::testkit::root_task(),
     }
 }
 
@@ -179,7 +179,7 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
         event_key,
         TraceLanguageExecutionPayload::ExecutionStarted {
             subject: subject(),
-            observation: lash_vocabulary::observation::RunObservation::Off,
+            observation: lash_kernel_value::observation::RunObservation::Off,
         },
     )
 }
@@ -1033,7 +1033,7 @@ fn the_default_limit_retains_the_latest_occurrence_and_summary() {
     assert_eq!(branch.summary.retained_occurrences, limit + 1);
     assert!(matches!(
         branch.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_vocabulary::sites::testkit::visit(limit + 1)
+        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_kernel_value::sites::testkit::visit(limit + 1)
     ));
     assert_eq!(overlay.retention[0].truncation_watermark, VISIT_1);
 }
@@ -1444,8 +1444,8 @@ fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
 /// reaches it.
 fn element_site(element: u64) -> WorkflowTaskSite {
     WorkflowTaskSite {
-        task: lash_vocabulary::sites::testkit::spawned_task(
-            lash_vocabulary::sites::testkit::root_task(),
+        task: lash_kernel_value::sites::testkit::spawned_task(
+            lash_kernel_value::sites::testkit::root_task(),
             site("branch").site,
             element,
         ),
@@ -1538,7 +1538,7 @@ fn a_host_overlay_mismatch_limit_is_honored() {
 /// across activations, independent of report order, duplication and history cap.
 #[test]
 fn cell_counts_sum_segments_with_duplicate_and_shuffled_reports() {
-    use lash_vocabulary::observation::RunObservation;
+    use lash_kernel_value::observation::RunObservation;
     let start = language(
         "start",
         TraceLanguageExecutionPayload::ExecutionStarted {
@@ -1598,11 +1598,11 @@ fn cell_counts_sum_segments_with_duplicate_and_shuffled_reports() {
 fn origin_is_projected_per_occurrence_without_starting_or_retiming_it() {
     let source = WorkflowTaskSite {
         site: Site::new(
-            Unit::Library(lash_vocabulary::names::FunctionId::from_bytes([9; 32])),
+            Unit::Library(lash_kernel_value::names::FunctionId::from_bytes([9; 32])),
             vec![0],
         )
         .position(),
-        task: lash_vocabulary::sites::testkit::root_task(),
+        task: lash_kernel_value::sites::testkit::root_task(),
     };
     let origin = Site::new(Unit::Main, vec![3]);
     let reported = |key: &str| {

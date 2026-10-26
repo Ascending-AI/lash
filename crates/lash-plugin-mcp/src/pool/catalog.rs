@@ -117,8 +117,8 @@ impl super::McpConnectionPool {
         source: &lash_core_store::environment::SourceId,
         selection: &lash_tool_support::ToolSelection,
         namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> lash_core_store::environment::SourceSnapshot {
         use lash_core_store::{
@@ -140,7 +140,7 @@ impl super::McpConnectionPool {
             .servers
             .keys()
             .map(|server| {
-                lash_vocabulary::names::Segment::new(crate::naming::server_segment(server))
+                lash_kernel_value::names::Segment::new(crate::naming::server_segment(server))
                     .unwrap_or_else(|_| unreachable!("canonical server root"))
             })
             .collect();
@@ -148,10 +148,10 @@ impl super::McpConnectionPool {
             .map(|(domain, scope)| {
                 roots
                     .into_iter()
-                    .map(move |root| lash_vocabulary::package::PublicationContext {
+                    .map(move |root| lash_kernel_value::package::PublicationContext {
                         domain: domain.clone(),
                         scope: scope.clone(),
-                        publisher: lash_vocabulary::package::PublisherInstance(format!(
+                        publisher: lash_kernel_value::package::PublisherInstance(format!(
                             "{}/{}",
                             key.owner(),
                             key.key()

@@ -7,11 +7,11 @@ use lash_kernel_doc::{
     Document, FunctionCatalog, FunctionDefinition, FunctionRegistry, KernelVersion, RegistryError,
 };
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -85,11 +85,11 @@ pub enum ParkedRefusal {
     #[error("helper {function} cannot carry operation slot {slot:?} onto another contract")]
     HelperOperationContext {
         function: FunctionId,
-        slot: lash_vocabulary::ImportSlot,
+        slot: lash_kernel_value::ImportSlot,
     },
     #[error("build helper {function} is missing")]
     MissingHelper {
-        function: lash_vocabulary::FunctionId,
+        function: lash_kernel_value::FunctionId,
     },
     #[error("the run was parked under kernel version {found}; the migration starts at {from}")]
     Version { found: u32, from: u32 },
@@ -119,7 +119,7 @@ pub enum ParkedRefusal {
 pub enum KernelMigrationRefusal {
     #[error("callable {callable:?} requires its retained defining Link to prove format carry")]
     CallableOriginRequired {
-        callable: lash_vocabulary::names::CallableId,
+        callable: lash_kernel_value::names::CallableId,
     },
     #[error("document {document} is not retained")]
     DocumentMissing { document: DocumentId },

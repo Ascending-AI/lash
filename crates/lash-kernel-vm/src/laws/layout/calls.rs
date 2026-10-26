@@ -8,7 +8,7 @@ struct Observed {
     printed: Vec<Datum>,
     requests: Vec<Request>,
     stops: Vec<(&'static str, crate::Meters)>,
-    checkpoints: Vec<crate::conformance::Checkpoint>,
+    checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
     events: Vec<lash_kernel_exec::Weight>,
 }
 

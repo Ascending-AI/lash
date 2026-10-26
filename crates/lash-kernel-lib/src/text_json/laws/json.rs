@@ -4,7 +4,10 @@ use lash_kernel_doc::{
     Datum, FunctionRegistry, Handle, Measure, NumberPolicy, NumberToken, Operand, Value,
 };
 
-use lash_vocabulary::{MapType, RecordType, RecordTypeField, Type};
+use {
+    lash_kernel_value::MapType, lash_kernel_value::RecordType, lash_kernel_value::RecordTypeField,
+    lash_kernel_value::Type,
+};
 
 use super::super::{decode_number, parse_json, stringify_json};
 use super::lab::{Lab, VALUE, b, deep, f, i, list, raised, run, t};
@@ -211,7 +214,7 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
             ty: Type::List(Box::new(Type::Int)),
             optional: false,
         }],
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     });
     for json in [
         "{}",
@@ -226,7 +229,7 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
     let Type::Record(mut dropping) = ty.clone() else {
         unreachable!()
     };
-    dropping.rest = lash_vocabulary::RecordRest::Drop;
+    dropping.rest = lash_kernel_value::RecordRest::Drop;
     let dropping = Type::Record(dropping);
     let projected = parsed(
         &mut lab,

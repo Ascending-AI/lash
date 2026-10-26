@@ -2,7 +2,7 @@ use super::*;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Catalog wrapper that counts which seam a caller reached for, and fails
 /// the by-id seam once a law arms it.
@@ -94,8 +94,8 @@ pub fn core_serving(backend: lash_execution_contracts::backend::Backend, serve: 
         .expect("standard core")
 }
 
-pub fn id(text: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::parse(text).expect("nonblank host identity")
+pub fn id(text: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::parse(text).expect("nonblank host identity")
 }
 
 pub fn turn(text: &str) -> lash_vocabulary::identity::TurnId {

@@ -58,7 +58,7 @@ fn required(tx: &Connection, id: &VersionOwnerId) -> Answer<env::EnvironmentAuth
 }
 pub(super) fn head(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> Answer<Option<EnvironmentHead>> {
     let text: Option<String> = tx
         .prepare_cached(ENV.head.sql())?
@@ -291,7 +291,7 @@ pub(super) fn apply(
             expected,
             head: next,
         } => {
-            let session = lash_vocabulary::identity::SessionId::parse(commit.actor.id())
+            let session = lash_kernel_value::identity::SessionId::parse(commit.actor.id())
                 .map_err(env::corrupt)
                 .map_err(conversion)?;
             if take!(head(tx, &session)) != *expected {
@@ -374,7 +374,7 @@ impl EnvironmentStore for SqliteDurableStore {
     }
     async fn environment_head(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Option<EnvironmentHead>, DurableError> {
         let session = session.clone();
         self.query(move |tx| head(tx, &session)).await
@@ -420,7 +420,7 @@ static SQLITE: LazyLock<SqliteEnvironmentStatements> =
 
 pub(super) fn remove_head(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     tx.prepare_cached(ENV.head_remove.sql())?
         .query_map([session.as_str()], |r| crate::codec::hash_column(r, 0))?

@@ -37,7 +37,7 @@ fn process_event_old_system_time_json_is_rejected() {
         &record,
         ProcessEventAppendRequest::observer_added(
             &record.id,
-            &lash_vocabulary::identity::SessionId::from("observer"),
+            &lash_kernel_value::identity::SessionId::from("observer"),
             &ProcessObserverBy::host("old-time-shape"),
         ),
         1,
@@ -142,7 +142,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
 fn observed(process: &ProcessId, session: &str) -> ProcessEventAppendRequest {
     ProcessEventAppendRequest::observer_added(
         process,
-        &lash_vocabulary::identity::SessionId::fixture(session),
+        &lash_kernel_value::identity::SessionId::fixture(session),
         &ProcessObserverBy::host("tests"),
     )
 }

@@ -150,6 +150,6 @@ pub struct AssistantResponsePlan {
 #[serde(deny_unknown_fields)]
 pub struct AssistantStreamHookState {
     pub callback: lash_vocabulary::providers::PluginCallbackIdentity,
-    pub format: lash_vocabulary::providers::FormatVersion,
+    pub format: lash_kernel_value::providers::FormatVersion,
     pub state: serde_json::Value,
 }

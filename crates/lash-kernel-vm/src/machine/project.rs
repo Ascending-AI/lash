@@ -41,7 +41,7 @@ use lash_kernel_state::kernel_internals::{
     PagedHeap, StoredCards, StoredHead, StoredObject, page_reads, stored_pages,
 };
 use lash_kernel_state::paged::{HeapWriteError, NameRef, ObjectKind, SiteRef};
-use lash_vocabulary::sites::{Site, Unit};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use crate::compile::{CodeId, Executable};
 
@@ -360,9 +360,9 @@ pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<Entit
 /// Resolves a closure's lexical body by its function and creation site.
 pub(crate) fn closure_code(
     exe: &Executable,
-    callable: &lash_vocabulary::CallableId,
+    callable: &lash_kernel_value::CallableId,
     site: &Site,
-    captures: &[lash_vocabulary::Name],
+    captures: &[lash_kernel_value::Name],
 ) -> Result<CodeId, HeapFault> {
     if !exe.admits_callable(callable) {
         return Err(malformed("a closure has no admitted defining origin"));

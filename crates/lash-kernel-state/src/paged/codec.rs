@@ -4,8 +4,11 @@ use super::*;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{JoinMode, TaskId};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_value::names::DocumentId;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 macro_rules! record {
     ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
@@ -136,7 +139,7 @@ impl TokenCodec for SavedMeters {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(4)?;
-        let charged = if input.peek_tag()? == lash_vocabulary::tokens::Tag::None {
+        let charged = if input.peek_tag()? == lash_kernel_value::tokens::Tag::None {
             input.option()?;
             None
         } else {
@@ -162,7 +165,7 @@ impl TokenCodec for SavedLimits {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
-        let memory = if input.peek_tag()? == lash_vocabulary::tokens::Tag::None {
+        let memory = if input.peek_tag()? == lash_kernel_value::tokens::Tag::None {
             input.option()?;
             None
         } else {
@@ -178,9 +181,9 @@ record!(CheckpointRoot {
     limits: SavedLimits,
     kernel: u32,
     document: DocumentId,
-    link: lash_vocabulary::content_ids::LinkId,
+    link: lash_kernel_value::content_ids::LinkId,
     closure: PageId,
-    helper_library: lash_vocabulary::HelperLibraryId,
+    helper_library: lash_kernel_value::HelperLibraryId,
     owner: PageId,
     target: CellTargetKind,
     functions: KeyedRoot,
@@ -194,7 +197,7 @@ record!(CheckpointRoot {
     unreported: SequenceRoot,
     reads: KeyedRoot,
     session: KeyedRoot,
-    host: Vec<lash_vocabulary::names::Name>,
+    host: Vec<lash_kernel_value::names::Name>,
     meters: SavedMeters
 });
 impl TokenCodec for RootStatus {
@@ -429,11 +432,11 @@ impl TokenCodec for EndedTask {
 
 record!(FunctionRecord {
     environment:EntityId,
-    callable: lash_vocabulary::names::CallableId,
+    callable: lash_kernel_value::names::CallableId,
     name: NameRef,
     meta: PageValue,
     closure: PageRef,
-    captures: std::collections::BTreeMap<lash_vocabulary::names::Name, FrozenRef>,
+    captures: std::collections::BTreeMap<lash_kernel_value::names::Name, FrozenRef>,
     before: Vec<FrozenRef>,
     after: Vec<FrozenRef>
 });

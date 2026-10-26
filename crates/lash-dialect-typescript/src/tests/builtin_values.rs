@@ -90,7 +90,7 @@ fn reflective_protocols_and_builtin_global_writes_are_typed_refusals() {
 fn builtin_indexes_project_the_owning_rows() {
     use std::collections::BTreeMap;
 
-    use crate::builtins::{self, Row};
+    use lash_ext_ts_helpers::builtins::{self, Row};
     let table = builtins::table();
     let mut methods = BTreeMap::<_, Vec<_>>::new();
     let mut properties = BTreeMap::<_, Vec<_>>::new();

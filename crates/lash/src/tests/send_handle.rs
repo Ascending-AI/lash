@@ -79,7 +79,7 @@ async fn graphless_session_reads_are_identical() -> Result<()> {
 /// same read as the input's binding (FIG-5915).
 async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
     let fixture = fixture(1).await?;
-    let id = lash_vocabulary::identity::SessionId::parse("send-faulted")
+    let id = lash_kernel_value::identity::SessionId::parse("send-faulted")
         .expect("nonblank host identity");
     let session = created_session(&fixture.core, id.clone())
         .await
@@ -123,7 +123,7 @@ async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
     let fixture = fixture(1).await?;
-    let session_id = lash_vocabulary::identity::SessionId::from("send-observed");
+    let session_id = lash_kernel_value::identity::SessionId::from("send-observed");
     let host = created_session(&fixture.core, session_id.clone())
         .await
         .open()
@@ -199,7 +199,7 @@ async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-replay-gap")
+        lash_kernel_value::identity::SessionId::parse("send-replay-gap")
             .expect("nonblank host identity"),
     )
     .await
@@ -263,7 +263,7 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-bad-route")
+        lash_kernel_value::identity::SessionId::parse("send-bad-route")
             .expect("nonblank host identity"),
     )
     .await
@@ -282,7 +282,7 @@ async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> 
     );
     let store = lash_execution_contracts::deployment::live_session_view(
         &fixture.core.store_factory,
-        &lash_vocabulary::identity::SessionId::from("send-bad-route"),
+        &lash_kernel_value::identity::SessionId::from("send-bad-route"),
     )
     .await?
     .expect("the opened session has a store");
@@ -339,7 +339,7 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() ->
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-settled-id")
+        lash_kernel_value::identity::SessionId::parse("send-settled-id")
             .expect("nonblank host identity"),
     )
     .await
@@ -408,7 +408,7 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("cancel-bound-input")
+        lash_kernel_value::identity::SessionId::parse("cancel-bound-input")
             .expect("nonblank host identity"),
     )
     .await

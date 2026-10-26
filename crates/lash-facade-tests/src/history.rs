@@ -12,7 +12,7 @@ use crate as lash;
 // history depth.
 
 use lash_core::store::{SessionHistoryStore, WindowSelector};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The window reads one send makes: the engine's turn, the runtime its pass
 /// opens, the commit's publication, the open session's refresh and the

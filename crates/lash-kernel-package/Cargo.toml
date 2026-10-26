@@ -30,8 +30,8 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
-lash-helper-labels = { workspace = true }
-lash-vocabulary = { workspace = true }
+lash-kernel-labels = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-check = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

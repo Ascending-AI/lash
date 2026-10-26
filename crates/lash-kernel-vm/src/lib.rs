@@ -125,7 +125,6 @@
 //!   `paged_carry::a_paged_carry_commits_one_consistent_side_and_resumes_after_retirement_on_sqlite`.
 
 mod compile;
-pub(crate) mod conformance;
 mod costs;
 mod crossing;
 mod data;
@@ -148,12 +147,14 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use lash_vocabulary::observation::{ExecutionPath, SiteCounts};
 pub use machine::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
+pub use {
+    lash_kernel_value::observation::ExecutionPath, lash_kernel_value::observation::SiteCounts,
+};
 
 /// The machine's implementation, for the other kernel crates only: plans
 /// that perturb how a run executes, and the step-structure checks kernel
@@ -171,3 +172,7 @@ pub use interface::{
 };
 
 pub use functions::machine_native;
+
+/// Controlled execution strategies for differential embedding laws.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;

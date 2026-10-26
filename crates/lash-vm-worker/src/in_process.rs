@@ -11,6 +11,7 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
+use lash_kernel_value::names::DocumentId;
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
 };
@@ -21,7 +22,6 @@ use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
 };
 use lash_vm_client::RunStart;
-use lash_vocabulary::names::DocumentId;
 
 use crate::host::{WirePageSource, grant_of, link_grant};
 
@@ -119,10 +119,10 @@ struct Cancelling<'a, H> {
 impl<H: Host> Host for Cancelling<'_, H> {
     fn perform(
         &mut self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[lash_kernel_doc::Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<lash_kernel_doc::Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         self.host.perform(effect, args, site, origin)
     }

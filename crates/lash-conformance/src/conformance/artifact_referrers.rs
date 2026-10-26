@@ -112,7 +112,7 @@ where
     let key = artifact.key().to_owned();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-        lash_vocabulary::identity::SessionId::fixture(format!(
+        lash_kernel_value::identity::SessionId::fixture(format!(
             "artifact-race-{}",
             HostArtifactPin::mint()
         )),
@@ -415,7 +415,7 @@ where
             .clone(),
         ),
         ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-            lash_vocabulary::identity::SessionId::from("canonical-session"),
+            lash_kernel_value::identity::SessionId::from("canonical-session"),
             lash_core::FrameNodeId::new("canonical-frame").expect("frame id"),
         )),
         ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
@@ -428,11 +428,11 @@ where
         },
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-        ArtifactReferrer::Session(lash_vocabulary::identity::SessionId::from(
+        ArtifactReferrer::Session(lash_kernel_value::identity::SessionId::from(
             "canonical-session",
         )),
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
-            lash_vocabulary::identity::SessionId::from("canonical-session"),
+            lash_kernel_value::identity::SessionId::from("canonical-session"),
         )),
         ArtifactReferrer::Source(Box::new(lash_core::AwaitEventKey {
             scope: lash_core::ExecutionScope::turn("canonical-session", "canonical-turn"),
@@ -697,7 +697,10 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     use lash_core_store::packages::{LinkRecord, PackageRecord};
-    use lash_vocabulary::{claims::RegistryKind, names::*, package::*};
+    use {
+        lash_kernel_value::names::*, lash_kernel_value::package::*,
+        lash_vocabulary::claims::RegistryKind, lash_vocabulary::package::*,
+    };
     for snapshot_only in [false, true] {
         let fixture = make();
         let handles = fixture.open;

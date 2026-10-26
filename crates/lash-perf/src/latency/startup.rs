@@ -159,7 +159,7 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
     .await
     .context("startup node registration timed out")?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::try_from(
+        .session(lash_kernel_value::identity::SessionId::try_from(
             "startup-session".to_owned(),
         )?)
         .create(lash::SessionCreation::root(lash::SessionSpec::new(

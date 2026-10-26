@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     SourceMapRefusal, SourceSite, Span, Stmt,
 };
 
-use lash_vocabulary::sites::{Site, Unit};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use crate::Written;
 
@@ -110,7 +110,7 @@ pub fn site_layers(
     source: &str,
     language: SourceLanguage,
     main: &[Note],
-    functions: &BTreeMap<lash_vocabulary::FunctionId, Vec<Note>>,
+    functions: &BTreeMap<lash_kernel_value::FunctionId, Vec<Note>>,
     declared: &[CaptionEntry],
 ) -> Result<SiteLayers, SiteLayersRefusal> {
     let mut layers = Layers::default();

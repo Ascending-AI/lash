@@ -18,9 +18,11 @@
 //! (`builtins::ordinary_prefix`); it marks the names with that prefix
 //! written.
 
+use lash_ext_ts_helpers::numeric_name;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::Ty;
 use crate::adapter::{BinaryOp, CallArg, Expr, MemberProperty, ObjectProperty, PropertyKey};
@@ -100,11 +102,6 @@ impl Names {
 /// Whether `name` may be the text of a number, as a property key spells it:
 /// `NaN`, `Infinity`, `-Infinity`, or a digit, after an optional minus
 /// sign. This admits more than the canonical spellings, never fewer.
-pub(crate) fn numeric_name(name: &str) -> bool {
-    let digits = name.strip_prefix('-').unwrap_or(name);
-    matches!(name, "NaN" | "Infinity" | "-Infinity")
-        || digits.as_bytes().first().is_some_and(u8::is_ascii_digit)
-}
 
 #[derive(Default)]
 pub(super) struct Collector<'a> {
@@ -352,7 +349,7 @@ impl<'a> Collector<'a> {
             if numeric(key) {
                 self.mutated.numeric = true;
             } else if let Some(prefix) = text_prefix(key, &prefixes, resolve)
-                && crate::builtins::ordinary_prefix(&prefix)
+                && lash_ext_ts_helpers::builtins::ordinary_prefix(&prefix)
             {
                 self.mutated.prefixes.insert(prefix);
             } else {

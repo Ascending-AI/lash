@@ -190,8 +190,8 @@ impl ToolRegistry {
         revision: lash_core_store::environment::SourceRevision,
         config: &OwnerConfigView,
         namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
     {
@@ -215,7 +215,7 @@ impl ToolRegistry {
                     source: Box::new(refusal),
                 });
             }
-            if manifest.execution_policy == lash_vocabulary::ExecutionPolicy::Read
+            if manifest.execution_policy == lash_kernel_value::ExecutionPolicy::Read
                 && !self.reads.contains_key(key)
             {
                 return Err(PluginError::ToolRegistrationRefused {
@@ -287,8 +287,8 @@ pub enum ToolSurfaceDriftKind {
     /// call is pinned to. The call's `perform` raises
     /// `operation_contract_changed`, and no body runs.
     ContractChanged {
-        pinned: lash_vocabulary::operations::ContractId,
-        live: lash_vocabulary::operations::ContractId,
+        pinned: lash_kernel_value::operations::ContractId,
+        live: lash_kernel_value::operations::ContractId,
     },
 }
 
@@ -373,8 +373,8 @@ impl ToolSurfaceDrift {
 pub fn operation_contract_changed(
     effect: &str,
     tool: &ToolId,
-    pinned: &lash_vocabulary::operations::ContractId,
-    live: &lash_vocabulary::operations::ContractId,
+    pinned: &lash_kernel_value::operations::ContractId,
+    live: &lash_kernel_value::operations::ContractId,
 ) -> crate::ToolFailure {
     crate::ToolFailure::runtime(
         crate::ToolFailureClass::InvalidRequest,
@@ -488,7 +488,7 @@ impl SurfaceTools {
     pub fn drift(
         &self,
         tool: &ToolId,
-        pinned: Option<&lash_vocabulary::operations::ContractId>,
+        pinned: Option<&lash_kernel_value::operations::ContractId>,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
@@ -506,7 +506,7 @@ impl SurfaceTools {
     pub fn read_route(
         &self,
         tool: &ToolId,
-        pinned: &lash_vocabulary::operations::ContractId,
+        pinned: &lash_kernel_value::operations::ContractId,
         config: &OwnerConfigView,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         let refused = |why: String| {
@@ -547,7 +547,7 @@ impl SurfaceTools {
     fn drift_entry(
         &self,
         entry: &SurfaceEntry,
-        pinned: Option<&lash_vocabulary::operations::ContractId>,
+        pinned: Option<&lash_kernel_value::operations::ContractId>,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
         let served = self.registry.served(entry.provider(), entry.tool(), config);

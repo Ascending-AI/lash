@@ -850,7 +850,7 @@ pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) 
     let (wait, key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
     let key = key_of(key)?;
     pin(&cx, WaitKind::EngineKey, None, None).await?;
-    let session = lash_vocabulary::identity::SessionId::parse("listed")
+    let session = lash_kernel_value::identity::SessionId::parse("listed")
         .map_err(|error| LawBroken(error.to_string()))?;
     let listed = parked(backend, CallOwner::Session(session.clone())).await?;
     let [call] = listed.as_slice() else {

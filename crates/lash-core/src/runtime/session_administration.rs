@@ -5,7 +5,7 @@ use super::AdmittedScope;
 use super::ProcessWorkWiring;
 use super::RuntimeError;
 use lash_execution_contracts::deployment::DeploymentStore;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Lifecycle services selected together for session administration.
 ///

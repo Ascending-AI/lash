@@ -89,7 +89,7 @@ impl Module {
             .processes()
             .kernel_engine_defaults()
             .expect("the kernel states its settings")
-            .observing(lash_vocabulary::observation::RunObservation::Counts)
+            .observing(lash_kernel_value::observation::RunObservation::Counts)
             .into_engine_settings();
         let serde_json::Value::Object(args) = args else {
             panic!("arguments are a record");

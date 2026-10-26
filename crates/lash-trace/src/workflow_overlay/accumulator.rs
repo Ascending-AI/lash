@@ -18,14 +18,14 @@ pub struct WorkflowExecutionOverlayAccumulator {
 /// what it keeps of those at or below it.
 #[derive(Default)]
 struct SiteHistory {
-    occurrences: BTreeMap<lash_vocabulary::sites::VisitId, OccurrenceHistory>,
+    occurrences: BTreeMap<lash_kernel_value::sites::VisitId, OccurrenceHistory>,
     retention: Option<SiteRetention>,
 }
 
 impl SiteHistory {
     fn observe(
         &mut self,
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         transition: Transition,
         observation: Observation,
         history_limit: usize,
@@ -431,7 +431,7 @@ impl WorkflowExecutionOverlayAccumulator {
                 _ => None,
             });
         let mut ran = BTreeMap::<u32, u64>::new();
-        if observation == Some(lash_vocabulary::observation::RunObservation::Counts) {
+        if observation == Some(lash_kernel_value::observation::RunObservation::Counts) {
             for segment in self.ran_segments.values() {
                 for (ordinal, count) in segment {
                     let total = ran.entry(*ordinal).or_default();

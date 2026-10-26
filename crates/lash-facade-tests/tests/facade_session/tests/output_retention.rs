@@ -216,7 +216,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -297,7 +297,7 @@ await control.finish({ rows });"#,
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -469,7 +469,7 @@ for (let i = 0; i < 200; i++) {
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("aggregate-prints")
+        lash_kernel_value::identity::SessionId::parse("aggregate-prints")
             .expect("nonblank host identity"),
     )
     .await
@@ -569,7 +569,7 @@ async fn an_rlm_request_carries_no_history_surface_on_sqlite() -> Result<()> {
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("history-surface")
+        lash_kernel_value::identity::SessionId::parse("history-surface")
             .expect("nonblank host identity"),
     )
     .await

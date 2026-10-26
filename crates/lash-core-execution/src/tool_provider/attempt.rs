@@ -52,7 +52,7 @@ impl<'run> AttemptContext<'run> {
             code: lash_execution_contracts::process::InlineCode::Engine { payload },
             snapshot: Default::default(),
             context,
-            attachment: lash_vocabulary::package::Attachment {
+            attachment: lash_kernel_value::package::Attachment {
                 members: Default::default(),
                 packages: Default::default(),
                 deferred: Default::default(),
@@ -659,8 +659,11 @@ impl<'run> AttemptContext<'run> {
 
 #[cfg(test)]
 mod work_laws {
-    use lash_vocabulary::names::{ExportName, Name, PackagePath, Segment};
-    use lash_vocabulary::package::*;
+    use {
+        lash_kernel_value::names::ExportName, lash_kernel_value::names::Name,
+        lash_kernel_value::names::PackagePath, lash_kernel_value::names::Segment,
+    };
+    use {lash_kernel_value::package::*, lash_vocabulary::package::*};
 
     /// FIG-7135/C10: a linked callable already carries retained provenance
     /// by identity. Its declaration never copies unrelated package members.

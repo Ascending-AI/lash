@@ -29,7 +29,7 @@ fn tool(namespace: &str, operation: &str) -> lash_vocabulary::tool_contract::Too
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn operation(text: &str) -> lash_vocabulary::names::QualifiedOperation {
+fn operation(text: &str) -> lash_kernel_value::names::QualifiedOperation {
     lash_vocabulary::tool_contract::IntoOperation::into_operation(text)
         .expect("a canonical operation")
 }
@@ -383,10 +383,10 @@ fn discovered_signatures_preserve_ten_level_select_options_in_every_dialect() {
         if named {
             input["$defs"] = json!({"Option": option});
         }
-        let input = lash_vocabulary::json_schema::JsonSchema::admit(input)
+        let input = lash_kernel_value::json_schema::JsonSchema::admit(input)
             .expect("valid deep select options");
         let output =
-            lash_vocabulary::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
+            lash_kernel_value::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
         for (dialect, field_type) in [
             (crate::dialect::CellDialect::typescript(), "string"),
             (crate::dialect::CellDialect::python(), "str"),
@@ -433,7 +433,7 @@ fn discovered_signature_refusals_retain_the_presenter_cause() {
 
     let config = json!({"unsupported_host_option": true});
     let schema =
-        lash_vocabulary::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
+        lash_kernel_value::json_schema::JsonSchema::admit(json!({"type": "string"})).unwrap();
     let dialect = crate::dialect::CellDialect::typescript();
     let expected = lash_tool_presenter_typescript::TypescriptToolPresenter
         .admit_config(&config)

@@ -1,9 +1,10 @@
 //! Opaque parked state and the small control facts an embedding may inspect.
 use super::{CheckpointRoot, PageAnswer, RootStatus};
 use lash_kernel_doc::heap::{HeapFault, PageId};
-use lash_vocabulary::{
-    names::DocumentId,
-    tokens::{TokenCodec, TokenError, TokenReader, TokenWriter},
+use {
+    lash_kernel_value::names::DocumentId, lash_kernel_value::tokens::TokenCodec,
+    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
 };
 
 /// An authenticated checkpoint opened from its root page. Execution records
@@ -15,6 +16,11 @@ impl Checkpoint {
     /// Opens the opaque state and authorizes its references from a page answer.
     pub fn of_answer(page: &PageAnswer) -> Result<Self, HeapFault> {
         CheckpointRoot::of_answer(page).map(Self)
+    }
+    /// Whether both checkpoints retain the same authenticated pending-wait set.
+    /// This compares the saved set without exposing its storage coordinates.
+    pub fn same_pending_waits(&self, other: &Self) -> bool {
+        self.0.waits == other.0.waits
     }
     pub fn header(&self) -> CheckpointHeader {
         header(&self.0)
@@ -28,8 +34,10 @@ pub struct CheckpointHeader {
     pub limits: super::SavedLimits,
     pub kernel: u32,
     pub document: DocumentId,
+    /// The authenticated linked program whose main frames may continue.
+    pub link: lash_kernel_value::LinkId,
     pub closure: PageId,
-    pub helper_library: lash_vocabulary::HelperLibraryId,
+    pub helper_library: lash_kernel_value::HelperLibraryId,
     pub owner: PageId,
     pub parked: bool,
     pub charged: Option<u64>,
@@ -42,6 +50,7 @@ fn header(root: &CheckpointRoot) -> CheckpointHeader {
         limits: root.limits,
         kernel: root.kernel,
         document: root.document,
+        link: root.link,
         closure: root.closure,
         helper_library: root.helper_library,
         owner: root.owner,
@@ -70,7 +79,7 @@ impl TokenCodec for Checkpoint {
 /// Exact helper identities owed by the retained continuation and callable values.
 /// Produced only on a library change; never stored as executable definitions.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HelperPins(pub std::collections::BTreeSet<lash_vocabulary::FunctionId>);
+pub struct HelperPins(pub std::collections::BTreeSet<lash_kernel_value::FunctionId>);
 
 /// A helper refusal stays typed until the embedding maps its protocol surface.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -79,14 +88,14 @@ pub enum HelperCompatibilityError {
     Heap(#[from] HeapFault),
     #[error("build helper {function} is missing")]
     MissingHelper {
-        function: lash_vocabulary::FunctionId,
+        function: lash_kernel_value::FunctionId,
     },
 }
 
 /// Compare before asking for any live-code facts. Equal images require no
 /// heap reads, helper preparation, dependency discovery or membership probes.
 pub fn check_helper_compatibility(
-    parked_id: lash_vocabulary::HelperLibraryId,
+    parked_id: lash_kernel_value::HelperLibraryId,
     pins: impl FnOnce() -> Result<HelperPins, HeapFault>,
     build: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(), HelperCompatibilityError> {
@@ -99,7 +108,7 @@ pub fn check_helper_compatibility(
 }
 
 fn check_pins(
-    pins: impl IntoIterator<Item = lash_vocabulary::FunctionId>,
+    pins: impl IntoIterator<Item = lash_kernel_value::FunctionId>,
     build: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(), HelperCompatibilityError> {
     for function in pins {
@@ -120,10 +129,13 @@ impl Checkpoint {
     pub fn check_helper_compatibility(
         &self,
         source: Box<dyn super::PageSource>,
-        documents: &std::collections::BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+        documents: &std::collections::BTreeMap<
+            lash_kernel_value::LinkId,
+            lash_kernel_doc::Document,
+        >,
         code_imports: &std::collections::BTreeMap<
-            (lash_vocabulary::LinkId, lash_vocabulary::ImportSlot),
-            lash_vocabulary::CallableId,
+            (lash_kernel_value::LinkId, lash_kernel_value::ImportSlot),
+            lash_kernel_value::CallableId,
         >,
         build: &lash_kernel_doc::BuildHelpers,
     ) -> Result<(Box<dyn super::PageSource>, lash_kernel_doc::Selection), HelperCompatibilityError>

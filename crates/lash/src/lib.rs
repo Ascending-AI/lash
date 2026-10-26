@@ -249,15 +249,19 @@ pub mod package {
         AdmissionRefusal, ContentRef, EnginePortError, FulfilRequest, Fulfilled, LinkInspection,
         LinkPurpose, LoadedContent, OperationNeed, ReachSelector,
     };
+    pub use lash_kernel_value::sites::EffectLocation;
     pub use lash_tool_support::ToolPackageProvider;
-    pub use lash_vocabulary::sites::EffectLocation;
-    pub use lash_vocabulary::{claims::*, names::*, package::*};
+    pub use {
+        lash_kernel_value::claims::*, lash_kernel_value::names::*, lash_kernel_value::package::*,
+        lash_vocabulary::claims::*, lash_vocabulary::package::*,
+    };
 }
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
     pub use lash_core::sync::*;
 }
 mod send;
+pub use lash_kernel_value::content_ids::InvalidDigest;
 pub use lash_vocabulary::identity::RunId;
 mod session;
 mod session_binding;
@@ -429,12 +433,12 @@ pub use lash_execution_contracts::session_spec::SessionSpec;
 pub use lash_execution_contracts::session_spec::SpecResolveError;
 pub use lash_execution_contracts::session_types::SessionCreateRequest;
 pub use lash_execution_contracts::session_types::UnstatedSessionConfig;
+pub use lash_kernel_value::identity::SessionId;
 pub use lash_vocabulary::identity::BatchId;
 pub use lash_vocabulary::identity::InputId;
 pub use lash_vocabulary::identity::NodeId;
 pub use lash_vocabulary::identity::ProcessId;
 pub use lash_vocabulary::identity::RuntimeOwner;
-pub use lash_vocabulary::identity::SessionId;
 pub use lash_vocabulary::identity::TurnId;
 pub use lash_vocabulary::tool_contract::RegistrationRefused;
 pub use pacing::{
@@ -485,6 +489,7 @@ pub use lash_core::runtime::obligations::relay::{
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
+pub use lash_kernel_value::identity::BlankIdentity;
 pub use lash_protocol_types::ErrorEnvelope;
 pub use lash_protocol_types::ExecCodeFailure;
 pub use lash_protocol_types::FrameKeyError;
@@ -497,7 +502,6 @@ pub use lash_protocol_types::{
     llm::types::AttemptRecord, llm::types::ChargeSafetyDenialReason, llm::types::LlmCallId,
     llm::types::StreamBlockEvent, llm::types::StreamBlockIdentity, llm::types::StreamBlockKind,
 };
-pub use lash_vocabulary::identity::BlankIdentity;
 pub use lash_vocabulary::identity::InvalidProcessId;
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary
@@ -564,6 +568,27 @@ pub mod observe {
 /// the typed [`ToolValue`](crate::tools::ToolValue), not presentation parts:
 /// see its section on remote tool hosts.
 pub mod tools {
+    /// The shape a presenter reads a tool's JSON Schemas as.
+    pub use lash_kernel_value::tool_shape::CanonicalIdentity;
+    pub use lash_kernel_value::tool_shape::DefinitionId;
+    pub use lash_kernel_value::tool_shape::ExtraKeys;
+    pub use lash_kernel_value::tool_shape::ImportLimits;
+    pub use lash_kernel_value::tool_shape::ObjectShape;
+    pub use lash_kernel_value::tool_shape::ProcessParamShape;
+    pub use lash_kernel_value::tool_shape::ProcessShape;
+    pub use lash_kernel_value::tool_shape::SchemaDefinition;
+    pub use lash_kernel_value::tool_shape::SchemaDocument;
+    pub use lash_kernel_value::tool_shape::SchemaShape;
+    pub use lash_kernel_value::tool_shape::ShapeConstraints;
+    pub use lash_kernel_value::tool_shape::ShapeField;
+    pub use lash_kernel_value::tool_shape::ShapeImportRefusal;
+    pub use lash_kernel_value::tool_shape::ShapeKind;
+    pub use lash_kernel_value::tool_shape::ShapeRow;
+    pub use lash_kernel_value::tool_shape::X_LASH_KEYWORD;
+    pub use lash_kernel_value::tool_shape::XLashParam;
+    pub use lash_kernel_value::tool_shape::XLashSignature;
+    pub use lash_kernel_value::tool_shape::XLashType;
+    pub use lash_kernel_value::tool_shape::is_named_type_reference;
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};
     /// How an execution mode's tools read to a model: the replaceable
@@ -578,28 +603,7 @@ pub mod tools {
         inline_schema, inline_shape, listing as presenter_listing, read_config,
     };
     pub use lash_vocabulary::schema_contract::OutputSchemaLimits;
-    /// The shape a presenter reads a tool's JSON Schemas as.
-    pub use lash_vocabulary::tool_shape::CanonicalIdentity;
-    pub use lash_vocabulary::tool_shape::DefinitionId;
-    pub use lash_vocabulary::tool_shape::ExtraKeys;
-    pub use lash_vocabulary::tool_shape::ImportLimits;
-    pub use lash_vocabulary::tool_shape::ObjectShape;
-    pub use lash_vocabulary::tool_shape::ProcessParamShape;
-    pub use lash_vocabulary::tool_shape::ProcessShape;
-    pub use lash_vocabulary::tool_shape::ReadableNameAllocator;
-    pub use lash_vocabulary::tool_shape::SchemaDefinition;
-    pub use lash_vocabulary::tool_shape::SchemaDocument;
-    pub use lash_vocabulary::tool_shape::SchemaShape;
-    pub use lash_vocabulary::tool_shape::ShapeConstraints;
-    pub use lash_vocabulary::tool_shape::ShapeField;
-    pub use lash_vocabulary::tool_shape::ShapeImportRefusal;
-    pub use lash_vocabulary::tool_shape::ShapeKind;
-    pub use lash_vocabulary::tool_shape::ShapeRow;
-    pub use lash_vocabulary::tool_shape::X_LASH_KEYWORD;
-    pub use lash_vocabulary::tool_shape::XLashParam;
-    pub use lash_vocabulary::tool_shape::XLashSignature;
-    pub use lash_vocabulary::tool_shape::XLashType;
-    pub use lash_vocabulary::tool_shape::is_named_type_reference;
+    pub use lash_vocabulary::shape_names::ReadableNameAllocator;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_execution_contracts::tool_intent::GetDefinitionIntent;
     pub use lash_execution_contracts::tool_intent::PublishDefinitionIntent;
@@ -729,6 +733,17 @@ pub mod tools {
     pub use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
     pub use lash_execution_contracts::tool_intent_outcome::ToolIntentRealized;
     pub use lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason;
+    pub use lash_kernel_value::names::QualifiedOperation;
+    pub use lash_kernel_value::providers::DeferredResolutionPolicy;
+    /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
+    pub use lash_kernel_value::tool_contract::Backoff;
+    pub use lash_kernel_value::tool_contract::BoundedRetry;
+    pub use lash_kernel_value::tool_contract::ExecutionPolicy;
+    /// Turn flow control constructed by tool implementors; attach it with
+    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
+    pub use lash_kernel_value::tool_declaration::FinishDeclaration;
+    pub use lash_kernel_value::tool_declaration::TurnControlKind;
+    pub use lash_kernel_value::tool_declaration::TurnControls;
     #[cfg(feature = "rlm")]
     pub use lash_protocol_rlm::DeferredResolutionError;
     #[cfg(feature = "rlm")]
@@ -746,18 +761,12 @@ pub mod tools {
     /// `rlm` re-exports above, those name the same items.
     pub use lash_tool_support::*;
     pub use lash_vocabulary::ToolIntentKind;
-    pub use lash_vocabulary::names::QualifiedOperation;
-    pub use lash_vocabulary::providers::DeferredResolutionPolicy;
     pub use lash_vocabulary::providers::ExecutionBinding;
     pub use lash_vocabulary::providers::ExecutionBindingUnreadable;
-    /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
-    pub use lash_vocabulary::tool_contract::Backoff;
-    pub use lash_vocabulary::tool_contract::BoundedRetry;
     /// Where a tool's contract id comes from: a package's declared id, or
     /// one derived from the tool's semantic facts and its host's tag. The
     /// id itself is [`crate::workflow::document::ContractId`].
     pub use lash_vocabulary::tool_contract::ContractSource;
-    pub use lash_vocabulary::tool_contract::ExecutionPolicy;
     pub use lash_vocabulary::tool_contract::HostTag;
     pub use lash_vocabulary::tool_contract::IntoOperation;
     pub use lash_vocabulary::tool_contract::LimitCause;
@@ -782,13 +791,8 @@ pub mod tools {
     /// [`ToolDefinition::with_declaration`], and what refuses a declaration
     /// or an outcome it does not admit.
     pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
-    /// Turn flow control constructed by tool implementors; attach it with
-    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
-    pub use lash_vocabulary::tool_declaration::FinishDeclaration;
     pub use lash_vocabulary::tool_declaration::OutcomeShape;
     pub use lash_vocabulary::tool_declaration::ToolDeclaration;
-    pub use lash_vocabulary::tool_declaration::TurnControlKind;
-    pub use lash_vocabulary::tool_declaration::TurnControls;
 }
 
 /// Direct protocol transport types.
@@ -1096,15 +1100,24 @@ pub mod testing;
 pub mod schema {
     /// Shipped JSON Schema and TypeScript text for every host contract.
     pub mod host;
-    pub use lash_vocabulary::Name;
-    pub use lash_vocabulary::entry_schema::{
-        EntrySchemaPolicy, EntrySchemas, EventContainmentRefusal, TypeSchemaRefusal,
-        TypeSchemaRefusalReason, entry_schemas, event_fits_entry_parameter, json_schema_of_type,
+    pub use lash_kernel_value::Name;
+    pub use {
+        lash_kernel_value::entry_schema::EntrySchemaPolicy,
+        lash_kernel_value::entry_schema::EntrySchemas,
+        lash_kernel_value::entry_schema::EventContainmentRefusal,
+        lash_kernel_value::entry_schema::TypeSchemaRefusal,
+        lash_kernel_value::entry_schema::TypeSchemaRefusalReason,
+        lash_kernel_value::entry_schema::entry_schemas,
+        lash_kernel_value::entry_schema::event_fits_entry_parameter,
+        lash_kernel_value::entry_schema::json_schema_of_type,
     };
-    pub use lash_vocabulary::schema::{Widening, WideningReason};
-    pub use lash_vocabulary::schema_contract::*;
-    pub use lash_vocabulary::types::{
-        MapType, Param, RecordRest, RecordType, RecordTypeField, Signature, Type,
+    pub use {lash_kernel_value::json_schema::*, lash_vocabulary::schema_contract::*};
+    pub use {lash_kernel_value::schema::Widening, lash_kernel_value::schema::WideningReason};
+    pub use {
+        lash_kernel_value::types::MapType, lash_kernel_value::types::Param,
+        lash_kernel_value::types::RecordRest, lash_kernel_value::types::RecordType,
+        lash_kernel_value::types::RecordTypeField, lash_kernel_value::types::Signature,
+        lash_kernel_value::types::Type,
     };
 }
 

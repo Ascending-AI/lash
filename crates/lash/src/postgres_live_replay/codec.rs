@@ -13,8 +13,8 @@ use lash_core::SessionQueueEventKind;
 use lash_core::SessionRevision;
 use lash_core::TurnActivity;
 use lash_core::transcript::TranscriptEntry;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The stored form of [`SessionObservationEventPayload`], one variant each:

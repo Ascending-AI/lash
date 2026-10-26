@@ -8,7 +8,7 @@ use lash_core::facade_support::{SessionObservationSubscription, SessionResume, T
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use lash_facade_tests::streaming::{

@@ -11,7 +11,7 @@
 //! Nodes are never observed through `load_session`: that constructs a
 //! `SessionGraph` read model whose id indexes can hide duplicate durable rows.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -640,7 +640,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     // The head's namespace map names each namespace's values body by content
     // address, and the body is a component of its own.
     let namespace = PluginNamespaceState {
-        format_version: lash_vocabulary::providers::FormatVersion::ONE,
+        format_version: lash_kernel_value::providers::FormatVersion::ONE,
         generation: 11,
         publication: Default::default(),
         fork: Default::default(),

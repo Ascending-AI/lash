@@ -12,6 +12,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash = { workspace = true, features = ["codemode"] }
 anyhow.workspace = true

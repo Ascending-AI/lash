@@ -7,7 +7,11 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_vocabulary::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::RecordType, lash_kernel_value::RecordTypeField,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use crate::DiagnosticCode;
 
@@ -176,7 +180,7 @@ fn selected_operations(source: &str, entry: &str) -> Vec<String> {
     let reach = content
         .inspect(
             root,
-            &lash_kernel_package::ReachSelection::Function(lash_vocabulary::ExportName {
+            &lash_kernel_package::ReachSelection::Function(lash_kernel_value::ExportName {
                 name: Name::new(entry),
                 member: None,
             }),
@@ -297,7 +301,7 @@ fn sleep_prints_its_authored_duration_and_preserves_the_document() {
 #[test]
 fn an_unprintable_export_refuses_with_its_callable_site() {
     use lash_kernel_doc::{Export, StartConvention};
-    use lash_vocabulary::sites::{Site, Unit};
+    use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
     let lowered = module("export function hidden(): number { return 1; }").unwrap();
     let mut document = lowered.document.document().clone();
     let Export::Function(export) = document.exports.get_mut(&Name::new("hidden")).unwrap() else {
@@ -463,7 +467,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                 optional: false,
             },
         ],
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     });
     assert_eq!(
         exported,
@@ -479,7 +483,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                                     let Type::Record(mut input) = actor.clone() else {
                                         unreachable!()
                                     };
-                                    input.rest = lash_vocabulary::RecordRest::Drop;
+                                    input.rest = lash_kernel_value::RecordRest::Drop;
                                     Type::Record(input)
                                 },
                                 optional: false
@@ -490,14 +494,14 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
                                 optional: false
                             },
                         ],
-                        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+                        rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
                     })
                 ),
                 param(
                     "columns",
                     Type::Record(RecordType {
                         fields: vec![],
-                        rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::List(Box::new(
+                        rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::List(Box::new(
                             Type::Number
                         ))))
                     })
@@ -551,7 +555,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
     let promoted = presentation
         .promote_entry(
             value.callable.function,
-            lash_vocabulary::FunctionLocation {
+            lash_kernel_value::FunctionLocation {
                 name: Some("handle".into()),
                 site: value.creation.clone(),
             },
@@ -584,7 +588,7 @@ export async function handle(): Pending { return {value: "done"}; }
                 ty: Type::Enum(vec!["done".into()]),
                 optional: false
             }],
-            rest: lash_vocabulary::RecordRest::Closed
+            rest: lash_kernel_value::RecordRest::Closed
         })
     );
 }
@@ -599,7 +603,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         signature.params[1].ty,
         Type::Record(RecordType {
             fields: vec![],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json))
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json))
         })
     );
     assert_eq!(
@@ -617,7 +621,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
                     optional: false
                 },
             ],
-            rest: lash_vocabulary::RecordRest::Drop
+            rest: lash_kernel_value::RecordRest::Drop
         })
     );
     super::lower("function ordinary(x) { return x; }").unwrap();
@@ -658,7 +662,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             transported
                 .entry_export(
                     &lowered.document,
-                    &lash_vm_releases::helper_release().unwrap().helpers,
+                    &lash_kernel_releases::helper_release().unwrap().helpers,
                     &lash_kernel_doc::Selection::Fresh,
                 )
                 .unwrap_err()
@@ -676,7 +680,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         .unwrap();
     assert_eq!(signature.params[0].ty, Type::Int);
     assert_eq!(signature.result, Type::Json);
-    use lash_vocabulary::AnnotationResolutionReason as Reason;
+    use lash_kernel_value::AnnotationResolutionReason as Reason;
     for (declaration, annotation, reason) in [
         (
             "type Cycle = Cycle;",
@@ -732,7 +736,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         };
         let encoded = serde_json::to_value(refused).unwrap();
         assert_eq!(
-            serde_json::from_value::<lash_vocabulary::EntryAnnotationRefusal>(encoded).unwrap(),
+            serde_json::from_value::<lash_kernel_value::EntryAnnotationRefusal>(encoded).unwrap(),
             *refused
         );
         assert_eq!(refused.reason, reason);
@@ -750,7 +754,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
             .entry_export(
                 &lowered.document,
-                &lash_vm_releases::helper_release().unwrap().helpers,
+                &lash_kernel_releases::helper_release().unwrap().helpers,
                 &lash_kernel_doc::Selection::Fresh,
             )
             .unwrap_err()
@@ -762,7 +766,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
     let error =
         module("export function handle({x}: {x: string}): string { return x; }").unwrap_err();
     assert!(
-        matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if matches!(refused.position, lash_vocabulary::SignaturePosition::Parameter { index: 0, .. }))
+        matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if matches!(refused.position, lash_kernel_value::SignaturePosition::Parameter { index: 0, .. }))
     );
     let patterns = [
         "const f = ({x}: {x: string}): string => x;",
@@ -836,17 +840,17 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
         panic!("closure");
     };
     let presentation = closure.presentation.as_ref().unwrap();
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: lowered.document.identity(),
         fills: Default::default(),
     };
     let function = k::FunctionValue {
-        callable: lash_vocabulary::CallableId {
+        callable: lash_kernel_value::CallableId {
             link: link.identity(),
             function: closure.function,
         },
         captures: [(
-            lash_vocabulary::Name::new("offset"),
+            lash_kernel_value::Name::new("offset"),
             k::CaptureValue::Data(k::Datum::Float(k::Float::new(7.0))),
         )]
         .into(),
@@ -879,7 +883,7 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     let opened = lash_kernel_package::materialize_workflow(
         &content,
         &k::WorkflowReference::Callable(function.callable),
@@ -901,7 +905,7 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
 /// mode while an ordinary result record remains closed.
 #[test]
 fn entry_record_modes_survive_source_and_saved_function_promotion() {
-    use lash_vocabulary::RecordRest;
+    use lash_kernel_value::RecordRest;
     for (suffix, rest) in [
         ("", RecordRest::Drop),
         ("; [key: string]: never", RecordRest::Closed),
@@ -946,7 +950,7 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
             value
                 .entry_export(
                     &lowered.document,
-                    &lash_vm_releases::helper_release().unwrap().helpers,
+                    &lash_kernel_releases::helper_release().unwrap().helpers,
                     &lash_kernel_doc::Selection::Fresh
                 )
                 .unwrap()
@@ -1038,7 +1042,7 @@ fn finite_type_families_map_to_the_exact_boundary_shape() {
         record.fields[1].ty,
         Type::Enum(vec!["yes".into(), "no".into()])
     );
-    assert_eq!(record.rest, lash_vocabulary::RecordRest::Drop);
+    assert_eq!(record.rest, lash_kernel_value::RecordRest::Drop);
     let optional = entries("export function run(x: [number, string?]): any { return x; }")
         .remove(&Name::new("run"))
         .unwrap();
@@ -1089,14 +1093,14 @@ fn qualified_package_types_map_to_the_exact_boundary_shape() {
         ty: Type::Text,
         optional: false,
     });
-    record.rest = lash_vocabulary::RecordRest::Closed;
+    record.rest = lash_kernel_value::RecordRest::Closed;
     let namespaces = Namespaces::new(
         BTreeMap::from([(
-            lash_vocabulary::PackagePath::parse("domain").unwrap(),
+            lash_kernel_value::PackagePath::parse("domain").unwrap(),
             BTreeMap::from([(
-                lash_vocabulary::Segment::new("item").unwrap(),
+                lash_kernel_value::Segment::new("item").unwrap(),
                 NamespaceMember {
-                    visibility: lash_vocabulary::package::Visibility::Public,
+                    visibility: lash_kernel_value::package::Visibility::Public,
                     kind: NamespaceKind::Type(ValueType {
                         representation: representation.clone(),
                         members: BTreeMap::new(),
@@ -1201,7 +1205,7 @@ await control.finish(values[key]);"#,
     let reach = content
         .inspect_invocations(
             root,
-            &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
+            &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
             super::library(),
         )
         .expect("the cell's selected reach");
@@ -1232,7 +1236,7 @@ fn direct_service_calls_still_plan_their_reads() {
     let reach = content
         .inspect_invocations(
             root,
-            &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
+            &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
             super::library(),
         )
         .expect("the cell's invocation reach");

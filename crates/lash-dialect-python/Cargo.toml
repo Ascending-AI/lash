@@ -21,9 +21,10 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-ext-py-helpers = { workspace = true }
 num-bigint = { workspace = true }
-lash-dialect-services = { workspace = true }
-lash-vocabulary = { workspace = true }
+lash-kernel-services = { workspace = true }
+lash-kernel-value = { workspace = true }
 unicode-ident = "1"
 unicode-normalization = { workspace = true }
 lash-kernel-dialect = { workspace = true }
@@ -36,17 +37,16 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 lash-kernel-package = { workspace = true, features = ["testing"] }
-lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-ext-helper-compiler = { workspace = true }
 lash-ext-py-core = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 arbitrary = "1"
-lash-kernel-conformance = { workspace = true }
+lash-kernel-conformance = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-dialect-typescript = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
-lash-kernel-vm = { workspace = true }
+lash-kernel-vm = { workspace = true, features = ["testing"] }

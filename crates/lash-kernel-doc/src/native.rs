@@ -25,7 +25,7 @@ use crate::released::{BodyCensus, ReleasedFunctions};
 
 use crate::validate::{Invalid, validate_identified_definition};
 
-use lash_vocabulary::names::{FunctionId, FunctionName};
+use {lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName};
 
 /// The counter a native function is handed: it counts the function's guard
 /// unit and refuses the unit that passes the limit.
@@ -160,7 +160,8 @@ struct Facts {
     header: OnceLock<Arc<crate::FunctionHeader>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
     /// The empty requirement set for a definition with no body.
-    imports: OnceLock<BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>>,
+    imports:
+        OnceLock<BTreeMap<lash_kernel_value::names::ImportSlot, lash_kernel_value::names::Import>>,
     /// The definition's token body, encoded once for every holder that
     /// stores it.
     image: OnceLock<Arc<[u8]>>,
@@ -322,14 +323,14 @@ impl RegisteredFunction {
         self.function
     }
 
-    /// The definition's token body ([`lash_vocabulary::tokens::encode_body`]),
+    /// The definition's token body ([`lash_kernel_value::tokens::encode_body`]),
     /// the bytes its checkpoint graph node is encoded from, encoded once per
     /// registration and shared by the registry's clones.
     pub fn image(&self) -> Arc<[u8]> {
         Arc::clone(self.facts().image.get_or_init(|| match &self.held {
             Held::Released(set, at) => Arc::from(set.image.definition_bytes(*at as usize)),
             Held::Defined(_) => {
-                Arc::from(lash_vocabulary::tokens::encode_body(&**self.definition()))
+                Arc::from(lash_kernel_value::tokens::encode_body(&**self.definition()))
             }
         }))
     }
@@ -349,7 +350,7 @@ impl RegisteredFunction {
     /// (`K-DOC-002`); what its callees perform is theirs.
     pub fn imports(
         &self,
-    ) -> &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import> {
+    ) -> &BTreeMap<lash_kernel_value::names::ImportSlot, lash_kernel_value::names::Import> {
         self.facts().imports.get_or_init(|| match &self.held {
             Held::Released(set, at) => set
                 .image
@@ -639,7 +640,7 @@ impl FunctionRegistry {
         let identity = validate_identified_definition(
             &definition,
             self,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
         .map_err(|source| RegistryError::Invalid {
             name: name.clone(),

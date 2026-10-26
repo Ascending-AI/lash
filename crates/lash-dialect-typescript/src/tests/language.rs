@@ -1,6 +1,6 @@
 //! What the lowered document of each language form must hold.
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;

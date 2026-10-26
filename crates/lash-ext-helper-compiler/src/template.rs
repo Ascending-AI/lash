@@ -23,7 +23,7 @@ use lash_kernel_doc::{
     Stmt, TryStmt, Value, ValueKind,
 };
 
-use lash_vocabulary::{FunctionId, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::library::Library;
 
@@ -697,11 +697,11 @@ impl Evaluator<'_> {
     /// The kind a call of `definition` answers, from its signature.
     fn result_kind(&self, definition: &FunctionDefinition) -> Option<ValueKind> {
         match definition.signature.result {
-            lash_vocabulary::Type::Bool => Some(ValueKind::Bool),
-            lash_vocabulary::Type::Float => Some(ValueKind::Float),
-            lash_vocabulary::Type::Int => Some(ValueKind::Int),
-            lash_vocabulary::Type::Text if !self.heap => Some(ValueKind::Text),
-            lash_vocabulary::Type::Null => Some(ValueKind::Null),
+            lash_kernel_value::Type::Bool => Some(ValueKind::Bool),
+            lash_kernel_value::Type::Float => Some(ValueKind::Float),
+            lash_kernel_value::Type::Int => Some(ValueKind::Int),
+            lash_kernel_value::Type::Text if !self.heap => Some(ValueKind::Text),
+            lash_kernel_value::Type::Null => Some(ValueKind::Null),
             _ => None,
         }
     }
@@ -722,9 +722,9 @@ impl Evaluator<'_> {
         let counts = kind == Some(ValueKind::Int) && args.iter().all(|arg| !immediate(arg.kind));
         let number = matches!(
             definition.signature.result,
-            lash_vocabulary::Type::Int
-                | lash_vocabulary::Type::Float
-                | lash_vocabulary::Type::Number
+            lash_kernel_value::Type::Int
+                | lash_kernel_value::Type::Float
+                | lash_kernel_value::Type::Number
         ) && args.iter().all(|arg| immediate(arg.kind));
         let builds = !matches!(kind, Some(ValueKind::Bool | ValueKind::Null)) && !counts && !number;
         let helper = definition.name.as_str().starts_with("py.")
@@ -732,11 +732,11 @@ impl Evaluator<'_> {
         let arena = !helper
             || !matches!(
                 definition.signature.result,
-                lash_vocabulary::Type::Bool
-                    | lash_vocabulary::Type::Int
-                    | lash_vocabulary::Type::Float
-                    | lash_vocabulary::Type::Number
-                    | lash_vocabulary::Type::Null
+                lash_kernel_value::Type::Bool
+                    | lash_kernel_value::Type::Int
+                    | lash_kernel_value::Type::Float
+                    | lash_kernel_value::Type::Number
+                    | lash_kernel_value::Type::Null
             );
         let form = Form::Call {
             callee: self.heap_callee(function),
@@ -845,7 +845,7 @@ impl Evaluator<'_> {
             + args.iter().map(|arg| arg.calls).sum::<usize>();
         let name = self.fresh();
         let result = &definition.signature.result;
-        let reserved = matches!(result, lash_vocabulary::Type::Text);
+        let reserved = matches!(result, lash_kernel_value::Type::Text);
         state.steps.push(
             if self.heap && !tag && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
                 // An operand the entry may decline, or a text whose room
@@ -857,11 +857,11 @@ impl Evaluator<'_> {
                     args: codes(&args),
                     builds: !matches!(
                         result,
-                        lash_vocabulary::Type::Bool
-                            | lash_vocabulary::Type::Int
-                            | lash_vocabulary::Type::Float
-                            | lash_vocabulary::Type::Number
-                            | lash_vocabulary::Type::Null
+                        lash_kernel_value::Type::Bool
+                            | lash_kernel_value::Type::Int
+                            | lash_kernel_value::Type::Float
+                            | lash_kernel_value::Type::Number
+                            | lash_kernel_value::Type::Null
                     ),
                 }
             } else {
@@ -1123,8 +1123,8 @@ fn codes(symbols: &[Symbol]) -> String {
 }
 
 /// Whether a parameter of type `ty` takes a value of `kind`.
-fn accepts(ty: &lash_vocabulary::Type, kind: ValueKind) -> bool {
-    use lash_vocabulary::Type;
+fn accepts(ty: &lash_kernel_value::Type, kind: ValueKind) -> bool {
+    use lash_kernel_value::Type;
     match ty {
         Type::Any => true,
         Type::Null => kind == ValueKind::Null,
@@ -1246,7 +1246,7 @@ impl Evaluator<'_> {
                         // The path's answer owns its budget: an Any-returning
                         // operator may have both numeric and textual arms.
                         let most = if self.heap
-                            || definition.signature.result == lash_vocabulary::Type::Text
+                            || definition.signature.result == lash_kernel_value::Type::Text
                             || value.kind == Some(ValueKind::Text)
                         {
                             PATH_CALLS

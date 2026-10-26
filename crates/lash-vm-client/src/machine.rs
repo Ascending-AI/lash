@@ -17,6 +17,7 @@ use lash_kernel_doc::heap::PageGrant;
 use lash_kernel_doc::{Datum, ErrorDatum, IdentifiedDocument};
 
 use lash_kernel_state::paged::SessionRoot;
+use lash_kernel_value::names::DocumentId;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::closure::Closure;
@@ -29,7 +30,6 @@ use lash_vm_protocol::{
     BoundReached, CheckpointStart, EncodedPayload, HostReadKind, LimitDecision, LimitedBound,
     RunBounds, StartFrom, VmOwner,
 };
-use lash_vocabulary::names::DocumentId;
 
 use crate::service::{CallHeld, Service};
 use crate::wire::{
@@ -43,13 +43,13 @@ pub use lash_vm_broker::kernel::run::kernel_reads;
 /// owner binding, which the broker supplies per execution.
 #[derive(Clone, Debug)]
 pub struct RunStart {
-    pub link: lash_vocabulary::content_ids::LinkId,
+    pub link: lash_kernel_value::content_ids::LinkId,
     pub instances: std::collections::BTreeMap<
-        lash_vocabulary::content_ids::LinkId,
+        lash_kernel_value::content_ids::LinkId,
         lash_kernel_vm::interface::PreparedInstance,
     >,
     pub documents:
-        std::collections::BTreeMap<lash_vocabulary::names::DocumentId, IdentifiedDocument>,
+        std::collections::BTreeMap<lash_kernel_value::names::DocumentId, IdentifiedDocument>,
     pub target: Target,
     /// The entry's arguments. Empty for `main`.
     pub args: Vec<Datum>,
@@ -60,7 +60,7 @@ pub struct RunStart {
     /// holds its own.
     pub modes: EffectModes,
     /// The host's read-only bindings a cell's `main` starts with.
-    pub host: Vec<(lash_vocabulary::names::Name, Datum)>,
+    pub host: Vec<(lash_kernel_value::names::Name, Datum)>,
     /// How a session cell's end saves its functions, fresh or resumed;
     /// none for a run that saves none.
     pub save: Option<wire::SaveWire>,
@@ -132,7 +132,7 @@ pub trait RunHost: Send + Sync {
     /// A provisional site entry: each task's last since the run's previous
     /// frame, taken from the next one. It neither yields a task nor admits
     /// work.
-    fn enter_site(&self, _at: &lash_vocabulary::sites::EffectLocation) {}
+    fn enter_site(&self, _at: &lash_kernel_value::sites::EffectLocation) {}
 
     /// A `perform` the run binds as a read (`K-EFF-012`), at `site` under
     /// the authored statement `origin`: the effect's result, or the error
@@ -141,10 +141,10 @@ pub trait RunHost: Send + Sync {
     /// save stands.
     async fn perform(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -951,7 +951,7 @@ mod reservation_tests {
             ])),
             documents: Vec::new(),
             instances: EncodedPayload(Vec::new()),
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             definitions: Vec::new(),
             functions: Default::default(),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),

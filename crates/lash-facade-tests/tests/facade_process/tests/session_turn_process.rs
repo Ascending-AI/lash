@@ -42,7 +42,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() -> Result<()> 
     );
     let parent = core
         .session(
-            lash_vocabulary::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
         )
         .open()
         .await?;
@@ -95,7 +95,7 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
     );
     let child = core
         .session(
-            lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
         )
         .open()
         .await?;
@@ -187,7 +187,7 @@ async fn a_partially_created_child_finishes_from_its_recorded_creation_request()
     );
     let child = core
         .session(
-            lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
         )
         .open()
         .await?;
@@ -249,7 +249,7 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     // The child parks once its passes exhaust the activation-loop budget,
     // or else this deployment's claim runs it and the redrive is a no-op.
     core.session(
-        lash_vocabulary::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(CHILD).expect("nonblank host identity"),
     )
     .open()
     .await?

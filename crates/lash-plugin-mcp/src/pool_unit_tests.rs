@@ -91,7 +91,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
             error,
             McpError::UnusableSchema(
                 lash_core::facade_support::ToolCatalogBuildError::UnusableSchema {
-                    source: lash_vocabulary::json_schema::SchemaAdmissionError::Compilation { .. },
+                    source: lash_kernel_value::json_schema::SchemaAdmissionError::Compilation { .. },
                     ..
                 }
             )

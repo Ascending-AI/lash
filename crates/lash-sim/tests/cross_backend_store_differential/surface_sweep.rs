@@ -15,6 +15,7 @@
 
 use super::*;
 use corrupt_input_cases::CorruptBackup;
+use lash_vocabulary::package::{PublicationRecord, PublishedContent};
 
 /// The run the sweep's checkpoint admission is keyed by. It is never
 /// admitted as a run: a checkpoint admission needs no run record.
@@ -700,9 +701,9 @@ impl BackendRunner {
                     execution: lash_core_store::resolutions::ExecutionId(
                         "process:unregistered-resolution".to_owned(),
                     ),
-                    use_: lash_vocabulary::names::OperationUse {
-                        link: lash_vocabulary::package::LinkId::from_bytes([0; 32]),
-                        slot: lash_vocabulary::names::ImportSlot(0),
+                    use_: lash_kernel_value::names::OperationUse {
+                        link: lash_kernel_value::package::LinkId::from_bytes([0; 32]),
+                        slot: lash_kernel_value::names::ImportSlot(0),
                     },
                 };
                 assert!(
@@ -733,10 +734,10 @@ impl BackendRunner {
                         },
                         lash_core_store::resolutions::ResolutionRecord {
                             key: missing,
-                            requested: lash_vocabulary::names::QualifiedName {
-                                package: lash_vocabulary::names::PackagePath::parse("wip")
+                            requested: lash_kernel_value::names::QualifiedName {
+                                package: lash_kernel_value::names::PackagePath::parse("wip")
                                     .map_err(|error| StoreError::Backend(error.to_string()))?,
-                                member: lash_vocabulary::names::Segment::new("lookup")
+                                member: lash_kernel_value::names::Segment::new("lookup")
                                     .map_err(|error| StoreError::Backend(error.to_string()))?,
                                 type_member: None,
                             },
@@ -849,7 +850,7 @@ impl BackendRunner {
                     ArtifactReferrer, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
                 };
                 use lash_core_store::packages::{LinkRecord, PackageRecord};
-                use lash_durable::packages::vocabulary::{names::*, package::*};
+                use lash_kernel_value::{names::*, package::*};
                 let stores = self.lifecycle_backend.stores();
                 let packages = stores.package_store();
                 let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
@@ -874,10 +875,10 @@ impl BackendRunner {
                     link,
                 };
                 let package = Package {
-                    path: lash_vocabulary::PackagePath::parse("surface")
+                    path: lash_kernel_value::PackagePath::parse("surface")
                         .map_err(|error| StoreError::Backend(format!("{error}")))?,
                     members: [(
-                        lash_vocabulary::Segment::new("run")
+                        lash_kernel_value::Segment::new("run")
                             .map_err(|error| StoreError::Backend(format!("{error}")))?,
                         Member {
                             visibility: Visibility::Public,
@@ -901,7 +902,7 @@ impl BackendRunner {
                         domain: PublicationDomain("surface".into()),
                         scope: PublicationScope::Host,
                         publisher: PublisherInstance("surface".into()),
-                        root: lash_vocabulary::Segment::new("surface")
+                        root: lash_kernel_value::Segment::new("surface")
                             .map_err(|error| StoreError::Backend(format!("{error}")))?,
                     },
                     path: package.package.path.clone(),

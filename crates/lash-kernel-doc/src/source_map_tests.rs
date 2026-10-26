@@ -8,10 +8,10 @@ use crate::SourceSite;
 use crate::Span;
 use crate::Survivor;
 use crate::parse_document;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::tokens::decode_body;
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::tokens::decode_body;
+use lash_kernel_value::tokens::encode_body;
 
 fn document() -> Document {
     parse_document("kernel 1\nnumbers float\nmain { print 1 print 2 }").unwrap()

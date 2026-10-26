@@ -2,8 +2,8 @@
 use crate::authoring::Operation;
 use lash_kernel_doc::{Expr, Stmt};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

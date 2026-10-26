@@ -5,7 +5,7 @@ use lash_kernel_doc::{
     Datum, Value,
     arena::{Body, Chunk},
 };
-use lash_vocabulary::{Type, TypeMismatch};
+use {lash_kernel_value::Type, lash_kernel_value::TypeMismatch};
 
 impl KernelMachine {
     fn public_value_type(&mut self, value: Value) -> Eval<Type> {
@@ -20,7 +20,7 @@ impl KernelMachine {
             Value::Timestamp(_) | Value::BigTimestamp(_) => Type::Timestamp,
             Value::Error(_) => Type::Error,
             Value::Closure(_) | Value::Function(_) => {
-                Type::Function(Box::new(lash_vocabulary::Signature {
+                Type::Function(Box::new(lash_kernel_value::Signature {
                     params: vec![],
                     result: Type::Any,
                 }))
@@ -29,13 +29,13 @@ impl KernelMachine {
             Value::Tuple(_) => Type::Tuple(vec![]),
             Value::List(_) => Type::List(Box::new(Type::Any)),
             Value::Set(_) => Type::Set(Box::new(Type::Any)),
-            Value::Map(_) => Type::Map(Box::new(lash_vocabulary::MapType {
+            Value::Map(_) => Type::Map(Box::new(lash_kernel_value::MapType {
                 key: Type::Any,
                 value: Type::Any,
             })),
-            Value::Record(_) => Type::Record(lash_vocabulary::RecordType {
+            Value::Record(_) => Type::Record(lash_kernel_value::RecordType {
                 fields: vec![],
-                rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+                rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
             }),
             Value::ObjectRef(_) => Type::Any,
             Value::Handle(_) => lash_kernel_doc::datum_type(&self.copy_datum(&value)?),
@@ -213,7 +213,7 @@ impl KernelMachine {
                     .flatten()
             });
             return Ok(if let Some(provided) = signature {
-                lash_vocabulary::type_relations::serves(&provided, expected).map(|_| {
+                lash_kernel_value::type_relations::serves(&provided, expected).map(|_| {
                     TypeMismatch::new(ty.clone(), Type::Function(Box::new(provided.clone())))
                 })
             } else {
@@ -334,7 +334,8 @@ impl KernelMachine {
                             .find(|field| field.name == name)
                             .map(|field| &field.ty)
                             .or(record.rest.kept_type());
-                        if ty.is_none() && matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                        if ty.is_none()
+                            && matches!(record.rest, lash_kernel_value::RecordRest::Drop)
                         {
                             continue;
                         }

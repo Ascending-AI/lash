@@ -2,14 +2,14 @@
 //! nodes without reading the document again.
 
 use lash_kernel_doc::FunctionTarget;
-use lash_vocabulary::names::ImportSlot;
+use lash_kernel_value::names::ImportSlot;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{FunctionCatalog, Literal};
 
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Unit;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph,

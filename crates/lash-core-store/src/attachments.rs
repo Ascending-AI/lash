@@ -3,9 +3,9 @@ use crate::store::{
     AttachmentReferrers, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
 };
 #[cfg(test)]
-use lash_protocol_types::sync::MutexExt;
+use lash_kernel_value::identity::SessionId;
 #[cfg(test)]
-use lash_vocabulary::identity::SessionId;
+use lash_protocol_types::sync::MutexExt;
 #[cfg(test)]
 use std::sync::Mutex;
 mod root_enumeration;

@@ -15,7 +15,7 @@
 
 use super::*;
 use crate::TurnInput;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A model whose first call signals [`Held::entered`] and holds until the
 /// law releases it; every call is counted.

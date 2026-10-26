@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{CaptionKind, Captions, Document, SourceMap};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::Name;
+use lash_kernel_value::sites::Site;
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
@@ -116,7 +116,7 @@ pub struct Lowered {
 #[serde(deny_unknown_fields)]
 pub struct ToolCalls {
     pub calls: BTreeSet<String>,
-    pub namespace_collisions: Vec<lash_vocabulary::NamespaceCollision>,
+    pub namespace_collisions: Vec<lash_kernel_value::NamespaceCollision>,
 }
 
 /// Lowers source in one language to a kernel document.

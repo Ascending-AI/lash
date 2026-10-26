@@ -677,10 +677,22 @@ packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]
 
 # FIG-5839: the worker registers the library functions lash ships from the
-# file `lash-vm-releases`' build script defines the helpers against.
+# file `lash-kernel-releases`' build script defines the helpers against.
 [[rule]]
 packages = ["lash-internal-vm-worker"]
-compile_data = ["//crates/lash-vm-releases:rust_sources"]
+compile_data = ["//crates/lash-kernel-releases:rust_sources"]
+
+# The opt-in shipped-library fixture uses the release's source-owned installers.
+[[rule]]
+packages = ["lash-kernel-conformance"]
+compile_data = ["//crates/lash-kernel-releases:rust_sources"]
+
+# The worker embedding instrument shares the dialect's page and link fixtures.
+[[rule]]
+packages = ["lash-internal-vm-worker"]
+kinds = ["example"]
+targets = ["kernel_perf"]
+compile_data = ["//crates/lash-dialect-typescript:rust_sources"]
 
 # The replay-read gate (FIG-4324) reads the production sources of every crate,
 # example and runbook host, and the store trait declarations, at run time.
@@ -711,9 +723,9 @@ compile_data = ["//crates/lash-kernel-conformance:package_files", "//crates/lash
 
 # Each library owns a reviewed helper-label side file, read without dialect code.
 [[rule]]
-packages = ["lash-helper-labels"]
+packages = ["lash-kernel-labels"]
 kinds = ["lib", "unit-test"]
-compile_data = ["//crates/lash-helper-labels:package_files"]
+compile_data = ["//crates/lash-kernel-labels:package_files"]
 
 # HOST-GUIDE-COMPILED compares the guide with its compiled source regions.
 [[rule]]

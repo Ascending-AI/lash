@@ -183,7 +183,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
         let mut request = lash_execution_contracts::session_types::SessionCreateRequest::root(
             lash_core::PluginOptions::default(),
         )
-        .with_session_id(lash_vocabulary::identity::SessionId::fixture(id));
+        .with_session_id(lash_kernel_value::identity::SessionId::fixture(id));
         request.policy = Some(policy.clone());
         request
     };
@@ -437,7 +437,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     assert!(head_of(&store).await?.is_none(), "the row has no head");
 
     let opened = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await;
     assert!(
@@ -468,11 +468,13 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     // cannot apply it to a session with no recorded config, and parks the
     // session with that refusal once its passes reach the activation-loop
     // budget, settling nothing over defaults.
-    core.session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
-        .durable()
-        .await?
-        .send(TurnInput::text("work the row"))
-        .await?;
+    core.session(
+        lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"),
+    )
+    .durable()
+    .await?
+    .send(TurnInput::text("work the row"))
+    .await?;
     let actor = lash_core::durable_port::ActorKey::session(ID).expect("a session actor key");
     let parked = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
@@ -527,7 +529,7 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
 
     let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         core.session(
-            lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"),
         )
         .durable()
         .await?

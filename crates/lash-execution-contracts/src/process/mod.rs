@@ -59,8 +59,8 @@ pub use events::{
     ReleasedProcessEvent, release_process_event_payload, restore_released_process_event,
     terminal_append_request,
 };
+pub use lash_kernel_value::identity::SessionId;
 pub use lash_vocabulary::identity::ProcessId;
-pub use lash_vocabulary::identity::SessionId;
 pub use model::Ancestry;
 pub use model::DeclaredDefinitionLaunch;
 pub use model::DeclaredInlineLaunch;

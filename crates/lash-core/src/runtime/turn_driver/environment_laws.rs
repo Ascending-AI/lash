@@ -91,7 +91,7 @@ async fn fixture() -> Fixture {
 
 async fn fixture_with(plugins: Vec<Arc<dyn crate::PluginFactory>>) -> Fixture {
     let backend = crate::testing::sqlite_recording_backend().await;
-    let session_id = lash_vocabulary::identity::SessionId::fixture("environment-laws");
+    let session_id = lash_kernel_value::identity::SessionId::fixture("environment-laws");
     let store =
         crate::testing::runtime_helpers::recording_session_store(&backend, session_id.clone())
             .await;
@@ -907,10 +907,10 @@ async fn env_catalog_only_owner() {
                 callback_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(crate::plugin::ToolCatalogContribution {
                     remove: if removal.load(Ordering::SeqCst) {
-                        vec![lash_vocabulary::names::QualifiedOperation {
-                            package: lash_vocabulary::names::PackagePath::parse("environment")
+                        vec![lash_kernel_value::names::QualifiedOperation {
+                            package: lash_kernel_value::names::PackagePath::parse("environment")
                                 .unwrap(),
-                            name: lash_vocabulary::names::Segment::new("work").unwrap(),
+                            name: lash_kernel_value::names::Segment::new("work").unwrap(),
                         }]
                     } else {
                         Vec::new()

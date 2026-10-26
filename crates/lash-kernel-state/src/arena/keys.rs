@@ -18,8 +18,8 @@ use lash_kernel_doc::heap::{Identity, NormalKey};
 use lash_kernel_doc::heap_values::{integral_float, key_digest};
 use lash_kernel_doc::{Integer, NativeError, Retry, Semantics, Timestamp, Value};
 
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
+use lash_kernel_value::data_limits::KernelDataLimits;
+use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
 
 use super::Facts;
 

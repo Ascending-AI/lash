@@ -47,7 +47,7 @@ use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolCall;
 use lash_core::ToolOutcome;
 use lash_core::llm::types::LlmRequest;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use served::{Tier, World};
 
 const TOOL: &str = "count_call";
@@ -886,7 +886,7 @@ async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tie
     let input = "worker-lost-mid-cell-replay";
     let session = world.session(input, served::spec(8)).await;
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from(input.to_owned()).expect("a session id");
+        lash_kernel_value::identity::SessionId::try_from(input.to_owned()).expect("a session id");
     let observed = world
         .core
         .session(session_id.clone())

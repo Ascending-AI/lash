@@ -1,5 +1,5 @@
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::CancelRequest;
-use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};

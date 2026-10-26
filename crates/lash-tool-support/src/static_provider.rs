@@ -117,8 +117,8 @@ impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
         revision: lash_core_store::environment::SourceRevision,
         config: &OwnerConfigView,
         _namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
     {

@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::{SessionId, TurnId};
 use tokio::sync::watch;
+use {lash_kernel_value::identity::SessionId, lash_vocabulary::identity::TurnId};
 
 type Turn = (SessionId, TurnId);
 

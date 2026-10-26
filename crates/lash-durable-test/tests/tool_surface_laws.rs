@@ -111,13 +111,13 @@ impl Spec {
             if self.name.ends_with("_held") && self.change != Change::Retried {
                 // A held call stranded by its node's stop runs again on the
                 // next node that serves it.
-                lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(2).expect("two attempts"),
                     1,
                     1,
                 )
             } else {
-                lash_vocabulary::tool_contract::ExecutionPolicy::Once
+                lash_kernel_value::tool_contract::ExecutionPolicy::Once
             },
         )
     }
@@ -335,8 +335,8 @@ impl Deployment {
     }
 }
 
-fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 async fn create(core: &lash::LashCore, name: &str) -> lash::DurableSession {

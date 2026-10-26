@@ -74,7 +74,7 @@ use lash_core::runtime::{
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputRead,
     PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use tokio::sync::OnceCell;
 
 /// How this handle obtains the session's store.

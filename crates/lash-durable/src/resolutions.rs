@@ -6,8 +6,8 @@ pub use lash_core_store::resolutions::{
     ExecutionId, ResolutionEntry, ResolutionKey, ResolutionRecord,
 };
 pub use lash_vocabulary::claims::ClaimRequirements;
-use lash_vocabulary::names::{OperationUse, QualifiedName};
 use serde::{Deserialize, Serialize};
+use {lash_kernel_value::names::OperationUse, lash_kernel_value::names::QualifiedName};
 
 use crate::{ActorCommit, ActorKey, DurableError, Epoch, StateRevision};
 
@@ -103,8 +103,8 @@ pub fn validate_resolution(candidate: &ResolutionRecord) -> Result<(), DurableEr
     } = &candidate.entry
     {
         use lash_core_store::tool_surface::RouteSource;
-        if *mode != lash_vocabulary::package::OperationMode::Waited
-            || route.policy == lash_vocabulary::ExecutionPolicy::Read
+        if *mode != lash_kernel_value::package::OperationMode::Waited
+            || route.policy == lash_kernel_value::ExecutionPolicy::Read
             || definition.contract_id() != *contract
             || route.tool != definition.manifest.id
             || route.policy != definition.manifest.execution_policy

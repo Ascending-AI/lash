@@ -95,7 +95,7 @@ impl lash_core::plugin::packages::PackageProvider for Negative {
             },
             config: ProviderConfig {
                 component: Some(
-                    lash_vocabulary::providers::ProcessComponentId::new(NEGATIVE.component())
+                    lash_kernel_value::providers::ProcessComponentId::new(NEGATIVE.component())
                         .unwrap(),
                 ),
                 format: lash::plugins::FormatVersion::ONE,
@@ -767,7 +767,7 @@ pub(crate) async fn publish(
 ) -> (serde_json::Value, lash::process::ProcessEnv) {
     let mut document = lash_kernel_doc::parse_document(text).unwrap();
     for import in document.imports.values_mut() {
-        if let lash_vocabulary::ImportKind::Operation { signature } = &mut import.kind {
+        if let lash_kernel_value::ImportKind::Operation { signature } = &mut import.kind {
             for accepted in &packages.snapshot.advertisements {
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement
                     && package.path == import.name.package

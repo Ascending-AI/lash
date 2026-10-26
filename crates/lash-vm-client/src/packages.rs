@@ -2,32 +2,35 @@
 use crate::PoolError;
 use lash_kernel_doc::{BuildHelpers, FunctionRegistry};
 use lash_kernel_doc::{Document, IdentifiedDocument};
+use lash_kernel_value::names::DocumentId;
 use lash_kernel_vm::PreparedLibrary;
 use lash_protocol_types::engine_fault::{PayloadKind, WorkerLibraryRefusal};
 use lash_vm_protocol::{EncodedPayload, FrameCodec, PoolStarted};
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::tokens::{TokenCodec as _, TokenReader, TokenWriter};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
+use {
+    lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
+};
 
 #[derive(Clone, Debug)]
 pub struct WorkerLibrary {
     frame: Arc<[u8]>,
     live: Arc<OnceLock<&'static [u8]>>,
     registry: Arc<FunctionRegistry>,
-    roots: std::collections::BTreeSet<lash_vocabulary::names::FunctionId>,
+    roots: std::collections::BTreeSet<lash_kernel_value::names::FunctionId>,
     documents: Arc<BTreeMap<DocumentId, IdentifiedDocument>>,
     helpers: Arc<BuildHelpers>,
 }
 
 impl WorkerLibrary {
     /// The process's one immutable build image, shared across owners and pools.
-    pub fn built() -> Result<Arc<Self>, lash_vm_releases::LibraryError> {
-        static BUILT: OnceLock<Result<Arc<WorkerLibrary>, lash_vm_releases::LibraryError>> =
+    pub fn built() -> Result<Arc<Self>, lash_kernel_releases::LibraryError> {
+        static BUILT: OnceLock<Result<Arc<WorkerLibrary>, lash_kernel_releases::LibraryError>> =
             OnceLock::new();
         BUILT
             .get_or_init(|| {
-                let release = lash_vm_releases::helper_release()?;
+                let release = lash_kernel_releases::helper_release()?;
                 Self::with_helpers(
                     &release.functions,
                     release.resolver_roots(),
@@ -35,17 +38,17 @@ impl WorkerLibrary {
                     Arc::clone(&release.helpers),
                 )
                 .map(Arc::new)
-                .map_err(lash_vm_releases::LibraryError::new)
+                .map_err(lash_kernel_releases::LibraryError::new)
             })
             .clone()
     }
 
     pub fn new(
         functions: &FunctionRegistry,
-        roots: impl IntoIterator<Item = lash_vocabulary::names::FunctionId>,
+        roots: impl IntoIterator<Item = lash_kernel_value::names::FunctionId>,
         documents: &BTreeMap<DocumentId, Document>,
     ) -> Result<Self, WorkerLibraryRefusal> {
-        let release = lash_vm_releases::helper_release().map_err(malformed)?;
+        let release = lash_kernel_releases::helper_release().map_err(malformed)?;
         let members = release
             .helpers
             .members()
@@ -58,7 +61,7 @@ impl WorkerLibrary {
     /// Install an exact closed helper image independently of host-authored Documents.
     pub fn with_helpers(
         functions: &FunctionRegistry,
-        roots: impl IntoIterator<Item = lash_vocabulary::names::FunctionId>,
+        roots: impl IntoIterator<Item = lash_kernel_value::names::FunctionId>,
         documents: &BTreeMap<DocumentId, Document>,
         helpers: Arc<BuildHelpers>,
     ) -> Result<Self, WorkerLibraryRefusal> {
@@ -106,7 +109,7 @@ impl WorkerLibrary {
             .encode(&mut metadata);
         let metadata = metadata.into_bytes();
         let roots: std::collections::BTreeSet<_> = roots.into_iter().collect();
-        let root_bytes = lash_vocabulary::tokens::encode_body(&roots);
+        let root_bytes = lash_kernel_value::tokens::encode_body(&roots);
         let documents: BTreeMap<_, _> = documents
             .iter()
             .map(|(id, document)| {
@@ -146,7 +149,7 @@ impl WorkerLibrary {
             helpers,
         })
     }
-    pub fn roots(&self) -> &std::collections::BTreeSet<lash_vocabulary::names::FunctionId> {
+    pub fn roots(&self) -> &std::collections::BTreeSet<lash_kernel_value::names::FunctionId> {
         &self.roots
     }
     pub fn helpers(&self) -> &Arc<BuildHelpers> {
@@ -163,11 +166,11 @@ impl WorkerLibrary {
         let owner: &'static [u8] = Box::leak(frame.to_vec().into_boxed_slice());
         let [image, _, _, roots, content, metadata] = sections(owner)?;
         let documents = read_documents(content)?;
-        let roots = lash_vocabulary::tokens::decode_body(roots).map_err(malformed)?;
+        let roots = lash_kernel_value::tokens::decode_body(roots).map_err(malformed)?;
         let registry = Arc::new(FunctionRegistry::over_frame(image).map_err(malformed)?);
         let mut reader = TokenReader::new(metadata);
         reader.expect_struct(2).map_err(malformed)?;
-        let identity = lash_vocabulary::HelperLibraryId::from_bytes(
+        let identity = lash_kernel_value::HelperLibraryId::from_bytes(
             reader
                 .bytes()
                 .map_err(malformed)?
@@ -175,7 +178,7 @@ impl WorkerLibrary {
                 .map_err(malformed)?,
         );
         let members =
-            std::collections::BTreeSet::<lash_vocabulary::FunctionId>::decode(&mut reader)
+            std::collections::BTreeSet::<lash_kernel_value::FunctionId>::decode(&mut reader)
                 .map_err(malformed)?;
         reader.finish().map_err(malformed)?;
         let helpers =
@@ -264,7 +267,7 @@ pub trait WorkerLibraryRuntimeOps: runtime_ops::Sealed {
     fn resolve_document(
         &self,
         document: &lash_vm_protocol::message::StoredDocument,
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<IdentifiedDocument, PoolError>;
 }
 // Cross-crate runtime support, as with WorkerPoolRuntimeOps (ADR 0051).
@@ -275,7 +278,7 @@ impl WorkerLibraryRuntimeOps for WorkerLibrary {
     fn resolve_document(
         &self,
         document: &lash_vm_protocol::message::StoredDocument,
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<IdentifiedDocument, PoolError> {
         use lash_vm_protocol::message::StoredDocument;
         let invalid = |error: &dyn std::fmt::Display| {
@@ -296,7 +299,7 @@ impl WorkerLibraryRuntimeOps for WorkerLibrary {
                 let held = self
                     .document(document)
                     .ok_or_else(|| image_document_missing(*document))?;
-                if limits == lash_vocabulary::data_limits::KernelDataLimits::standard() {
+                if limits == lash_kernel_value::data_limits::KernelDataLimits::standard() {
                     held.clone()
                 } else {
                     IdentifiedDocument::decode(held.body(), limits)
@@ -399,8 +402,8 @@ mod document_work_laws {
     #[test]
     fn a_missing_helper_plan_stays_typed_across_pool_start() {
         let refusal = WorkerLibraryRefusal::PlanMissing {
-            function: lash_vocabulary::FunctionId::from_bytes([7; 32]),
-            name: lash_vocabulary::FunctionName::new("ts.lt").expect("helper name"),
+            function: lash_kernel_value::FunctionId::from_bytes([7; 32]),
+            name: lash_kernel_value::FunctionName::new("ts.lt").expect("helper name"),
         };
         let reply = result(Err(refusal.clone())).expect("pool-start encoding");
         let codec = FrameCodec::new(lash_vm_protocol::DecodeLimits::standard());
@@ -454,7 +457,7 @@ mod document_work_laws {
                     .expect_err("no by-value fallback"),
                 image_document_missing(id)
             );
-            let narrow = lash_vocabulary::data_limits::KernelDataLimits::new(0, 352, 0, 512, 128)
+            let narrow = lash_kernel_value::data_limits::KernelDataLimits::new(0, 352, 0, 512, 128)
                 .expect("narrow limits");
             assert!(
                 library.resolve_document(&supplied, narrow).is_err(),
@@ -478,9 +481,9 @@ mod document_work_laws {
 #[cfg(any(test, feature = "testing"))]
 pub mod helper_document_work {
     use lash_kernel_doc::Document;
-    use lash_vocabulary::{DocumentId, FunctionId};
     use std::collections::BTreeSet;
     use std::sync::{Mutex, PoisonError};
+    use {lash_kernel_value::DocumentId, lash_kernel_value::FunctionId};
 
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Work {
@@ -528,7 +531,7 @@ pub mod helper_document_work {
         }
     }
     fn helper(function: &FunctionId) -> bool {
-        lash_vm_releases::helper_release().is_ok_and(|release| {
+        lash_kernel_releases::helper_release().is_ok_and(|release| {
             release
                 .functions
                 .get(function)

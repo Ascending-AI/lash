@@ -60,7 +60,7 @@ fn the_memory_bound_holds_inside_a_native_call() {
     assert_eq!(
         passes("let big = work.fill(100000)", bounds),
         BoundExceeded {
-            function: Some(lash_vocabulary::names::FunctionName::new("work.fill").unwrap()),
+            function: Some(lash_kernel_value::names::FunctionName::new("work.fill").unwrap()),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -96,7 +96,7 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
     assert_eq!(
         passes("let big = work.repeat(100000)", bounds),
         BoundExceeded {
-            function: Some(lash_vocabulary::names::FunctionName::new("work.repeat").unwrap()),
+            function: Some(lash_kernel_value::names::FunctionName::new("work.repeat").unwrap()),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -126,7 +126,7 @@ main {
     assert_eq!(
         warm.run_to_end(&[]),
         End::Error(RunError::Bound(BoundExceeded {
-            function: Some(lash_vocabulary::names::FunctionName::new("work.repeat").unwrap()),
+            function: Some(lash_kernel_value::names::FunctionName::new("work.repeat").unwrap()),
             ..exceeded(Bound::Memory, 64 << 10)
         }))
     );
@@ -192,7 +192,7 @@ fn a_native_guard_ends_the_run() {
     assert_eq!(
         passes("let spun = work.spin(101)", ROOMY),
         BoundExceeded {
-            function: Some(lash_vocabulary::names::FunctionName::new("work.spin").unwrap()),
+            function: Some(lash_kernel_value::names::FunctionName::new("work.spin").unwrap()),
             ..exceeded(Bound::Guard { function }, 100)
         }
     );
@@ -362,7 +362,8 @@ main {
 fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
     let mut embedder = Embedder::new("main { return (1, (2, 3)) }");
     let (program, _) = embedder.program(false);
-    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 512, 512, 1).unwrap();
+    let limits =
+        lash_kernel_value::data_limits::KernelDataLimits::new(64, 352, 512, 512, 1).unwrap();
     embedder.machine = KernelMachine::start_with_data_limits(
         program,
         ROOMY,
@@ -815,8 +816,8 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
     }
     fn probes(
         registry: &mut lash_kernel_doc::FunctionRegistry,
-        _: &std::collections::BTreeMap<&'static str, lash_vocabulary::FunctionId>,
-    ) -> Vec<(&'static str, lash_vocabulary::FunctionId)> {
+        _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
         let definition = lash_kernel_doc::parse_definition("function law.measure(x: Any, raising: Bool) -> Any\nkernel 1\ncharge sum(10000, deep(x), size(result))\nnative\n").unwrap();
         vec![(
             "law.measure",

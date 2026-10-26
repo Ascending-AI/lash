@@ -1,7 +1,10 @@
 //! Machine and execution claim debt; one token spelling for both registries.
-use crate::providers::{
-    FormatVersion, PluginCallbackIdentity, ProcessComponentId, ToolProviderHandle,
+use lash_kernel_value::claims::NodeRequirements;
+use {
+    crate::providers::PluginCallbackIdentity, crate::providers::ToolProviderHandle,
+    lash_kernel_value::providers::FormatVersion, lash_kernel_value::providers::ProcessComponentId,
 };
+
 /// The registry a recorded callback resolves through.
 #[derive(
     Clone,
@@ -36,9 +39,13 @@ impl RegistryKind {
 /// Machine requirement prefixes and member tags for registry-owned provider
 /// and codec obligations (FIG-6993, FIG-7266).
 const NATIVE: &str = "native:";
+
 const LIBRARY: &str = "helper-library:";
+
 const KERNEL: &str = "kernel:";
+
 const PROVIDER: &str = "provider:";
+
 const CODEC: &str = "codec:";
 
 /// One claim token: what an actor's `requires` holds and a node's `serves`
@@ -110,11 +117,11 @@ impl ObligationToken {
         let mut requirements = ClaimRequirements::default();
         for token in tokens {
             if let Some(function) = token.strip_prefix(NATIVE) {
-                if let Ok(function) = crate::FunctionId::parse(function) {
+                if let Ok(function) = lash_kernel_value::FunctionId::parse(function) {
                     requirements.machine.natives.insert(function);
                 }
             } else if let Some(library) = token.strip_prefix(LIBRARY) {
-                if let Ok(library) = library.parse::<crate::HelperLibraryId>() {
+                if let Ok(library) = library.parse::<lash_kernel_value::HelperLibraryId>() {
                     requirements.machine.libraries.insert(library);
                 }
             } else if let Some(version) = token.strip_prefix(KERNEL) {
@@ -200,18 +207,12 @@ impl PartialEq<ObligationToken> for String {
     }
 }
 
-use crate::{FunctionId, package::ProviderName};
+use lash_kernel_value::package::ProviderName;
+
 use serde::{Deserialize, Serialize};
+
 use std::collections::BTreeSet;
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-/// Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.
-pub struct NodeRequirements {
-    /// Exact build-owned helper manifests, each discharging its native debt.
-    pub libraries: BTreeSet<crate::HelperLibraryId>,
-    pub natives: BTreeSet<FunctionId>,
-    pub kernels: BTreeSet<u32>,
-}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]
@@ -221,6 +222,7 @@ pub struct CallbackRequirement {
     pub registry: RegistryKind,
     pub callback: PluginCallbackIdentity,
 }
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Known machine/provider/codec/callback/component debt. Provider and codec
@@ -233,6 +235,7 @@ pub struct ClaimRequirements {
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
 }
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Neutral machine and registry-qualified execution capabilities offered by one worker.
@@ -310,20 +313,6 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
         .collect()
 }
 
-impl NodeRequirements {
-    /// Union of selected linked reach. Extra unused Exports add no debt.
-    pub fn extend(&mut self, other: &Self) {
-        self.libraries.extend(other.libraries.iter().copied());
-        self.natives.extend(other.natives.iter().copied());
-        self.kernels.extend(other.kernels.iter().copied());
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.libraries.is_empty() && self.natives.is_empty() && self.kernels.is_empty()
-    }
-}
-
 impl ClaimRequirements {
     /// Add debt without retiring another recorded use's requirements.
     pub fn extend(&mut self, other: &Self) {
@@ -395,39 +384,19 @@ impl ClaimRequirements {
     }
 }
 
-impl crate::tokens::TokenCodec for NodeRequirements {
-    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
-        out.seq(3);
-        self.libraries.encode(out);
-        self.natives.encode(out);
-        self.kernels.encode(out);
-    }
-
-    fn decode(
-        input: &mut crate::tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::tokens::TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            libraries: BTreeSet::decode(input)?,
-            natives: BTreeSet::decode(input)?,
-            kernels: BTreeSet::decode(input)?,
-        })
-    }
-}
-
-impl crate::tokens::TokenCodec for ClaimRequirements {
-    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for ClaimRequirements {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         self.tokens().collect::<Vec<_>>().encode(out);
     }
 
     fn decode(
-        input: &mut crate::tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::tokens::TokenError> {
+        input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         let tokens = Vec::<String>::decode(input)?;
-        crate::tokens::check_ascending(&tokens)?;
+        lash_kernel_value::tokens::check_ascending(&tokens)?;
         let requirements = ObligationToken::requirements_of(tokens.iter().map(String::as_str));
         if requirements.tokens().collect::<Vec<_>>() != tokens {
-            return Err(crate::tokens::TokenError::Invalid(
+            return Err(lash_kernel_value::tokens::TokenError::Invalid(
                 "unrecognized or noncanonical claim requirement".into(),
             ));
         }
@@ -499,8 +468,8 @@ mod tests {
     /// cannot discharge an exact helper-library claim.
     #[test]
     fn a_claim_requires_its_exact_helper_library() {
-        let library = crate::HelperLibraryId::from_bytes([1; 32]);
-        let other = crate::HelperLibraryId::from_bytes([2; 32]);
+        let library = lash_kernel_value::HelperLibraryId::from_bytes([1; 32]);
+        let other = lash_kernel_value::HelperLibraryId::from_bytes([2; 32]);
         let token = format!("helper-library:{library}");
         let required = ObligationToken::requirements_of([token.as_str()]);
         let mut node = NodeCapabilities::default();
@@ -511,8 +480,10 @@ mod tests {
         assert!(required.met_by(&node));
         assert_eq!(required.tokens().collect::<Vec<_>>(), vec![token]);
         assert_eq!(
-            crate::tokens::decode_body::<ClaimRequirements>(&crate::tokens::encode_body(&required))
-                .unwrap(),
+            lash_kernel_value::tokens::decode_body::<ClaimRequirements>(
+                &lash_kernel_value::tokens::encode_body(&required)
+            )
+            .unwrap(),
             required
         );
     }

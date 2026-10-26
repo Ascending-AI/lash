@@ -43,8 +43,8 @@ use lash_core::{
 };
 use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 

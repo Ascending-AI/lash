@@ -8,8 +8,11 @@ use crate::{Library, NamedLibrary, SourceError, define_functions};
 #[test]
 fn written_refuses_a_second_start_signature() {
     use lash_kernel_doc::SourceLanguage;
-    use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, decode_body};
-    use lash_vocabulary::{Signature, Type};
+    use {lash_kernel_value::Signature, lash_kernel_value::Type};
+    use {
+        lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenWriter,
+        lash_kernel_value::tokens::decode_body,
+    };
 
     let signature = Signature {
         params: Vec::new(),
@@ -30,7 +33,7 @@ fn written_refuses_a_second_start_signature() {
     out.text("() -> str");
     Some(signature).encode(&mut out);
     None::<crate::CallShape>.encode(&mut out);
-    None::<lash_vocabulary::SignatureOrigin>.encode(&mut out);
+    None::<lash_kernel_value::SignatureOrigin>.encode(&mut out);
     assert!(decode_body::<crate::Written>(&out.into_bytes()).is_err());
 }
 
@@ -157,11 +160,13 @@ fn terminal_readback_projects_each_units_exact_import_contract() {
     use lash_kernel_doc::{
         ActExpr, ActKind, Document, Expr, FunctionBody, Literal, Metering, NumberPolicy, Stmt,
     };
-    use lash_vocabulary::{
-        EffectName, Import, ImportKind, ImportSlot, Name, PackagePath, QualifiedName, Segment,
-        Signature, Type,
-    };
     use std::collections::BTreeMap;
+    use {
+        lash_kernel_value::EffectName, lash_kernel_value::Import, lash_kernel_value::ImportKind,
+        lash_kernel_value::ImportSlot, lash_kernel_value::Name, lash_kernel_value::PackagePath,
+        lash_kernel_value::QualifiedName, lash_kernel_value::Segment, lash_kernel_value::Signature,
+        lash_kernel_value::Type,
+    };
 
     let import = |member: &str| Import {
         name: QualifiedName {
@@ -282,14 +287,14 @@ fn helper_operation_resolution_preserves_literal_values() {
          body { return \"perform python.clock(\" }\n",
         &mut library,
         &[crate::authoring::HelperOperation {
-            slot: lash_vocabulary::ImportSlot(0),
+            slot: lash_kernel_value::ImportSlot(0),
             name: crate::service_name("python", "clock"),
-            requirement: lash_vocabulary::OperationRequirement::new(
-                lash_vocabulary::Signature {
+            requirement: lash_kernel_value::OperationRequirement::new(
+                lash_kernel_value::Signature {
                     params: vec![],
-                    result: lash_vocabulary::Type::Timestamp,
+                    result: lash_kernel_value::Type::Timestamp,
                 },
-                lash_vocabulary::ContractId::new("fixture.clock"),
+                lash_kernel_value::ContractId::new("fixture.clock"),
             ),
         }],
     )
@@ -307,7 +312,11 @@ fn helper_operation_resolution_preserves_literal_values() {
 #[test]
 fn helper_operations_compose_owner_declarations_without_package_policy() {
     use crate::authoring::{HelperOperation, Imports, include_library_dependencies};
-    use lash_vocabulary::{ContractId, ImportSlot, OperationRequirement, Signature, Type};
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::ImportSlot,
+        lash_kernel_value::OperationRequirement, lash_kernel_value::Signature,
+        lash_kernel_value::Type,
+    };
     let operations = [HelperOperation {
         slot: ImportSlot(0),
         name: crate::service_name("third_party", "read"),

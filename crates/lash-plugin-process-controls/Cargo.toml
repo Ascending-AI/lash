@@ -24,6 +24,7 @@ workspace = true
 
 [dependencies]
 lash-core-store = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-core = { workspace = true }

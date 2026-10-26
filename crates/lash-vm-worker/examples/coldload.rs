@@ -15,7 +15,7 @@ use std::sync::Arc;
 type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_doc::parse_document;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::Machine as _;
@@ -84,7 +84,7 @@ impl Drop for Counter {
 /// Release `step` of package `w`: `w.f0` .. `w.f{CHAIN - 1}`, each calling
 /// the one before it.
 fn chain(step: i64) -> Outcome<(lash_kernel_doc::FunctionRegistry, FunctionId)> {
-    let mut registry = lash_vm_releases::helper_release()?.functions.clone();
+    let mut registry = lash_kernel_releases::helper_release()?.functions.clone();
     let mut top = None;
     for at in 0..CHAIN {
         let body = match top {
@@ -170,7 +170,7 @@ fn main() -> Outcome<()> {
         "registry" => &writer,
         other => return Err(format!("unknown mode `{other}`").into()),
     };
-    let roots = lash_vm_releases::helper_release()?.resolver_roots();
+    let roots = lash_kernel_releases::helper_release()?.resolver_roots();
     let image = WorkerLibrary::new(node, roots, &Default::default())?;
     let embedding = lash_vm_worker::Embedder::new()
         .dialect(lash_vm_worker::typescript(
@@ -207,7 +207,7 @@ fn main() -> Outcome<()> {
         .map(|function| {
             (
                 function,
-                lash_vocabulary::tokens::encode_body(
+                lash_kernel_value::tokens::encode_body(
                     writer
                         .get(&function)
                         .unwrap_or_else(|| {
@@ -230,11 +230,11 @@ fn main() -> Outcome<()> {
             &embedding,
             &document,
             &definitions,
-            lash_vocabulary::KernelDataLimits::standard(),
+            lash_kernel_value::KernelDataLimits::standard(),
             &lash_kernel_doc::Selection::Fresh,
         )?
         .map_err(|refusal| refusal.to_string())?;
-        let link = lash_vocabulary::Link {
+        let link = lash_kernel_value::Link {
             document: document.identity(),
             fills: BTreeMap::new(),
         };

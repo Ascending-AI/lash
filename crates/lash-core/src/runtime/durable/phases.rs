@@ -67,9 +67,9 @@ use crate::plugin::prompt::load_admitted_call;
 use crate::{
     ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::llm::types::AdmittedSend;
 use lash_sansio::CheckpointDelta;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
@@ -1412,7 +1412,7 @@ async fn stop(
 /// candidate kept it from the call's settlement.
 fn accepted_finish_value_schema(
     machine: &crate::TurnMachine,
-) -> Option<lash_vocabulary::json_schema::JsonSchema> {
+) -> Option<lash_kernel_value::json_schema::JsonSchema> {
     machine
         .decided_completions()
         .iter()
@@ -1518,7 +1518,7 @@ pub(super) fn settle_model_calls(
 
 /// Model call `call` of `run`, as its admission is keyed.
 fn call_key(
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
     call: u32,
 ) -> PromptCallKey {

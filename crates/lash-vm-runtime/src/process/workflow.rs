@@ -6,8 +6,8 @@ use lash_execution_contracts::process::*;
 use lash_kernel_dialect::{FunctionMember, NamespaceKind, NamespaceMember, Namespaces, ValueType};
 use lash_kernel_doc::{DocumentBytes, Export, FunctionExport};
 
-use lash_vocabulary::{names::*, package::*};
 use std::{collections::BTreeMap, sync::Arc};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -327,7 +327,7 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
     async fn load(&self, reference: &ContentRef) -> Result<LoadedContent, EnginePortError> {
         self.engine.documents.load(reference).await
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         self.engine.machine_requirements()
     }
     async fn document_ref(

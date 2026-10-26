@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, NamedLibrary};
 use lash_kernel_doc::{parse_document, print_document, validate_document};
 
-use lash_vocabulary::{EffectName, Signature};
+use {lash_kernel_value::EffectName, lash_kernel_value::Signature};
 
 use crate::Diagnostic;
 
@@ -70,7 +70,7 @@ pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
 pub(crate) fn library() -> &'static NamedLibrary {
     static LIBRARY: OnceLock<NamedLibrary> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        let roots = lash_vm_releases::helper_release()
+        let roots = lash_kernel_releases::helper_release()
             .expect("helper release")
             .resolver_roots();
         NamedLibrary::resolving(machine::registry(), |id| roots.contains(id))

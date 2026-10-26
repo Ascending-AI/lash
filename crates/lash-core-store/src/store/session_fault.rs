@@ -15,7 +15,7 @@ use super::StoreError;
 use crate::RuntimeError;
 use crate::RuntimeErrorCause;
 use crate::RuntimeErrorCode;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// What met the fault.

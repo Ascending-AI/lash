@@ -14,7 +14,7 @@ lash-ext-helper-compiler = { path = "../crates/lash-ext-helper-compiler" }
 lash-kernel-dialect = { path = "../crates/lash-kernel-dialect" }
 lash-kernel-check = { path = "../crates/lash-kernel-check" }
 arbitrary = "1"
-lash-vocabulary = { package = "lash-internal-vocabulary", path = "../crates/lash-vocabulary" }
+lash-kernel-value = { package = "lash-kernel-value", path = "../crates/lash-kernel-value" }
 lash-kernel-doc = { path = "../crates/lash-kernel-doc" }
 lash-kernel-state = { path = "../crates/lash-kernel-state" }
 lash-checkpoint-encoder = { package = "lash-internal-checkpoint-encoder", path = "../crates/lash-checkpoint-encoder" }

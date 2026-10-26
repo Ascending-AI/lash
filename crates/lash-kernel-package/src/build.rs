@@ -2,9 +2,9 @@
 use crate::{LinkRefusal, LinkedContent};
 use lash_kernel_doc::Export;
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::{names::*, package::*, types::Type};
+use lash_kernel_value::names::FunctionId;
 use std::collections::{BTreeMap, BTreeSet};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_kernel_value::types::Type};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReachSelection {
@@ -380,7 +380,8 @@ pub(crate) fn compatible(
             },
             Fill::Operation(requirement),
         ) => {
-            if lash_vocabulary::type_relations::serves(&requirement.signature, expected).is_none() {
+            if lash_kernel_value::type_relations::serves(&requirement.signature, expected).is_none()
+            {
                 Ok(())
             } else {
                 Err(signature())
@@ -416,7 +417,8 @@ pub(crate) fn compatible(
                         name: import.name.clone(),
                     });
                 }
-                if lash_vocabulary::type_relations::serves(&function.signature, expected).is_some()
+                if lash_kernel_value::type_relations::serves(&function.signature, expected)
+                    .is_some()
                 {
                     return Err(signature());
                 }

@@ -191,7 +191,7 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
             .await
             .expect("a host-provisioned schema connects verify-only"),
     );
-    let session = lash_vocabulary::identity::SessionId::from("provisioned");
+    let session = lash_kernel_value::identity::SessionId::from("provisioned");
     let before = store.current_cursor(&session, lash_core::SessionRevision::new(1));
     let first = publish(&store, &session, "k#0", "first").await;
     match store.replay_after_cursor(&before).await.expect("replay") {

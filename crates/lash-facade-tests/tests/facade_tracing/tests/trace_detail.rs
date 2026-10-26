@@ -99,7 +99,7 @@ async fn turn_under(
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("l21-detail").expect("an id"),
+        lash_kernel_value::identity::SessionId::parse("l21-detail").expect("an id"),
     )
     .await
     .open()

@@ -1,8 +1,8 @@
 use crate::{
     CausalRef, SessionLineage, SessionMeta, SessionObserverIntent, SessionRelation, StoreError,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 const RECORD_KIND: &str = "SessionMeta relation";

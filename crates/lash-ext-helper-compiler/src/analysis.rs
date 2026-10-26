@@ -12,7 +12,7 @@ use lash_kernel_doc::{
     ActKind, Action, Callee, Expr, Formula, FunctionDefinition, Node, Operand, Place, Stmt,
 };
 
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 
 use crate::library::Library;
 

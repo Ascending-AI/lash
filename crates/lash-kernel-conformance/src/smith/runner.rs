@@ -14,7 +14,7 @@ use super::{Smith, library};
 use crate::HarnessError;
 
 use crate::projection::Projector;
-use lash_kernel_vm::kernel_internals::conformance::Checkpoint;
+use lash_kernel_state::semantic::Checkpoint;
 
 /// Full observation at one return, including the canonical state at slices
 /// and parks. Code caches and host cancellation probes are not observations.
@@ -42,10 +42,10 @@ struct World {
 impl Host for World {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let value = match use_.slot.0 {
             2 => Datum::Timestamp(lash_kernel_doc::Timestamp {
@@ -140,11 +140,11 @@ fn observe_in<M: Machine>(
                     "typescript.clock" | "typescript.random"
                 )
                 .then_some((
-                    lash_vocabulary::OperationUse {
+                    lash_kernel_value::OperationUse {
                         link: program.link,
                         slot: *slot,
                     },
-                    lash_vocabulary::OperationMode::Read,
+                    lash_kernel_value::OperationMode::Read,
                 ))
             })
             .collect(),
@@ -201,7 +201,7 @@ fn observe_in<M: Machine>(
             for request in requests {
                 let (wait, outcome) = match request {
                     Request::Effect(effect) => {
-                        let data = if effect.use_.slot == lash_vocabulary::ImportSlot(1) {
+                        let data = if effect.use_.slot == lash_kernel_value::ImportSlot(1) {
                             Datum::Null
                         } else {
                             effect.args.first().cloned().unwrap_or(Datum::Null)

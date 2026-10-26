@@ -13,10 +13,10 @@ use lash_core_store::checkpoint_graph::GraphStaging;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::NodeSource;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// One namespace's values as stored.
 #[derive(Clone, Debug, PartialEq, Eq)]

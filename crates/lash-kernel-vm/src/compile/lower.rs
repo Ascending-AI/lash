@@ -24,8 +24,8 @@ use lash_kernel_exec::{
     ActIx, BlockIx, ChargeEvent, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx,
     Op, OpRange, Reg, RegRange, RegionIx, RegionTable, SiteIx, Weight,
 };
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
@@ -450,7 +450,7 @@ impl Compiler<'_> {
         }
     }
     fn via(&self, via: &doc::Protocol) -> Result<Via, FunctionId> {
-        use lash_vocabulary::Type;
+        use lash_kernel_value::Type;
         // The cursor supplies these kinds before the public call boundary.
         let hinted =
             |target: &doc::FunctionTarget, kinds: &[Type], result: Type| {
@@ -602,12 +602,12 @@ impl Compiler<'_> {
                                 .resolve
                                 .helpers
                                 .is_some_and(|helpers| helpers.contains(function))
-                            && (header.signature.result != lash_vocabulary::Type::Any
+                            && (header.signature.result != lash_kernel_value::Type::Any
                                 || header
                                     .signature
                                     .params
                                     .iter()
-                                    .any(|param| param.ty != lash_vocabulary::Type::Any));
+                                    .any(|param| param.ty != lash_kernel_value::Type::Any));
                         if checked {
                             Callee::CheckedHelper(lib)
                         } else {
@@ -630,7 +630,7 @@ impl Compiler<'_> {
                             .signature
                             .params
                             .iter()
-                            .all(|param| param.ty == lash_vocabulary::Type::Any)
+                            .all(|param| param.ty == lash_kernel_value::Type::Any)
                     }),
             ),
             doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
@@ -690,7 +690,7 @@ impl Compiler<'_> {
                 path.push(index);
                 NestedRole {
                     suffix: path[statement..].into(),
-                    site: lash_vocabulary::sites::Site::new(self.unit.clone(), path),
+                    site: lash_kernel_value::sites::Site::new(self.unit.clone(), path),
                     reg,
                 }
             })
@@ -835,11 +835,11 @@ impl Compiler<'_> {
                     .block;
                 let enclosing_unit = std::mem::replace(
                     &mut self.unit,
-                    lash_vocabulary::sites::Unit::Library(closure.function),
+                    lash_kernel_value::sites::Unit::Library(closure.function),
                 );
                 let enclosing_path = std::mem::take(&mut self.path);
                 let mut code = self.code(&params, body, false, true, false);
-                code.created = Some(lash_vocabulary::sites::Site::new(
+                code.created = Some(lash_kernel_value::sites::Site::new(
                     enclosing_unit.clone(),
                     enclosing_path.clone(),
                 ));
@@ -858,11 +858,11 @@ impl Compiler<'_> {
                 if *function == brand_built() && self.resolve.lib(function).is_some() =>
             {
                 let c = self.constant(match &self.unit {
-                    lash_vocabulary::sites::Unit::Library(body) => {
+                    lash_kernel_value::sites::Unit::Library(body) => {
                         doc::Literal::Bytes(doc::Bytes::new(&body.as_bytes()[..]))
                     }
-                    lash_vocabulary::sites::Unit::Main
-                    | lash_vocabulary::sites::Unit::Function(_) => doc::Literal::Absent,
+                    lash_kernel_value::sites::Unit::Main
+                    | lash_kernel_value::sites::Unit::Function(_) => doc::Literal::Absent,
                 });
                 ops.push(Op::Const { dst, c });
             }

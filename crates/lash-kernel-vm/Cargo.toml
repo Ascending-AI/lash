@@ -18,6 +18,8 @@ name = "lash_kernel_vm"
 doctest = false
 
 [features]
+# Differential execution controls for embedders' laws.
+testing = []
 # Unsupported synchronous capture/import diagnostics; absent from ordinary builds.
 perf-witness = ["lash-kernel-state/perf-witness", "lash-kernel-doc/perf-witness"]
 # The machine also runs the synthetic successor of kernel version 1.
@@ -29,7 +31,7 @@ workspace = true
 [dependencies]
 schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-lash-vocabulary = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-package = { workspace = true }

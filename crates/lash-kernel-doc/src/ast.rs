@@ -1,6 +1,6 @@
 //! The kernel's forms as one closed tree (`K-FORM-001`).
 //!
-//! A form that may pause lash_vocabulary::types::Type;
+//! A form that may pause lash_kernel_value::types::Type;
 //! use a task, or call a non-native library function,
 //! is an action. Every action has an [`Expr::Act`] spelling with expression
 //! arguments; `do` always holds an expression. A whole right-hand side with
@@ -8,17 +8,17 @@
 //! (`K-EVAL-008`). Validation checks that [`Expr::Call`] names a function
 //! with a native implementation.
 
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::function_value::{CallablePresentation, FunctionTarget};
 
 use crate::number::{Float, Integer};
-use lash_vocabulary::names::{FunctionId, Name};
+use {lash_kernel_value::names::FunctionId, lash_kernel_value::names::Name};
 
 use crate::value::Bytes;
-use lash_vocabulary::names::ImportSlot;
+use lash_kernel_value::names::ImportSlot;
 
 /// A sequence of statements, run in order.
 pub type Block = Vec<Stmt>;

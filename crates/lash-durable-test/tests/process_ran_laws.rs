@@ -273,8 +273,8 @@ impl Counted {
             .kernel_engine_defaults()
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         let observe = match self.plan {
-            Plan::Unobserved => lash_vocabulary::observation::RunObservation::Off,
-            Plan::Counted | Plan::Carried => lash_vocabulary::observation::RunObservation::Counts,
+            Plan::Unobserved => lash_kernel_value::observation::RunObservation::Off,
+            Plan::Counted | Plan::Carried => lash_kernel_value::observation::RunObservation::Counts,
         };
         let settings = recorded.observing(observe).into_engine_settings();
         core.processes()
@@ -489,7 +489,7 @@ impl Counted {
         let overlay = self.overlay(process).await;
         match overlay {
             Some(overlay) => {
-                if overlay.observation != lash_vocabulary::observation::RunObservation::Counts {
+                if overlay.observation != lash_kernel_value::observation::RunObservation::Counts {
                     violations.push(format!("the overlay says {:?}", overlay.observation));
                 }
                 let folded: BTreeMap<u32, u64> = overlay
@@ -913,7 +913,7 @@ impl Counted {
         }
         match self.overlay(process).await {
             Some(overlay) => {
-                if overlay.observation != lash_vocabulary::observation::RunObservation::Off
+                if overlay.observation != lash_kernel_value::observation::RunObservation::Off
                     || !overlay.ran.is_empty()
                 {
                     violations.push(format!(

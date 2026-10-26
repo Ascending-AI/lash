@@ -136,7 +136,7 @@ fn llm_query_section() -> Result<
 /// (FIG-6034 §3.2).
 pub const LLM_TOOLS_CONFIG: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     LLM_TOOLS_PLUGIN_ID,
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// `llm_query` as a process component: a process whose environment names
@@ -267,7 +267,7 @@ impl LlmToolsProvider {
         // The sub-question runs on the session's behalf, so it carries the
         // session's sampling intent rather than provider defaults.
         let generation = session_model.generation;
-        let response_schema = lash_vocabulary::json_schema::JsonSchema::admit(
+        let response_schema = lash_kernel_value::json_schema::JsonSchema::admit(
             llm_query_response_schema(output_schema.as_ref()),
         )
         .map_err(|source| {
@@ -369,7 +369,7 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
     .with_output_from_input_schema(
         "output",
         Some(
-            lash_vocabulary::json_schema::JsonSchema::admit(json!({ "type": "string" }))
+            lash_kernel_value::json_schema::JsonSchema::admit(json!({ "type": "string" }))
                 .expect("valid output default schema"),
         ),
     )
@@ -434,7 +434,7 @@ fn llm_query_response_schema(output_schema: Option<&Value>) -> Value {
 
 fn parse_llm_query_result(
     text: &str,
-    schema: &lash_vocabulary::json_schema::JsonSchema,
+    schema: &lash_kernel_value::json_schema::JsonSchema,
 ) -> Result<Value, LlmQueryError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -526,7 +526,7 @@ mod tests {
     use lash_execution_contracts::plugin_error::PluginError;
     use lash_execution_contracts::session_types::SessionCreateRequest;
     use lash_execution_contracts::session_types::SessionHandle;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     async fn run_llm_query(
         provider: &StaticToolProvider<LlmToolsProvider>,
@@ -596,7 +596,7 @@ mod tests {
     impl lash_core::plugin::SessionReadService for DirectCompletionManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
@@ -633,7 +633,7 @@ mod tests {
     impl SessionStateService for DirectCompletionManager {
         async fn turn_scope(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<lash_core::ExecutionScope, lash_execution_contracts::plugin_error::PluginError>
         {
@@ -659,7 +659,7 @@ mod tests {
     impl SessionGraphService for DirectCompletionManager {
         async fn append_session_nodes(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
         ) -> Result<
             lash_core::SessionGraphAppendResult,
@@ -708,7 +708,7 @@ mod tests {
                 "count": { "type": "integer" }
             }
         });
-        let schema = lash_vocabulary::json_schema::JsonSchema::admit(
+        let schema = lash_kernel_value::json_schema::JsonSchema::admit(
             serde_json::json!({ "type": "object", "properties": { "value": output } }),
         )
         .expect("valid result schema");

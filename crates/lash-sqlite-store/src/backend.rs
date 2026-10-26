@@ -569,7 +569,7 @@ mod tests {
         let uri = stores.database_uri();
         let store = stores.open_store().await.expect("open catalog");
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
-            &lash_vocabulary::identity::SessionId::from("memory-lifetime"),
+            &lash_kernel_value::identity::SessionId::from("memory-lifetime"),
             "memory-lifetime",
             lash_core_store::session_identity::SessionRelation::Root,
         );

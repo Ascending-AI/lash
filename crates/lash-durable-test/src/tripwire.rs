@@ -10,8 +10,8 @@
 
 use lash_durable::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
 use lash_durable::{ActorKey, CommitLabel, DurableError, DurableProbe, Epoch, OwnerCut, OwnerRead};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Mutex;

@@ -6,15 +6,15 @@ use std::collections::BTreeSet;
 
 use crate::{ActKind, Action, Atom, Callee, Expr, Literal, Member, Place, Rhs, Stmt};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
 
 /// What a body reads of the world outside it.
 #[derive(Clone, Debug, Default)]
 pub struct CodeReads {
     /// The variables it names and does not declare.
     pub free: BTreeSet<Name>,
-    pub imports: BTreeSet<lash_vocabulary::names::ImportSlot>,
+    pub imports: BTreeSet<lash_kernel_value::names::ImportSlot>,
     /// Every library function it holds ([`crate::Node::functions_within`]).
     pub library: BTreeSet<FunctionId>,
     /// The declared functions it names.

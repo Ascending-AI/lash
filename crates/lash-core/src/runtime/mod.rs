@@ -260,7 +260,7 @@ pub use lash_core_execution::runtime::work::{
 };
 /// The trace handle a host config carries.
 pub use lash_core_execution::runtime::{TraceEmitter, TraceRuntime};
-pub use lash_vocabulary::observation::RunObservation;
+pub use lash_kernel_value::observation::RunObservation;
 pub use observation::InMemoryProcessReplayStore;
 pub use observation::InMemoryProcessReplayStoreConfig;
 pub use observation::LanguageExecutionObservation;
@@ -324,8 +324,8 @@ pub use process::ProcessChangeHub;
 pub use lash_core_store::process_env::ProcessComponentConfig;
 pub use lash_core_store::process_env::ProcessComponentEntry;
 pub use lash_core_store::process_env::ProcessConfigKey;
-pub use lash_vocabulary::providers::ProcessComponentId;
-pub use lash_vocabulary::providers::ProcessComponentIdError;
+pub use lash_kernel_value::providers::ProcessComponentId;
+pub use lash_kernel_value::providers::ProcessComponentIdError;
 
 pub use lash_protocol_types::ProcessDefinitionId;
 
@@ -368,7 +368,7 @@ pub use lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION;
 pub use lash_core_store::scope_identity::ScopeId;
 
 pub use lash_core_store::scope_identity::ScopeStorageError;
-pub use lash_vocabulary::identity::SessionId;
+pub use lash_kernel_value::identity::SessionId;
 pub use process::SessionObserverIntentSource;
 
 pub use process::StagedProcessStart;

@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use crate::compat::{CompatRefusal, VersionRange};
 use crate::plugin_state::FormatNamespace;
 use crate::plugin_state::PluginStateMap;
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 
 use super::StoreError;
 

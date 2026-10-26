@@ -454,7 +454,7 @@ const FLAKY_OPERATION: &str = "tools.flaky";
 /// A tool definition bound as `tools.<name>`.
 fn probe_definition(
     name: &str,
-    policy: lash_vocabulary::tool_contract::ExecutionPolicy,
+    policy: lash_kernel_value::tool_contract::ExecutionPolicy,
     output: serde_json::Value,
 ) -> lash_vocabulary::tool_contract::ToolDefinition {
     lash_vocabulary::tool_contract::ToolDefinition::raw(
@@ -480,7 +480,7 @@ struct Holding {
 fn hold_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     probe_definition(
         HOLD,
-        lash_vocabulary::tool_contract::ExecutionPolicy::default(),
+        lash_kernel_value::tool_contract::ExecutionPolicy::default(),
         serde_json::json!({ "type": "string" }),
     )
 }
@@ -525,7 +525,7 @@ struct Flaky {
 fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     probe_definition(
         FLAKY,
-        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
             0,
             0,
@@ -570,8 +570,8 @@ impl lash_core::ToolProvider for Flaky {
     }
 }
 
-fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
-    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_kernel_value::identity::SessionId {
+    lash_kernel_value::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 /// The node that served `name`'s open turn is gone: the turn is open in its

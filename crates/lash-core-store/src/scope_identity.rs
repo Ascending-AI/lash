@@ -1,7 +1,7 @@
 //! Shared identity and storage encoding of a process lifetime scope.
 
 use crate::effect_opener::EffectOpener;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// A scope a process may live until.

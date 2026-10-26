@@ -70,7 +70,7 @@ async fn required(
 }
 async fn head(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Option<EnvironmentHead>, DurableError> {
     let text: Option<String> = crate::observed_sql::query_scalar(ENV.head.sql())
         .bind(session.as_str())
@@ -149,7 +149,7 @@ pub(crate) async fn lock_artifact_owner(
         ))
     })?;
     let session =
-        lash_vocabulary::identity::SessionId::parse(record.actor.id()).map_err(env::corrupt)?;
+        lash_kernel_value::identity::SessionId::parse(record.actor.id()).map_err(env::corrupt)?;
     PostgresDurableStore::lock_session_writes(tx, &session)
         .await
         .map_err(store_failure)?;
@@ -354,7 +354,7 @@ pub(super) async fn apply(
             expected,
             head: next,
         } => {
-            let session = lash_vocabulary::identity::SessionId::parse(commit.actor.id())
+            let session = lash_kernel_value::identity::SessionId::parse(commit.actor.id())
                 .map_err(env::corrupt)?;
             if head(tx, &session).await? != *expected {
                 return Err(Refusal::HeadConflict.into());
@@ -424,7 +424,7 @@ pub(super) async fn finish(
 }
 pub(super) async fn remove_head(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
     crate::keys::query_scalar(ENV.head_remove.sql())
         .bind(session.as_str())
@@ -441,7 +441,7 @@ impl EnvironmentStore for PostgresDurableStore {
     }
     async fn environment_head(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Option<EnvironmentHead>, DurableError> {
         self.read(|tx| Box::pin(head(tx, session))).await
     }
@@ -452,7 +452,7 @@ impl EnvironmentStore for PostgresDurableStore {
         let (mut tx, _) = self.open(CommitLabel::new("environment.abandon")).await?;
         let outcome = async {
             let record = required(&mut tx, id).await?;
-            let session = lash_vocabulary::identity::SessionId::parse(record.actor.id())
+            let session = lash_kernel_value::identity::SessionId::parse(record.actor.id())
                 .map_err(env::corrupt)?;
             PostgresDurableStore::lock_session_writes(&mut tx, &session)
                 .await

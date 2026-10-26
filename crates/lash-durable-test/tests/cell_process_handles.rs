@@ -342,7 +342,7 @@ struct Resolver(Arc<Inbox>);
 impl lash_core::plugin::packages::DeferredPackageProvider for Resolver {
     fn validate_grant(
         &self,
-        grant: &lash_vocabulary::package::DeferredGrant,
+        grant: &lash_kernel_value::package::DeferredGrant,
         registry: lash_vocabulary::claims::RegistryKind,
     ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
         packages::validate_grant("inbox", "deferred", "inbox", grant, registry)
@@ -350,8 +350,8 @@ impl lash_core::plugin::packages::DeferredPackageProvider for Resolver {
     async fn resolve(
         &self,
         _: &lash_core::DeferredResolveContext<'_>,
-        _: &lash_vocabulary::package::DeferredGrant,
-        requested: &lash_vocabulary::names::QualifiedName,
+        _: &lash_kernel_value::package::DeferredGrant,
+        requested: &lash_kernel_value::names::QualifiedName,
     ) -> Result<
         lash_core::plugin::packages::DeferredAnswer,
         lash_core::plugin::packages::ResolverFault,

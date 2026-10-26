@@ -5,11 +5,11 @@ use std::collections::BTreeSet;
 
 use lash_kernel_doc::Document;
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

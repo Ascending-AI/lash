@@ -39,11 +39,13 @@ fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
-        0,
-        0,
-    ))
+    .with_execution_policy(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
+            0,
+            0,
+        ),
+    )
 }
 
 #[async_trait::async_trait]
@@ -146,7 +148,7 @@ async fn an_unanswerable_wait_ends_the_turn_with_a_typed_terminal_failure() {
     );
     let call = lash_core::ToolCallId::fixture("unanswered");
     let exec = lash_vm_broker::ExecKey::Cell(
-        lash_vocabulary::identity::SessionId::from(SESSION),
+        lash_kernel_value::identity::SessionId::from(SESSION),
         lash_vocabulary::identity::TurnId::try_from(TURN.to_owned()).expect("a turn id"),
         lash_vm_broker::CellId::new("exec-code:0"),
     );

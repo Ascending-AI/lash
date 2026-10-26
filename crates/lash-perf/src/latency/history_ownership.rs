@@ -116,7 +116,7 @@ mod tests {
             CREATE TABLE session_head(session_id TEXT, head_revision INTEGER);").unwrap();
         let page = |kind, mut children: Vec<NodeId>, body: &str| {
             children.sort();
-            let mut tokens = lash_vocabulary::tokens::TokenWriter::new();
+            let mut tokens = lash_kernel_value::tokens::TokenWriter::new();
             tokens.seq(children.len() as u64 + 1);
             tokens.text(body);
             for slot in 0..children.len() {

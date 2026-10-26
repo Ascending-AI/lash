@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Value};
 
-use lash_vocabulary::Type;
+use lash_kernel_value::Type;
 
 use super::text::position;
 use super::{

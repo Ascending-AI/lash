@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_vocabulary::json_schema::JsonSchema;
+use lash_kernel_value::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolManifest;
 use serde_json::Value;

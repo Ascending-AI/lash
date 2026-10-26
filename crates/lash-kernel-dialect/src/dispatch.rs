@@ -28,12 +28,12 @@
 
 use lash_kernel_doc::{Expr, Integer, Literal, Member as Place};
 
-use lash_vocabulary::{FunctionId, Signature, Type};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Signature, lash_kernel_value::Type};
 
 use crate::exports::{
     BRAND_FIELD, FunctionMember, NamespaceKind, NamespaceView, TypeMember, ValueType,
 };
-use lash_vocabulary::{PackagePath, Segment};
+use {lash_kernel_value::PackagePath, lash_kernel_value::Segment};
 
 /// The library function a front end reads a value's brand with: a text
 /// pair, or `absent` for a value of no package type.
@@ -318,7 +318,7 @@ pub enum KeywordRefusal {
 
 /// The fields of a slot that takes options: a record of declared fields,
 /// or such a record or `absent`. A package value's slot takes none.
-pub fn options_fields(ty: &Type) -> Option<&[lash_vocabulary::RecordTypeField]> {
+pub fn options_fields(ty: &Type) -> Option<&[lash_kernel_value::RecordTypeField]> {
     match ty {
         Type::Record(record) if Brand::of_type(ty).is_none() && !record.fields.is_empty() => {
             Some(&record.fields)
@@ -504,7 +504,7 @@ pub fn fill_placed<T>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_vocabulary::{Name, Param, QualifiedName};
+    use {lash_kernel_value::Name, lash_kernel_value::Param, lash_kernel_value::QualifiedName};
 
     use super::*;
 
@@ -534,7 +534,7 @@ mod tests {
                     type_member: None,
                 }
             },
-            convention: lash_vocabulary::Convention::Direct,
+            convention: lash_kernel_value::Convention::Direct,
             signature: Signature {
                 params: params
                     .iter()
@@ -568,9 +568,9 @@ mod tests {
     #[test]
     fn slots_fill_by_the_canonical_convention() {
         let optional = Type::Union(vec![
-            Type::Record(lash_vocabulary::RecordType {
+            Type::Record(lash_kernel_value::RecordType {
                 fields: Vec::new(),
-                rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+                rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
             }),
             Type::Absent,
         ]);
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn targets_are_keyed_by_type_and_member() {
         let ty = |members: Vec<(&str, TypeMember)>| crate::NamespaceMember {
-            visibility: lash_vocabulary::Visibility::Public,
+            visibility: lash_kernel_value::Visibility::Public,
             kind: NamespaceKind::Type(ValueType {
                 representation: Type::Any,
                 members: members
@@ -658,7 +658,7 @@ mod tests {
                 (
                     segment("error"),
                     crate::NamespaceMember {
-                        visibility: lash_vocabulary::Visibility::Public,
+                        visibility: lash_kernel_value::Visibility::Public,
                         kind: NamespaceKind::Error,
                     },
                 ),
@@ -676,8 +676,8 @@ mod tests {
             typed_packages(&view),
             vec![PackagePath::parse("df").expect("canonical")]
         );
-        let brand = Type::Record(lash_vocabulary::RecordType {
-            fields: vec![lash_vocabulary::RecordTypeField {
+        let brand = Type::Record(lash_kernel_value::RecordType {
+            fields: vec![lash_kernel_value::RecordTypeField {
                 name: BRAND_FIELD.into(),
                 ty: Type::Tuple(vec![
                     Type::Enum(vec!["df".into()]),
@@ -685,7 +685,7 @@ mod tests {
                 ]),
                 optional: false,
             }],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
         });
         assert_eq!(Brand::of_type(&brand), Some(found[1].brand.clone()));
     }

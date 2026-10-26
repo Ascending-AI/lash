@@ -186,7 +186,7 @@ impl TurnPrelude {
     /// `base`, refuse restore.
     pub fn restore_over(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         base: crate::MessageSequence,
     ) -> Result<
         (
@@ -208,7 +208,7 @@ impl TurnPrelude {
 
     fn check_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<(), RuntimeEffectControllerError> {
         if self.configuration.execution_scope.session_id() != Some(session) {
             return Err(RuntimeEffectControllerError::new(

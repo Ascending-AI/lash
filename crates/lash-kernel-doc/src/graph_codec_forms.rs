@@ -11,18 +11,22 @@ use crate::{
     JoinMode, Literal, MapEntry, Member, NumberPolicy, Operand, Place, Protocol, RecordEntry, Rhs,
     Stmt, TryStmt,
 };
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
-use lash_vocabulary::tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
+use {
+    lash_kernel_value::tokens::CodecVariant, lash_kernel_value::tokens::TokenCodec,
+    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
+};
 
 use crate::{
     CallablePresentation, Export, FunctionExport, FunctionRepresentation, FunctionTarget,
     FunctionValue, StartConvention, TypeDef, TypeMember,
 };
 
-use lash_vocabulary::{claims::NodeRequirements, names::*};
+use {lash_kernel_value::claims::NodeRequirements, lash_kernel_value::names::*};
 
 // Forms.
 
@@ -479,7 +483,7 @@ impl TokenCodec for FunctionValue {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(11)?;
         Ok(Self {
-            callable: lash_vocabulary::CallableId::decode(input)?,
+            callable: lash_kernel_value::CallableId::decode(input)?,
             captures: BTreeMap::decode(input)?,
             signature: Signature::decode(input)?,
             convention: StartConvention::decode(input)?,
@@ -1084,7 +1088,7 @@ impl TokenCodec for Implementation {
 /// Read only the header and implementation metering; skip the executable body.
 pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, TokenError> {
     let mut input = TokenReader::new(bytes)
-        .with_data_limits(lash_vocabulary::data_limits::KernelDataLimits::standard());
+        .with_data_limits(lash_kernel_value::data_limits::KernelDataLimits::standard());
     input.expect_struct(7)?;
     let kernel = input.unsigned_u32()?;
     let name = FunctionName::decode(&mut input)?;

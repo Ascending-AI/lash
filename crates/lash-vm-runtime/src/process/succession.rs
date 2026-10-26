@@ -244,10 +244,10 @@ mod tests {
     #[test]
     fn a_successor_refusal_keeps_its_typed_origin() {
         let cause = lash_kernel_migrate::KernelMigrationRefusal::Parked {
-            document: lash_vocabulary::DocumentId::from_bytes([1; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([1; 32]),
             refusal: lash_kernel_migrate::ParkedRefusal::SiteNotCarried {
-                site: lash_vocabulary::sites::Site::new(
-                    lash_vocabulary::sites::Unit::Main,
+                site: lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
                     vec![3],
                 ),
                 held: "spawn origin".into(),

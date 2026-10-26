@@ -11,7 +11,7 @@ pub enum ToolCatalogBuildError {
         tool_id: crate::ToolId,
         operation: String,
         purpose: crate::SchemaPurpose,
-        source: crate::SchemaAdmissionError,
+        source: lash_kernel_value::SchemaAdmissionError,
     },
     /// The tool supplied no output type, including the empty schema.
     MissingOutputDeclaration {

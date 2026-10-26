@@ -4,7 +4,7 @@
 use lash_kernel_dialect::NamedLibrary;
 use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
 
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 
 /// A dialect whose helpers the compiler reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,8 +53,8 @@ impl Library {
         }
         let mut names = NamedLibrary::from_registry(&registry).map_err(|e| e.to_string())?;
         let definitions = match dialect {
-            Dialect::Python => lash_dialect_python::define_helpers(&mut names),
-            Dialect::TypeScript => lash_dialect_typescript::define_helpers(&mut names),
+            Dialect::Python => lash_ext_py_helpers::package::define_helpers(&mut names),
+            Dialect::TypeScript => lash_ext_ts_helpers::package::define_helpers(&mut names),
         }
         .map_err(|e| e.to_string())?;
         let helpers = definitions

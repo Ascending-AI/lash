@@ -32,9 +32,9 @@ fn fixture_link(document: &Document) -> lash::package::Link {
             };
             (
                 *slot,
-                lash::package::Fill::Operation(lash_vocabulary::OperationRequirement::new(
+                lash::package::Fill::Operation(lash_kernel_value::OperationRequirement::new(
                     signature.clone(),
-                    lash_vocabulary::ContractId::new("1"),
+                    lash_kernel_value::ContractId::new("1"),
                 )),
             )
         })
@@ -605,7 +605,7 @@ async fn launch(
         .processes()
         .kernel_engine_defaults()
         .unwrap()
-        .observing(lash_vocabulary::observation::RunObservation::Counts)
+        .observing(lash_kernel_value::observation::RunObservation::Counts)
         .into_engine_settings();
     let lash::workflow::WorkflowDocumentRead::Read(document) =
         artifacts.execution_document(&linked).await.unwrap()

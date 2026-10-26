@@ -27,8 +27,8 @@ use super::RuntimeError;
 use crate::TurnOutcome;
 use crate::TurnStop;
 use lash_execution_contracts::backend::Backend;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 
 /// What a cancel request did.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

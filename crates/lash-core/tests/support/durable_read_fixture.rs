@@ -36,8 +36,8 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -159,7 +159,7 @@ const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
 fn fixture_effect_outcome() -> lash_execution_contracts::process::ProcessEffectOccurrence {
     lash_execution_contracts::process::ProcessEffectOccurrence::new(
-        lash_vocabulary::sites::EffectLocation::authored(
+        lash_kernel_value::sites::EffectLocation::authored(
             lash_protocol_types::effect_identity_fixture("durable-read-tool-node", 1),
         ),
         "tool:fixture",
@@ -1041,7 +1041,7 @@ fn fixture_plugin_state() -> PluginState {
         plugins: BTreeMap::from([(
             "durable-read-snapshot-plugin".to_string(),
             PluginNamespaceState {
-                format_version: lash_vocabulary::providers::FormatVersion::ONE,
+                format_version: lash_kernel_value::providers::FormatVersion::ONE,
                 generation: 887,
                 encoding: Default::default(),
                 publication: Default::default(),
@@ -1104,7 +1104,7 @@ fn fixture_process_env() -> ProcessEnv {
     const FIXTURE: lash_core::ProcessConfigKey<serde_json::Value> =
         lash_core::ProcessConfigKey::new(
             "durable-read",
-            lash_vocabulary::providers::FormatVersion::ONE,
+            lash_kernel_value::providers::FormatVersion::ONE,
         );
     ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
         .component(FIXTURE, &serde_json::json!({"max_chars": 120}))

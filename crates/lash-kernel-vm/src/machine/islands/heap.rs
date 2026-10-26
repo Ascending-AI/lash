@@ -633,7 +633,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         code: CodeId,
     ) -> Option<ArenaHandle> {
         let target = self.exe.code(code);
-        let lash_vocabulary::sites::Unit::Library(function) = target.site.unit else {
+        let lash_kernel_value::sites::Unit::Library(function) = target.site.unit else {
             return None;
         };
         let mut cells = Vec::with_capacity(target.captures.len());
@@ -659,7 +659,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
             let identity = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
                 capture_names: target.capture_names.clone(),
-                callable: lash_vocabulary::names::CallableId { link, function },
+                callable: lash_kernel_value::names::CallableId { link, function },
                 site: lash_kernel_doc::linked_site::LinkedSite {
                     link,
                     site: target

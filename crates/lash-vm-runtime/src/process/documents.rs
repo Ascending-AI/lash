@@ -9,13 +9,13 @@ use lash_execution_contracts::process::linking::*;
 use lash_kernel_doc::{Document, DocumentBytes, IdentifiedDocument, SourceMap};
 
 use lash_kernel_package::{LinkRefusal, LinkedContent, Namespace, ReachSelection, RetainedContent};
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::SourceMapId;
-use lash_vocabulary::{names::*, package::*};
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::SourceMapId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::Instrument as _;
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 pub(super) async fn artifact_phase<T>(
     phase: &'static str,
@@ -114,7 +114,7 @@ struct PreparedDocument {
     id: DocumentId,
     bytes: Arc<[u8]>,
     checked: OnceLock<Result<IdentifiedDocument, EnginePortError>>,
-    decoded: OnceLock<Result<IdentifiedDocument, lash_vocabulary::tokens::TokenError>>,
+    decoded: OnceLock<Result<IdentifiedDocument, lash_kernel_value::tokens::TokenError>>,
     derived: OnceLock<Result<(), EnginePortError>>,
 }
 
@@ -938,7 +938,7 @@ impl KernelDocuments {
     pub async fn invoked_operations(
         &self,
         start: &LinkedStart,
-    ) -> Result<BTreeSet<lash_vocabulary::OperationUse>, EnginePortError> {
+    ) -> Result<BTreeSet<lash_kernel_value::OperationUse>, EnginePortError> {
         let content = self.load_linked(start.link).await?;
         let reach = content
             .inspect_invocations(

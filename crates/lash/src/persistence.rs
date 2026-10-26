@@ -16,10 +16,10 @@
 pub use lash_core_store::checkpoint_graph::DecodeLimits as GraphDecodeLimits;
 pub use lash_core_store::checkpoint_graph::GraphReadPolicy;
 pub use lash_execution_contracts::backend::ProcessAuthorityReads;
+pub use lash_kernel_value::data_limits::KernelDataLimits;
 pub use lash_protocol_types::Durable;
 pub use lash_protocol_types::DurableSerialize;
 pub use lash_protocol_types::durable_serde::serialize as serialize_durable;
-pub use lash_vocabulary::data_limits::KernelDataLimits;
 
 pub use lash_core::ProcessOpScope;
 pub use lash_core::StagedProcessStart;

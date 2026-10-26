@@ -15,8 +15,8 @@ pub(super) fn compile_document(
     library: &PreparedLibrary,
     authored: &BTreeSet<FunctionId>,
     imports: &BTreeMap<
-        (Unit, lash_vocabulary::ImportSlot),
-        (lash_vocabulary::DocumentId, FunctionId),
+        (Unit, lash_kernel_value::ImportSlot),
+        (lash_kernel_value::DocumentId, FunctionId),
     >,
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;

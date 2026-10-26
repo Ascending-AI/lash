@@ -2,8 +2,11 @@
 #![allow(dead_code)]
 use lash_core::plugin::packages::{PackageContribution, PackageProvider, operation_publication};
 use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
-use lash_vocabulary::{names::*, package::*, providers::*};
 use std::sync::Arc;
+use {
+    lash_kernel_value::names::*, lash_kernel_value::package::*, lash_kernel_value::providers::*,
+    lash_vocabulary::providers::*,
+};
 
 pub fn tools(
     key: ToolProviderKey,

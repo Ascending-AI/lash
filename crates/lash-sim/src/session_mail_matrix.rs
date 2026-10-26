@@ -28,9 +28,9 @@ use lash_core::runtime::durable::session_mail::{OneInputPerRun, drain_session_ma
 use lash_durable_test::{Cut, Fault, Scenario, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::{Arc, Mutex, OnceLock};
 

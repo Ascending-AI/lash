@@ -34,7 +34,7 @@ async fn saved(
     FunctionValue,
 ) {
     let (_, environment) = namespace(core, pin, &source_environment(false)).await;
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     let roots = release.resolver_roots();
     let library =
         lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))

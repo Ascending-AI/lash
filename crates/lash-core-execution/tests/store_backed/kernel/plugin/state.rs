@@ -2,7 +2,7 @@ mod tests {
     use crate::plugin::PluginSessionRequest;
     use std::sync::Arc;
 
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     /// A memory backend's catalog holding the session the test commits.
     async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimeStore> {
@@ -248,7 +248,7 @@ mod tests {
             target: crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
                 crate::store::plugin_writers::AdmittedPlugin {
                     plugin: "mock".into(),
-                    writer: lash_vocabulary::providers::FormatVersion::ONE,
+                    writer: lash_kernel_value::providers::FormatVersion::ONE,
                 },
             ]),
         };

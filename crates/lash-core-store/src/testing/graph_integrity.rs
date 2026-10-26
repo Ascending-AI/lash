@@ -1,6 +1,6 @@
 //! Graph fault injection vocabulary for backend test support.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphIntegrityCorruption {
     OrphanLeaf,

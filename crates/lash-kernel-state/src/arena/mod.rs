@@ -149,16 +149,16 @@ pub enum ProxyKind {
 /// one shared empty site, so a proxy allocates none.
 static COLD_CLOSURE_SITE: LazyLock<Arc<lash_kernel_doc::arena::ClosureIdentity>> =
     LazyLock::new(|| {
-        let link = lash_vocabulary::content_ids::LinkId::from_bytes([0; 32]);
+        let link = lash_kernel_value::content_ids::LinkId::from_bytes([0; 32]);
         Arc::new(lash_kernel_doc::arena::ClosureIdentity {
             capture_names: Vec::new(),
-            callable: lash_vocabulary::names::CallableId {
+            callable: lash_kernel_value::names::CallableId {
                 link,
-                function: lash_vocabulary::names::FunctionId::from_bytes([0; 32]),
+                function: lash_kernel_value::names::FunctionId::from_bytes([0; 32]),
             },
             site: lash_kernel_doc::linked_site::LinkedSite {
                 link,
-                site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, []),
+                site: lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, []),
             },
         })
     });
@@ -662,14 +662,14 @@ impl Arena {
     }
 
     /// An admitted function reference, including its defining Link.
-    pub fn function(&mut self, callable: lash_vocabulary::names::CallableId) -> Value {
+    pub fn function(&mut self, callable: lash_kernel_value::names::CallableId) -> Value {
         Value::Function(self.insert(Body::Function(Box::new(callable)), Facts::default()))
     }
 
     pub fn callable(
         &self,
         handle: ArenaHandle,
-    ) -> Result<lash_vocabulary::names::CallableId, NativeError> {
+    ) -> Result<lash_kernel_value::names::CallableId, NativeError> {
         match self.body(handle)? {
             Body::Function(callable) => Ok(**callable),
             _ => Err(NativeError::Malformed("a function names another body")),

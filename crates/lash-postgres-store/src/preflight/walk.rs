@@ -45,7 +45,7 @@ use lash_core_store::store::DurableScanPage;
 use lash_core_store::store::DurableSurface;
 use lash_core_store::store::ScanCoverage;
 use lash_core_store::store::StoreError;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use sqlx::postgres::PgPool;
 use sqlx::{Postgres, Transaction};
 

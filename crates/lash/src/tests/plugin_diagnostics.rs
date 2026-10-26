@@ -27,7 +27,7 @@ async fn recorded_attribution_survives_removal() {
         .unwrap();
     // A real isolated owner registry publishes the frozen inventory, and its
     // lifetime ends with the materialization rather than the observer.
-    let observed = lash_vocabulary::identity::SessionId::from("materialized-observer");
+    let observed = lash_kernel_value::identity::SessionId::from("materialized-observer");
     let runtime = created_session(&core, observed.clone())
         .await
         .open_runtime()
@@ -95,7 +95,7 @@ async fn recorded_attribution_survives_removal() {
             call: call.clone(),
             tool: "removed-tool".into(),
             request,
-            policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            policy: lash_kernel_value::tool_contract::ExecutionPolicy::Once,
             limit_expires_at_ms: 60000,
             limit_max_slice_ms: 1000,
             wait_id: None,

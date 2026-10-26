@@ -3,7 +3,7 @@ use super::*;
 use crate::ActorContext;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
 use context_pressure::ContextPressureStep;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 mod context_pressure;

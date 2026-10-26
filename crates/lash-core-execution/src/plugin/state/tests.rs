@@ -267,11 +267,11 @@ impl crate::PluginFactory for FormatProbe {
 
     fn migrate_format(
         &self,
-        from: lash_vocabulary::providers::FormatVersion,
+        from: lash_kernel_value::providers::FormatVersion,
         namespace: crate::FormatNamespace,
         mut value: Value,
     ) -> Result<Value, crate::FormatRefusal> {
-        if from == lash_vocabulary::providers::FormatVersion::ONE {
+        if from == lash_kernel_value::providers::FormatVersion::ONE {
             let value = value.as_object_mut().unwrap();
             if let Some(old) = value.remove("old") {
                 value.insert("native".into(), old);
@@ -291,12 +291,12 @@ impl crate::PluginFactory for FormatProbe {
 
     fn encode_format(
         &self,
-        to: lash_vocabulary::providers::FormatVersion,
+        to: lash_kernel_value::providers::FormatVersion,
         namespace: crate::FormatNamespace,
         value: &Value,
     ) -> Result<Value, crate::FormatRefusal> {
         let mut value = value.clone();
-        if to == lash_vocabulary::providers::FormatVersion::ONE {
+        if to == lash_kernel_value::providers::FormatVersion::ONE {
             let object = value.as_object_mut().unwrap();
             if let Some(native) = object.remove("native") {
                 object.insert("old".into(), native);
@@ -333,9 +333,9 @@ impl crate::PluginFactory for FormatProbe {
 impl FormatProbe {
     pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial("format-probe");
-        declaration.format_version = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+        declaration.format_version = lash_kernel_value::providers::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![
-            lash_vocabulary::providers::FormatVersion::ONE,
+            lash_kernel_value::providers::FormatVersion::ONE,
             declaration.format_version,
         ];
         declaration
@@ -421,7 +421,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let mut config = crate::PluginConfig::default();
     config.insert_versioned(
         "format-probe",
-        lash_vocabulary::providers::FormatVersion::new(u32::MAX).unwrap(),
+        lash_kernel_value::providers::FormatVersion::new(u32::MAX).unwrap(),
         serde_json::json!({"old": 17}),
     );
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
@@ -536,9 +536,9 @@ impl crate::PluginFactory for NoMigrateProbe {
 impl NoMigrateProbe {
     pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial("no-migrate");
-        declaration.format_version = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+        declaration.format_version = lash_kernel_value::providers::FormatVersion::new(2).unwrap();
         declaration.writable_formats = vec![
-            lash_vocabulary::providers::FormatVersion::ONE,
+            lash_kernel_value::providers::FormatVersion::ONE,
             declaration.format_version,
         ];
         declaration
@@ -673,7 +673,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let mut config = crate::PluginConfig::default();
     config.insert_versioned(
         "no-migrate",
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
         serde_json::json!({"old": 17}),
     );
     let config_bytes = rmp_serde::to_vec_named(&config).unwrap();
@@ -764,7 +764,7 @@ fn plugin_formats_convert_only_in_recorded_transition() {
     let mut config = crate::PluginConfig::default();
     config.insert_versioned(
         "format-probe",
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
         serde_json::json!({"old": 17}),
     );
     let mut results = Vec::new();
@@ -836,16 +836,16 @@ fn plugin_formats_stamp_every_state_write() {
     let mut config = crate::PluginConfig::default();
     config.insert_versioned(
         "format-probe",
-        lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+        lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
         serde_json::json!({"native": 18}),
     );
     config.insert_versioned(
         "inactive",
-        lash_vocabulary::providers::FormatVersion::new(99).unwrap(),
+        lash_kernel_value::providers::FormatVersion::new(99).unwrap(),
         serde_json::json!({"opaque": 5}),
     );
     for version in [1, 2] {
-        let writer = lash_vocabulary::providers::FormatVersion::new(version).unwrap();
+        let writer = lash_kernel_value::providers::FormatVersion::new(version).unwrap();
         let writers = BTreeMap::from([("format-probe".into(), writer)]);
         let encoded_state = host.encode_state(&native, &writers).unwrap();
         let encoded_config = host.encode_config(&config, &writers).unwrap();
@@ -886,7 +886,7 @@ fn plugin_formats_stamp_every_state_write() {
             &native,
             &BTreeMap::from([(
                 "format-probe".into(),
-                lash_vocabulary::providers::FormatVersion::new(3).unwrap()
+                lash_kernel_value::providers::FormatVersion::new(3).unwrap()
             )])
         )
         .is_err()
@@ -901,7 +901,7 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         plugins: BTreeMap::from([(
             "absent-plugin".into(),
             PluginNamespaceState {
-                format_version: lash_vocabulary::providers::FormatVersion::ONE,
+                format_version: lash_kernel_value::providers::FormatVersion::ONE,
                 generation: 17,
                 publication: Default::default(),
                 fork: Default::default(),
@@ -1119,7 +1119,7 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
 
         fn migrate_format(
             &self,
-            from: lash_vocabulary::providers::FormatVersion,
+            from: lash_kernel_value::providers::FormatVersion,
             namespace: crate::FormatNamespace,
             mut value: Value,
         ) -> Result<Value, crate::FormatRefusal> {
@@ -1156,7 +1156,8 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     impl crate::plugin::PluginMetadata for Converter {
         fn plugin_declaration(&self) -> crate::plugin::PluginDeclaration {
             let mut declaration = crate::plugin::PluginDeclaration::initial(self.id);
-            declaration.format_version = lash_vocabulary::providers::FormatVersion::new(2).unwrap();
+            declaration.format_version =
+                lash_kernel_value::providers::FormatVersion::new(2).unwrap();
             declaration.writable_formats = vec![declaration.format_version];
             declaration
         }
@@ -1258,7 +1259,7 @@ fn transition_request(
         id: crate::plugin::PluginTransitionId(
             crate::EffectAddress::new(
                 crate::ExecutionScope::turn(
-                    lash_vocabulary::identity::SessionId::fixture(owner),
+                    lash_kernel_value::identity::SessionId::fixture(owner),
                     "run",
                 ),
                 "plugin-transition",
@@ -1266,7 +1267,7 @@ fn transition_request(
             .unwrap(),
         ),
         owner: lash_vocabulary::identity::RuntimeOwner::Session(
-            lash_vocabulary::identity::SessionId::fixture(owner),
+            lash_kernel_value::identity::SessionId::fixture(owner),
         ),
         base: crate::plugin::PluginTransitionBase::Session {
             head: crate::store::SessionHeadRef {

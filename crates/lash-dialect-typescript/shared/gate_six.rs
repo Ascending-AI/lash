@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::Float;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 use lash_kernel_vm::Outcome;
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
 
 /// The session data the old benchmark seeded or projected, as the literals a
 /// cell would hold.

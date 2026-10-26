@@ -7,9 +7,9 @@ use std::fmt::Write as _;
 )]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source = String::from(
-        "static NATIVE_TABLES: &[&[(lash_vocabulary::names::FunctionId, lash_kernel_doc::NativeCtor)]] = &[\n",
+        "static NATIVE_TABLES: &[&[(lash_kernel_value::names::FunctionId, lash_kernel_doc::NativeCtor)]] = &[\n",
     );
-    for package in lash_vm_releases::PACKAGES {
+    for package in lash_kernel_releases::PACKAGES {
         if package.path != "kernel" {
             let feature = if package.path == "python" {
                 "dialect-python"
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (callee, label) in package.native_callees(function)? {
                 write!(
                     callees,
-                    "(lash_vocabulary::names::FunctionId::from_bytes({:?}), {:?}),",
+                    "(lash_kernel_value::names::FunctionId::from_bytes({:?}), {:?}),",
                     callee.as_bytes(),
                     label
                 )?;
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             callees.push(']');
             writeln!(
                 source,
-                "(lash_vocabulary::names::FunctionId::from_bytes({:?}), |registry| crate::library::native({:?}, {:?}, lash_vocabulary::names::FunctionId::from_bytes({:?}), {callees}, registry)),",
+                "(lash_kernel_value::names::FunctionId::from_bytes({:?}), |registry| crate::library::native({:?}, {:?}, lash_kernel_value::names::FunctionId::from_bytes({:?}), {callees}, registry)),",
                 function.as_bytes(),
                 package.path,
                 name,
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         source.push_str("],\n");
     }
-    source.push_str("];\npub(crate) fn native_tables() -> &'static [&'static [(lash_vocabulary::names::FunctionId, lash_kernel_doc::NativeCtor)]] { NATIVE_TABLES }\n");
+    source.push_str("];\npub(crate) fn native_tables() -> &'static [&'static [(lash_kernel_value::names::FunctionId, lash_kernel_doc::NativeCtor)]] { NATIVE_TABLES }\n");
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     std::fs::write(out.join("native_tables.rs"), source)?;
     println!("cargo:rerun-if-changed=build.rs");

@@ -1,6 +1,6 @@
 use super::*;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::llm::types::RetainedLlmRequest;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
@@ -353,7 +353,7 @@ pub struct ExecutionEnvironmentSync {
     /// them, and a turn that must end through a control checks one can.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub turn_controls:
-        std::collections::BTreeMap<String, lash_vocabulary::tool_declaration::TurnControls>,
+        std::collections::BTreeMap<String, lash_kernel_value::tool_declaration::TurnControls>,
     /// The operation each surface tool's Standard-mode name calls, for the
     /// names joining the operation's segments with `__` does not give back:
     /// those truncated with a digest. Every other name calls the operation
@@ -899,7 +899,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     }
 
     /// Whether a tool of the synced surface can end the turn with a value:
-    /// one declares [`TurnControlKind::Finish`](lash_vocabulary::tool_declaration::TurnControlKind::Finish).
+    /// one declares [`TurnControlKind::Finish`](lash_kernel_value::tool_declaration::TurnControlKind::Finish).
     pub fn can_finish(&self) -> bool {
         self.finishing_tools().next().is_some()
     }
@@ -911,7 +911,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             .turn_controls
             .iter()
             .filter(|(_, controls)| {
-                controls.contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
+                controls.contains(lash_kernel_value::tool_declaration::TurnControlKind::Finish)
             })
             .map(|(name, _)| name.as_str())
     }

@@ -72,7 +72,7 @@ pub fn tool_spec(
 struct FixtureToolPackages {
     owner: String,
     key: crate::plugin::ToolProviderKey,
-    roots: std::collections::BTreeSet<lash_vocabulary::names::Segment>,
+    roots: std::collections::BTreeSet<lash_kernel_value::names::Segment>,
     provider: Arc<dyn crate::ToolProvider>,
 }
 
@@ -81,14 +81,14 @@ impl crate::plugin::packages::PackageProvider for FixtureToolPackages {
     fn roots(
         &self,
         _: &crate::OwnerConfigView,
-    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
         self.roots.clone()
     }
 
     fn advertise(
         &self,
         config: &crate::OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
+        context: &lash_kernel_value::package::PublicationContext,
     ) -> Result<
         Vec<crate::plugin::packages::PackageContribution>,
         lash_execution_contracts::PluginError,
@@ -136,7 +136,7 @@ impl crate::plugin::packages::PackageProvider for FixtureToolPackages {
     async fn hold(
         &self,
         _: &crate::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         Ok(())
     }
@@ -226,7 +226,7 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -234,7 +234,7 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -251,14 +251,14 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
     > {
         // This engine executes no linked code and owes no operation or machine debt.
         self.inspect_link(
-            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            lash_kernel_value::LinkId::from_bytes([0; 32]),
             &lash_execution_contracts::process::linking::ReachSelector::Start(
-                lash_vocabulary::StartSelector::Main,
+                lash_kernel_value::StartSelector::Main,
             ),
         )
         .await
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -412,7 +412,7 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -420,7 +420,7 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -437,14 +437,14 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
     > {
         // This engine executes no linked code and owes no operation or machine debt.
         self.inspect_link(
-            lash_vocabulary::LinkId::from_bytes([0; 32]),
+            lash_kernel_value::LinkId::from_bytes([0; 32]),
             &lash_execution_contracts::process::linking::ReachSelector::Start(
-                lash_vocabulary::StartSelector::Main,
+                lash_kernel_value::StartSelector::Main,
             ),
         )
         .await
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 

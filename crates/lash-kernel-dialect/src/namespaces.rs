@@ -1,13 +1,13 @@
 //! One runtime projection of the accepted package advertisement. A missing
 //! member of an enumerated package never falls through to a deferred provider.
 use crate::{NamespaceKind, NamespaceMember, NamespaceView, SpellKind, Spelling};
-use lash_vocabulary::{
-    names::{PackagePath, QualifiedOperation, Segment},
-    package::Visibility,
-};
-pub use lash_vocabulary::{operation_keys, operation_text};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::PackagePath, lash_kernel_value::names::QualifiedOperation,
+    lash_kernel_value::names::Segment, lash_kernel_value::package::Visibility,
+};
+pub use {lash_kernel_value::operation_keys, lash_kernel_value::operation_text};
 
 pub fn spell_operation(spelling: Spelling, operation: &QualifiedOperation) -> String {
     operation
@@ -26,13 +26,13 @@ pub fn spell_operation(spelling: Spelling, operation: &QualifiedOperation) -> St
 pub enum NamespaceRefusal {
     #[error("conflicting source requirements {first:?} and {second:?}")]
     ImportNameConflict {
-        first: Box<lash_vocabulary::Import>,
-        second: Box<lash_vocabulary::Import>,
+        first: Box<lash_kernel_value::Import>,
+        second: Box<lash_kernel_value::Import>,
     },
     #[error("the package export `{name:?}` in Link {link} is not loaded")]
     MissingExport {
-        link: lash_vocabulary::LinkId,
-        name: lash_vocabulary::ExportName,
+        link: lash_kernel_value::LinkId,
+        name: lash_kernel_value::ExportName,
     },
     #[error("the package path `{path}` conflicts with `{other}`")]
     PathConflict { path: String, other: String },
@@ -74,15 +74,15 @@ impl Namespaces {
     /// Project the accepted package members from their linked declarations.
     /// The resolver reads held content only; it performs no publication or fulfilment.
     pub fn project<'a>(
-        packages: impl IntoIterator<Item = &'a lash_vocabulary::Package>,
+        packages: impl IntoIterator<Item = &'a lash_kernel_value::Package>,
         deferred: BTreeSet<PackagePath>,
         export: &dyn Fn(
-            lash_vocabulary::LinkId,
-            &lash_vocabulary::ExportName,
+            lash_kernel_value::LinkId,
+            &lash_kernel_value::ExportName,
         ) -> Option<lash_kernel_doc::Export>,
         reserves: &dyn Fn(&str) -> bool,
     ) -> Result<Self, NamespaceRefusal> {
-        use lash_vocabulary::{MemberKind, QualifiedName};
+        use {lash_kernel_value::MemberKind, lash_kernel_value::QualifiedName};
         fn function(
             name: QualifiedName,
             f: lash_kernel_doc::FunctionExport,
@@ -230,7 +230,7 @@ impl Namespaces {
     }
     pub fn operation(
         &self,
-        effect: &lash_vocabulary::EffectName,
+        effect: &lash_kernel_value::EffectName,
     ) -> Option<(QualifiedOperation, &crate::OperationSignature)> {
         let operation = QualifiedOperation::from_effect(effect).ok()?;
         let member = self
@@ -246,7 +246,7 @@ impl Namespaces {
     }
     pub fn controls(
         &self,
-        effect: &lash_vocabulary::EffectName,
+        effect: &lash_kernel_value::EffectName,
     ) -> Option<BTreeSet<crate::EffectControl>> {
         let (_, offer) = self.operation(effect)?;
         let controls = controls(&offer.controls);
@@ -367,17 +367,17 @@ impl Namespaces {
     /// No binding is renamed and no namespace changes lexical resolution.
     pub fn collisions(
         &self,
-        bindings: &BTreeSet<lash_vocabulary::Name>,
+        bindings: &BTreeSet<lash_kernel_value::Name>,
         spelling: Spelling,
-    ) -> Vec<lash_vocabulary::NamespaceCollision> {
+    ) -> Vec<lash_kernel_value::NamespaceCollision> {
         self.packages
             .keys()
             .chain(self.deferred.iter())
             .filter_map(|path| {
                 let root = spelling.spell(SpellKind::PathSegment, &path.as_slice()[0]);
                 bindings
-                    .contains(&lash_vocabulary::Name::new(&root))
-                    .then(|| lash_vocabulary::NamespaceCollision {
+                    .contains(&lash_kernel_value::Name::new(&root))
+                    .then(|| lash_kernel_value::NamespaceCollision {
                         namespace: dotted(path),
                         binding_name: root,
                     })
@@ -391,14 +391,14 @@ impl Namespaces {
         &self,
         path: &[&str],
         spelling: Spelling,
-    ) -> Option<lash_vocabulary::NamespaceShadowing> {
+    ) -> Option<lash_kernel_value::NamespaceShadowing> {
         let operation = match self.resolve(path, spelling) {
             Resolution::Operation { operation, .. } | Resolution::Deferred { operation } => {
                 operation
             }
             _ => return None,
         };
-        Some(lash_vocabulary::NamespaceShadowing {
+        Some(lash_kernel_value::NamespaceShadowing {
             binding_name: path.first()?.to_string(),
             binding_origin: None,
             namespace: dotted(&operation.package),
@@ -433,12 +433,12 @@ fn conflict(path: &PackagePath, other: &PackagePath) -> NamespaceRefusal {
         other: dotted(other),
     }
 }
-pub fn controls(value: &lash_vocabulary::TurnControls) -> BTreeSet<crate::EffectControl> {
+pub fn controls(value: &lash_kernel_value::TurnControls) -> BTreeSet<crate::EffectControl> {
     let mut controls = BTreeSet::new();
-    if value.contains(lash_vocabulary::TurnControlKind::Finish) {
+    if value.contains(lash_kernel_value::TurnControlKind::Finish) {
         controls.insert(crate::EffectControl::Finish);
     }
-    if value.contains(lash_vocabulary::TurnControlKind::SwitchAgentFrame) {
+    if value.contains(lash_kernel_value::TurnControlKind::SwitchAgentFrame) {
         controls.insert(crate::EffectControl::SwitchAgentFrame);
     }
     controls
@@ -446,10 +446,10 @@ pub fn controls(value: &lash_vocabulary::TurnControls) -> BTreeSet<crate::Effect
 
 /// Deferred calls pack their arguments into one JSON list. Resolution narrows
 /// that payload at first use; no provider is invoked while lowering.
-pub fn deferred_signature() -> lash_vocabulary::types::Signature {
-    use lash_vocabulary::{
-        names::Name,
-        types::{Param, Signature, Type},
+pub fn deferred_signature() -> lash_kernel_value::types::Signature {
+    use {
+        lash_kernel_value::names::Name, lash_kernel_value::types::Param,
+        lash_kernel_value::types::Signature, lash_kernel_value::types::Type,
     };
     Signature {
         params: vec![Param {
@@ -460,8 +460,8 @@ pub fn deferred_signature() -> lash_vocabulary::types::Signature {
         result: Type::Json,
     }
 }
-pub fn service_name(dialect: &str, member: &str) -> lash_vocabulary::names::QualifiedName {
-    lash_vocabulary::names::QualifiedName {
+pub fn service_name(dialect: &str, member: &str) -> lash_kernel_value::names::QualifiedName {
+    lash_kernel_value::names::QualifiedName {
         package: PackagePath::new(
             Segment::new(dialect).unwrap_or_else(|error| panic!("dialect package: {error}")),
         ),
@@ -469,10 +469,10 @@ pub fn service_name(dialect: &str, member: &str) -> lash_vocabulary::names::Qual
         type_member: None,
     }
 }
-pub fn sleep_signature() -> lash_vocabulary::types::Signature {
-    use lash_vocabulary::{
-        names::Name,
-        types::{Param, Signature, Type},
+pub fn sleep_signature() -> lash_kernel_value::types::Signature {
+    use {
+        lash_kernel_value::names::Name, lash_kernel_value::types::Param,
+        lash_kernel_value::types::Signature, lash_kernel_value::types::Type,
     };
     Signature {
         params: vec![Param {

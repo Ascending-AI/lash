@@ -5,8 +5,11 @@ use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::*;
 use super::{FamilyRecord, FrozenRef, HeapWriteError, MembershipRun, ObjectKind, SealBudget};
 use lash_kernel_doc::heap::*;
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use std::sync::Arc;
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 mod continuation;
 
@@ -23,7 +26,7 @@ pub enum Body {
         next: u64,
     },
     Closure {
-        callable: lash_vocabulary::names::CallableId,
+        callable: lash_kernel_value::names::CallableId,
         site: SiteRef,
         captures: Tree<(NameRef, EntityId)>,
     },
@@ -296,7 +299,7 @@ impl TokenCodec for ObjectHead {
                 4 => {
                     TokenReader::expect_fields(fields, 3)?;
                     Body::Closure {
-                        callable: lash_vocabulary::names::CallableId::decode(input)?,
+                        callable: lash_kernel_value::names::CallableId::decode(input)?,
                         site: SiteRef::decode(input)?,
                         captures: Tree::decode(input)?,
                     }
@@ -397,7 +400,7 @@ pub mod execution {
     };
     use super::*;
     use lash_kernel_doc::TaskId;
-    use lash_vocabulary::names::Name;
+    use lash_kernel_value::names::Name;
 
     /// A cursor holding retains identity roots without another PageValue header.
     #[derive(Clone)]
@@ -437,10 +440,10 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct FrameRecord {
-        pub capture_names: Vec<lash_vocabulary::names::Name>,
+        pub capture_names: Vec<lash_kernel_value::names::Name>,
         pub convention: Option<lash_kernel_doc::StartConvention>,
-        pub public_result: Option<lash_vocabulary::types::Type>,
-        pub link: lash_vocabulary::content_ids::LinkId,
+        pub public_result: Option<lash_kernel_value::types::Type>,
+        pub link: lash_kernel_value::content_ids::LinkId,
         pub statement: SiteRef,
         pub bindings: Tree<BindingRecord>,
         pub loops: Tree<LoopRecord>,
@@ -456,7 +459,7 @@ pub mod execution {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum OccurrenceOwner {
         Authored,
-        Helper(lash_vocabulary::FunctionId),
+        Helper(lash_kernel_value::FunctionId),
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct OccurrenceRecord {
@@ -472,14 +475,14 @@ pub mod execution {
         fn encode(&self, out: &mut TokenWriter) {
             out.seq(2);
             match self.owner {
-                OccurrenceOwner::Authored => None::<lash_vocabulary::FunctionId>.encode(out),
+                OccurrenceOwner::Authored => None::<lash_kernel_value::FunctionId>.encode(out),
                 OccurrenceOwner::Helper(function) => Some(function).encode(out),
             }
             self.count.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             input.expect_struct(2)?;
-            let owner = Option::<lash_vocabulary::FunctionId>::decode(input)?
+            let owner = Option::<lash_kernel_value::FunctionId>::decode(input)?
                 .map_or(OccurrenceOwner::Authored, OccurrenceOwner::Helper);
             Ok(Self {
                 owner,
@@ -503,7 +506,7 @@ pub mod execution {
         pub spawn_origin: Option<SiteRef>,
     }
     impl FrameRecord {
-        pub fn fresh(link: lash_vocabulary::content_ids::LinkId, statement: SiteRef) -> Self {
+        pub fn fresh(link: lash_kernel_value::content_ids::LinkId, statement: SiteRef) -> Self {
             Self {
                 capture_names: Vec::new(),
                 link,
@@ -788,8 +791,8 @@ pub mod execution {
             self.identity.root.map(|p| p.id) == other.identity.root.map(|p| p.id)
                 && self.observed == other.observed
                 && self.passed == other.passed
-                && lash_vocabulary::tokens::encode_body(&self.state)
-                    == lash_vocabulary::tokens::encode_body(&other.state)
+                && lash_kernel_value::tokens::encode_body(&self.state)
+                    == lash_kernel_value::tokens::encode_body(&other.state)
                 && self.frames.same_version(&other.frames)
                 && self.joiners.same_version(&other.joiners)
                 && self.occurrences.same_version(&other.occurrences)
@@ -867,10 +870,10 @@ pub mod execution {
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             input.expect_struct(12)?;
             Ok(Self {
-                capture_names: Vec::<lash_vocabulary::names::Name>::decode(input)?,
-                link: lash_vocabulary::content_ids::LinkId::decode(input)?,
+                capture_names: Vec::<lash_kernel_value::names::Name>::decode(input)?,
+                link: lash_kernel_value::content_ids::LinkId::decode(input)?,
                 convention: Option::<lash_kernel_doc::StartConvention>::decode(input)?,
-                public_result: Option::<lash_vocabulary::types::Type>::decode(input)?,
+                public_result: Option::<lash_kernel_value::types::Type>::decode(input)?,
                 statement: <SiteRef>::decode(input)?,
                 bindings: <Tree<BindingRecord>>::decode(input)?,
                 loops: <Tree<LoopRecord>>::decode(input)?,

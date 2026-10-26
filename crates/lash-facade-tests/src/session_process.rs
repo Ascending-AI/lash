@@ -35,7 +35,7 @@ pub fn started(model: &str, keyed: bool) -> lash_execution_contracts::process::P
         },
         lash_core::PluginOptions::default(),
     )
-    .with_session_id(lash_vocabulary::identity::SessionId::fixture(
+    .with_session_id(lash_kernel_value::identity::SessionId::fixture(
         CHILD.to_string(),
     ));
     if keyed {
@@ -76,7 +76,7 @@ pub async fn deploy(
         .complete(move |request| {
             let on_child = (request
                 .session_id()
-                .map(lash_vocabulary::identity::SessionId::as_str)
+                .map(lash_kernel_value::identity::SessionId::as_str)
                 == Some(CHILD))
             .then(|| child.clone());
             async move {
@@ -101,7 +101,7 @@ pub async fn deploy(
     let core = builder.build(runtime_lease_owner())?;
     if first {
         core.session(
-            lash_vocabulary::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
@@ -140,7 +140,8 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
     else {
         panic!("the fixture starts a child session turn");
     };
-    let stated_id = named.then(|| lash_vocabulary::identity::SessionId::fixture(CHILD.to_owned()));
+    let stated_id =
+        named.then(|| lash_kernel_value::identity::SessionId::fixture(CHILD.to_owned()));
     create_request.session_id = stated_id.clone();
     let started = core.processes().start(request, core.effect_host()).await?;
     let output = tokio::time::timeout(

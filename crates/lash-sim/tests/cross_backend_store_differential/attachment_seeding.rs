@@ -9,8 +9,8 @@ use lash_core::AttachmentWrite;
 use lash_core::AttachmentWriteFence;
 use lash_core::ReferrerClaim;
 use lash_core::store::StoreError;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 pub(crate) async fn seed_differential_attachment_rows(
     store: &dyn RuntimeStore,
     session_id: &SessionId,

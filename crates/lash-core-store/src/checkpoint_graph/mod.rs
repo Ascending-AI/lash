@@ -11,7 +11,7 @@
 //! and its [`NodeId`] is the envelope's digest under the blob hash domain
 //! (`BlobRef::for_content`), so a node's lowercase hex id is its SQL key. The
 //! body is a stream of the canonical tokens of
-//! [`lash_vocabulary::tokens`], where a child reference is the slot of
+//! [`lash_kernel_value::tokens`], where a child reference is the slot of
 //! the child in the sorted child table. Every declared child is referenced,
 //! and nothing else is: a node's child table is exactly its storage edges.
 //!
@@ -32,7 +32,7 @@
 //! - [`bodies`]: the typed bodies of the generic kinds this crate owns.
 //!
 //! Typed bodies of kernel, host, cell and turn kinds are encoded by their
-//! owning crates with [`lash_vocabulary::tokens::TokenCodec`] and
+//! owning crates with [`lash_kernel_value::tokens::TokenCodec`] and
 //! staged here through [`GraphStaging::encode`].
 //!
 //! There is no format version field, no fallback reader and no second

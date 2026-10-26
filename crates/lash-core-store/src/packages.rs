@@ -1,7 +1,10 @@
 //! Immutable package and publication records.
 
-use lash_vocabulary::package::{Link, LinkId, Package, PackageId};
 use serde::{Deserialize, Serialize};
+use {
+    lash_kernel_value::package::Link, lash_kernel_value::package::LinkId,
+    lash_kernel_value::package::Package, lash_kernel_value::package::PackageId,
+};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LinkRecord {
@@ -33,7 +36,7 @@ pub struct PackageRecord {
 )]
 pub enum PackageRefusal {
     #[error("package session owner is absent or deleted: {0}")]
-    SessionNotLive(lash_vocabulary::identity::SessionId),
+    SessionNotLive(lash_kernel_value::identity::SessionId),
     #[error("content identity does not match its record: {0}")]
     Identity(String),
     #[error("immutable record already has different content: {0}")]

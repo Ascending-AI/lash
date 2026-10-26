@@ -8,8 +8,8 @@ mod roster;
 
 use crate::*;
 use lash_execution_contracts::process::ProcessQuery as _;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 #[path = "process_registry/event_release.rs"]
 mod event_release;
 #[path = "process_registry/lifecycle.rs"]

@@ -1,5 +1,5 @@
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::ReportedFailure;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 pub(crate) use std::sync::Arc;
 
@@ -403,8 +403,8 @@ pub(crate) fn rlm_environment() -> sansio::ExecutionEnvironmentSync {
     sansio::ExecutionEnvironmentSync {
         turn_controls: [(
             lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
-            lash_vocabulary::tool_declaration::TurnControls::finish(
-                lash_vocabulary::json_schema::JsonSchema::any(),
+            lash_kernel_value::tool_declaration::TurnControls::finish(
+                lash_kernel_value::json_schema::JsonSchema::any(),
             ),
         )]
         .into(),

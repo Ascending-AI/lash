@@ -18,8 +18,8 @@ use lash_durable::domain::{
     RequestTexts,
 };
 use lash_durable::{DurableError, Epoch};
+use lash_kernel_value::identity::SessionId;
 use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension};
 

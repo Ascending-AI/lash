@@ -61,7 +61,7 @@ fn meta() -> AttachmentCreateMeta {
 async fn paged_reclamation_keeps_rooted_blobs_across_delete_and_put_between_pages() {
     let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let factory = stores.session_store_factory();
-    let session_id = lash_vocabulary::identity::SessionId::fixture("paged-gc");
+    let session_id = lash_kernel_value::identity::SessionId::fixture("paged-gc");
     factory
         .admit_session(&lash_core::SessionStoreCreateRequest {
             session_id: session_id.clone(),

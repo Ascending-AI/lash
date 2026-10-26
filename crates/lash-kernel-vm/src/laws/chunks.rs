@@ -12,7 +12,7 @@ use lash_kernel_doc::{
 };
 
 use lash_kernel_state::paged::{AllocationCensus as _, PageAnswer, PageBody, PageSource};
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 use std::sync::Arc;
 
 use super::embedder::{Embedder, ROOMY, Setup, Source, int, result};
@@ -162,7 +162,7 @@ fn a_point_write_to_a_cold_large_table_reads_and_seals_one_chunk_and_its_path() 
 #[test]
 fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
     use lash_kernel_doc::Datum;
-    use lash_vocabulary::Name;
+    use lash_kernel_value::Name;
     use std::cell::RefCell;
 
     #[derive(Clone, Default)]

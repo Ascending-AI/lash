@@ -8,7 +8,6 @@
 
 mod builtin_values;
 mod callables;
-pub(crate) use callables::helper_value;
 mod calls;
 mod captions;
 mod contexts;
@@ -39,9 +38,9 @@ use lash_kernel_doc::{
     Place, Rhs, Stmt, TryStmt, validate_document,
 };
 
-use lash_vocabulary::{FunctionId, FunctionName, Name};
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
+use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
 
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Classes;
@@ -359,7 +358,7 @@ pub(crate) fn lower_with_calls(
         library: environment.library,
         namespaces: environment.namespaces,
         imports: lash_kernel_dialect::authoring::Imports::default().reserving(
-            crate::helper_operations()
+            lash_ext_py_helpers::package::helper_operations()
                 .iter()
                 .map(|operation| operation.slot),
         ),

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
 use crate::machine::Boundary;
@@ -395,7 +395,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         assert_eq!(root.tasks, expected.tasks);
         assert_eq!(root.ready, expected.ready);
         assert_eq!(root.waits, expected.waits);
-        checkpoint_bytes += lash_vocabulary::tokens::encode_body(&root).len();
+        checkpoint_bytes += lash_kernel_value::tokens::encode_body(&root).len();
         checkpoints += 1;
         active.open_at(&root, certificate, Layout(1 + checkpoints * 2), true);
         active.machine.record_charges(tape.clone());

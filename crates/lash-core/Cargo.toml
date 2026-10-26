@@ -39,6 +39,7 @@ synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthet
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }

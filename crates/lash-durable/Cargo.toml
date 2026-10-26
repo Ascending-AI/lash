@@ -26,6 +26,7 @@ workspace = true
 
 [dependencies]
 serde = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }

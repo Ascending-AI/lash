@@ -279,12 +279,12 @@ const B_TOOL: &str = "core_node_b";
 /// Cross-cutting: no tools, one result check.
 const CHECK_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "core-node-check",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 /// The component that provides `B_TOOL`.
 const B_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "core-node-b",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// The engine runs `B_TOOL` once and ends with its answer.
@@ -336,7 +336,7 @@ fn object_tool(name: &str, binding: [&str; 2]) -> lash_vocabulary::tool_contract
 /// redelivers it.
 fn ordinary_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     object_tool(ORDINARY_TOOL, ["tools", ORDINARY_TOOL]).with_execution_policy(
-        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::new(3).unwrap(),
             1,
             1,

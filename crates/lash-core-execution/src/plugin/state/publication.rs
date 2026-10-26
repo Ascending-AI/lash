@@ -33,7 +33,7 @@ use crate::{RuntimeEffectControllerError, RuntimeEffectKind, RuntimeEffectOutcom
 use lash_core_store::tool_run::{
     FrontierStep, ReducerRefusal, StateCommandBatch, StateCommandLimits,
 };
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 use lash_vocabulary::providers::PluginCallbackIdentity;
 use std::future::Future;
 

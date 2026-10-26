@@ -11,9 +11,9 @@ use lash_kernel_state::kernel_internals::{
     tree::{SealWork, Tree},
 };
 use lash_kernel_state::paged::*;
+use lash_kernel_value::names::Name;
 #[cfg(test)]
 use lash_kernel_vm::kernel_internals::Layout;
-use lash_vocabulary::names::Name;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Default)]
 pub(crate) struct Source {
@@ -107,8 +107,8 @@ impl Session {
                     BindingRecord {
                         name: NameRef::new(&name, heap.pages()).unwrap(),
                         declared: SiteRef::new(
-                            &lash_vocabulary::sites::Site {
-                                unit: lash_vocabulary::sites::Unit::Main,
+                            &lash_kernel_value::sites::Site {
+                                unit: lash_kernel_value::sites::Unit::Main,
                                 path: Vec::new(),
                             },
                             heap.pages(),

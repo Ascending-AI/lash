@@ -35,7 +35,7 @@ pub(crate) fn finish_tool_provider(
     let definition = lash_core::finish_tool(
         FINISH_OPERATION,
         "End the turn with this call's arguments, whole, as its answer. Call it on its own once every other call has returned; it returns nothing. A prose reply does not end this turn.",
-        lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({ "type": "object" }))
+        lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({ "type": "object" }))
             .expect("a fixed object schema is admitted"),
     )
     .expect("a canonical operation");

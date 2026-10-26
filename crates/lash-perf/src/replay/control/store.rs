@@ -2,8 +2,8 @@
 use super::observation::Observation;
 use lash_core_ids::operational_metrics::sql;
 use lash_durable::{domain::*, *};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
@@ -203,7 +203,7 @@ impl DurableStore for ObservedStore {
 impl DurableReads for ObservedStore {
     async fn model_call_pins(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.observe(
@@ -215,7 +215,7 @@ impl DurableReads for ObservedStore {
 
     async fn model_calls(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.observe("model_calls", self.inner.model_calls(session, owner))
@@ -274,7 +274,7 @@ impl DurableReads for ObservedStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.observe("cell_roots", self.inner.cell_roots(session, run))
@@ -282,7 +282,7 @@ impl DurableReads for ObservedStore {
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {

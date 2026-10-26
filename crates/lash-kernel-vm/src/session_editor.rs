@@ -23,7 +23,7 @@ use lash_kernel_state::paged::{
     HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, SemanticHeap, SessionRoot,
     SiteRef,
 };
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 mod preview;
 
@@ -284,7 +284,10 @@ impl SessionEditor {
         let record = BindingRecord {
             name: NameRef::new(name, self.heap.pages())?,
             declared: SiteRef::new(
-                &lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+                &lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
+                    Vec::new(),
+                ),
                 self.heap.pages(),
             )?,
             value: BoundRecord::Value(value),
@@ -347,7 +350,7 @@ impl SessionEditor {
         name: &Name,
         description: &[u8],
         closure: lash_kernel_doc::heap::PageRef,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
     ) -> Result<bool, HeapFault> {
         self.rewrite_function(name, description, closure, callable, None)
     }
@@ -364,7 +367,7 @@ impl SessionEditor {
         name: &Name,
         description: &[u8],
         closure: lash_kernel_doc::heap::PageRef,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
         correspondence: &lash_kernel_doc::Correspondence,
     ) -> Result<bool, HeapFault> {
         self.rewrite_function(name, description, closure, callable, Some(correspondence))
@@ -375,7 +378,7 @@ impl SessionEditor {
         name: &Name,
         description: &[u8],
         closure: lash_kernel_doc::heap::PageRef,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
         correspondence: Option<&lash_kernel_doc::Correspondence>,
     ) -> Result<bool, HeapFault> {
         let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);

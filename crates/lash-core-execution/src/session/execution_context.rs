@@ -1,6 +1,6 @@
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 mod held_response;
@@ -234,7 +234,7 @@ pub struct LinkedExecution {
     pub resolutions: Arc<
         std::sync::Mutex<
             std::collections::BTreeMap<
-                lash_vocabulary::names::OperationUse,
+                lash_kernel_value::names::OperationUse,
                 lash_core_store::resolutions::ResolutionEntry,
             >,
         >,
@@ -862,7 +862,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|exec| exec.provenance.clone())
     }
 
-    fn child_process_observers(&self) -> Vec<lash_vocabulary::identity::SessionId> {
+    fn child_process_observers(&self) -> Vec<lash_kernel_value::identity::SessionId> {
         match self.process_execution.as_ref() {
             Some(exec) => match &exec.provenance.originator {
                 lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
@@ -1057,7 +1057,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn read_route(
         &self,
         tool: &lash_vocabulary::tool_contract::ToolId,
-        pinned: &lash_vocabulary::operations::ContractId,
+        pinned: &lash_kernel_value::operations::ContractId,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         self.dispatch
             .routes
@@ -1120,7 +1120,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn operation_grant(
         &self,
         route: &crate::OperationRoute,
-        contract: &lash_vocabulary::operations::ContractId,
+        contract: &lash_kernel_value::operations::ContractId,
     ) -> Result<crate::ToolExecutionGrant, Box<crate::ToolFailure>> {
         let registry = self.dispatch.routes.registry();
         let served = registry.served(&route.provider, &route.tool, self.owner_config());

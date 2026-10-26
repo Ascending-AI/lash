@@ -2,7 +2,7 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use pretty_assertions::assert_eq;
 
 /// Backend observation and fault seam for the session-delete blob laws.

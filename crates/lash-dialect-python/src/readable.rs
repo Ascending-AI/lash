@@ -13,7 +13,7 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use crate::printer::{Regions, print_regions};
 use crate::{Code, Diagnostic, SourceLimits};
@@ -94,7 +94,10 @@ impl regions::Regions for Printing<'_> {
 
     fn whole(&self, functions: &BTreeSet<Name>) -> Result<regions::Whole, PrintError> {
         let unprintable = || PrintError::Unprintable {
-            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, Vec::new()),
+            site: lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                Vec::new(),
+            ),
         };
         let parts = regions::module_parts(self.document).ok_or_else(unprintable)?;
         let regions = Regions {

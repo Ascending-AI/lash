@@ -35,7 +35,7 @@ pub enum StoredObject {
         next: u64,
     },
     Closure {
-        callable: lash_vocabulary::names::CallableId,
+        callable: lash_kernel_value::names::CallableId,
         site: Box<SiteRef>,
         captures: Vec<(NameRef, EntityId)>,
     },
@@ -638,7 +638,7 @@ pub mod pages {
         PageValue, Payload, TextRef, TupleRef, TupleSummary,
     };
     use lash_kernel_doc::heap_values::{integer_digits, task_count, text_summary};
-    use lash_vocabulary::tokens::encode_body;
+    use lash_kernel_value::tokens::encode_body;
 
     /// A text: inline when short, else payload pages.
     ///

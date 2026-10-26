@@ -38,7 +38,7 @@ use crate::LiveReplayEventDraft;
 use crate::LiveReplayStore;
 use crate::SessionObservationEventPayload;
 use crate::SessionRevision;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The durable heads this node published, per session, and the commits it

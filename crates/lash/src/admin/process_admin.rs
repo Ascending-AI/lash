@@ -1,8 +1,8 @@
 use super::AdminContext;
 use crate::support::{Arc, EmbedError, Result};
 use lash_core::ActorContext;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 #[derive(Clone)]
 /// Facade handle for session process administration.

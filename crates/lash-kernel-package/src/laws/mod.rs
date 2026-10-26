@@ -5,14 +5,13 @@ use lash_kernel_doc::{
     parse_definition,
 };
 
-use lash_vocabulary::types::Type;
-use lash_vocabulary::{
-    names::*,
-    operations::{ContractId, OperationRequirement},
-    package::*,
-    providers::FormatVersion,
-};
+use lash_kernel_value::types::Type;
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::*, lash_kernel_value::operations::ContractId,
+    lash_kernel_value::operations::OperationRequirement, lash_kernel_value::package::*,
+    lash_kernel_value::providers::FormatVersion,
+};
 fn path(text: &str) -> PackagePath {
     PackagePath::parse(text).unwrap()
 }
@@ -64,7 +63,7 @@ fn service(document: &Document, contract: &str, visibility: Visibility) -> Packa
                         contract: ContractId::new(contract),
                     },
                     intents: BTreeSet::new(),
-                    controls: lash_vocabulary::TurnControls::none(),
+                    controls: lash_kernel_value::TurnControls::none(),
                     mode: OperationMode::Waited,
                 }),
             },

@@ -421,7 +421,7 @@ impl StoreSnapshot {
         for session in sessions.iter().map(|row| required(row, "session_id")) {
             let messages = transcript_from(
                 factory.as_ref(),
-                &lash_vocabulary::identity::SessionId::fixture(session.as_str()),
+                &lash_kernel_value::identity::SessionId::fixture(session.as_str()),
             )
             .await?;
             let mut transcript = TranscriptSession {
@@ -479,7 +479,7 @@ impl StoreSnapshot {
 /// Read an active transcript directly from its store, including child sessions.
 async fn transcript_from(
     factory: &dyn lash_execution_contracts::deployment::DeploymentStore,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Vec<(String, String)>, String> {
     if !matches!(
         factory

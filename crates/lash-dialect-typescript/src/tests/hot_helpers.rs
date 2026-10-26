@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, ErrorDatum, Float, Integer, Timestamp};
 
+use lash_kernel_value::Name;
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
-use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -309,10 +309,10 @@ struct Console {
 impl Host for Console {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked_reads::read(use_, 0)
     }

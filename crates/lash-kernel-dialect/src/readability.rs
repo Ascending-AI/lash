@@ -49,7 +49,7 @@ pub struct Dialect<'a> {
 pub struct Occurrence {
     pub dialect: String,
     pub case: &'static str,
-    pub site: lash_vocabulary::sites::Site,
+    pub site: lash_kernel_value::sites::Site,
     pub node_kind: &'static str,
     pub rule: String,
     pub reason: &'static str,
@@ -107,17 +107,17 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     .document
                     .main
                     .iter()
-                    .map(|main| (lash_vocabulary::sites::Unit::Main, k::Node::Block(main)))
+                    .map(|main| (lash_kernel_value::sites::Unit::Main, k::Node::Block(main)))
                     .chain(case.document.functions.iter().filter_map(|(id, function)| {
                         function.body().map(|body| {
                             (
-                                lash_vocabulary::sites::Unit::Library(*id),
+                                lash_kernel_value::sites::Unit::Library(*id),
                                 k::Node::Block(&body.block),
                             )
                         })
                     }))
                 {
-                    let mut stack = vec![(lash_vocabulary::sites::Site::new(unit, vec![]), root)];
+                    let mut stack = vec![(lash_kernel_value::sites::Site::new(unit, vec![]), root)];
                     while let Some((site, node)) = stack.pop() {
                         for (index, child) in node.children().into_iter().enumerate() {
                             stack.push((site.child(index as u32), child));
@@ -382,11 +382,11 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
 
 fn site_node<'a>(
     document: &'a k::Document,
-    site: &lash_vocabulary::sites::Site,
+    site: &lash_kernel_value::sites::Site,
 ) -> Option<k::Node<'a>> {
     let mut node = match &site.unit {
-        lash_vocabulary::sites::Unit::Main => k::Node::Block(document.main.as_ref()?),
-        lash_vocabulary::sites::Unit::Library(id) => {
+        lash_kernel_value::sites::Unit::Main => k::Node::Block(document.main.as_ref()?),
+        lash_kernel_value::sites::Unit::Library(id) => {
             k::Node::Block(&document.functions.get(id)?.body()?.block)
         }
         _ => return None,
@@ -428,7 +428,7 @@ mod tests {
         ) -> Result<crate::PrintedSource, PrintError> {
             let mut writer = SourceWriter::new(options);
             writer.write("main\n");
-            writer.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
+            writer.begin_node(Some(&lash_kernel_value::sites::Unit::Main));
             writer.write("generic");
             writer.end_node();
             writer.finish(document, SourceFormat::TypeScriptV1)
@@ -527,7 +527,7 @@ mod tests {
             let mut writer = SourceWriter::new(options);
             writer.write(self.0);
             writer.write("\nmain\n");
-            writer.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
+            writer.begin_node(Some(&lash_kernel_value::sites::Unit::Main));
             writer.write("generic");
             writer.end_node();
             writer.finish(document, SourceFormat::TypeScriptV1)

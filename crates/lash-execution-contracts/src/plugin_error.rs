@@ -1,5 +1,5 @@
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 /// One refusal for a durable identity re-presented with different content.
 ///
@@ -308,9 +308,9 @@ define_plugin_errors! {
         => "tool_presentation_refused"
         => crate::ToolFailureClass::InvalidRequest;
     #[error("{source}")]
-    UnusableSchema { source: Box<lash_vocabulary::json_schema::SchemaAdmissionError> }
+    UnusableSchema { source: Box<lash_kernel_value::json_schema::SchemaAdmissionError> }
         => PluginError::UnusableSchema { source }
-        => { source: Box<lash_vocabulary::json_schema::SchemaAdmissionError> }
+        => { source: Box<lash_kernel_value::json_schema::SchemaAdmissionError> }
         => Self::UnusableSchema { source: source.clone() }
         => Self::UnusableSchema { .. }
         => "unusable_schema"
@@ -324,9 +324,9 @@ define_plugin_errors! {
         => "unusable_tool_schema"
         => crate::ToolFailureClass::InvalidRequest;
     #[error("invalid {context}: {source}")]
-    ValueMismatch { context: String, source: Box<lash_vocabulary::json_schema::ValueMismatch> }
+    ValueMismatch { context: String, source: Box<lash_kernel_value::json_schema::ValueMismatch> }
         => PluginError::ValueMismatch { context, source }
-        => { context: String, source: Box<lash_vocabulary::json_schema::ValueMismatch> }
+        => { context: String, source: Box<lash_kernel_value::json_schema::ValueMismatch> }
         => Self::ValueMismatch { context: context.clone(), source: source.clone() }
         => Self::ValueMismatch { .. }
         => "value_mismatch"
@@ -396,9 +396,9 @@ define_plugin_errors! {
     /// recorded identity is a process run's `SessionTurn` initialisation,
     /// not a create.
     #[error("session `{session_id}` already exists")]
-    SessionAlreadyExists { session_id: lash_vocabulary::identity::SessionId }
+    SessionAlreadyExists { session_id: lash_kernel_value::identity::SessionId }
         => PluginError::SessionAlreadyExists { session_id }
-        => { session_id: lash_vocabulary::identity::SessionId }
+        => { session_id: lash_kernel_value::identity::SessionId }
         => Self::SessionAlreadyExists { session_id: session_id.clone() }
         => Self::SessionAlreadyExists { .. }
         => "session_already_exists"
@@ -885,8 +885,8 @@ impl From<crate::AttachmentStoreError> for PluginError {
 }
 
 /// Blank text offered as an identity is the store's refusal of it.
-impl From<lash_vocabulary::identity::BlankIdentity> for PluginError {
-    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
+impl From<lash_kernel_value::identity::BlankIdentity> for PluginError {
+    fn from(error: lash_kernel_value::identity::BlankIdentity) -> Self {
         crate::StoreError::from(error).into()
     }
 }
@@ -1343,7 +1343,7 @@ impl From<crate::config_error::ConfigRegistrationError> for PluginError {
 mod classification_tests {
     #[test]
     fn schema_causes_retain_typed_fields_through_recorded_intent_and_runtime() {
-        let admission = lash_vocabulary::json_schema::JsonSchema::admit(serde_json::Value::Null)
+        let admission = lash_kernel_value::json_schema::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema");
         let catalog = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "bad",
@@ -1353,7 +1353,7 @@ mod classification_tests {
             serde_json::json!({"type":"null"}),
         )
         .expect_err("a tool cannot publish an unusable schema");
-        let mismatch = lash_vocabulary::json_schema::ValueMismatch {
+        let mismatch = lash_kernel_value::json_schema::ValueMismatch {
             instance_path: "/count".into(),
             message: "integer required".into(),
         };
@@ -1421,8 +1421,8 @@ mod classification_tests {
         let refusal = lash_core_store::plugin_state::FormatRefusal {
             plugin: "unreadable-plugin".into(),
             namespace: crate::FormatNamespace::Config,
-            stored: lash_vocabulary::providers::FormatVersion::new(7).expect("nonzero format"),
-            readable: lash_vocabulary::providers::FormatVersion::ONE,
+            stored: lash_kernel_value::providers::FormatVersion::new(7).expect("nonzero format"),
+            readable: lash_kernel_value::providers::FormatVersion::ONE,
         };
         let expected = serde_json::json!({
             "plugin": "unreadable-plugin", "namespace": "config", "stored": 7, "readable": 1,

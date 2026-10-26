@@ -1,6 +1,6 @@
 use super::*;
 use lash::TurnInput;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The bounded session's recorded budget.

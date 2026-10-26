@@ -7,7 +7,7 @@ use lash_durable::domain::graph_commit::CheckedGraph;
 /// no list position supplies identity. Application keeps the original write
 /// order and reaches every refusal under the original fences.
 pub(super) type PreparedSessions = std::collections::BTreeMap<
-    (lash_vocabulary::identity::SessionId, u64),
+    (lash_kernel_value::identity::SessionId, u64),
     std::collections::BTreeMap<
         String,
         Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
@@ -130,7 +130,7 @@ pub(super) fn apply_owner(
     let (turn_cancel, open_roots) = match write.actor().kind() {
         lash_durable::ActorKind::Session => {
             let Ok(session) =
-                lash_vocabulary::identity::SessionId::try_from(write.actor().id().to_owned())
+                lash_kernel_value::identity::SessionId::try_from(write.actor().id().to_owned())
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };

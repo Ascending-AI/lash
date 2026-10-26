@@ -19,9 +19,9 @@ use lash_kernel_doc::CaptionTarget;
 use lash_kernel_doc::Captions;
 use lash_kernel_doc::Document;
 use lash_kernel_doc::{Export, Expr, FieldTarget, Node, ParamTarget};
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::{Site, Unit};
+use lash_kernel_value::names::Name;
 use serde::Deserialize;
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use crate::HarnessError;
 
@@ -367,7 +367,7 @@ impl CaptionDialect<'_> {
                 .filter(|entry| {
                     authored.get(&entry.target).is_some()
                         || entry.target.site().is_some_and(|site| {
-                            (site.unit == lash_vocabulary::sites::Unit::Main
+                            (site.unit == lash_kernel_value::sites::Unit::Main
                                 && !document.exports.is_empty())
                                 || !authored_units.contains(&site.unit)
                         })
@@ -434,12 +434,12 @@ impl CaptionDialect<'_> {
             (
                 "another document",
                 other.identity(),
-                serde_json::json!({"site": Site::new(lash_vocabulary::sites::Unit::Main, [0])}),
+                serde_json::json!({"site": Site::new(lash_kernel_value::sites::Unit::Main, [0])}),
             ),
             (
                 "main's body",
                 document.identity(),
-                serde_json::json!({"site": Site::new(lash_vocabulary::sites::Unit::Main, Vec::new())}),
+                serde_json::json!({"site": Site::new(lash_kernel_value::sites::Unit::Main, Vec::new())}),
             ),
             (
                 "a parameter the entry lacks",
@@ -548,7 +548,7 @@ pub fn everywhere(document: &Document) -> Result<Captions, HarnessError> {
 /// no separate declaration caption (`K-CAP-003`).
 fn authored_surface(lowered: &Lowered, source: &str) -> Result<Captions, HarnessError> {
     use lash_kernel_doc::{CaptionKind, Node};
-    use lash_vocabulary::sites::Unit;
+    use lash_kernel_value::sites::Unit;
     let document = lowered.document.document();
     let exports: BTreeSet<_> = document
         .exports

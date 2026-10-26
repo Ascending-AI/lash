@@ -10,7 +10,7 @@ use lash_core_store::{
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
-use lash_vocabulary::names::OperationUse;
+use lash_kernel_value::names::OperationUse;
 
 pub type DeferredResolutionError = ResolutionError;
 

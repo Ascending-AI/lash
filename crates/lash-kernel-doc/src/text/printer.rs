@@ -6,7 +6,7 @@ use crate::ast::{
     ActKind, Action, AssignOrder, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs,
     Stmt,
 };
-use lash_vocabulary::type_text::write_quoted;
+use lash_kernel_value::type_text::write_quoted;
 
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
@@ -14,9 +14,12 @@ use crate::function::{Formula, FunctionDefinition, Operand};
 use crate::function_value::{CallablePresentation, FunctionRepresentation, StartConvention};
 
 use crate::number::NumberPolicy;
-use lash_vocabulary::names::{FunctionId, FunctionName, Name, is_identifier};
-use lash_vocabulary::type_text::is_keyword;
-use lash_vocabulary::types::{Signature, Type};
+use lash_kernel_value::type_text::is_keyword;
+use {
+    lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName,
+    lash_kernel_value::names::Name, lash_kernel_value::names::is_identifier,
+};
+use {lash_kernel_value::types::Signature, lash_kernel_value::types::Type};
 
 /// Writes a document as kernel text. [`super::parse_document`] reads the
 /// text back to an equal document.
@@ -758,9 +761,9 @@ impl<'a> Printer<'a> {
     }
     fn imports(
         &mut self,
-        imports: &BTreeMap<lash_vocabulary::names::ImportSlot, lash_vocabulary::names::Import>,
+        imports: &BTreeMap<lash_kernel_value::names::ImportSlot, lash_kernel_value::names::Import>,
     ) {
-        use lash_vocabulary::names::{Convention, ImportKind};
+        use {lash_kernel_value::names::Convention, lash_kernel_value::names::ImportKind};
         for (slot, import) in imports {
             let name = format!("{}.{}", import.name.package, import.name.member);
             self.out.push_str(&format!("import {} ", slot.0));
@@ -807,7 +810,7 @@ impl<'a> Printer<'a> {
     }
 
     fn ty(&mut self, ty: &Type) {
-        self.out.push_str(&lash_vocabulary::print_type(ty));
+        self.out.push_str(&lash_kernel_value::print_type(ty));
     }
 
     fn formula(&mut self, formula: &Formula) {

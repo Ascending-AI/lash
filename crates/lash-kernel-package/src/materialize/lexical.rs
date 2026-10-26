@@ -1,6 +1,6 @@
 //! Ordinary lexical factories allocate cells before any captured reference is filled.
 use super::*;
-use lash_vocabulary::{Param, Signature, Type};
+use {lash_kernel_value::Param, lash_kernel_value::Signature, lash_kernel_value::Type};
 
 pub(super) fn definition(
     name: String,

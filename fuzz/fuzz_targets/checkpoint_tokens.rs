@@ -3,13 +3,13 @@
 
 use lash_kernel_doc::Datum;
 use lash_kernel_state::paged::{Checkpoint, CheckpointRoot};
-use lash_vocabulary::tokens::{TokenCodec, decode_body_with_limits, encode_body};
+use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::decode_body_with_limits, lash_kernel_value::tokens::encode_body};
 use libfuzzer_sys::fuzz_target;
 
 fn canonical<T: TokenCodec>(bytes: &[u8]) {
     // Narrow recursion independently of the input byte cap, including recursive
     // function captures. The standard-depth refusal already has its own law.
-    let limits = lash_vocabulary::KernelDataLimits::new(64, 352, 64, 512, 128).unwrap();
+    let limits = lash_kernel_value::KernelDataLimits::new(64, 352, 64, 512, 128).unwrap();
     if let Ok(value) = decode_body_with_limits::<T>(bytes, limits) {
         assert_eq!(encode_body(&value), bytes, "accepted a second spelling");
     }

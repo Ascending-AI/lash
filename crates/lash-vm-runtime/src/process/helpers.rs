@@ -1,8 +1,8 @@
 //! Adoption uses explicit import/use correspondence, never a global function-name rewrite.
 use lash_kernel_migrate::{AdoptedUses, AdoptionRefusal};
 use lash_kernel_package::{LinkRefusal, LinkedContent};
-use lash_vocabulary::{names::*, package::*};
 use std::collections::{BTreeMap, BTreeSet};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*};
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum HelperAdoptionRefusal {
     #[error(transparent)]

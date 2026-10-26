@@ -38,7 +38,7 @@ use lash_core::runtime::durable::session_mail::{
 };
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Arms and disarms a cut of the producer transactions on the store under
 /// test: while armed, the transaction fails at the session actor's wake, the

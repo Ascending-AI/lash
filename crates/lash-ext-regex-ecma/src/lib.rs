@@ -51,7 +51,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::RegistryError;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 pub use definitions::{
     BRAND, CHARGE_BASE, CHARGE_PER_PATTERN_UNIT, GUARD_BASE, GUARD_PER_INPUT_UNIT, GUARD_UNIT,

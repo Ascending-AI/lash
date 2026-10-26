@@ -3,11 +3,11 @@
 //! invented by a source front end.
 use lash_kernel_doc::{Block, FunctionBody, FunctionDefinition, Implementation, Node};
 
-use lash_vocabulary::{
-    names::*,
-    types::{Param, Signature, Type},
-};
 use std::collections::BTreeMap;
+use {
+    lash_kernel_value::names::*, lash_kernel_value::types::Param,
+    lash_kernel_value::types::Signature, lash_kernel_value::types::Type,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct Imports(
@@ -133,7 +133,7 @@ pub fn used_imports(block: &Block) -> std::collections::BTreeSet<ImportSlot> {
 pub struct HelperOperation {
     pub slot: ImportSlot,
     pub name: QualifiedName,
-    pub requirement: lash_vocabulary::OperationRequirement,
+    pub requirement: lash_kernel_value::OperationRequirement,
 }
 
 /// Project the owner's declarations once, refusing duplicate slots or names.

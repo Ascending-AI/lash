@@ -1,5 +1,5 @@
 use lash_core::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::durable_session::DurableSession;

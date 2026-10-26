@@ -2,7 +2,7 @@
 //! fulfiller and namespace projection used by hosts select every Import.
 use super::*;
 use lash_kernel_package::{LinkedContent, Namespace};
-use lash_vocabulary::{names::*, package::*};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*};
 
 pub(crate) struct FixtureNamespace {
     content: LinkedContent,
@@ -11,8 +11,8 @@ pub(crate) struct FixtureNamespace {
 }
 impl FixtureNamespace {
     pub(crate) fn new(
-        effects: BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::OperationRequirement>,
-        controls: &BTreeMap<lash_vocabulary::EffectName, lash_vocabulary::TurnControls>,
+        effects: BTreeMap<lash_kernel_value::EffectName, lash_kernel_value::OperationRequirement>,
+        controls: &BTreeMap<lash_kernel_value::EffectName, lash_kernel_value::TurnControls>,
     ) -> Result<Self> {
         let release = lash::vm::helper_release()?;
         let mut content = LinkedContent::default();
@@ -77,7 +77,7 @@ impl FixtureNamespace {
     pub(crate) fn link(
         &self,
         document: Document,
-    ) -> Result<(LinkedContent, lash_vocabulary::LinkId)> {
+    ) -> Result<(LinkedContent, lash_kernel_value::LinkId)> {
         let mut content = self.content.clone();
         let id = content.insert_document(document, self.helpers.as_ref())?;
         let attachment = Attachment {

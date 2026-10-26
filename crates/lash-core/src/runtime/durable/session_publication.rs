@@ -48,7 +48,7 @@ impl Publishes {
     async fn landed(
         self,
         cx: &ActorContext,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<bool, DurableError> {
         match self {
             Self::Working(root) => Ok(cx
@@ -74,7 +74,7 @@ impl Publishes {
 }
 
 /// The write of `tx` that publishes or clears `session`'s execution root, if any.
-fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Option<Publishes> {
+fn published(tx: &ActorTx, session: &lash_kernel_value::identity::SessionId) -> Option<Publishes> {
     tx.domain().iter().find_map(|write| match write {
         DomainWrite::Turn(TurnWrite::Working {
             session: wrote,
@@ -118,7 +118,7 @@ fn published(tx: &ActorTx, session: &lash_vocabulary::identity::SessionId) -> Op
 pub(crate) async fn commit(
     cx: &ActorContext,
     executor: Option<&Arc<dyn CodeExecutorPlugin>>,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     mut tx: ActorTx,
     label: CommitLabel,
     release: Option<Release>,

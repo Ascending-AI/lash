@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const CHECKPOINT_CURVE_SCALE: usize = 4;
 const CHECKPOINT_CURVE_COMMIT_BYTES: usize = 32 * 1024 * 1024;

@@ -5,7 +5,7 @@
 const LASH_AGENT_FRAME_KEY_DOMAIN_VERSION: &str = "lash.agent-frame-key/v2";
 
 use crate::core_support::Blake3DomainHasher;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// version_surface = "coexist"
 /// version_guard(items(FRAME_KEY_PREFIX, derive, is_derived))

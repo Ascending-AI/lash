@@ -1,7 +1,7 @@
 use super::*;
 
 use lash_facade_tests::durable::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_contention_retains_its_type_and_retryability_across_existing_session_apis() {

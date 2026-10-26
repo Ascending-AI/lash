@@ -376,7 +376,7 @@ pub struct StateResolution {
     pub publisher: crate::EffectAddress,
     pub plugin: String,
     /// The format of the namespace this resolution changes.
-    pub format_version: lash_vocabulary::providers::FormatVersion,
+    pub format_version: lash_kernel_value::providers::FormatVersion,
     pub origin: StateCommandOrigin,
     /// The segment that published it.
     pub segment: SegmentOrdinal,

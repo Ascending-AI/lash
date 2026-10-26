@@ -59,3 +59,8 @@ mod helper_segments;
 mod linked;
 
 mod document_fixture;
+
+#[cfg(feature = "shipped-library")]
+mod installed;
+#[cfg(feature = "shipped-library")]
+pub use installed::installed_functions;

@@ -600,19 +600,19 @@ impl TraceEvent {
                     }
                     if let Some(admission) = error.schema_admission.as_deref_mut() {
                         match admission {
-                            lash_vocabulary::json_schema::SchemaAdmissionError::Compilation {
+                            lash_kernel_value::json_schema::SchemaAdmissionError::Compilation {
                                 message,
                                 ..
                             }
-                            | lash_vocabulary::json_schema::SchemaAdmissionError::Unprojectable {
+                            | lash_kernel_value::json_schema::SchemaAdmissionError::Unprojectable {
                                 message,
                                 ..
                             } => text(C::CodeOutput, "code_output.error.schema", message, f),
-                            lash_vocabulary::json_schema::SchemaAdmissionError::NonLocalReference {
+                            lash_kernel_value::json_schema::SchemaAdmissionError::NonLocalReference {
                                 reference,
                                 ..
                             } => text(C::CodeOutput, "code_output.error.reference", reference, f),
-                            lash_vocabulary::json_schema::SchemaAdmissionError::InvalidKind { .. } => {}
+                            lash_kernel_value::json_schema::SchemaAdmissionError::InvalidKind { .. } => {}
                         }
                     }
                 }

@@ -5,7 +5,7 @@ use super::{
     SessionCheckpoint, StoreError, commit_identity,
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A committed frame switch's artifact half (ADR 0113 §3.1).
 #[derive(Clone, Debug, PartialEq, Eq)]

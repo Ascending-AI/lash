@@ -88,13 +88,13 @@ enum Fold {
 }
 
 impl Plan {
-    pub(crate) fn new(formula: &doc::Formula, params: &[lash_vocabulary::types::Param]) -> Self {
+    pub(crate) fn new(formula: &doc::Formula, params: &[lash_kernel_value::types::Param]) -> Self {
         Self::prepare(formula, params, false)
     }
 
     fn prepare(
         formula: &doc::Formula,
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
         shallow: bool,
     ) -> Self {
         let mut plan = Self {
@@ -167,7 +167,7 @@ impl Plan {
     fn term(
         &mut self,
         formula: &doc::Formula,
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
         shallow: bool,
     ) {
         match formula {
@@ -209,7 +209,7 @@ impl Plan {
         &mut self,
         fold: Fold,
         items: &[doc::Formula],
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
         shallow: bool,
     ) {
         let (identity, combine): (u64, fn(u64, u64) -> u64) = match fold {
@@ -249,7 +249,7 @@ impl Plan {
         &mut self,
         op: Op,
         items: &[doc::Formula],
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
         shallow: bool,
     ) {
         if items.is_empty() {
@@ -268,7 +268,7 @@ impl Plan {
         &mut self,
         operand: &doc::Operand,
         measure: doc::Measure,
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
     ) {
         let source = match operand {
             doc::Operand::Result => Source::Result,
@@ -453,7 +453,7 @@ fn size_bit(source: Source) -> Option<usize> {
 
 impl ScalarTable {
     /// The table of `charge` for a function of `params`.
-    fn of(charge: &Plan, params: &[lash_vocabulary::types::Param]) -> Option<Self> {
+    fn of(charge: &Plan, params: &[lash_kernel_value::types::Param]) -> Option<Self> {
         if params.len() > 3
             || charge
                 .measurements
@@ -526,7 +526,7 @@ impl Fast {
     /// immediates, which a scalar charge table serves.
     pub(crate) fn new(
         formula: &doc::Formula,
-        params: &[lash_vocabulary::types::Param],
+        params: &[lash_kernel_value::types::Param],
         charge: &Plan,
         scalar: bool,
     ) -> Self {

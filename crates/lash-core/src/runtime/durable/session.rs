@@ -54,8 +54,8 @@ use crate::TurnMachine;
 use crate::TurnMachineConfig;
 use crate::TurnOutcome;
 use lash_execution_contracts::backend::Backend;
+use lash_kernel_value::identity::SessionId;
 use lash_sansio::EffectId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 pub use lash_durable::domain::{
@@ -270,7 +270,7 @@ pub struct TurnDone {
     /// The value schema its accepted finish was validated under: the
     /// witness its completion candidate kept. `None` when no finish tool
     /// ended it.
-    pub finish_value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
+    pub finish_value_schema: Option<lash_kernel_value::json_schema::JsonSchema>,
 }
 
 impl TurnDone {

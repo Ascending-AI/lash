@@ -17,7 +17,7 @@ impl KernelMachine {
     pub(super) fn build_helper_target(&self, exe: &Executable, lib: LibId) -> Target {
         let function = exe.lib(lib);
         Target::Export(
-            lash_vocabulary::CallableId {
+            lash_kernel_value::CallableId {
                 function: function.id,
                 link: self.current_link(),
             },
@@ -34,7 +34,7 @@ impl KernelMachine {
     pub(super) fn import_target(
         &self,
         exe: &Executable,
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
     ) -> Eval<Target> {
         let instance = self.program.instances.get(&self.current_link());
         match instance.and_then(|instance| instance.slots.get(&slot)) {
@@ -67,7 +67,7 @@ impl KernelMachine {
         &mut self,
         task: lash_kernel_doc::TaskId,
         exe: &Executable,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
         descriptor: &lash_kernel_doc::FunctionExport,
         invocation: super::exec::Invocation<'_>,
     ) -> Status {
@@ -116,7 +116,7 @@ impl KernelMachine {
     pub(super) fn export_arguments(
         &mut self,
         exe: &Executable,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
         descriptor: &lash_kernel_doc::FunctionExport,
         args: Reg,
         count: usize,
@@ -189,8 +189,8 @@ impl KernelMachine {
     pub(super) fn check_call_arguments(
         &mut self,
         exe: &Executable,
-        callable: lash_vocabulary::CallableId,
-        signature: &lash_vocabulary::Signature,
+        callable: lash_kernel_value::CallableId,
+        signature: &lash_kernel_value::Signature,
         args: Reg,
         count: usize,
         direct: bool,
@@ -209,7 +209,7 @@ impl KernelMachine {
             {
                 return self.raise_typed(
                     "function_argument",
-                    &lash_vocabulary::EntryTypeMismatch {
+                    &lash_kernel_value::EntryTypeMismatch {
                         callable,
                         mismatch: mismatch.within(param.name.as_str()).within("input"),
                     },
@@ -244,7 +244,7 @@ impl KernelMachine {
                         exe,
                         &value,
                         boundary.result,
-                        lash_vocabulary::CallableId {
+                        lash_kernel_value::CallableId {
                             function: exe.lib(lib).id,
                             link: self.current_link(),
                         },

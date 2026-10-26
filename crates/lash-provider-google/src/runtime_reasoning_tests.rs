@@ -297,7 +297,7 @@ async fn durable_backend() -> lash::Backend {
 
 /// Create the root session `session_id` on the test model.
 async fn created_session(core: &lash::LashCore, session_id: &str) -> lash::DurableSession {
-    core.session(lash_vocabulary::identity::SessionId::fixture(
+    core.session(lash_kernel_value::identity::SessionId::fixture(
         session_id.to_owned(),
     ))
     .create(lash::SessionCreation::root(lash::SessionSpec::new(

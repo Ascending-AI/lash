@@ -113,10 +113,10 @@ pub enum Unreplayable {
     Unobserved,
 }
 
-pub use lash_vocabulary::observation::ReplayPath;
-pub use lash_vocabulary::observation::TaskPath;
+pub use lash_kernel_value::observation::ReplayPath;
+pub use lash_kernel_value::observation::TaskPath;
 
-fn replay_path(path: lash_vocabulary::observation::ExecutionPath) -> ReplayPath {
+fn replay_path(path: lash_kernel_value::observation::ExecutionPath) -> ReplayPath {
     path.replay()
 }
 
@@ -159,8 +159,8 @@ impl ReplayHost {
 
 #[async_trait::async_trait]
 impl RunHost for ReplayHost {
-    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
-        lash_vocabulary::observation::RunObservation::Counts
+    fn observe(&self) -> lash_kernel_value::observation::RunObservation {
+        lash_kernel_value::observation::RunObservation::Counts
     }
 
     fn traces_path(&self) -> bool {
@@ -169,10 +169,10 @@ impl RunHost for ReplayHost {
 
     async fn perform(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let read = self
             .effects
@@ -197,7 +197,7 @@ impl RunHost for ReplayHost {
 struct Start_ {
     parked: Option<(ParkedPage, StepFact)>,
     admissions: Vec<Admission>,
-    deliver: Vec<(lash_vocabulary::sites::WaitId, OutcomeWire)>,
+    deliver: Vec<(lash_kernel_value::sites::WaitId, OutcomeWire)>,
 }
 
 /// What the journal retains of a process, as a replay reads it.
@@ -221,7 +221,7 @@ impl Journal<'_> {
         }
     }
 
-    fn issued(&self, run: u64, wait: lash_vocabulary::sites::WaitId) -> Option<&Issued> {
+    fn issued(&self, run: u64, wait: lash_kernel_value::sites::WaitId) -> Option<&Issued> {
         self.parked(run)?
             .1
             .iter()
@@ -232,7 +232,7 @@ impl Journal<'_> {
     /// from the record that holds it, and bound by its digest.
     fn delivered(
         &self,
-        wait: lash_vocabulary::sites::WaitId,
+        wait: lash_kernel_value::sites::WaitId,
         source: &DeliverySource,
         digest: &str,
     ) -> Result<OutcomeWire, Unreplayable> {
@@ -407,7 +407,7 @@ impl KernelProcessEngine {
                 serde_json::from_value::<KernelRecordedSettings>(settings.value().clone()).ok()
             })
             .filter(|settings| {
-                settings.observe == lash_vocabulary::observation::RunObservation::Counts
+                settings.observe == lash_kernel_value::observation::RunObservation::Counts
             });
         let mut answers = Vec::with_capacity(chosen.len());
         for segment in chosen {
@@ -581,7 +581,7 @@ impl KernelProcessEngine {
                 modes: reads
                     .read_effects
                     .iter()
-                    .map(|use_| (*use_, lash_vocabulary::package::OperationMode::Read))
+                    .map(|use_| (*use_, lash_kernel_value::package::OperationMode::Read))
                     .collect(),
                 host: Vec::new(),
                 save: None,
@@ -679,14 +679,14 @@ impl KernelProcessEngine {
                     ..
                 },
             ) => {
-                let replayed: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
-                let asked: Vec<(lash_vocabulary::sites::WaitId, Admission)> = park
+                let replayed: Vec<lash_kernel_value::sites::WaitId> = park.withdrawn.clone();
+                let asked: Vec<(lash_kernel_value::sites::WaitId, Admission)> = park
                     .requests
                     .iter()
                     .map(admission_of)
                     .filter(|(wait, _)| !replayed.contains(wait))
                     .collect();
-                let recorded_asks: Vec<(lash_vocabulary::sites::WaitId, Admission)> = issued
+                let recorded_asks: Vec<(lash_kernel_value::sites::WaitId, Admission)> = issued
                     .iter()
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();

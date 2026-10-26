@@ -1,7 +1,10 @@
 //! Schema admission plus neutral encoded-data fitting. Runtime Datum and
 //! heap decoding belong to the runtime; this checks the JSON result it receives.
-use lash_vocabulary::{JsonSchema, KernelDataLimits, Type, ValueMismatch};
 use serde_json::Value;
+use {
+    lash_kernel_value::JsonSchema, lash_kernel_value::KernelDataLimits, lash_kernel_value::Type,
+    lash_kernel_value::ValueMismatch,
+};
 
 pub(crate) fn admit_value(
     schema: &JsonSchema,
@@ -163,7 +166,7 @@ fn fit(value: &Value, ty: &Type, budget: usize) -> Result<(), ValueMismatch> {
                 }
             }
             for (name, value) in fields {
-                if matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                if matches!(record.rest, lash_kernel_value::RecordRest::Drop)
                     && !record.fields.iter().any(|field| field.name == *name)
                 {
                     continue;
@@ -188,7 +191,7 @@ fn fit(value: &Value, ty: &Type, budget: usize) -> Result<(), ValueMismatch> {
         }
         _ => Err(mismatch(format!(
             "value does not fit {}",
-            lash_vocabulary::print_type(ty)
+            lash_kernel_value::print_type(ty)
         ))),
     }
 }
@@ -198,8 +201,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::ToolCallOutput;
-    use lash_vocabulary::json_schema::JsonSchema;
-    use lash_vocabulary::json_schema::ValueMismatch;
+    use lash_kernel_value::json_schema::JsonSchema;
+    use lash_kernel_value::json_schema::ValueMismatch;
     use lash_vocabulary::tool_declaration::DeclarationRefusal;
     use lash_vocabulary::tool_declaration::ToolDeclaration;
 
@@ -275,11 +278,11 @@ mod tests {
         for (kind, expected, valid, invalid) in [
             (
                 "timestamp",
-                lash_vocabulary::Type::Timestamp,
+                lash_kernel_value::Type::Timestamp,
                 "12345678901234567890123456789012345678901234567890",
                 "1.5",
             ),
-            ("bytes", lash_vocabulary::Type::Bytes, "00abcdef", "ABC"),
+            ("bytes", lash_kernel_value::Type::Bytes, "00abcdef", "ABC"),
         ] {
             let schema =
                 JsonSchema::admit(json!({"type":"string", "x-lash":{"kind":kind}})).unwrap();

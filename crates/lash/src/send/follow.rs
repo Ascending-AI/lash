@@ -831,7 +831,7 @@ mod tests {
         .build(runtime_lease_owner())?;
         let session = created_session(
             &core,
-            lash_vocabulary::identity::SessionId::fixture("held-turn-closer"),
+            lash_kernel_value::identity::SessionId::fixture("held-turn-closer"),
         )
         .await
         .open()
@@ -896,7 +896,7 @@ mod tests {
     /// activity payloads before it knows which run consumed its input.
     #[tokio::test]
     async fn unbound_adoption_shares_replay_payloads_until_the_run_is_known() {
-        let session = lash_vocabulary::identity::SessionId::fixture("adoption-sharing");
+        let session = lash_kernel_value::identity::SessionId::fixture("adoption-sharing");
         let subject = Subject::Input(TurnInputAcceptanceReceipt {
             input_id: lash_vocabulary::identity::InputId::fixture("input"),
             session_id: session.clone(),

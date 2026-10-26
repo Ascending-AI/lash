@@ -42,9 +42,9 @@ use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::EngineStepRun;
 use lash_kernel_doc::IdentifiedDocument;
 
-use lash_vocabulary::names::DocumentId;
+use lash_kernel_value::names::DocumentId;
 
-use lash_vocabulary::types::Signature;
+use lash_kernel_value::types::Signature;
 use tokio_util::sync::CancellationToken;
 
 /// Kernel start input: linked source selection or a callable with its frozen environment.
@@ -57,23 +57,23 @@ use tokio_util::sync::CancellationToken;
 )]
 pub enum InlineRequest {
     Linked {
-        start: lash_vocabulary::names::LinkedStart,
+        start: lash_kernel_value::names::LinkedStart,
     },
     Callable {
-        link: lash_vocabulary::package::LinkId,
+        link: lash_kernel_value::package::LinkId,
         function: Box<lash_kernel_doc::FunctionValue>,
         origin: lash_vocabulary::package::CallableOrigin,
     },
     Unlinked {
         document: DocumentId,
-        selector: lash_vocabulary::names::StartSelector,
+        selector: lash_kernel_value::names::StartSelector,
     },
 }
 impl InlineRequest {
     pub fn linked(
         &self,
     ) -> Option<(
-        lash_vocabulary::package::LinkId,
+        lash_kernel_value::package::LinkId,
         lash_execution_contracts::process::linking::ReachSelector,
     )> {
         use lash_execution_contracts::process::linking::ReachSelector;
@@ -90,7 +90,7 @@ impl InlineRequest {
             Self::Unlinked { .. } => None,
         }
     }
-    pub(crate) fn links(&self) -> std::collections::BTreeSet<lash_vocabulary::package::LinkId> {
+    pub(crate) fn links(&self) -> std::collections::BTreeSet<lash_kernel_value::package::LinkId> {
         let mut links = std::collections::BTreeSet::new();
         match self {
             Self::Linked { start } => {
@@ -414,7 +414,7 @@ pub fn entry_signature(
 /// linked under `packages`, would have: a pure id and signature derivation,
 /// with no storage or registry read.
 pub fn definition_of_start(
-    start: &lash_vocabulary::names::LinkedStart,
+    start: &lash_kernel_value::names::LinkedStart,
     inspection: &lash_execution_contracts::process::linking::LinkInspection,
 ) -> Result<serde_json::Value, String> {
     let draft = definition_draft(&KernelProcessDefinition {
@@ -520,10 +520,10 @@ impl KernelProcessEngine {
         dialect: &str,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
-    ) -> Result<Self, lash_vm_releases::LibraryError> {
+    ) -> Result<Self, lash_kernel_releases::LibraryError> {
         let library = workers.config().worker_library()?;
         if !Arc::ptr_eq(documents.helpers(), library.helpers()) {
-            return Err(lash_vm_releases::LibraryError::new(
+            return Err(lash_kernel_releases::LibraryError::new(
                 "the document owner must share the worker image helper handle",
             ));
         }
@@ -667,8 +667,8 @@ impl KernelProcessEngine {
         };
         Ok((IdentifiedDocument::new(document), signature))
     }
-    pub(crate) fn machine_requirements(&self) -> lash_vocabulary::claims::NodeRequirements {
-        lash_vocabulary::claims::NodeRequirements {
+    pub(crate) fn machine_requirements(&self) -> lash_kernel_value::claims::NodeRequirements {
+        lash_kernel_value::claims::NodeRequirements {
             libraries: [self.documents.helpers().identity()].into(),
             natives: self
                 .functions
@@ -735,7 +735,7 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
     }
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::package::LinkId,
+        link: lash_kernel_value::package::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -743,7 +743,7 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
     > {
         self.documents.inspect_link(link, selector).await
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         self.machine_requirements()
     }
 

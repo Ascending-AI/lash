@@ -20,9 +20,9 @@ use lash_core::sync::MutexExt as _;
 use lash_core::{AppendSessionNodesOutcome, AppendSessionNodesRequest, SessionAppendNode};
 use lash_durable::{ActorState, CommitLabel, DurableError};
 use lash_durable_test::{Cut, Fault, SimNodes, Stored};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 use super::{session_actor, state};
 use crate::crash_matrix::deployment::Workload;

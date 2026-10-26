@@ -35,7 +35,7 @@ fn serving(
 /// within [`BOUND`].
 async fn send_in_turn(core: &LashCore, session: &str, texts: &[&str]) {
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(session).expect("session id"))
+        .session(lash_kernel_value::identity::SessionId::parse(session).expect("session id"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("create the session");

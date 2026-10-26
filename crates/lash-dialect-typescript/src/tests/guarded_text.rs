@@ -5,8 +5,8 @@ use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{Datum, Float, Integer};
 
+use lash_kernel_value::Name;
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
-use lash_vocabulary::Name;
 
 use super::machine;
 

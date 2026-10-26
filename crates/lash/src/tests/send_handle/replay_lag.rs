@@ -34,7 +34,7 @@ async fn a_follower_past_a_restarted_stream_reads_what_the_restart_published() -
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash_vocabulary::identity::SessionId::parse("send-restarted-stream")
+        lash_kernel_value::identity::SessionId::parse("send-restarted-stream")
             .expect("nonblank host identity"),
     )
     .await
@@ -142,7 +142,7 @@ impl FaultyReplay {
 impl lash_core::LiveReplayStore for FaultyReplay {
     async fn publish(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -198,7 +198,7 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 
     fn current_cursor(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session, revision)
@@ -206,14 +206,14 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 
     fn tail_cursor(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> lash_core::SessionCursor {
         self.inner.tail_cursor(session_id)
     }
 
     fn earliest_cursor(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.earliest_cursor(session, revision)
@@ -225,14 +225,14 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 
     async fn invalidate_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_session(session).await
     }
 
     async fn trim_session(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
@@ -279,7 +279,7 @@ async fn a_follower_answers_a_run_whose_node_died_after_its_commit_at_once() -> 
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("send-unpublished-commit")
+        lash_kernel_value::identity::SessionId::parse("send-unpublished-commit")
             .expect("nonblank host identity"),
     )
     .await
@@ -314,7 +314,7 @@ async fn a_runs_terminal_is_durable_only_once_its_activity_is_published() -> Res
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("send-lagging-replay")
+        lash_kernel_value::identity::SessionId::parse("send-lagging-replay")
             .expect("nonblank host identity"),
     )
     .await

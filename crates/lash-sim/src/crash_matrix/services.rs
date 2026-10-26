@@ -47,10 +47,10 @@ use lash_protocol_types::TurnCancelMode;
 use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
 
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use lash_vocabulary::tool_contract::ToolId;
 
 use super::world::{BodyEntry, World, retry};

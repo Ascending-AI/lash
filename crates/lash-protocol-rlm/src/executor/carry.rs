@@ -89,7 +89,7 @@ impl KernelCarry {
             Held::Registry(functions) => Ok(Arc::clone(functions)),
             Held::Release(release) => Ok(Arc::new(release.registry().clone())),
             Held::Lash => Ok(Arc::new(
-                lash_vm_releases::helper_release()
+                lash_kernel_releases::helper_release()
                     .map_err(|error| KernelMigrationRefusal::State {
                         message: error.to_string(),
                     })?

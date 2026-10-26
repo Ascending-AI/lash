@@ -6,11 +6,11 @@ use super::*;
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integral_float, key_digest};
-use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
 
 /// A canonical native aggregate awaiting admission. It owns its tree until
 /// installation succeeds; a precision refusal leaves it available for retry.
@@ -27,7 +27,7 @@ thread_local! {
 
 pub struct PagedHeap {
     pub(super) access: Access<'static>,
-    pub(super) limits: lash_vocabulary::data_limits::KernelDataLimits,
+    pub(super) limits: lash_kernel_value::data_limits::KernelDataLimits,
     pub(super) directory: Tree<ObjectHead>,
     pub(super) families: Tree<FamilyRecord>,
     next_ordinal: u64,
@@ -64,7 +64,7 @@ pub fn header_root(page: PageRef, answer: &PageAnswer) -> Result<HeapRoot, HeapF
     if answer.kind != PageKind::KEYED_LEAF {
         return Err(corrupt("expected heap header".into()));
     }
-    let mut input = lash_vocabulary::tokens::TokenReader::new(&answer.tokens);
+    let mut input = lash_kernel_value::tokens::TokenReader::new(&answer.tokens);
     let (variant, fields) = input.sum().map_err(|e| corrupt(e.to_string()))?;
     if variant != 0 || fields != 1 {
         return Err(corrupt("superseded heap header".into()));
@@ -115,7 +115,7 @@ impl PagedHeap {
         let families = Tree::of_keyed(&root.families);
         Ok(Self {
             access,
-            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory,
             families,
             next_ordinal: root.next_ordinal,
@@ -137,7 +137,7 @@ impl PagedHeap {
             working: Default::default(),
         })
     }
-    pub fn set_data_limits(&mut self, limits: lash_vocabulary::data_limits::KernelDataLimits) {
+    pub fn set_data_limits(&mut self, limits: lash_kernel_value::data_limits::KernelDataLimits) {
         self.limits = limits;
     }
     /// Select the unaccounted heap at run entry. No census is installed.
@@ -242,7 +242,7 @@ impl PagedHeap {
     pub fn bind_closure_capture(
         &mut self,
         closure: EntityId,
-        name: &lash_vocabulary::names::Name,
+        name: &lash_kernel_value::names::Name,
         value: PageValue,
     ) -> Result<EntityId, HeapWriteError> {
         self.required(closure, ObjectKind::Closure)?;
@@ -268,7 +268,7 @@ impl PagedHeap {
     pub fn replace_closure_code(
         &mut self,
         closure: EntityId,
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
         site: SiteRef,
     ) -> Result<(), HeapWriteError> {
         self.required(closure, ObjectKind::Closure)?;
@@ -563,7 +563,7 @@ impl SemanticHeap for PagedHeap {
     fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self {
         Self {
             access: Access::new(source),
-            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory: Tree::new(false),
             families: Tree::new(false),
             next_ordinal: 0,
@@ -595,7 +595,7 @@ impl SemanticHeap for PagedHeap {
     ) -> Result<Self, HeapFault> {
         Ok(Self {
             access: Access::new(source),
-            limits: lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory: Tree::of_keyed(&root.directory),
             families: Tree::of_keyed(&root.families),
             next_ordinal: root.next_ordinal,

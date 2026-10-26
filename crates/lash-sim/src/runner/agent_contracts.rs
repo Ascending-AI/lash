@@ -2,8 +2,8 @@ use super::*;
 use lash_protocol_types::ReportedFailure;
 
 mod process_fixtures;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use process_fixtures::*;
 
 thread_local! {
@@ -874,7 +874,7 @@ async fn agent_process_contract_core_with_options(
 /// The component that serves a contract's tools to its processes.
 const CONTRACT_TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "contract-tools",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// `builder` with the session process controls, `tools` and `delegation`,

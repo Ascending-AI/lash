@@ -98,7 +98,7 @@ fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
         )
         .expect("tool schema")
         // The contract the laws' kernel texts pin.
-        .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
+        .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120)),
     ]
 }
@@ -587,7 +587,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 .expect("waiting row");
             assert_eq!(
                 row.occurrences,
-                lash_vocabulary::sites::ObservationReader::counts(at).starts
+                lash_kernel_value::sites::ObservationReader::counts(at).starts
             );
             let lash::process::WaitKind::Call {
                 resume_at_ms: Some(until_ms),
@@ -750,7 +750,7 @@ async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
                 };
                 assert_eq!(
                     row.occurrences,
-                    lash_vocabulary::sites::ObservationReader::counts(at).starts
+                    lash_kernel_value::sites::ObservationReader::counts(at).starts
                 );
                 assert_eq!(row.state, ProcessWorkflowSiteState::Running);
             }
@@ -1623,7 +1623,7 @@ fn implicit_text_limits(
 
 #[cfg(feature = "typescript")]
 fn cell_with_implicit_text(source: &str) -> lash::dialect::Lowered {
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     let roots = release.resolver_roots();
     let library =
         lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))
@@ -1900,7 +1900,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
         .unwrap();
     // Even an unrelated typed edit must retain facts of copied code.
     let base = opened.draft.identity();
-    let release = lash_vm_releases::helper_release().unwrap();
+    let release = lash_kernel_releases::helper_release().unwrap();
     opened
         .draft
         .apply(

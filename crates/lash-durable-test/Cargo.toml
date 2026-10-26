@@ -24,6 +24,7 @@ workspace = true
 # The synthetic carry witness enables its VM feature through a normal optional edge.
 lash-vm-runtime = { workspace = true, optional = true }
 lash-vm-worker = { workspace = true, optional = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 async-trait = { workspace = true }

@@ -15,7 +15,7 @@ use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_exec::{ActIx, RegRange, Weight};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::paged::PhaseRecord;
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 use super::super::ops::Flow;
 use super::super::session::Session;
@@ -962,7 +962,7 @@ impl KernelMachine {
 /// Fields no call changes while a region batch or a callback walk runs.
 /// The bound stays at the entry: a callback's limiter can grow it.
 pub(in crate::machine) struct Ground<'a> {
-    pub(in crate::machine) link: lash_vocabulary::LinkId,
+    pub(in crate::machine) link: lash_kernel_value::LinkId,
     pub(in crate::machine) exe: &'a Executable,
     pub(in crate::machine) tape: Option<&'a ChargeTape>,
     pub(in crate::machine) recorder: Option<&'a ChargeTape>,

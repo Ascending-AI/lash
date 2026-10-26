@@ -132,7 +132,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
     let child_session_id =
-        lash_vocabulary::identity::SessionId::from("child-turn-cancellation-evidence");
+        lash_kernel_value::identity::SessionId::from("child-turn-cancellation-evidence");
     let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
         lash_execution_contracts::process::ProcessProvenance::host(),
@@ -275,7 +275,7 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     let value = serde_json::json!({ "answer": 42 });
     let typed = lash_execution_contracts::process::SessionTurnOutcome::FinalValue {
         schema: Some(
-            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
+            lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "answer": { "type": "integer" } },
                 "required": ["answer"],

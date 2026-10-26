@@ -39,10 +39,10 @@ use crate::session::tool_execution::{ToolInvocation, ToolInvocationReply};
 use crate::tool_run::CompletionSource;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 /// One tool call a cell makes, as its admitted member's frozen request
 /// carries it: everything its body is built from again, on any owner.
@@ -56,7 +56,7 @@ pub struct CellCall {
     pub args: serde_json::Value,
     /// The contract the cell's code requires of the call's operation: the
     /// one its tool must serve (OP-CONTRACT-PIN).
-    pub contract: lash_vocabulary::operations::ContractId,
+    pub contract: lash_kernel_value::operations::ContractId,
     /// The grant a deferred resolution pinned, for a tool outside the
     /// catalog.
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
@@ -70,7 +70,7 @@ impl CellCall {
     #[must_use]
     pub fn of(
         invocation: &ToolInvocation,
-        contract: lash_vocabulary::operations::ContractId,
+        contract: lash_kernel_value::operations::ContractId,
     ) -> Self {
         Self {
             id: invocation.id.clone(),
@@ -134,7 +134,7 @@ impl CellCall {
             id,
             tool_id: lash_vocabulary::tool_contract::ToolId::new(input.text()?),
             args,
-            contract: lash_vocabulary::operations::ContractId::decode(input)?,
+            contract: lash_kernel_value::operations::ContractId::decode(input)?,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
         })

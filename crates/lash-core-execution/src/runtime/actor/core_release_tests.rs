@@ -36,7 +36,7 @@ async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
         crate::trace::TraceRuntime::new(Arc::new(lash_core_ids::clock::SystemClock)),
     )
     .defer_session(crate::plugin::PluginSessionRequest::creation(
-        lash_vocabulary::identity::SessionId::fixture("released-environment"),
+        lash_kernel_value::identity::SessionId::fixture("released-environment"),
         crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .unwrap();

@@ -74,7 +74,7 @@ pub(super) async fn carry(
     }
     let predecessor = envelope.link;
     let next_document = lash_kernel_doc::IdentifiedDocument::new(plan.rewritten.document.clone());
-    let next = lash_vocabulary::package::Link {
+    let next = lash_kernel_value::package::Link {
         document: next_document.id(),
         fills: content.links[&predecessor].fills.clone(),
     };
@@ -88,7 +88,7 @@ pub(super) async fn carry(
         .inspect(
             &content,
             successor,
-            &lash_kernel_package::ReachSelection::Start(lash_vocabulary::StartSelector::Main),
+            &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
         )
         .map_err(|e| refusal(e.to_string()))?;
     let execution = super::link::execution_id(snapshots.exec());
@@ -282,9 +282,9 @@ pub(super) async fn carry(
     )
     .map_err(|e| text(&e))?;
     let start = |link| lash_vm_runtime::process::InlineRequest::Linked {
-        start: lash_vocabulary::LinkedStart {
+        start: lash_kernel_value::LinkedStart {
             link,
-            selector: lash_vocabulary::StartSelector::Main,
+            selector: lash_kernel_value::StartSelector::Main,
         },
     };
     let prepared = engine
@@ -315,7 +315,7 @@ pub(super) async fn carry(
     let mut inspection = documents
         .inspect_link(
             successor,
-            &ReachSelector::Start(lash_vocabulary::StartSelector::Main),
+            &ReachSelector::Start(lash_kernel_value::StartSelector::Main),
         )
         .await
         .map_err(|e| text(&e))?;
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn a_linked_migration_refusal_keeps_its_typed_cause_at_the_plugin_boundary() {
         let refusal = lash_vm_runtime::KernelMigrationRefusal::NotAdmitted {
-            document: lash_vocabulary::DocumentId::from_bytes([1; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([1; 32]),
             reason: "linked carry has no successor Link correspondence".into(),
         };
         let error = super::Error::Migration(refusal.clone()).into_runtime();

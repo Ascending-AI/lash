@@ -3,30 +3,30 @@
 //! makes a slot admit a function, through the one decode the presenters
 //! read too.
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::tool_shape::{SchemaDocument, ShapeKind};
-use lash_vocabulary::types::MapType;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::RecordType;
-use lash_vocabulary::types::RecordTypeField;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::MapType;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::RecordType;
+use lash_kernel_value::types::RecordTypeField;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 use serde_json::{Value, json};
+use {lash_kernel_value::tool_shape::SchemaDocument, lash_kernel_value::tool_shape::ShapeKind};
 
-use lash_vocabulary::schema::SchemaConflict;
-use lash_vocabulary::schema::SchemaProjectionRefusal;
-use lash_vocabulary::schema::signature_serves;
+use lash_kernel_value::schema::SchemaConflict;
+use lash_kernel_value::schema::SchemaProjectionRefusal;
+use lash_kernel_value::schema::signature_serves;
 
 /// The kernel type `schema` projects to as an input.
 fn type_of_schema(schema: &Value) -> Type {
-    lash_vocabulary::schema::type_of_schema(schema)
+    lash_kernel_value::schema::type_of_schema(schema)
         .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
         .0
 }
 
 /// The kernel type `schema` projects to as a result.
 fn result_type_of_schema(schema: &Value) -> Type {
-    lash_vocabulary::schema::result_type_of_schema(schema)
+    lash_kernel_value::schema::result_type_of_schema(schema)
         .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
         .0
 }
@@ -111,7 +111,7 @@ fn marked_forms() -> Vec<(Value, Type)> {
                 }],
                 result: Type::Record(RecordType {
                     fields: Vec::new(),
-                    rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+                    rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
                 }),
             })),
         ),
@@ -176,7 +176,7 @@ fn a_json_schema_admits_a_function_only_where_an_x_lash_marker_says_so() {
                 ty: Type::Text,
                 optional: true,
             }],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
         })
     );
 }
@@ -247,7 +247,7 @@ fn json_is_the_data_part_of_any() {
             })))),
             optional: false,
         }],
-        rest: lash_vocabulary::RecordRest::Closed,
+        rest: lash_kernel_value::RecordRest::Closed,
     });
     assert!(signature_serves(&returns(Type::Json), &returns(Type::Any)));
     assert!(!signature_serves(&returns(Type::Any), &returns(Type::Json)));
@@ -267,13 +267,13 @@ fn json_is_the_data_part_of_any() {
         Type::Handle("rows".into()),
     ] {
         assert!(
-            lash_vocabulary::type_relations::disjoint(&never, &Type::Json),
+            lash_kernel_value::type_relations::disjoint(&never, &Type::Json),
             "{never:?}"
         );
     }
     for some in [Type::Any, data, Type::Error, Type::Text] {
         assert!(
-            !lash_vocabulary::type_relations::disjoint(&some, &Type::Json),
+            !lash_kernel_value::type_relations::disjoint(&some, &Type::Json),
             "{some:?}"
         );
     }
@@ -298,7 +298,7 @@ fn field(name: &str, ty: Type, optional: bool) -> RecordTypeField {
 }
 
 fn refusal(schema: &Value) -> SchemaProjectionRefusal {
-    lash_vocabulary::schema::type_of_schema(schema).expect_err("no kernel type")
+    lash_kernel_value::schema::type_of_schema(schema).expect_err("no kernel type")
 }
 
 /// SCHEMA-UNION (FIG-6951): `anyOf`, `oneOf` and a `type` list project to
@@ -388,7 +388,7 @@ fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where(
         type_of_schema(&narrowed),
         Type::Record(RecordType {
             fields: vec![field("limit", Type::Int, true), field("mode", mode, false),],
-            rest: lash_vocabulary::RecordRest::Closed,
+            rest: lash_kernel_value::RecordRest::Closed,
         })
     );
     // A required member beside the record it refines adds nothing the
@@ -403,7 +403,7 @@ fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where(
         type_of_schema(&refined),
         Type::Record(RecordType {
             fields: vec![field("a", Type::Text, true), field("b", Type::Text, true)],
-            rest: lash_vocabulary::RecordRest::Closed,
+            rest: lash_kernel_value::RecordRest::Closed,
         })
     );
     // Each member's own openness: as an input, closed members leave no room
@@ -416,14 +416,14 @@ fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where(
         type_of_schema(&split),
         Type::Record(RecordType {
             fields: Vec::new(),
-            rest: lash_vocabulary::RecordRest::Closed
+            rest: lash_kernel_value::RecordRest::Closed
         })
     );
     assert_eq!(
         result_type_of_schema(&split),
         Type::Record(RecordType {
             fields: vec![field("a", Type::Text, true), field("b", Type::Int, true)],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
         })
     );
     // A meet distributes over a union and keeps the members that meet.
@@ -470,7 +470,7 @@ fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where(
         }
     );
     // The open result has room for the required field.
-    assert!(lash_vocabulary::schema::result_type_of_schema(&required_out).is_ok());
+    assert!(lash_kernel_value::schema::result_type_of_schema(&required_out).is_ok());
     let nested = json!({"allOf": [
         closed_object(json!({"plan": closed_object(json!({"step": {"type": "string"}}), &[])}), &[]),
         closed_object(json!({"plan": closed_object(json!({"step": {"type": "boolean"}}), &[])}), &[]),
@@ -508,11 +508,11 @@ fn a_marker_under_a_composition_types_and_presents_its_slot_as_the_marked_kind()
         for (schema, nullable) in [
             (
                 json!({"anyOf": [marked, {"type": "null"}]}),
-                lash_vocabulary::type_relations::union([expected.clone(), Type::Null]),
+                lash_kernel_value::type_relations::union([expected.clone(), Type::Null]),
             ),
             (
                 json!({"oneOf": [{"type": "null"}, marked]}),
-                lash_vocabulary::type_relations::union([Type::Null, expected.clone()]),
+                lash_kernel_value::type_relations::union([Type::Null, expected.clone()]),
             ),
         ] {
             assert_eq!(type_of_schema(&schema), nullable, "{schema}");
@@ -534,7 +534,7 @@ fn a_marker_under_a_composition_types_and_presents_its_slot_as_the_marked_kind()
                 type_of_schema(&slot),
                 Type::Record(RecordType {
                     fields: vec![field("definition", nullable.clone(), true)],
-                    rest: lash_vocabulary::RecordRest::Closed,
+                    rest: lash_kernel_value::RecordRest::Closed,
                 }),
                 "{slot}"
             );
@@ -595,7 +595,7 @@ fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_res
     let open = |rest: Type| {
         Type::Record(RecordType {
             fields: typed.clone(),
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(rest)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(rest)),
         })
     };
     let pydantic = open_object(fields.clone(), &["label"]);
@@ -614,7 +614,7 @@ fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_res
         type_of_schema(&closed),
         Type::Record(RecordType {
             fields: typed.clone(),
-            rest: lash_vocabulary::RecordRest::Closed,
+            rest: lash_kernel_value::RecordRest::Closed,
         })
     );
     assert_eq!(result_type_of_schema(&closed), open(Type::Json));
@@ -623,14 +623,14 @@ fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_res
         type_of_schema(&json!({"type": "object"})),
         Type::Record(RecordType {
             fields: Vec::new(),
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
         })
     );
     assert_eq!(
         type_of_schema(&json!({"type": "object", "additionalProperties": {"type": "integer"}})),
         Type::Record(RecordType {
             fields: Vec::new(),
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Int)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Int)),
         })
     );
     // Without a `type`, the record of data is absorbed by `Json`, and the
@@ -646,7 +646,7 @@ fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_res
             Type::Json,
             Type::Record(RecordType {
                 fields: vec![field("run", Type::Any, true)],
-                rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+                rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
             }),
         ])
     );
@@ -738,7 +738,7 @@ fn a_reference_cycle_terminates_at_json_or_at_any_where_it_reaches_a_marker() {
     let node = |rest: Type, next: Type| {
         Type::Record(RecordType {
             fields: vec![field("next", next, true), field("value", Type::Int, true)],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(rest)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(rest)),
         })
     };
     let list = json!({
@@ -766,7 +766,7 @@ fn a_reference_cycle_terminates_at_json_or_at_any_where_it_reaches_a_marker() {
     let record = |name: &str, ty: Type| {
         Type::Record(RecordType {
             fields: vec![field(name, ty, true)],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
         })
     };
     assert_eq!(
@@ -823,11 +823,11 @@ fn a_const_projects_to_its_literal_type() {
                     field("a", Type::Text, true),
                     field("kind", Type::Enum(vec!["a".into()]), false),
                 ],
-                rest: lash_vocabulary::RecordRest::Closed,
+                rest: lash_kernel_value::RecordRest::Closed,
             }),
             Type::Record(RecordType {
                 fields: vec![field("kind", Type::Enum(vec!["b".into()]), false)],
-                rest: lash_vocabulary::RecordRest::Closed,
+                rest: lash_kernel_value::RecordRest::Closed,
             }),
         ])
     );
@@ -858,7 +858,7 @@ fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_
         SchemaProjectionRefusal {
             path: "/properties/query/allOf".into(),
             conflict: Box::new(SchemaConflict::TooLarge {
-                limit: lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES
+                limit: lash_kernel_value::schema::MAX_PROJECTED_TYPE_NODES
             }),
         }
     );
@@ -877,7 +877,7 @@ fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_
     );
     // A union larger than the bound is as large as its members: it stands,
     // and so does its meet with a type that only narrows it.
-    let modes: Vec<Value> = (0..=lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES)
+    let modes: Vec<Value> = (0..=lash_kernel_value::schema::MAX_PROJECTED_TYPE_NODES)
         .map(|index| json!({"const": format!("v{index}")}))
         .collect();
     let Type::Union(wide) = type_of_schema(&json!({"type": "string", "anyOf": modes})) else {
@@ -885,7 +885,7 @@ fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_
     };
     assert_eq!(
         wide.len(),
-        lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES + 1
+        lash_kernel_value::schema::MAX_PROJECTED_TYPE_NODES + 1
     );
     // Sixteen definitions each naming the next twice resolve 2^17 - 1
     // references in full: the first resolutions are typed, and those past

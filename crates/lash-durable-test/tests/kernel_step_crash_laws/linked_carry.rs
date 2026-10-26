@@ -9,8 +9,8 @@ use lash_kernel_doc::{Datum, Document};
 use lash_kernel_doc::{Export, FunctionExport, StartConvention};
 use lash_kernel_package::LinkedContent;
 use lash_kernel_state::paged::PageSource;
+use lash_kernel_value::names::Name;
 use lash_kernel_vm::{KernelMachine, Machine};
-use lash_vocabulary::names::Name;
 use std::{collections::BTreeMap, sync::Arc};
 
 struct Fixture {
@@ -25,7 +25,7 @@ struct Fixture {
     leaf: LinkId,
     closure: PageId,
     rewritten: lash_kernel_migrate::Rewritten,
-    wait: lash_vocabulary::sites::WaitId,
+    wait: lash_kernel_value::sites::WaitId,
 }
 impl Fixture {
     async fn new() -> Self {
@@ -256,11 +256,11 @@ impl Fixture {
                 .flat_map(|(link, instance)| {
                     instance.fills.iter().filter_map(move |(slot, fill)| {
                         matches!(fill, Fill::Operation(_) | Fill::Deferred { .. }).then_some((
-                            lash_vocabulary::OperationUse {
+                            lash_kernel_value::OperationUse {
                                 link: *link,
                                 slot: *slot,
                             },
-                            lash_vocabulary::OperationUse {
+                            lash_kernel_value::OperationUse {
                                 link: if *link == self.from { self.to } else { *link },
                                 slot: *slot,
                             },
@@ -357,7 +357,7 @@ impl Fixture {
             };
             assert_eq!(
                 request.use_,
-                lash_vocabulary::OperationUse {
+                lash_kernel_value::OperationUse {
                     link: self.leaf,
                     slot: ImportSlot(0)
                 }
@@ -570,7 +570,7 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
     let content = documents.load_linked(link).await.unwrap();
     let document = &content.documents[&content.links[&link].document];
     let mut pending = vec![(
-        lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, []),
+        lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, []),
         lash_kernel_doc::Node::Block(document.main.as_ref().unwrap()),
     )];
     let (creation, callable, presentation) = loop {
@@ -592,7 +592,7 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
-        callable: lash_vocabulary::CallableId {
+        callable: lash_kernel_value::CallableId {
             link,
             function: callable,
         },

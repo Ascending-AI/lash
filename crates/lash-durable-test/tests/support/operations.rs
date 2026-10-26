@@ -3,7 +3,8 @@
 use lash_core_store::tool_surface::{
     ExecutionEnvironment, OperationRoute, RoutedOperation, UseBinding,
 };
-use lash_vocabulary::{claims::RegistryKind, *};
+use lash_kernel_value::*;
+use lash_vocabulary::{ToolDefinition, claims::RegistryKind, providers::ToolProviderHandle};
 use std::collections::BTreeMap;
 
 /// One imported operation and its committed pin. Its bytes, rather than a
@@ -50,7 +51,7 @@ pub fn use_for(definition: &ToolDefinition) -> OperationUse {
 }
 
 pub fn environment(
-    provider: providers::ToolProviderHandle,
+    provider: ToolProviderHandle,
     definitions: &[ToolDefinition],
 ) -> ExecutionEnvironment {
     let mut execution = ExecutionEnvironment::empty(RegistryKind::Process);
@@ -141,15 +142,15 @@ pub async fn retain(
 
 /// A fixture's tools enter code only through its explicit package provider.
 pub struct Packages {
-    pub provider: providers::ToolProviderHandle,
+    pub provider: ToolProviderHandle,
     pub definitions: Vec<ToolDefinition>,
 }
 #[async_trait::async_trait]
 impl lash_core_execution::plugin::packages::PackageProvider for Packages {
     fn environment_tool_sources(
         &self,
-        _: &providers::ToolProviderHandle,
-    ) -> std::collections::BTreeSet<providers::ToolProviderHandle> {
+        _: &ToolProviderHandle,
+    ) -> std::collections::BTreeSet<ToolProviderHandle> {
         [self.provider.clone()].into()
     }
     fn roots(

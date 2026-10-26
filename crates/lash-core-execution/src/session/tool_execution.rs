@@ -20,7 +20,7 @@ pub struct ToolInvocation {
     /// The contract the performing code requires of the call's operation;
     /// none for a model round's call, which is pinned to its recorded
     /// definition.
-    pub contract: Option<lash_vocabulary::operations::ContractId>,
+    pub contract: Option<lash_kernel_value::operations::ContractId>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
@@ -171,7 +171,7 @@ impl RuntimeExecutionContext<'_> {
     pub fn binding_formats(
         &self,
         codec: &lash_vocabulary::providers::ToolProviderHandle,
-    ) -> Option<&'static [lash_vocabulary::providers::FormatVersion]> {
+    ) -> Option<&'static [lash_kernel_value::providers::FormatVersion]> {
         self.dispatch
             .routes
             .registry()

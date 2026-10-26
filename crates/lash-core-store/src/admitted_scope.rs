@@ -7,8 +7,8 @@
 //! pinned beside it, because no successor can ever share the id.
 
 use crate::ExecutionScope;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// An [`ExecutionScope`] admitted for effect work.

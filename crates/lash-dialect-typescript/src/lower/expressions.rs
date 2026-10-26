@@ -3,7 +3,7 @@
 
 use lash_kernel_doc::{Expr, Literal, Member, Place, RecordEntry, Rhs, Stmt};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::calls::Key;
 use super::patterns::Mode;
@@ -590,7 +590,7 @@ impl Lowerer<'_> {
             (UnaryOp::Minus, ast::Expr::Number(number)) => return Ok(Operand::number(-number)),
             (UnaryOp::TypeOf, ast::Expr::Ident(name, _))
                 if !self.is_bound(name)
-                    && !crate::builtins::is_global(name)
+                    && !lash_ext_ts_helpers::builtins::is_global(name)
                     && name != "arguments"
                     && name != "Reflect" =>
             {

@@ -512,7 +512,7 @@ pub async fn relay_due(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     use super::*;
     use crate::store::{ClaimToken, ObligationKind, StalledObligation, UndecodableObligation};

@@ -1,7 +1,7 @@
 use super::*;
 use crate::TurnInput;
 use crate::tests::host::controls::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The config head `id` records.
 async fn recorded_config(core: &LashCore, id: &str) -> Result<lash_core::PersistedSessionConfig> {
@@ -53,7 +53,7 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
     for requested in [crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES + 1, u8::MAX] {
         let error = core
             .session(
-                lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"),
+                lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"),
             )
             .create(crate::SessionCreation::root(
                 mock_session_spec().charge_safety(
@@ -122,14 +122,16 @@ async fn creation_refuses_charge_safety_above_the_ceiling_without_recording_a_se
             )
         );
     }
-    core.session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            mock_session_spec().charge_safety(crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-                max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
-                max_duplicate_cost_tokens: None,
-            }),
-        ))
-        .await?;
+    core.session(
+        lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation::root(
+        mock_session_spec().charge_safety(crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: crate::ChargeSafetyPolicy::MAX_UNSAFE_RETRIES,
+            max_duplicate_cost_tokens: None,
+        }),
+    ))
+    .await?;
     assert_eq!(
         recorded_config(&core, ID).await?.charge_safety,
         crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
@@ -479,7 +481,7 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         "the session records the limit it was created with"
     );
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
     let admitted = session
@@ -524,7 +526,7 @@ async fn a_commanded_max_tool_calls_binds_the_next_run() -> Result<()> {
         "only the initially admitted bodies run"
     );
     let durable = core
-        .session(lash_vocabulary::identity::SessionId::from(ID))
+        .session(lash_kernel_value::identity::SessionId::from(ID))
         .durable()
         .await?;
     for output in [&refused, &reopened] {
@@ -630,7 +632,7 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
         });
     let core = core_over(backend.clone(), mock_provider())?;
     core.session(
-        lash_vocabulary::identity::SessionId::parse(SOURCE).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(SOURCE).expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::root(stated))
     .await?;
@@ -655,7 +657,7 @@ async fn a_fork_records_its_fork_points_config_whatever_the_host_passes_now() ->
         });
     later
         .session(
-            lash_vocabulary::identity::SessionId::parse(LATER).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(LATER).expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(changed))
         .await?;

@@ -185,7 +185,7 @@ impl RecordedWork {
     pub async fn read_session_within(
         reads: &dyn DurableReads,
         heads: &dyn crate::store::SessionCommitStore,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         limits: DecodeLimits,
         max_rows: usize,
     ) -> Result<Self, DurableError> {
@@ -205,7 +205,7 @@ impl RecordedWork {
     /// fault of the store.
     pub async fn read_head(
         heads: &dyn crate::store::SessionCommitStore,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Self, DurableError> {
         let mut work = Self::session();
         let head = heads
@@ -229,7 +229,7 @@ impl RecordedWork {
     /// A read's refusal, or a record that does not decode.
     pub(crate) async fn read_turn(
         reads: &dyn DurableReads,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         limits: DecodeLimits,
         phase_limits: DecodeLimits,
     ) -> Result<Self, DurableError> {
@@ -242,7 +242,7 @@ impl RecordedWork {
     async fn read_turn_into(
         &mut self,
         reads: &dyn DurableReads,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         mut limits: DecodeLimits,
         phase_limits: DecodeLimits,
         max_rows: Option<usize>,
@@ -677,7 +677,7 @@ impl RecordedWork {
 fn read_limit(actual: u64, limit: u64) -> DurableError {
     DurableError::Graph(
         lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-            dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
+            dimension: lash_kernel_value::tokens::DecodeDimension::Nodes,
             actual,
             limit,
         },
@@ -739,7 +739,7 @@ fn corrupt(record: &str, reason: &str) -> DurableError {
 /// The ledger one claim of a session commits its obligations through.
 #[derive(Debug)]
 pub(super) struct SessionObligations {
-    session: lash_vocabulary::identity::SessionId,
+    session: lash_kernel_value::identity::SessionId,
     /// Held across each commit, so commits stage and land in one order.
     state: super::claim_cell::ClaimCell<State>,
 }
@@ -758,7 +758,7 @@ struct State {
 impl SessionObligations {
     /// The ledger of a claim of session `session`, which carried `requires`.
     pub(super) fn claimed(
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         requires: &[String],
     ) -> Self {
         let mut written = requires.to_vec();
@@ -777,7 +777,7 @@ impl SessionObligations {
     /// outstanding `work` and the `written` requirements the store holds.
     #[cfg(test)]
     pub(super) fn seeded(
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         work: RecordedWork,
         written: Vec<String>,
     ) -> Self {
@@ -837,7 +837,7 @@ impl SessionObligations {
         commit: F,
     ) -> Result<T, DurableError>
     where
-        R: Fn(lash_vocabulary::identity::SessionId, ReadScope) -> ReadFut,
+        R: Fn(lash_kernel_value::identity::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<T, DurableError>>,
@@ -905,7 +905,7 @@ impl SessionObligations {
         written: Option<&[String]>,
     ) -> Result<RecordedWork, DurableError>
     where
-        R: Fn(lash_vocabulary::identity::SessionId, ReadScope) -> ReadFut,
+        R: Fn(lash_kernel_value::identity::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
     {
         let session = || self.session.clone();

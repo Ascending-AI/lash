@@ -37,7 +37,7 @@ use lash_core::runtime::durable::ProcessActivation;
 use lash_core::runtime::durable::node::{NodeServe, serve};
 use lash_core::runtime::durable::services::{RuntimeTurnServices, SessionRuntimes};
 use lash_core::runtime::durable::session::{SessionActivation, TurnError, TurnServices};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -466,13 +466,13 @@ mod tests {
             .component(crate::vm::KERNEL_SERVICES_CONFIG, &())
             .build()
             .unwrap();
-        let context = lash_vocabulary::PublicationContext {
-            domain: lash_vocabulary::PublicationDomain(
+        let context = lash_kernel_value::PublicationContext {
+            domain: lash_kernel_value::PublicationDomain(
                 core.backend().binding_identity().to_string(),
             ),
-            scope: lash_vocabulary::PublicationScope::Host,
-            publisher: lash_vocabulary::PublisherInstance("node-clock-law".into()),
-            root: lash_vocabulary::Segment::new("workflow").unwrap(),
+            scope: lash_kernel_value::PublicationScope::Host,
+            publisher: lash_kernel_value::PublisherInstance("node-clock-law".into()),
+            root: lash_kernel_value::Segment::new("workflow").unwrap(),
         };
         let packages = artifacts
             .process_namespace(&pin, &base, context.clone())
@@ -481,8 +481,8 @@ mod tests {
         let environment = crate::vm::WorkflowEnvironmentRequest {
             snapshot: packages.snapshot.clone(),
             context,
-            attachment: lash_vocabulary::Attachment {
-                packages: [lash_vocabulary::PackagePath::parse("typescript").unwrap()].into(),
+            attachment: lash_kernel_value::Attachment {
+                packages: [lash_kernel_value::PackagePath::parse("typescript").unwrap()].into(),
                 members: Default::default(),
                 deferred: Default::default(),
             },
@@ -491,7 +491,7 @@ mod tests {
             "function nap() -> Null\nkernel 1\nmetering statements\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nbody { do perform 0(600000) as Null return null }",
         )
         .unwrap();
-        let name = lash_vocabulary::Name::new("nap");
+        let name = lash_kernel_value::Name::new("nap");
         let mut document =
             lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
         document.main = None;
@@ -511,7 +511,7 @@ mod tests {
             .publish_workflow(
                 &pin,
                 &document.into(),
-                &lash_vocabulary::StartSelector::Export(name),
+                &lash_kernel_value::StartSelector::Export(name),
                 &environment,
                 None,
                 None,

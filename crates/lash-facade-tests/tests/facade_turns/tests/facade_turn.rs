@@ -9,7 +9,7 @@ async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
     let accounts = AccountCore::new().await;
     let session = accounts
         .core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "facade-queued-cancel",
         ))
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -72,7 +72,7 @@ async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
 async fn a_sent_input_runs_on_the_cores_node_and_answers_its_reply() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("facade-turn".to_owned()).expect("id");
+        lash_kernel_value::identity::SessionId::try_from("facade-turn".to_owned()).expect("id");
     let session = core
         .session(session_id)
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -112,7 +112,7 @@ async fn a_turns_model_call_carries_its_typed_turn_run_and_attempt() {
     .expect("standard core");
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::try_from("attributed-turn".to_owned())
+            lash_kernel_value::identity::SessionId::try_from("attributed-turn".to_owned())
                 .expect("id"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -152,7 +152,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
         "tools.switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -192,7 +192,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("facade-frame-switch".to_owned())
+        lash_kernel_value::identity::SessionId::try_from("facade-frame-switch".to_owned())
             .expect("id");
     let session = core
         .session(session_id)
@@ -251,7 +251,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
 async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_sees_it() {
     let accounts = AccountCore::new().await;
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("idle-refresh".to_owned()).expect("id");
+        lash_kernel_value::identity::SessionId::try_from("idle-refresh".to_owned()).expect("id");
     let session = accounts
         .core
         .session(session_id.clone())
@@ -329,7 +329,7 @@ async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_se
 async fn a_refresh_queued_during_a_turn_applies_after_its_commit_and_the_next_turn_sees_it() {
     let accounts = AccountCore::new().await;
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("in-turn-refresh".to_owned()).expect("id");
+        lash_kernel_value::identity::SessionId::try_from("in-turn-refresh".to_owned()).expect("id");
     let session = accounts
         .core
         .session(session_id.clone())
@@ -399,7 +399,7 @@ async fn cancelling_a_running_input_answers_cancelled_with_accepted_detail() {
     let accounts = AccountCore::new().await;
     let session = accounts
         .core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "facade-running-cancel",
         ))
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -443,7 +443,7 @@ async fn cancelling_a_running_input_answers_cancelled_with_accepted_detail() {
 async fn cancelling_an_unknown_or_completed_run_answers_unknown_or_revoked() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "facade-unknown-cancel",
         ))
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -503,7 +503,7 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("prompt-sections".to_owned()).expect("id");
+        lash_kernel_value::identity::SessionId::try_from("prompt-sections".to_owned()).expect("id");
     let session = core
         .session(session_id)
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -574,7 +574,7 @@ async fn a_call_whose_section_refuses_fails_closed_and_sends_nothing() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("standard core");
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from("broken-section".to_owned()).expect("id");
+        lash_kernel_value::identity::SessionId::try_from("broken-section".to_owned()).expect("id");
     let session = core
         .session(session_id)
         .create(lash::SessionCreation::root(mock_session_spec()))

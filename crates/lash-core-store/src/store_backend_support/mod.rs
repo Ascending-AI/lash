@@ -1,6 +1,6 @@
 //! Shared SQL and identity helpers backends implement their store tier with.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 mod append_identity;
 mod config_cache;

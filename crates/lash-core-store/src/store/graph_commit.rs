@@ -1,6 +1,6 @@
 use super::{GraphAppend, OperationId, StoreError, derive_history_node_id};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 impl GraphAppend {
     pub fn derive_node_ids(

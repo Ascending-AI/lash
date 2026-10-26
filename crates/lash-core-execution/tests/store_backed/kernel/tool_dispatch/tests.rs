@@ -153,7 +153,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
             &lash_execution_contracts::testing::process_env_with_limit(1024),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
-            session_id: lash_vocabulary::identity::SessionId::from("session"),
+            session_id: lash_kernel_value::identity::SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: crate::engine::NullObservationSink::arc(),
@@ -292,7 +292,7 @@ fn granted_binding() -> lash_vocabulary::providers::ExecutionBinding {
             "test_tools",
             crate::tool_provider_key!("tools"),
         ),
-        format: lash_vocabulary::providers::FormatVersion::ONE,
+        format: lash_kernel_value::providers::FormatVersion::ONE,
         payload: json!({ "kind": "test", "route": "deferred" }),
     }
 }
@@ -398,7 +398,9 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
     use crate::tool_dispatch::{CellCall, CellMember, CellMembers};
     use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
     use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
-    use lash_vocabulary::{ProviderName, names::*, package::*};
+    use {
+        lash_kernel_value::ProviderName, lash_kernel_value::names::*, lash_kernel_value::package::*,
+    };
 
     #[derive(Default)]
     struct DeferredOnly {
@@ -425,8 +427,10 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
             None
         }
 
-        fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
-            &[lash_vocabulary::providers::FormatVersion::ONE]
+        fn readable_binding_formats(
+            &self,
+        ) -> &'static [lash_kernel_value::providers::FormatVersion] {
+            &[lash_kernel_value::providers::FormatVersion::ONE]
         }
 
         async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -459,7 +463,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
                 },
                 config: ProviderConfig {
                     component: None,
-                    format: lash_vocabulary::providers::FormatVersion::ONE,
+                    format: lash_kernel_value::providers::FormatVersion::ONE,
                     value: serde_json::Value::Null,
                     payload: None,
                 },
@@ -550,7 +554,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         .tools()
         .provider_reading(
             crate::tool_provider_key!("tools"),
-            &[lash_vocabulary::providers::FormatVersion::ONE],
+            &[lash_kernel_value::providers::FormatVersion::ONE],
             {
                 let provider = provider.clone();
                 move |_, _| Ok(provider.clone() as Arc<dyn ToolProvider>)
@@ -594,9 +598,9 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         context: accepted.publication.context.clone(),
         path: package.path.clone(),
         visibility: package.visibility,
-        signature: lash_vocabulary::Signature {
+        signature: lash_kernel_value::Signature {
             params: Vec::new(),
-            result: lash_vocabulary::Type::Json,
+            result: lash_kernel_value::Type::Json,
         },
         config: package.config.clone(),
         resolution_policy: package.resolution_policy,
@@ -623,7 +627,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
     .into_runtime();
     let capabilities = Default::default();
     let owner = crate::ExecutionOwner::SessionFrame {
-        session_id: lash_vocabulary::identity::SessionId::from("test-session"),
+        session_id: lash_kernel_value::identity::SessionId::from("test-session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
     };
     let config = crate::plugin::OwnerConfigView::default();
@@ -684,7 +688,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
     };
     let draft = round::call_draft(&opener, &pending, pin).unwrap();
     let ledger_owner = lash_durable::domain::OwnerKey::Turn(
-        lash_vocabulary::identity::SessionId::from("test-session"),
+        lash_kernel_value::identity::SessionId::from("test-session"),
         lash_vocabulary::identity::TurnId::parse("test-turn").unwrap(),
     );
     let mut tx = controller.begin().await.unwrap();
@@ -719,7 +723,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
     let CellMember::Tool(call) = &mut unreadable;
     let grant = call.execution_grant.as_mut().unwrap();
     let payload = lash_vocabulary::providers::ExecutionBinding {
-        format: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
+        format: lash_kernel_value::providers::FormatVersion::new(2).unwrap(),
         ..grant.payload().unwrap().clone()
     };
     **grant = (**grant).clone().with_execution_binding(Some(payload));

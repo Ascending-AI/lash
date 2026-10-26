@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
 use lash_kernel_state::paged::HeaderRecord;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::{Drive, bodies, exact, int, list, text, tuple};
 

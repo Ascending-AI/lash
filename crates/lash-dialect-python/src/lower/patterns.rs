@@ -2,7 +2,7 @@
 //! in private slots until the whole pattern succeeds, before its guard.
 
 use lash_kernel_doc::{Expr, Literal, Place, Rhs};
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 use ruff_python_ast::{self as ast, Pattern};
 use ruff_text_size::Ranged;
 use std::collections::{BTreeMap, BTreeSet};

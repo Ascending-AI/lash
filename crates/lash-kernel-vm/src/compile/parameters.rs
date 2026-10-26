@@ -2,7 +2,7 @@
 //! call. This lexical walk resolves only captures; it emits no body code.
 use lash_kernel_doc::{self as doc};
 
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 pub(super) fn shared(
     definition: &doc::FunctionDefinition,

@@ -11,7 +11,7 @@
 use crate::helper_plans::{World, runner};
 use crate::projection::{Image, Plan};
 use lash_kernel_doc::Datum;
-use lash_kernel_vm::kernel_internals::conformance::checkpoint;
+use lash_kernel_state::semantic::checkpoint;
 use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{
     Bounds, CellStart, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,

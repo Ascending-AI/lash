@@ -103,7 +103,7 @@ await control.finish(await handle);"#,
     )
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session_id =
-        lash_vocabulary::identity::SessionId::parse("agent-scenario-process-llm-query")
+        lash_kernel_value::identity::SessionId::parse("agent-scenario-process-llm-query")
             .expect("nonblank host identity");
     let session = created_session(&core, session_id.clone())
         .await
@@ -166,17 +166,19 @@ fn retrying_direct_tool_definition() -> lash_vocabulary::tool_contract::ToolDefi
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
-        0,
-        0,
-    ))
+    .with_execution_policy(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
+            0,
+            0,
+        ),
+    )
 }
 
 /// The component that serves `retrying_direct` to a process body.
 const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "retrying-direct",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 #[async_trait]
@@ -272,7 +274,7 @@ await control.finish(await handle);"#,
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse(
+        lash_kernel_value::identity::SessionId::parse(
             "agent-scenario-direct-completion-attempt-retry",
         )
         .expect("nonblank host identity"),
@@ -402,7 +404,7 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                     Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))),
                 )
                 .build(lash_facade_tests::runtime_lease_owner())?;
-        let session_id = lash_vocabulary::identity::SessionId::parse(format!(
+        let session_id = lash_kernel_value::identity::SessionId::parse(format!(
             "overflow-continuation-{classified}"
         ))
         .expect("nonblank session identity");

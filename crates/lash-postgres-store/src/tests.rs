@@ -1060,7 +1060,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                 lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
             ),
         );
-        let mut body = lash_vocabulary::tokens::TokenWriter::new();
+        let mut body = lash_kernel_value::tokens::TokenWriter::new();
         body.text(&format!("outcome {ordinal}"));
         let record = staging
             .encode(

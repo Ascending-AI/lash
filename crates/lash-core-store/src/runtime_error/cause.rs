@@ -1,7 +1,7 @@
 //! The typed causes a runtime error carries beside its code.
 
 use super::{IngressReservedSourceKeyRefusal, RuntimeEffectControllerError, RuntimeErrorCode};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A host item refused before durable enqueue or execution.
 #[derive(
@@ -157,14 +157,14 @@ pub enum RuntimeErrorCause {
         refusal: Box<lash_protocol_types::module_artifact_refusal::ModuleArtifactRefusal>,
     },
     SchemaRefused {
-        source: Box<lash_vocabulary::json_schema::SchemaAdmissionError>,
+        source: Box<lash_kernel_value::json_schema::SchemaAdmissionError>,
     },
     ToolSchemaRefused {
         source: Box<lash_vocabulary::ToolCatalogBuildError>,
     },
     ValueMismatch {
         context: Box<str>,
-        source: Box<lash_vocabulary::json_schema::ValueMismatch>,
+        source: Box<lash_kernel_value::json_schema::ValueMismatch>,
     },
     IngressReservedSourceKey {
         #[serde(flatten)]

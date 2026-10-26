@@ -342,7 +342,7 @@ async fn send(url: bool, tools: bool) -> Sent {
             lash::persistence::LeaseIncarnationId::new("node"),
         ))
         .unwrap();
-    let id = lash_vocabulary::identity::SessionId::from("ref-law");
+    let id = lash_kernel_value::identity::SessionId::from("ref-law");
     let spec = lash::SessionSpec::new(
         MODEL,
         lash::TurnBudget::Unbounded,
@@ -607,7 +607,7 @@ async fn tool_put_receipts_match_session_delivery_advice() {
             lash::persistence::LeaseIncarnationId::new("node"),
         ))
         .unwrap();
-    let id = lash_vocabulary::identity::SessionId::from("put-receipt-law");
+    let id = lash_kernel_value::identity::SessionId::from("put-receipt-law");
     core.session(id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,

@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 // The session-management routes: the roster the session sidebar renders, the create
 // flow, and the durable selection a query-less `/api/` call resolves through.

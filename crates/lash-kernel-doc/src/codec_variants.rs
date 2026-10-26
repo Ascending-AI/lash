@@ -13,7 +13,7 @@ use crate::{
     JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt,
 };
 
-use lash_vocabulary::tokens::CodecVariant;
+use lash_kernel_value::tokens::CodecVariant;
 
 #[doc(hidden)]
 impl CodecVariant for crate::heap::PageValue {

@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use lash_kernel_dialect::{
     BRAND_FIELD, NamespaceKind, Namespaces, SpellKind, Spelling, TypeMember,
 };
-use lash_vocabulary::{Signature, Type};
+use {lash_kernel_value::Signature, lash_kernel_value::Type};
 /// Canonical dialect spelling used by the TypeScript presenter.
 pub const TYPESCRIPT_SPELLING: Spelling = Spelling::TypeScript;
 /// Canonical dialect spelling used by the Python presenter.
@@ -24,7 +24,7 @@ pub fn render_package_surface(view: &Namespaces, spelling: Spelling) -> String {
             .join(".");
         let mut lines = Vec::new();
         for (segment, member) in members {
-            if member.visibility != lash_vocabulary::Visibility::Public {
+            if member.visibility != lash_kernel_value::Visibility::Public {
                 continue;
             }
             match &member.kind {
@@ -143,20 +143,20 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
                 .collect::<Vec<_>>();
             if ts {
                 match &record.rest {
-                    lash_vocabulary::RecordRest::Closed => {
+                    lash_kernel_value::RecordRest::Closed => {
                         fields.push("[key: string]: never".into())
                     }
-                    lash_vocabulary::RecordRest::Drop => {}
-                    lash_vocabulary::RecordRest::Keep(rest) => {
+                    lash_kernel_value::RecordRest::Drop => {}
+                    lash_kernel_value::RecordRest::Keep(rest) => {
                         fields.push(format!("[key: string]: {}", render(rest)))
                     }
                 }
                 format!("{{ {} }}", fields.join("; "))
             } else {
                 let rest = match &record.rest {
-                    lash_vocabulary::RecordRest::Closed => ", closed=True".into(),
-                    lash_vocabulary::RecordRest::Drop => String::new(),
-                    lash_vocabulary::RecordRest::Keep(rest) => {
+                    lash_kernel_value::RecordRest::Closed => ", closed=True".into(),
+                    lash_kernel_value::RecordRest::Drop => String::new(),
+                    lash_kernel_value::RecordRest::Keep(rest) => {
                         format!(", extra_items={}", render(rest))
                     }
                 };
@@ -255,13 +255,13 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
 
 /// Render the entry annotation refusal; source coordinates remain available
 /// on the owning diagnostic for hosts to present alongside this text.
-pub fn render_signature_required(required: &lash_vocabulary::SignatureRequired) -> String {
+pub fn render_signature_required(required: &lash_kernel_value::SignatureRequired) -> String {
     let function = required.function.name.as_deref().unwrap_or("<anonymous>");
     match &required.position {
-        lash_vocabulary::SignaturePosition::Parameter { name, index } => format!(
+        lash_kernel_value::SignaturePosition::Parameter { name, index } => format!(
             "SIGNATURE_REQUIRED: {function} parameter {index} ({name}) needs a written type annotation"
         ),
-        lash_vocabulary::SignaturePosition::Result => {
+        lash_kernel_value::SignaturePosition::Result => {
             format!("SIGNATURE_REQUIRED: {function} needs a written settled-result type annotation")
         }
     }
@@ -269,11 +269,11 @@ pub fn render_signature_required(required: &lash_vocabulary::SignatureRequired) 
 
 /// Render the owning entry mismatch using this dialect's type spelling.
 pub fn render_entry_type_mismatch(
-    source: &lash_vocabulary::EntryTypeMismatch,
+    source: &lash_kernel_value::EntryTypeMismatch,
     spelling: Spelling,
 ) -> String {
     let callable = &source.callable;
-    let lash_vocabulary::TypeMismatch {
+    let lash_kernel_value::TypeMismatch {
         path,
         expected,
         actual,
@@ -286,7 +286,7 @@ pub fn render_entry_type_mismatch(
 }
 
 /// The `(package, type)` a package value's record type names.
-fn branded(record: &lash_vocabulary::RecordType) -> Option<(&str, &str)> {
+fn branded(record: &lash_kernel_value::RecordType) -> Option<(&str, &str)> {
     let field = record
         .fields
         .iter()
@@ -304,7 +304,7 @@ fn branded(record: &lash_vocabulary::RecordType) -> Option<(&str, &str)> {
 }
 
 fn spelled(spelling: Spelling, kind: SpellKind, text: &str) -> String {
-    lash_vocabulary::names::Segment::new(text).map_or_else(
+    lash_kernel_value::names::Segment::new(text).map_or_else(
         |_| text.to_owned(),
         |segment| spelling.spell(kind, &segment),
     )
@@ -313,7 +313,7 @@ fn spelled(spelling: Spelling, kind: SpellKind, text: &str) -> String {
 #[cfg(test)]
 mod laws {
     use super::*;
-    use lash_vocabulary::{Name, Param};
+    use {lash_kernel_value::Name, lash_kernel_value::Param};
 
     /// ENTRY-PRESENTATION: signature optionality and diagnostic facts retain
     /// their meanings in both source languages.
@@ -321,18 +321,18 @@ mod laws {
     fn entry_contract_facts_use_the_dialect_spelling() {
         for (rest, ts, py) in [
             (
-                lash_vocabulary::RecordRest::Closed,
+                lash_kernel_value::RecordRest::Closed,
                 "[key: string]: never",
                 "closed=True",
             ),
-            (lash_vocabulary::RecordRest::Drop, "", ""),
+            (lash_kernel_value::RecordRest::Drop, "", ""),
             (
-                lash_vocabulary::RecordRest::Keep(Box::new(Type::Json)),
+                lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
                 "[key: string]: JsonValue",
                 "extra_items=JsonValue",
             ),
         ] {
-            let ty = Type::Record(lash_vocabulary::RecordType {
+            let ty = Type::Record(lash_kernel_value::RecordType {
                 fields: vec![],
                 rest,
             });
@@ -371,12 +371,12 @@ mod laws {
             "tuple[()]"
         );
         assert_eq!(
-            render_signature_required(&lash_vocabulary::SignatureRequired {
-                function: lash_vocabulary::FunctionLocation {
+            render_signature_required(&lash_kernel_value::SignatureRequired {
+                function: lash_kernel_value::FunctionLocation {
                     name: Some("entry".into()),
                     site: None
                 },
-                position: lash_vocabulary::SignaturePosition::Parameter {
+                position: lash_kernel_value::SignaturePosition::Parameter {
                     name: Name::new("event"),
                     index: 0
                 },
@@ -385,28 +385,28 @@ mod laws {
             "SIGNATURE_REQUIRED: entry parameter 0 (event) needs a written type annotation"
         );
         assert_eq!(
-            render_signature_required(&lash_vocabulary::SignatureRequired {
-                function: lash_vocabulary::FunctionLocation {
+            render_signature_required(&lash_kernel_value::SignatureRequired {
+                function: lash_kernel_value::FunctionLocation {
                     name: None,
                     site: None
                 },
-                position: lash_vocabulary::SignaturePosition::Result,
+                position: lash_kernel_value::SignaturePosition::Result,
                 span: None,
             }),
             "SIGNATURE_REQUIRED: <anonymous> needs a written settled-result type annotation"
         );
-        let callable = lash_vocabulary::CallableId {
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
-            function: lash_vocabulary::FunctionId::from_bytes([2; 32]),
+        let callable = lash_kernel_value::CallableId {
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+            function: lash_kernel_value::FunctionId::from_bytes([2; 32]),
         };
         for (spelling, expected, actual) in [
             (Spelling::TypeScript, "string", "number"),
             (Spelling::Python, "str", "float"),
         ] {
             let text = render_entry_type_mismatch(
-                &lash_vocabulary::EntryTypeMismatch {
+                &lash_kernel_value::EntryTypeMismatch {
                     callable,
-                    mismatch: lash_vocabulary::TypeMismatch {
+                    mismatch: lash_kernel_value::TypeMismatch {
                         path: "/output/id".into(),
                         expected: Type::Text,
                         actual: Type::Number,

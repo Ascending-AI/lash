@@ -217,7 +217,7 @@ impl ProcessEventKind {
 
     /// The JSON Schema of this kind's payload, for the kinds the runtime
     /// publishes one for: the effect summary.
-    pub fn payload_schema(self) -> Option<lash_vocabulary::json_schema::JsonSchema> {
+    pub fn payload_schema(self) -> Option<lash_kernel_value::json_schema::JsonSchema> {
         match self {
             Self::EffectOutcome => Some(super::effect_summary::effect_outcome_payload_schema()),
             Self::EffectOmissions => Some(super::effect_summary::effect_omissions_payload_schema()),
@@ -259,12 +259,12 @@ pub enum ProcessLifecycleFact {
     CancelRequested(CancelRequest),
     /// A session began observing the process.
     ObserverAdded {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         by: ProcessObserverBy,
     },
     /// A session stopped observing the process.
     ObserverRemoved {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         by: ProcessObserverBy,
     },
     /// The process was bound to durable backend work.
@@ -514,7 +514,7 @@ struct WaitPayload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ObserverPayload {
-    session: lash_vocabulary::identity::SessionId,
+    session: lash_kernel_value::identity::SessionId,
     by: ProcessObserverBy,
 }
 
@@ -1289,7 +1289,7 @@ impl ProcessEventAppendRequest {
     /// process, session, and observer authority.
     pub fn observer_added(
         process_id: &ProcessId,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         by: &ProcessObserverBy,
     ) -> Self {
         Self::new(ProcessLifecycleFact::ObserverAdded {
@@ -1306,7 +1306,7 @@ impl ProcessEventAppendRequest {
     /// process, session, and observer authority.
     pub fn observer_removed(
         process_id: &ProcessId,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         by: &ProcessObserverBy,
     ) -> Self {
         Self::new(ProcessLifecycleFact::ObserverRemoved {

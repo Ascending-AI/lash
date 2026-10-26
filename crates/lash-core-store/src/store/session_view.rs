@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// One session's view of a [`RuntimeStore`].
 ///

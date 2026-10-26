@@ -48,8 +48,8 @@ impl lash_execution_contracts::process::EngineSteps for Saturating {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
-        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    ) -> lash_kernel_value::tool_contract::ExecutionPolicy {
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
             std::num::NonZeroU32::MIN.saturating_add(2),
             0,
             0,

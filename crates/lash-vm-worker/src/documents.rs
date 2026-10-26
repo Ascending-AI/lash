@@ -2,9 +2,9 @@
 //! process death drops it. A miss always asks the declaring parent.
 use crate::PoolError;
 use lash_kernel_doc::IdentifiedDocument;
-use lash_vocabulary::{DocumentId, KernelDataLimits};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
+use {lash_kernel_value::DocumentId, lash_kernel_value::KernelDataLimits};
 
 struct Entry {
     document: IdentifiedDocument,

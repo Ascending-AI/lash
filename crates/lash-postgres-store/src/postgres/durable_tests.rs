@@ -5,7 +5,7 @@
 // (the workspace clippy ban targets production library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -282,7 +282,7 @@ async fn lo_idle_writer_when_configured() {
     use lash_core_store::session_state::RuntimeSessionState;
     use lash_core_store::store::{RuntimeCommit, SessionCatalogStore, SessionCommitStore};
     use lash_durable::{ActorKey, DurableStore, FormatSet, MailTx, NodeId, NodeSpec};
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
     let storage = crate::testing::connect(database.url()).await.unwrap();
@@ -595,7 +595,7 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         ActorKey, CommitLabel, DurableReads, DurableStore, FormatSet, MailTx, NodeId, NodeSpec,
         Release,
     };
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
     let storage = crate::testing::connect(database.url()).await.unwrap();
@@ -860,11 +860,11 @@ async fn a_publication_retains_its_complete_content_dag_when_configured() {
         .await
         .expect("store");
     let store = storage.lash_vm_artifact_store();
-    let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
+    let document = lash_kernel_value::names::DocumentId::from_bytes([72; 32]);
     use lash_core_store::store::SessionCatalogStore;
     let catalog = storage.session_store_factory();
-    let session_id = lash_vocabulary::identity::SessionId::fixture("package-law-session");
-    let child_id = lash_vocabulary::identity::SessionId::fixture("package-law-child");
+    let session_id = lash_kernel_value::identity::SessionId::fixture("package-law-session");
+    let child_id = lash_kernel_value::identity::SessionId::fixture("package-law-child");
     for id in [&session_id, &child_id] {
         catalog
             .admit_session(&lash_core_execution::testing::store_fixtures::root_session_request(id))
@@ -949,7 +949,7 @@ async fn lo_root_prompt_retirement_when_configured() {
         let store = storage.durable_store();
         let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
         let actor = ActorKey::session("sql-work-owner").unwrap();
-        let session = lash_vocabulary::identity::SessionId::from("sql-work-owner");
+        let session = lash_kernel_value::identity::SessionId::from("sql-work-owner");
 
         let segments: Vec<_> = (0..depth)
             .map(|index| {

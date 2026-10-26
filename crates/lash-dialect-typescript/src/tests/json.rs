@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
 
+use lash_kernel_value::Name;
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
-use lash_vocabulary::Name;
 
 use super::machine;
 
@@ -97,7 +97,7 @@ body { return x }
 
 fn program(
     retained: &lash_kernel_package::LinkedContent,
-    roots: &BTreeSet<lash_vocabulary::LinkId>,
+    roots: &BTreeSet<lash_kernel_value::LinkId>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> Program {
     let names = [
@@ -138,7 +138,7 @@ fn program(
             .insert(link.document, retained.documents[&link.document].clone());
         content.links.insert(id, link.clone());
         pending.extend(link.fills.values().filter_map(|fill| match fill {
-            lash_vocabulary::package::Fill::Export { link, .. } => Some(*link),
+            lash_kernel_value::package::Fill::Export { link, .. } => Some(*link),
             _ => None,
         }));
     }
@@ -162,10 +162,10 @@ struct Console {
 impl Host for Console {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked_reads::read(use_, 0)
     }
@@ -459,7 +459,7 @@ fn edges() -> Vec<Datum> {
 }
 
 /// Retain the exact producing code only when a graph contains callables.
-fn callable_links(value: &Datum) -> BTreeSet<lash_vocabulary::LinkId> {
+fn callable_links(value: &Datum) -> BTreeSet<lash_kernel_value::LinkId> {
     let mut links = BTreeSet::new();
     let mut pending = vec![value];
     while let Some(value) = pending.pop() {

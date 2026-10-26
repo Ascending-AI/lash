@@ -35,7 +35,7 @@ use lash_kernel_doc::NativeFunction;
 use lash_kernel_doc::PreparedNative;
 use lash_kernel_doc::RegistryError;
 use lash_kernel_doc::Value;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 /// Why [`implement`] could not add the natives.
 #[derive(Debug, thiserror::Error)]

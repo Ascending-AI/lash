@@ -3,7 +3,11 @@
 use std::cell::{Cell, RefCell};
 
 use lash_kernel_doc::TaskId;
-use lash_vocabulary::sites::{EffectIdentity, EffectLocation, LoopIteration, Site, TaskIdentity};
+use {
+    lash_kernel_value::sites::EffectIdentity, lash_kernel_value::sites::EffectLocation,
+    lash_kernel_value::sites::LoopIteration, lash_kernel_value::sites::Site,
+    lash_kernel_value::sites::TaskIdentity,
+};
 
 use super::*;
 use crate::compile::{BlockId, LibId};
@@ -180,7 +184,7 @@ impl<'a> Watching<'a> {
             let mut loops = self.loops.clone()?;
             loops.extend(self.active_loops.borrow().iter().cloned());
             let task = task.clone()?;
-            let at = lash_kernel_doc::kernel_internals::effect_id(EffectIdentity {
+            let at = lash_kernel_value::kernel_internals::effect_id(EffectIdentity {
                 task,
                 site: site.clone(),
                 occurrence,

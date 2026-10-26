@@ -615,9 +615,9 @@ pub struct RunSpec {
     /// the level it actually ran at; another run may choose another level.
     #[serde(
         default,
-        skip_serializing_if = "lash_vocabulary::observation::RunObservation::is_off"
+        skip_serializing_if = "lash_kernel_value::observation::RunObservation::is_off"
     )]
-    pub observe: lash_vocabulary::observation::RunObservation,
+    pub observe: lash_kernel_value::observation::RunObservation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<DefinitionRef>,
     /// Immutable data the definition reads. Request ids and tracing stay
@@ -795,16 +795,16 @@ pub struct RecordedRender {
     pub params: std::sync::Arc<serde_json::Value>,
 }
 
-impl lash_vocabulary::tokens::TokenCodec for RecordedRender {
-    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for RecordedRender {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         out.seq(2);
         out.text(&self.renderer_id);
         self.params.as_ref().encode(out);
     }
 
     fn decode(
-        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
             renderer_id: input.text()?.to_owned(),

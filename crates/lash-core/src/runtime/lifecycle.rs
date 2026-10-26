@@ -865,7 +865,7 @@ impl LashRuntime {
 mod tests {
     use super::{initial_park_operation, initial_park_preview};
     use crate::SessionError;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {

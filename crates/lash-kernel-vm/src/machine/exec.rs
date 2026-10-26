@@ -25,7 +25,7 @@ use lash_kernel_state::paged::HeapLifecycle;
 #[derive(Clone, Copy)]
 pub(super) struct ExportBoundary<'a> {
     pub(super) convention: &'a lash_kernel_doc::StartConvention,
-    pub(super) result: &'a lash_vocabulary::types::Type,
+    pub(super) result: &'a lash_kernel_value::types::Type,
 }
 
 impl<'a> From<&'a lash_kernel_doc::FunctionExport> for ExportBoundary<'a> {
@@ -68,7 +68,7 @@ impl<'a> Invocation<'a> {
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
-    pub(super) link: Option<lash_vocabulary::content_ids::LinkId>,
+    pub(super) link: Option<lash_kernel_value::content_ids::LinkId>,
     /// The register the call's arguments start at.
     pub(super) args: Reg,
     /// How many arguments there are.
@@ -107,7 +107,7 @@ impl<'a> Call<'a> {
         self
     }
 
-    pub(super) fn in_link(mut self, link: lash_vocabulary::content_ids::LinkId) -> Self {
+    pub(super) fn in_link(mut self, link: lash_kernel_value::content_ids::LinkId) -> Self {
         self.link = Some(link);
         self
     }
@@ -163,7 +163,7 @@ impl KernelMachine {
             Literal::Int(value) => arena.int(value.clone()),
             Literal::Text(value) => arena.text(value),
             Literal::Bytes(value) => arena.bytes(value.as_slice()),
-            Literal::Function(function) => arena.function(lash_vocabulary::names::CallableId {
+            Literal::Function(function) => arena.function(lash_kernel_value::names::CallableId {
                 link,
                 function: *function,
             }),
@@ -531,7 +531,7 @@ impl KernelMachine {
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
         let result = if let (Ok(value), Some(ty)) = (&result, &frame.public_result) {
-            let lash_vocabulary::sites::Unit::Library(function) = exe.code(frame.code).site.unit
+            let lash_kernel_value::sites::Unit::Library(function) = exe.code(frame.code).site.unit
             else {
                 return Err(fault("public result frame has no defining callable"));
             };
@@ -539,7 +539,7 @@ impl KernelMachine {
                 exe,
                 value,
                 ty,
-                lash_vocabulary::CallableId {
+                lash_kernel_value::CallableId {
                     link: frame.link,
                     function,
                 },
@@ -875,7 +875,7 @@ impl KernelMachine {
         // fallback frames, whether reached by a root, import, or spawn.
         let library = library
             .or_else(|| match &code.site.unit {
-                lash_vocabulary::sites::Unit::Library(function)
+                lash_kernel_value::sites::Unit::Library(function)
                     if exe.native_starts.get(function) == Some(&code_id) =>
                 {
                     exe.lib_of(function)
@@ -1030,15 +1030,15 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         value: &Value,
-        ty: &lash_vocabulary::types::Type,
-        callable: lash_vocabulary::CallableId,
+        ty: &lash_kernel_value::types::Type,
+        callable: lash_kernel_value::CallableId,
     ) -> Eval<()> {
         if let Some(mismatch) =
             self.public_value_fits(exe, *value, ty, self.limits.value_depth())?
         {
             self.raise_typed(
                 "entry_type_mismatch",
-                &lash_vocabulary::EntryTypeMismatch {
+                &lash_kernel_value::EntryTypeMismatch {
                     callable,
                     mismatch: mismatch.within("output"),
                 },
@@ -1118,7 +1118,7 @@ impl KernelMachine {
     /// value's canonical form.
     pub(super) fn copy_out_tool_arg(
         &mut self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         index: usize,
         value: &Value,
     ) -> Eval<lash_kernel_doc::Datum> {
@@ -1171,7 +1171,7 @@ impl KernelMachine {
             .imports
             .get(&effect.slot)
             .and_then(|import| match &import.kind {
-                lash_vocabulary::names::ImportKind::Operation { signature } => {
+                lash_kernel_value::names::ImportKind::Operation { signature } => {
                     signature.params.get(index)
                 }
                 _ => None,
@@ -1189,7 +1189,7 @@ impl KernelMachine {
                 &mut run,
                 value,
                 &format!("args[{index}]"),
-                &lash_vocabulary::types::Type::Json,
+                &lash_kernel_value::types::Type::Json,
             )?,
         };
         self.charge_boundary(crossed_bytes(&datum))?;
@@ -1321,7 +1321,7 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_vocabulary::types::Type,
+        ty: &lash_kernel_value::types::Type,
     ) -> Eval<Value> {
         self.decode_as(exe, datum, ty, "the result", self.charging)
     }
@@ -1332,7 +1332,7 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_vocabulary::types::Type,
+        ty: &lash_kernel_value::types::Type,
     ) -> Eval<Value> {
         let metered = self.metered();
         self.decode_as(exe, datum, ty, "the result", metered)
@@ -1344,8 +1344,8 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_vocabulary::types::Type,
-        effect: &lash_vocabulary::names::OperationUse,
+        ty: &lash_kernel_value::types::Type,
+        effect: &lash_kernel_value::names::OperationUse,
     ) -> Eval<Value> {
         let metered = self.metered();
         self.decode_as(
@@ -1362,7 +1362,7 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_vocabulary::types::Type,
+        ty: &lash_kernel_value::types::Type,
         _what: &str,
         charged: bool,
     ) -> Eval<Value> {

@@ -68,9 +68,9 @@ use lash_durable_test::{
     WriteKind,
 };
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::claims::ObligationToken;
-use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 use served::Tier;
@@ -112,7 +112,7 @@ fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     // A call a kill interrupted runs again at its ordinal: the raced calls
     // stay in flight across the kill, so the race is still held when the
     // call past the limit asks.
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -185,7 +185,7 @@ fn probe_plugin(
 /// The component that serves the probe to a process body.
 const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "process-holding-probe",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// Author the raced calls as ordinary tasks. The test starts through the
@@ -197,7 +197,7 @@ async fn holding_definition(
     lash::process::EngineLaunch,
 ) {
     let definition = probe_definition();
-    let signature = lash_vocabulary::json_schema::tool_signature(
+    let signature = lash_kernel_value::json_schema::tool_signature(
         &definition.contract.input_schema.canonical,
         &definition.contract.output_schema.canonical,
     );
@@ -704,7 +704,7 @@ async fn start_sleeping_process(deployment: &Holding) {
         "function quick() -> Json\nkernel 1\nmetering statements\nimport 0 operation tools.holding_probe(input: Json) -> Json\nbody { let v = perform 0({label: \"quick\"}) as Json return v }"
     ).unwrap();
     let definition = probe_definition();
-    let signature = lash_vocabulary::json_schema::tool_signature(
+    let signature = lash_kernel_value::json_schema::tool_signature(
         &definition.contract.input_schema.canonical,
         &definition.contract.output_schema.canonical,
     );
@@ -909,7 +909,7 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
 /// its deferred provider resolves them and executes what it matched.
 const DYNAMIC_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "process-dynamic",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// The effect the granted tool is performed as.
@@ -966,7 +966,7 @@ fn call_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
         serde_json::json!({"type":"object"}),
     )
     .expect("the granted tool's schemas")
-    .declared_contract(lash_vocabulary::operations::ContractId::new("tools.call_tool/1"))
+    .declared_contract(lash_kernel_value::operations::ContractId::new("tools.call_tool/1"))
     // The grant's resolution policy replaces the bound when it is linked.
     .with_execution(std::time::Duration::from_secs(30))
 }
@@ -984,11 +984,13 @@ fn dynamic_target(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition 
     )
     .expect("the target's schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
-        1,
-        1,
-    ))
+    .with_execution_policy(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+            1,
+            1,
+        ),
+    )
 }
 
 /// The deferred provider: it advertises nothing, resolves on demand, and
@@ -999,8 +1001,8 @@ struct Resolver {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Resolver {
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
-        &[lash_vocabulary::providers::FormatVersion::ONE]
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
+        &[lash_kernel_value::providers::FormatVersion::ONE]
     }
 
     fn tool_manifests(
@@ -1064,7 +1066,7 @@ impl lash_core::DeferredToolProvider for Resolver {
                         .then(|| lash::tools::ExecutionBinding {
                             codec: DYNAMIC_COMPONENT
                                 .tool_provider(lash::tool_provider_key!("deferred")),
-                            format: lash_vocabulary::providers::FormatVersion::ONE,
+                            format: lash_kernel_value::providers::FormatVersion::ONE,
                             payload: serde_json::json!({"route": "matched"}),
                         }),
                 ),
@@ -1230,18 +1232,18 @@ impl DynamicCalls {
         }
     }
 
-    fn policy(&self) -> lash_vocabulary::providers::DeferredResolutionPolicy {
+    fn policy(&self) -> lash_kernel_value::providers::DeferredResolutionPolicy {
         if self.custom_policy {
-            lash_vocabulary::providers::DeferredResolutionPolicy {
+            lash_kernel_value::providers::DeferredResolutionPolicy {
                 execution: Duration::from_secs(120),
-                execution_policy: lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                execution_policy: lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(5).unwrap(),
                     17,
                     71,
                 ),
             }
         } else {
-            lash_vocabulary::providers::DeferredResolutionPolicy::default()
+            lash_kernel_value::providers::DeferredResolutionPolicy::default()
         }
     }
 
@@ -1922,7 +1924,7 @@ async fn dynamic_match_codec_debt(dialect: Dialect) {
     let config = calls.config();
     let codec = (
         DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
     );
     let lacking: Vec<String> = config
         .serves

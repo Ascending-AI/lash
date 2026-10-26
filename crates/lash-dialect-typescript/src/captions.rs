@@ -20,7 +20,7 @@ use lash_kernel_doc::{
     ParamTarget,
 };
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 use swc_common::comments::{CommentKind, SingleThreadedComments};
 use swc_ecma_ast as swc;
 

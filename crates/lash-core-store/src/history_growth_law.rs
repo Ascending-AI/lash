@@ -9,8 +9,8 @@ use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, 
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::shared_parts;
 use crate::transcript::{SessionTranscript, TranscriptDecoders};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 fn record(id: &str, parent: &str, role: MessageRole, turn: &str) -> SessionNodeRecord {
     let turn_id = lash_vocabulary::identity::TurnId::parse(turn).expect("turn id");

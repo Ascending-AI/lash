@@ -57,7 +57,7 @@ mod rollout {
     use lash_core_store::store::SessionCommitStore as _;
     use lash_core_store::store::SessionMeta;
     use lash_core_store::store::StoreError;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     use crate::PostgresStorage;
     use crate::testing::IsolatedDatabase;

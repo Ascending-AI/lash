@@ -25,8 +25,8 @@ use crate::FrameNodeId;
 use crate::await_event_identity::AwaitEventKey;
 use crate::environment::VersionOwnerId;
 use crate::process_identity::StartKey;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 /// The referrer labels and their canonical id encodings at the 1.0 cut.
 ///

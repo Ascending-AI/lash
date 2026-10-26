@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{self as k, CaptionTarget, FieldPath, FieldRoot, FieldTarget, ParamTarget};
 
-use lash_vocabulary::{Name, Type};
+use {lash_kernel_value::Name, lash_kernel_value::Type};
 
 use super::{Renderer, names::attribute_identifier};
 
@@ -326,7 +326,7 @@ impl Classes {
                     name: name.clone(),
                     fields,
                     rest,
-                    closed: matches!(record.rest, lash_vocabulary::RecordRest::Closed),
+                    closed: matches!(record.rest, lash_kernel_value::RecordRest::Closed),
                 });
                 name
             }

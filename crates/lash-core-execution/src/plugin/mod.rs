@@ -141,9 +141,9 @@ pub use lash_core_store::obligations::RetirementRefusal;
 pub use registries::RetiredSessionPlugins;
 mod service_bindings;
 pub use config_observers::{ConfigChangeDelivery, RetiredConfigObservers, is_lifecycle_observer};
+pub use lash_kernel_value::providers::FormatVersion;
 pub use lash_vocabulary::claims::RegistryKind;
 pub use lash_vocabulary::providers::CallbackSlot;
-pub use lash_vocabulary::providers::FormatVersion;
 pub use lash_vocabulary::providers::TraceScopeOf;
 pub use recipe::ContextRegistrations;
 pub use recipe::ContributionDescriptor;
@@ -294,7 +294,7 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
 mod tests {
     use crate::ToolOutcome;
     use lash_execution_contracts::ToolIntentCommandFailure;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -470,8 +470,8 @@ mod tests {
         type Output = TypedEchoOutput;
         type Error = String;
         const ERROR_TYPE: &'static str = Self::NAME;
-        const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
-            lash_vocabulary::providers::FormatVersion::ONE;
+        const ERROR_VERSION: lash_kernel_value::providers::FormatVersion =
+            lash_kernel_value::providers::FormatVersion::ONE;
         fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
             lash_protocol_types::PluginFailureClass::Terminal
         }
@@ -603,7 +603,7 @@ mod tests {
                     input_schema: json!({}),
                     output_schema: json!({}),
                     error_type: "test.operation".into(),
-                    error_version: lash_vocabulary::providers::FormatVersion::ONE,
+                    error_version: lash_kernel_value::providers::FormatVersion::ONE,
                     error_schema: json!({"type": "object"}),
                 },
                 move |this, _state| {
@@ -684,9 +684,9 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
         assert_eq!(def.error_type, "mock.typed_echo");
         assert_eq!(
             def.error_version,
-            lash_vocabulary::providers::FormatVersion::ONE
+            lash_kernel_value::providers::FormatVersion::ONE
         );
-        let schema = lash_vocabulary::json_schema::JsonSchema::admit(def.error_schema)
+        let schema = lash_kernel_value::json_schema::JsonSchema::admit(def.error_schema)
             .expect("admitted error schema");
         assert_eq!(schema.validate(&json!("declared error")), Ok(()));
         for invalid in [json!(7), json!({"message": "declared error"})] {
@@ -751,8 +751,8 @@ Ok(move |ctx: crate::plugin::PluginQueryContext, args: <TypedEchoOp as crate::pl
             type Output = TypedEchoOutput;
             type Error = String;
             const ERROR_TYPE: &'static str = Self::NAME;
-            const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
-                lash_vocabulary::providers::FormatVersion::ONE;
+            const ERROR_VERSION: lash_kernel_value::providers::FormatVersion =
+                lash_kernel_value::providers::FormatVersion::ONE;
             fn error_class(_: &Self::Error) -> lash_protocol_types::PluginFailureClass {
                 lash_protocol_types::PluginFailureClass::Terminal
             }
@@ -856,7 +856,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
             input_schema: json!({}),
             output_schema: json!({}),
             error_type: "test.operation".into(),
-            error_version: lash_vocabulary::providers::FormatVersion::ONE,
+            error_version: lash_kernel_value::providers::FormatVersion::ONE,
             error_schema: json!({"type": "object"}),
         }
     }

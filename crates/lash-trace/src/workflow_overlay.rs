@@ -32,9 +32,9 @@ use crate::TraceNodeFact;
 use crate::TraceRecord;
 use crate::TraceRuntimeScope;
 use crate::TraceRuntimeSubject;
-use lash_vocabulary::WorkflowReference;
+use lash_kernel_value::WorkflowReference;
 #[cfg(test)]
-use lash_vocabulary::names::LinkedStart;
+use lash_kernel_value::names::LinkedStart;
 
 mod accumulator;
 mod model;
@@ -186,7 +186,7 @@ impl Incoming {
 #[derive(Clone, Debug, Default)]
 struct DocumentState {
     mismatch_limit: Option<usize>,
-    loaded: Option<lash_vocabulary::WorkflowReference>,
+    loaded: Option<lash_kernel_value::WorkflowReference>,
     mismatches: BTreeSet<WorkflowOverlayMismatch>,
     truncated: bool,
 }

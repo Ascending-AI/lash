@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     Document, Expr, FunctionDeclarations, SourceMap, SourceMapRefusal, Span, Stmt,
 };
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -185,7 +185,7 @@ impl WorkflowView {
 
     pub fn action_node(
         &self,
-        site: &lash_vocabulary::sites::PositionLabel,
+        site: &lash_kernel_value::sites::PositionLabel,
     ) -> Option<&WorkflowNode> {
         self.nodes
             .iter()

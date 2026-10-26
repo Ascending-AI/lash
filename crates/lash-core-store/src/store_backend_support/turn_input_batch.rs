@@ -85,7 +85,7 @@ pub fn decide_turn_input_draft_admission(
 /// under the key would have been filed under, so a probe by that id finds
 /// it.
 pub fn forsaken_input_id(
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
     source_key: &str,
 ) -> lash_vocabulary::identity::InputId {
     PendingTurnInputDraft::keyed_input_id(session_id, source_key)

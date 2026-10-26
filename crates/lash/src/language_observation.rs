@@ -13,10 +13,10 @@ use lash_core::{
     ProcessSequence, SessionObservationEventPayload,
 };
 use lash_execution_contracts::process::ObservedProcessEvent;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_trace::{LanguageExecutionObservation, TraceEvent, TraceRecord};
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 mod ingress;
 mod routing;

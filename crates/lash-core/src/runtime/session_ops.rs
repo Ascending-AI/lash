@@ -3,7 +3,7 @@
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`;
 //! no types live here and no public API is changed.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::Arc;
 
 use crate::{PluginOperationInvokeError, SessionError};

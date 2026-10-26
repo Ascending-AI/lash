@@ -129,7 +129,7 @@ async fn run(args: Args) -> Result<()> {
     ))
     .map_err(|error| anyhow::anyhow!("build the core: {error}"))?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::try_from(
+        .session(lash_kernel_value::identity::SessionId::try_from(
             "cellpath".to_owned(),
         )?)
         .create(lash::SessionCreation::root(lash::SessionSpec::new(

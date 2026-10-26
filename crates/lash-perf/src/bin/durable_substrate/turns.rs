@@ -8,7 +8,7 @@ use anyhow::{Context as _, Result, bail, ensure};
 use futures_util::future::try_join_all;
 use lash_core::runtime::durable::session_close::request_session_close;
 use lash_durable::{ActorKey, CommitLabel};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde::Serialize;
 

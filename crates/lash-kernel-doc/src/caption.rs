@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{Correspondence, Document, DocumentId, IdentifiedDocument, Node, Stmt};
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 mod target;
 
@@ -684,34 +684,34 @@ impl<'de> Deserialize<'de> for Captions {
     }
 }
 
-impl lash_vocabulary::tokens::TokenCodec for Caption {
-    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for Caption {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         out.seq(2);
         out.text(&self.title);
         self.description.encode(out);
     }
 
     fn decode(
-        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         input.expect_struct(2)?;
         let title = String::decode(input)?;
         let description = Option::decode(input)?;
         Self::new(title, description)
-            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))
+            .map_err(|error| lash_kernel_value::tokens::TokenError::Invalid(error.to_string()))
     }
 }
 
-impl lash_vocabulary::tokens::TokenCodec for Captions {
-    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for Captions {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         out.seq(2);
         self.document.encode(out);
         self.entries.encode(out);
     }
 
     fn decode(
-        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         input.expect_struct(2)?;
         let captions = Self {
             document: DocumentId::decode(input)?,
@@ -719,7 +719,7 @@ impl lash_vocabulary::tokens::TokenCodec for Captions {
         };
         captions
             .check_order()
-            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))?;
+            .map_err(|error| lash_kernel_value::tokens::TokenError::Invalid(error.to_string()))?;
         Ok(captions)
     }
 }

@@ -30,7 +30,7 @@ impl ProcessEngine for SignedEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -38,7 +38,7 @@ impl ProcessEngine for SignedEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -59,7 +59,7 @@ impl ProcessEngine for SignedEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -405,8 +405,8 @@ impl contracts::EngineSteps for Capabilities {
     fn retry(
         &self,
         _kind: &contracts::EngineStepKind,
-    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
-        lash_vocabulary::tool_contract::ExecutionPolicy::default()
+    ) -> lash_kernel_value::tool_contract::ExecutionPolicy {
+        lash_kernel_value::tool_contract::ExecutionPolicy::default()
     }
 
     async fn run(

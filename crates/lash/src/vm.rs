@@ -62,6 +62,8 @@ pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, Sour
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
+pub use lash_kernel_releases::{HelperRelease, helper_release};
+pub use lash_kernel_value::HelperLibraryId;
 pub use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
 pub use lash_vm_client::packages::WorkerLibrary;
 /// Host-selected worker entry, pool bounds, a cell's lifetime caps,
@@ -72,7 +74,6 @@ pub use lash_vm_client::{
     PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig, WorkerCgroup,
     WorkerConfinement, WorkerEntry, WorkerTuning,
 };
-pub use lash_vm_releases::{HelperRelease, helper_release};
 pub use lash_vm_runtime::{
     KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER, KernelDocuments, KernelProcessPluginFactory,
     KernelServicesComponent, KernelServicesPluginFactory, WorkflowEnvironmentRequest,
@@ -102,7 +103,6 @@ pub use lash_vm_worker::{
     PythonSourceLimits, python as python_worker_dialect,
     python_with_limits as python_worker_dialect_with_limits,
 };
-pub use lash_vocabulary::HelperLibraryId;
 
 /// The host boundary in the kernel type grammar, the providers that answer
 /// projection reads with kernel data, and what a tool is offered as.
@@ -154,14 +154,14 @@ pub use lash_vm_runtime::process::InlineRequest as KernelInlineRequest;
 pub use lash_vm_runtime::{DIALECT_SERVICE_PACKAGES, TIMER_OPERATIONS};
 
 /// Errors and retained source maps named by the runtime host interfaces.
-pub use lash_vm_releases::LibraryError;
+pub use lash_kernel_releases::LibraryError;
 pub use lash_vm_runtime::{AdoptionRefusal, StoredSourceMap, Unretained};
 
 #[cfg(feature = "codemode")]
-pub use lash_vocabulary::type_relations::type_mismatch;
+pub use lash_kernel_value::type_relations::type_mismatch;
 
 #[cfg(feature = "codemode")]
-pub use lash_vocabulary::{SignatureMismatch, SignatureSide};
+pub use {lash_kernel_value::SignatureMismatch, lash_kernel_value::SignatureSide};
 
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::Rewritten as RewrittenKernelDocument;

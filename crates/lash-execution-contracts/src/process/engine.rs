@@ -105,7 +105,7 @@ pub struct SettledRan {
     pub ran: Vec<(u32, u64)>,
     /// The effect occurrences whose failed outcome a `catch` in the step
     /// recovered from, in order.
-    pub caught: Vec<lash_vocabulary::sites::EffectId>,
+    pub caught: Vec<lash_kernel_value::sites::EffectId>,
 }
 
 /// A definition's language document, as its engine's
@@ -277,8 +277,11 @@ use lash_core_store::artifact_referrer::{ArtifactName, ReferrerClaim, ResolvedAr
 use lash_core_store::executable_generation::ExecutableGeneration;
 use lash_core_store::tool_run::SettledOutput;
 
-use lash_vocabulary::{claims::*, names::*, package::*};
 use serde::{Deserialize, Serialize};
+use {
+    lash_kernel_value::claims::*, lash_kernel_value::names::*, lash_kernel_value::package::*,
+    lash_vocabulary::package::*,
+};
 #[async_trait::async_trait]
 /// Neutral retained lifecycle interface. Inspecting a Link never fulfils it against current advertisements.
 pub trait ProcessEngine: Send + Sync {

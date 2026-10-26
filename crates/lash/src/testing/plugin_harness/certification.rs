@@ -557,7 +557,7 @@ async fn unserved_law(
         .plugin_diagnostics()
         .explain_claimability(
             Some(&snapshot),
-            &lash_vocabulary::identity::SessionId::parse(actor.id())
+            &lash_kernel_value::identity::SessionId::parse(actor.id())
                 .map_err(|error| PluginHarnessError::Worker(error.to_string()))?,
         )
         .await?;

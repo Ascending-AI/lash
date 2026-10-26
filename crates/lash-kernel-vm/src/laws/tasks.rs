@@ -2,11 +2,14 @@
 //! scripted delivery order. Each asserts values, errors, effect identities
 //! and the order of side effects.
 
-const WAIT_0: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
-const WAIT_7: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
+const WAIT_0: lash_kernel_value::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
+const WAIT_7: lash_kernel_value::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
 
-use lash_vocabulary::sites::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 use std::sync::Arc;
+use {
+    lash_kernel_value::sites::EffectIdentity, lash_kernel_value::sites::LoopIteration,
+    lash_kernel_value::sites::SpawnIdentity, lash_kernel_value::sites::TaskIdentity,
+};
 
 use lash_kernel_doc::Datum;
 
@@ -26,7 +29,7 @@ fn pair(a: &str, b: &str) -> Datum {
 
 fn spawned(
     parent: TaskIdentity,
-    site: lash_vocabulary::sites::Site,
+    site: lash_kernel_value::sites::Site,
     occurrence: u64,
 ) -> TaskIdentity {
     TaskIdentity::Spawned(SpawnIdentity {
@@ -39,7 +42,7 @@ fn spawned(
 fn identity(request: &Request) -> &EffectIdentity {
     match request {
         Request::Effect(effect) => {
-            lash_kernel_doc::kernel_internals::effect_parts(&effect.identity)
+            lash_kernel_value::kernel_internals::effect_parts(&effect.identity)
         }
     }
 }
@@ -53,11 +56,11 @@ fn outstanding(end: End) -> (Vec<TaskIdentity>, Vec<TaskIdentity>) {
         }) => (
             unfinished
                 .iter()
-                .map(|id| lash_kernel_doc::kernel_internals::task_parts(id).clone())
+                .map(|id| lash_kernel_value::kernel_internals::task_parts(id).clone())
                 .collect(),
             unobserved
                 .iter()
-                .map(|id| lash_kernel_doc::kernel_internals::task_parts(id).clone())
+                .map(|id| lash_kernel_value::kernel_internals::task_parts(id).clone())
                 .collect(),
         ),
         other => panic!("the run did not end with tasks outstanding: {other:?}"),
@@ -122,7 +125,7 @@ main {{
             lash_kernel_doc::kernel_internals::wait_id(wait)
         );
         assert_eq!(
-            *lash_kernel_doc::kernel_internals::effect_parts(&effect.identity),
+            *lash_kernel_value::kernel_internals::effect_parts(&effect.identity),
             EffectIdentity {
                 task: spawned(TaskIdentity::Main, main_site([spawn, 0]), 0),
                 site: function_site("worker", [1, 0]),
@@ -1054,10 +1057,10 @@ fn a_cancel_requested_inside_a_read_is_taken_at_the_next_slice() {
     impl Host for ReadCancel<'_> {
         fn perform(
             &mut self,
-            effect: &lash_vocabulary::OperationUse,
+            effect: &lash_kernel_value::OperationUse,
             args: &[Datum],
-            site: &lash_vocabulary::sites::PositionLabel,
-            origin: &lash_vocabulary::sites::Site,
+            site: &lash_kernel_value::sites::PositionLabel,
+            origin: &lash_kernel_value::sites::Site,
         ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
             self.performed += 1;
             self.world.cancel = self.cancel;

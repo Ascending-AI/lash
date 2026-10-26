@@ -6,8 +6,8 @@ use lash_kernel_doc::{AssignOrder, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
-use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+use lash_ext_ts_helpers::builtins::Receiver;
 
 mod discovery;
 mod methods;
@@ -446,7 +446,9 @@ impl Lowerer<'_> {
     fn own_field_tests(&mut self, object: &Operand, key: &Operand) -> Lowering<Vec<Expr>> {
         let mut tests = Vec::new();
         match key.text_prefix.as_deref() {
-            Some(prefix) if crate::builtins::ordinary_prefix(prefix) => return Ok(tests),
+            Some(prefix) if lash_ext_ts_helpers::builtins::ordinary_prefix(prefix) => {
+                return Ok(tests);
+            }
             Some(_) => {}
             None => {
                 let kind = self.native("kind", vec![key.expr()])?;
@@ -730,7 +732,7 @@ impl Lowerer<'_> {
     fn global_path(&self, expr: &ast::Expr) -> Option<String> {
         match expr {
             ast::Expr::Ident(name, _) => (!self.is_bound(name)
-                && crate::builtins::is_global(name)
+                && lash_ext_ts_helpers::builtins::is_global(name)
                 && !matches!(name.as_str(), "NaN" | "Infinity" | "undefined"))
             .then(|| name.clone()),
             ast::Expr::Member {
@@ -951,7 +953,7 @@ impl Lowerer<'_> {
             // any object, raised when the call runs.
             let object = matches!(
                 self.table.builtin(&path),
-                Some(crate::builtins::Builtin::Object)
+                Some(lash_ext_ts_helpers::builtins::Builtin::Object)
             );
             if !inherited
                 && !object
@@ -1099,15 +1101,15 @@ impl Lowerer<'_> {
     /// them, with no argument list (`builtins::Positional`).
     fn call_positional(
         &mut self,
-        positional: crate::builtins::Positional,
+        positional: lash_ext_ts_helpers::builtins::Positional,
         args: &[&ast::Expr],
     ) -> Lowering<Operand> {
         if args.is_empty()
             && let Some(empty) = positional.empty
         {
             return Ok(match empty {
-                crate::builtins::Empty::Text => Operand::text(String::new()),
-                crate::builtins::Empty::Zero => Operand::number(0.0),
+                lash_ext_ts_helpers::builtins::Empty::Text => Operand::text(String::new()),
+                lash_ext_ts_helpers::builtins::Empty::Zero => Operand::number(0.0),
             });
         }
         let mut passed = self.positional_arguments(args, positional.arity)?;

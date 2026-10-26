@@ -2,7 +2,7 @@
 use crate::DocumentRefusal;
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::FunctionValue;
-use lash_vocabulary::{names::*, package::Link};
+use {lash_kernel_value::names::*, lash_kernel_value::package::Link};
 /// Only a fully validated successor Link may replace a callable origin.
 pub fn saved_function(
     function: &SavedFunction,
@@ -13,8 +13,8 @@ pub fn saved_function(
         || !function.document.functions.contains_key(&function_id)
     {
         return Err(DocumentRefusal::FormNotCarried {
-            site: lash_vocabulary::sites::Site::new(
-                lash_vocabulary::sites::Unit::Library(function.callable.function),
+            site: lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Library(function.callable.function),
                 [],
             ),
             detail: "explicit successor callable is absent".into(),

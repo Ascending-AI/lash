@@ -84,11 +84,6 @@ pub fn verify_library_stream(
     library.verify_stream()
 }
 
-/// Exact semantic equality for the kernel conformance laws.
-pub mod conformance {
-    pub use crate::conformance::*;
-}
-
 /// The projected records inspected by kernel-owned format laws.
 pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
     &sealed.root
@@ -98,7 +93,7 @@ pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
 pub fn task_identity(
     machine: &KernelMachine,
     identity: lash_kernel_state::paged::TaskIdentityRef,
-) -> Result<lash_vocabulary::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+) -> Result<lash_kernel_value::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
     machine.task_identity(identity)
 }
 
@@ -145,7 +140,7 @@ pub fn immediate_charge(
 pub fn call_islands(program: &Program) -> Result<usize, StartError> {
     let admitted = program.library.admit(
         &program.document,
-        lash_vocabulary::data_limits::KernelDataLimits::default(),
+        lash_kernel_value::data_limits::KernelDataLimits::default(),
         &program.selection,
     )?;
     let exe = admitted

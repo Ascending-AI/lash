@@ -7,7 +7,7 @@ use lash_core_store::plugin_state::{NamespaceBody, NamespaceEntry, PluginNamespa
 use lash_core_store::store::{
     AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// A namespace at `generation` holding `value` under `key`: its entry and

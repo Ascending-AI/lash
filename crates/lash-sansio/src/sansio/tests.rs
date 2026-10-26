@@ -1,7 +1,7 @@
 use lash_protocol_types::ReportedFailure;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

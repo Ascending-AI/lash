@@ -65,7 +65,7 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
     )
     .with_execution_binding(Some(lash_vocabulary::providers::ExecutionBinding {
         codec: provider,
-        format: lash_vocabulary::providers::FormatVersion::ONE,
+        format: lash_kernel_value::providers::FormatVersion::ONE,
         payload: serde_json::json!({ "route": "deferred" }),
     }));
     let args = serde_json::json!({});

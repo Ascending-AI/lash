@@ -139,7 +139,7 @@ impl lash_core::ToolProvider for DeferredTools {
 
 pub(super) async fn create(core: &lash::LashCore, name: &str) -> Result<lash::DurableSession> {
     Ok(core
-        .session(lash_vocabulary::identity::SessionId::try_from(
+        .session(lash_kernel_value::identity::SessionId::try_from(
             name.to_owned(),
         )?)
         .create(lash::SessionCreation::root(spec()?))

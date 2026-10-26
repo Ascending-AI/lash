@@ -6,10 +6,10 @@ use std::sync::Arc;
 use lash_core::plugin::SessionPages;
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_kernel_doc::NumberPolicy;
+use lash_kernel_value::tool_shape::SchemaShape;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_tool_presenter_api::ToolPresenterSlot;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-use lash_vocabulary::tool_shape::SchemaShape;
 
 pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
@@ -312,7 +312,7 @@ pub(crate) struct CodeModeDialectServices {
 /// The operation named by the effect name `effect` as `spelling` writes
 /// it; `effect` itself when it names no canonical operation.
 pub(crate) fn spelled_effect(spelling: lash_kernel_dialect::Spelling, effect: &str) -> String {
-    lash_vocabulary::operation_text::parse(effect).map_or_else(
+    lash_kernel_value::operation_text::parse(effect).map_or_else(
         |_| effect.to_owned(),
         |operation| lash_kernel_dialect::spell_operation(spelling, &operation),
     )
@@ -349,7 +349,7 @@ impl SessionDialect {
         &self,
         packages: &lash_core_store::tool_surface::RecordedPackages,
     ) -> Result<Option<String>, SessionError> {
-        use lash_vocabulary::package::*;
+        use lash_kernel_value::package::*;
         let attachment = Attachment {
             members: Default::default(),
             packages: packages

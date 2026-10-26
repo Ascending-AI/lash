@@ -18,7 +18,7 @@ use std::time::Duration;
 use futures_util::{FutureExt as _, StreamExt as _};
 use lash::TurnInput;
 use lash::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde_json::json;
 

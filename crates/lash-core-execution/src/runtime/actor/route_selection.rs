@@ -4,7 +4,7 @@ use lash_core_store::tool_surface::{ExecutionEnvironment, RoutedOperation, UseBi
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
-use lash_vocabulary::{claims::*, package::*};
+use {lash_kernel_value::package::*, lash_vocabulary::claims::*};
 
 /// Candidate order has no authority. Distinct serving candidates for one pin
 /// are ambiguous; equal advertisements are harmless duplicates.
@@ -49,8 +49,8 @@ pub fn select_routes(
                 let operation = RoutedOperation {
                     requirement: requirement.clone(),
                     offer: OperationOffer {
-                        requirement: lash_vocabulary::operations::OperationRequirement {
-                            signature: lash_vocabulary::json_schema::tool_signature(
+                        requirement: lash_kernel_value::operations::OperationRequirement {
+                            signature: lash_kernel_value::json_schema::tool_signature(
                                 &selected.definition.contract.input_schema.canonical,
                                 &selected.definition.contract.output_schema.canonical,
                             ),
@@ -62,7 +62,7 @@ pub fn select_routes(
                             .map(|intent| Intent(intent.as_str().into()))
                             .collect(),
                         controls: declaration.controls.clone(),
-                        mode: if selected.route.policy == lash_vocabulary::ExecutionPolicy::Read {
+                        mode: if selected.route.policy == lash_kernel_value::ExecutionPolicy::Read {
                             OperationMode::Read
                         } else {
                             OperationMode::Waited
@@ -85,7 +85,8 @@ pub fn select_routes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_vocabulary::names::*;
+    use lash_kernel_value::claims::NodeRequirements;
+    use lash_kernel_value::names::*;
 
     /// L-DISPATCH: one diagnostic name can require two independent contracts.
     #[test]
@@ -137,8 +138,8 @@ mod tests {
                 member: candidate.operation.name.clone(),
                 type_member: None,
             },
-            requirement: lash_vocabulary::operations::OperationRequirement {
-                signature: lash_vocabulary::json_schema::tool_signature(
+            requirement: lash_kernel_value::operations::OperationRequirement {
+                signature: lash_kernel_value::json_schema::tool_signature(
                     &candidate.definition.contract.input_schema.canonical,
                     &candidate.definition.contract.output_schema.canonical,
                 ),

@@ -7,7 +7,7 @@
 
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::PageId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{

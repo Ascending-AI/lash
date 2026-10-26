@@ -45,8 +45,8 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{Datum, TaskId, Value};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::Name;
 
 use crate::compile::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
@@ -88,7 +88,7 @@ pub(crate) enum Halt {
 
 impl Halt {
     /// Preserve the innermost library definition that caused a bound.
-    fn in_function(mut self, function: &lash_vocabulary::names::FunctionName) -> Self {
+    fn in_function(mut self, function: &lash_kernel_value::names::FunctionName) -> Self {
         if let Self::Bound(exceeded) = &mut self {
             exceeded.function.get_or_insert_with(|| function.clone());
         }
@@ -129,7 +129,7 @@ impl Interrupt {
             data: None,
         }))
     }
-    fn in_function(self, function: &lash_vocabulary::names::FunctionName) -> Self {
+    fn in_function(self, function: &lash_kernel_value::names::FunctionName) -> Self {
         match self {
             Self::Halt(halt) => Self::from((*halt).in_function(function)),
             other => other,
@@ -308,8 +308,8 @@ struct Storage {
 
 struct Frame {
     convention: Option<lash_kernel_doc::StartConvention>,
-    public_result: Option<lash_vocabulary::types::Type>,
-    link: lash_vocabulary::content_ids::LinkId,
+    public_result: Option<lash_kernel_value::types::Type>,
+    link: lash_kernel_value::content_ids::LinkId,
     code: CodeId,
     // Rebuilt from the admitted code; never written to a frame row.
     charging: bool,
@@ -363,7 +363,7 @@ struct Task {
 /// `run` and `deliver`.
 pub struct KernelMachine {
     program: Program,
-    active_link: lash_vocabulary::content_ids::LinkId,
+    active_link: lash_kernel_value::content_ids::LinkId,
     /// The document's identity, which a parked run pins, once it has been
     /// taken.
     document: Option<DocumentId>,
@@ -376,7 +376,7 @@ pub struct KernelMachine {
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
     closure: PageId,
     owner: PageId,
     tasks: tasks::Tasks,
@@ -396,7 +396,7 @@ pub struct KernelMachine {
     withdrawn_ever: Tree<u64>,
     /// The mode each effect is performed in, bound at the start and saved
     /// with the run (`K-EFF-012`).
-    modes: Tree<lash_vocabulary::names::OperationUse>,
+    modes: Tree<lash_kernel_value::names::OperationUse>,
     /// The session's saved functions ([`FunctionRecord`]s by declared
     /// name), when the run is a session cell.
     ///
@@ -544,7 +544,7 @@ impl KernelMachine {
         self.exe.verify_stream()
     }
 
-    fn current_link(&self) -> lash_vocabulary::content_ids::LinkId {
+    fn current_link(&self) -> lash_kernel_value::content_ids::LinkId {
         self.active_link
     }
 
@@ -560,7 +560,7 @@ impl KernelMachine {
             {
                 return Err(StartError::UndeclaredRead { use_ });
             }
-            if mode == lash_vocabulary::package::OperationMode::Read {
+            if mode == lash_kernel_value::package::OperationMode::Read {
                 self.modes
                     .write(operation_key(&use_), use_, self.heap.pages())?;
             }
@@ -570,17 +570,17 @@ impl KernelMachine {
 
     fn effect_mode(
         &self,
-        use_: &lash_vocabulary::names::OperationUse,
-    ) -> Result<lash_vocabulary::package::OperationMode, HeapFault> {
+        use_: &lash_kernel_value::names::OperationUse,
+    ) -> Result<lash_kernel_value::package::OperationMode, HeapFault> {
         Ok(
             if self
                 .modes
                 .get(&operation_key(use_), self.heap.pages())?
                 .is_some()
             {
-                lash_vocabulary::package::OperationMode::Read
+                lash_kernel_value::package::OperationMode::Read
             } else {
-                lash_vocabulary::package::OperationMode::Waited
+                lash_kernel_value::package::OperationMode::Waited
             },
         )
     }
@@ -588,17 +588,17 @@ impl KernelMachine {
     fn operation(
         &mut self,
         task: TaskId,
-        slot: lash_vocabulary::names::ImportSlot,
-    ) -> Result<lash_vocabulary::names::OperationUse, Halt> {
+        slot: lash_kernel_value::names::ImportSlot,
+    ) -> Result<lash_kernel_value::names::OperationUse, Halt> {
         let link = self.frame(task)?.link;
         self.operation_in_link(link, slot)
     }
 
     fn operation_in_link(
         &self,
-        link: lash_vocabulary::LinkId,
-        slot: lash_vocabulary::ImportSlot,
-    ) -> Result<lash_vocabulary::OperationUse, Halt> {
+        link: lash_kernel_value::LinkId,
+        slot: lash_kernel_value::ImportSlot,
+    ) -> Result<lash_kernel_value::OperationUse, Halt> {
         match self
             .program
             .instances
@@ -1110,7 +1110,7 @@ impl KernelMachine {
                 .into_iter()
                 .map(|id| {
                     id.resolve(self.heap.pages())
-                        .map(lash_kernel_doc::kernel_internals::task_label)
+                        .map(lash_kernel_value::kernel_internals::task_label)
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(MachineError::Heap)?;
@@ -1302,7 +1302,7 @@ impl KernelMachine {
     }
 
     /// The shared kernel equality domain at a projection point.
-    pub(crate) fn semantic_checkpoint(&mut self) -> crate::conformance::Checkpoint {
+    pub(crate) fn semantic_checkpoint(&mut self) -> lash_kernel_state::semantic::Checkpoint {
         let sealed = self
             .seal(lash_kernel_state::paged::SealBudget {
                 pages: u64::MAX,
@@ -1329,7 +1329,7 @@ impl KernelMachine {
                 ))
             }
         }
-        crate::conformance::checkpoint(&sealed.root, Box::new(Source(access)))
+        lash_kernel_state::semantic::checkpoint(&sealed.root, Box::new(Source(access)))
             .expect("semantic checkpoint")
     }
 
@@ -1438,7 +1438,7 @@ impl KernelMachine {
     }
 }
 
-fn operation_key(use_: &lash_vocabulary::names::OperationUse) -> Vec<u8> {
+fn operation_key(use_: &lash_kernel_value::names::OperationUse) -> Vec<u8> {
     let mut key = use_.link.as_bytes().to_vec();
     key.extend_from_slice(&use_.slot.0.to_be_bytes());
     key

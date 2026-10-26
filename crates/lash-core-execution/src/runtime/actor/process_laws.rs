@@ -24,8 +24,8 @@ use std::time::{Duration, Instant};
 use lash_durable::domain::WaitPurpose;
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -307,15 +307,15 @@ const LAW_FLAKY: &str = "law_flaky";
 const LAW_PARK: &str = "law_park";
 
 /// A law tool's effect name.
-fn law_use(tool: &str) -> lash_vocabulary::OperationUse {
-    lash_vocabulary::OperationUse {
-        link: lash_vocabulary::LinkId::from_bytes({
+fn law_use(tool: &str) -> lash_kernel_value::OperationUse {
+    lash_kernel_value::OperationUse {
+        link: lash_kernel_value::LinkId::from_bytes({
             let mut id = [0; 32];
             let bytes = tool.as_bytes();
             id[..bytes.len()].copy_from_slice(bytes);
             id
         }),
-        slot: lash_vocabulary::ImportSlot(0),
+        slot: lash_kernel_value::ImportSlot(0),
     }
 }
 
@@ -375,7 +375,7 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_vocabulary::sites::EffectId {
+fn law_site(node: &str) -> lash_kernel_value::sites::EffectId {
     lash_protocol_types::effect_identity_fixture(node, 1)
 }
 
@@ -412,7 +412,7 @@ impl ProcessEngine for LawEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -420,7 +420,7 @@ impl ProcessEngine for LawEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -441,7 +441,7 @@ impl ProcessEngine for LawEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -546,9 +546,9 @@ impl ProcessEngine for LawEngine {
                             use_: law_use(LAW_PARK),
 
                             input: json!({}),
-                            site: Some(Box::new(lash_vocabulary::sites::EffectLocation::authored(
-                                law_site(step),
-                            ))),
+                            site: Some(Box::new(
+                                lash_kernel_value::sites::EffectLocation::authored(law_site(step)),
+                            )),
                         })
                         .collect(),
                     wake: None,

@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::Datum;
 
-use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
+use lash_kernel_state::semantic::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
@@ -51,7 +51,7 @@ struct Kernel {
 fn kernel_with(array: Option<&'static str>) -> Kernel {
     let mut registry = super::kernel_registry();
     let mut library = NamedLibrary::from_registry(&registry).unwrap();
-    let mut objects = crate::builtins::objects();
+    let mut objects = lash_ext_ts_helpers::builtins::objects();
     if let Some(array) = array {
         let object = objects
             .iter_mut()
@@ -59,7 +59,9 @@ fn kernel_with(array: Option<&'static str>) -> Kernel {
             .unwrap();
         object.source = array;
     }
-    for definition in crate::package::define_helpers_from(&mut library, objects).unwrap() {
+    for definition in
+        lash_ext_ts_helpers::package::define_helpers_from(&mut library, objects).unwrap()
+    {
         registry.register(definition, None).unwrap();
     }
     Kernel {
@@ -85,7 +87,7 @@ fn after() -> &'static Kernel {
 fn before() -> &'static Kernel {
     static KERNEL: OnceLock<Kernel> = OnceLock::new();
     KERNEL.get_or_init(|| {
-        let source = crate::builtins::objects()
+        let source = lash_ext_ts_helpers::builtins::objects()
             .into_iter()
             .find(|object| object.source.contains("function ts.array.map("))
             .unwrap()
@@ -169,7 +171,7 @@ fn observe(program: Program, relay: bool) -> Observed {
             Step::Ended(mut end) => {
                 let carry = match &mut end {
                     End::Finished(finished) => finished.carry.take().map(|root| {
-                        conformance::session(&root, Box::new(source.clone()))
+                        semantic::session(&root, Box::new(source.clone()))
                             .expect("the carried graph is readable")
                     }),
                     _ => None,

@@ -16,9 +16,9 @@
 
 mod session_services;
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
@@ -100,7 +100,7 @@ pub fn process_work_wiring_for_registry(
 pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
     const PAYLOAD: crate::ProcessConfigKey<serde_json::Value> = crate::ProcessConfigKey::new(
         "fixture-payload",
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
     );
     crate::ProcessEnv::builder(crate::MaxToolCalls::new(1024))
         .component(
@@ -134,8 +134,8 @@ pub fn step_tool(
 #[cfg(any(test, feature = "testing"))]
 #[expect(clippy::expect_used, reason = "fixture effect names")]
 #[must_use]
-pub fn effect(name: &str) -> lash_vocabulary::names::EffectName {
-    lash_vocabulary::names::EffectName::new(name).expect("a fixture effect name")
+pub fn effect(name: &str) -> lash_kernel_value::names::EffectName {
+    lash_kernel_value::names::EffectName::new(name).expect("a fixture effect name")
 }
 
 /// The effect `definition`'s operation names (`package.operation`): the
@@ -144,7 +144,7 @@ pub fn effect(name: &str) -> lash_vocabulary::names::EffectName {
 #[must_use]
 pub fn effect_of(
     definition: &lash_vocabulary::tool_contract::ToolDefinition,
-) -> lash_vocabulary::names::EffectName {
+) -> lash_kernel_value::names::EffectName {
     definition.manifest.operation.effect_name()
 }
 
@@ -1686,18 +1686,21 @@ pub fn operation_environment(
     registry: lash_vocabulary::claims::RegistryKind,
     operations: impl IntoIterator<
         Item = (
-            lash_vocabulary::OperationUse,
+            lash_kernel_value::OperationUse,
             lash_vocabulary::ToolDefinition,
             lash_core_store::tool_surface::OperationRoute,
         ),
     >,
 ) -> Result<lash_core_store::tool_surface::ExecutionEnvironment, String> {
     use lash_core_store::tool_surface::{ExecutionEnvironment, RoutedOperation, UseBinding};
-    use lash_vocabulary::{OperationMode, OperationOffer, OperationRequirement};
+    use {
+        lash_kernel_value::OperationMode, lash_kernel_value::OperationOffer,
+        lash_kernel_value::OperationRequirement,
+    };
     let mut environment = ExecutionEnvironment::empty(registry);
     for (use_, definition, route) in operations {
         let requirement = OperationRequirement::new(
-            lash_vocabulary::json_schema::tool_signature(
+            lash_kernel_value::json_schema::tool_signature(
                 &definition.contract.input_schema.canonical,
                 &definition.contract.output_schema.canonical,
             ),
@@ -1712,10 +1715,10 @@ pub fn operation_environment(
                     .declaration()
                     .intents
                     .iter()
-                    .map(|intent| lash_vocabulary::Intent(intent.as_str().into()))
+                    .map(|intent| lash_kernel_value::Intent(intent.as_str().into()))
                     .collect(),
                 controls: definition.manifest.declaration().controls.clone(),
-                mode: if route.policy == lash_vocabulary::ExecutionPolicy::Read {
+                mode: if route.policy == lash_kernel_value::ExecutionPolicy::Read {
                     OperationMode::Read
                 } else {
                     OperationMode::Waited

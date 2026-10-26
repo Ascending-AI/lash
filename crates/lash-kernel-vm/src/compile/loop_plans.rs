@@ -26,7 +26,7 @@
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 mod eligibility;
 use eligibility::{

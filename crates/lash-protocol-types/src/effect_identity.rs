@@ -2,8 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// Stable semantic identity for one effectful runtime operation.

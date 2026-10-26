@@ -8,13 +8,13 @@
 //! function of the process and the identity: a repeat is the same fact.
 
 use lash_core::plugin::PluginExecutionTrace;
+use lash_kernel_value::sites::EffectId;
 use lash_trace::{
     TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject,
 };
 use lash_vm_client::wire::OutcomeWire;
-use lash_vocabulary::sites::EffectId;
 
 use super::state::{Delivery, Issued, KernelProcessInput};
 
@@ -23,7 +23,7 @@ pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
     process_id: lash_vocabulary::identity::ProcessId,
-    observation: lash_vocabulary::observation::RunObservation,
+    observation: lash_kernel_value::observation::RunObservation,
 }
 
 impl ProcessTrace {
@@ -31,7 +31,7 @@ impl ProcessTrace {
         runtime: Option<&lash_core::trace::TraceRuntime>,
         process: &lash_vocabulary::identity::ProcessId,
         input: &KernelProcessInput,
-        observation: lash_vocabulary::observation::RunObservation,
+        observation: lash_kernel_value::observation::RunObservation,
     ) -> Option<Self> {
         let tracing = PluginExecutionTrace::new(runtime?.unreplayed(None));
         if !tracing.observes_language() {
@@ -54,8 +54,8 @@ impl ProcessTrace {
                 },
                 entry_name: match &input.code {
                     super::InlineRequest::Linked { start } => match &start.selector {
-                        lash_vocabulary::names::StartSelector::Main => "main".into(),
-                        lash_vocabulary::names::StartSelector::Export(name) => name.to_string(),
+                        lash_kernel_value::names::StartSelector::Main => "main".into(),
+                        lash_kernel_value::names::StartSelector::Export(name) => name.to_string(),
                     },
                     super::InlineRequest::Callable { function, .. } => {
                         function.callable.function.to_string()
@@ -96,7 +96,7 @@ impl ProcessTrace {
         });
     }
 
-    pub(super) fn origin(&self, at: &EffectId, origin: &lash_vocabulary::sites::Site) {
+    pub(super) fn origin(&self, at: &EffectId, origin: &lash_kernel_value::sites::Site) {
         self.node(
             at,
             TraceNodeFact::Origin {
@@ -150,7 +150,7 @@ impl ProcessTrace {
         &self,
         segment: &str,
         frame: u64,
-        delta: &lash_vocabulary::observation::SiteCounts,
+        delta: &lash_kernel_value::observation::SiteCounts,
     ) {
         self.emit(TraceLanguageExecutionPayload::Counts {
             counts: lash_trace::TraceCountObservation::Process(lash_trace::TraceProcessCounts {

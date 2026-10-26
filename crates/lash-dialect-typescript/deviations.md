@@ -2,7 +2,7 @@
 
 Where the TypeScript dialect of the lash kernel knowingly behaves differently from ECMAScript as Node runs it. Each row names the law that pins the dialect's behaviour; a row is removed only with the difference. A Test262 case that fails for a reason listed here cites the row's code.
 
-How asynchronous source maps to kernel tasks is described in `src/lower/async_fn.rs` and `src/helpers/promise.kernel`. The Node witnesses are in `witness/async/`.
+How asynchronous source maps to kernel tasks is described in `src/lower/async_fn.rs` and `../lash-ext-ts-helpers/src/helpers/promise.kernel`. The Node witnesses are in `witness/async/`.
 
 | Code | ECMAScript, in Node | The dialect | Why | Law |
 | --- | --- | --- | --- | --- |

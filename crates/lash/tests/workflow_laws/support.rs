@@ -133,7 +133,7 @@ pub(super) fn operation_import(
                 type_member: None,
             },
             kind: ImportKind::Operation {
-                signature: lash_vocabulary::json_schema::tool_signature(
+                signature: lash_kernel_value::json_schema::tool_signature(
                     &definition.contract.input_schema.canonical,
                     &definition.contract.output_schema.canonical,
                 ),

@@ -10,9 +10,9 @@
 //! owned by its process run, not held here.
 
 use super::*;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::sync::atomic::AtomicBool;
 
@@ -90,7 +90,7 @@ pub(in crate::runtime) struct EngineProcessParts {
     pub(in crate::runtime) resolutions: Arc<
         std::sync::Mutex<
             std::collections::BTreeMap<
-                lash_vocabulary::names::OperationUse,
+                lash_kernel_value::names::OperationUse,
                 lash_core_store::resolutions::ResolutionEntry,
             >,
         >,
@@ -660,7 +660,7 @@ pub(super) fn emit_session_events(event_tx: &TurnObserver, plugin_events: Vec<Se
 #[cfg(test)]
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
     use lash_vocabulary::identity::TurnId;
 
     use crate::runtime::tests::helpers::standard_test_policy;
@@ -694,7 +694,7 @@ mod process_visibility_tests {
     impl crate::ProcessToolVisibilityFilter for CountingFilter {
         fn narrow(
             &self,
-            _session: &lash_vocabulary::identity::SessionId,
+            _session: &lash_kernel_value::identity::SessionId,
             candidates: &[lash_vocabulary::identity::ProcessId],
         ) -> Vec<lash_vocabulary::identity::ProcessId> {
             self.invocations.fetch_add(1, Ordering::SeqCst);

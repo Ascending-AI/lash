@@ -22,7 +22,7 @@
 
 use std::sync::Arc;
 
-use lash_vocabulary::json_schema::JsonSchema;
+use lash_kernel_value::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolId;
 use lash_vocabulary::tool_contract::ToolManifest;
@@ -44,7 +44,7 @@ pub use wrap::WrappedToolPresenter;
 /// ```
 /// let document = lash_tool_presenter_api::import_schema(&serde_json::json!({"type":"string"}))?;
 /// assert_eq!(document.roots.len(), 1);
-/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
+/// # Ok::<(), lash_kernel_value::tool_shape::ShapeImportRefusal>(())
 /// ```
 ///
 /// # Errors
@@ -52,10 +52,10 @@ pub use wrap::WrappedToolPresenter;
 pub fn import_schema(
     schema: &Value,
 ) -> Result<
-    lash_vocabulary::tool_shape::SchemaDocument,
-    lash_vocabulary::tool_shape::ShapeImportRefusal,
+    lash_kernel_value::tool_shape::SchemaDocument,
+    lash_kernel_value::tool_shape::ShapeImportRefusal,
 > {
-    lash_vocabulary::tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
+    lash_kernel_value::tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
 }
 
 /// Import an immutable admitted contract, sharing its complete presentation
@@ -67,15 +67,17 @@ pub fn import_schema(
 pub fn import_admitted_schema(
     schema: &JsonSchema,
 ) -> Result<
-    Arc<lash_vocabulary::tool_shape::SchemaDocument>,
-    lash_vocabulary::tool_shape::ShapeImportRefusal,
+    Arc<lash_kernel_value::tool_shape::SchemaDocument>,
+    lash_kernel_value::tool_shape::ShapeImportRefusal,
 > {
     static CACHE: GraphImports = GraphImports::new();
     CACHE.import(schema, || {})
 }
 
 struct GraphImports(
-    std::sync::Mutex<std::collections::VecDeque<Arc<lash_vocabulary::tool_shape::SchemaDocument>>>,
+    std::sync::Mutex<
+        std::collections::VecDeque<Arc<lash_kernel_value::tool_shape::SchemaDocument>>,
+    >,
 );
 
 impl GraphImports {
@@ -88,14 +90,14 @@ impl GraphImports {
         schema: &JsonSchema,
         after_import: impl FnOnce(),
     ) -> Result<
-        Arc<lash_vocabulary::tool_shape::SchemaDocument>,
-        lash_vocabulary::tool_shape::ShapeImportRefusal,
+        Arc<lash_kernel_value::tool_shape::SchemaDocument>,
+        lash_kernel_value::tool_shape::ShapeImportRefusal,
     > {
         const ENTRIES: usize = 32;
         const SOURCE_BYTES: usize = 32 * 1024;
         const DEFINITIONS: usize = 128;
         let find = |entries: &std::collections::VecDeque<
-            Arc<lash_vocabulary::tool_shape::SchemaDocument>,
+            Arc<lash_kernel_value::tool_shape::SchemaDocument>,
         >| {
             entries
                 .iter()
@@ -375,7 +377,7 @@ pub enum PresentationRefusal {
     #[error("tool schema cannot be presented: {cause}")]
     Shape {
         #[from]
-        cause: lash_vocabulary::tool_shape::ShapeImportRefusal,
+        cause: lash_kernel_value::tool_shape::ShapeImportRefusal,
     },
     /// The presenter does not take this config.
     #[error("tool presenter `{presenter}` refuses its config: {reason}")]
@@ -401,7 +403,7 @@ impl PresentationRefusal {
     /// The stable, machine-readable cause documented on [`Self`]. A host
     /// presenter's custom code is returned unchanged.
     pub fn code(&self) -> &str {
-        use lash_vocabulary::tool_shape::ShapeImportRefusal;
+        use lash_kernel_value::tool_shape::ShapeImportRefusal;
         match self {
             Self::Custom { code, .. } => code,
             Self::Shape {

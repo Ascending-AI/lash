@@ -4,7 +4,7 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]

@@ -1023,7 +1023,7 @@ fn switch_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
             "additionalProperties": false,
             "properties": { "other": { "type": "boolean" } }
         }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120))

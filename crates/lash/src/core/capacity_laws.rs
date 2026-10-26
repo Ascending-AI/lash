@@ -192,7 +192,7 @@ async fn facade_fetch_horizon_is_recorded_for_cold_resends() {
                     let row = backend
                         .durable()
                         .prompt_snapshot(&crate::prompt::PromptCallKey {
-                            session: lash_vocabulary::identity::SessionId::from("fetch-horizon"),
+                            session: lash_kernel_value::identity::SessionId::from("fetch-horizon"),
                             call: crate::prompt::ModelCallId::Turn {
                                 run: turn,
                                 ordinal: 1,

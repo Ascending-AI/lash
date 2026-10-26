@@ -22,7 +22,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use lash_vocabulary::{Name, Signature};
+use {lash_kernel_value::Name, lash_kernel_value::Signature};
 
 use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{
@@ -229,7 +229,7 @@ impl Facts {
                 .iter()
                 .filter(|(name, _)| {
                     let root = name.split('.').next().unwrap_or_default();
-                    !crate::builtins::is_global(root)
+                    !lash_ext_ts_helpers::builtins::is_global(root)
                         && !collector.names.contains_key(root)
                         && !session.contains(&Name::new(root))
                 })
@@ -256,17 +256,17 @@ impl Facts {
                     Some((path.clone(), Ty::annotated(&header.signature.result)))
                 })
                 .collect(),
-            text_methods: crate::builtins::table()
+            text_methods: lash_ext_ts_helpers::builtins::table()
                 .methods
                 .iter()
                 .filter_map(|(name, rows)| {
-                    let (_, path) = rows
-                        .iter()
-                        .find(|(receiver, _)| *receiver == crate::builtins::Receiver::Text)?;
-                    let helper = crate::builtins::table().functions.get(path)?;
+                    let (_, path) = rows.iter().find(|(receiver, _)| {
+                        *receiver == lash_ext_ts_helpers::builtins::Receiver::Text
+                    })?;
+                    let helper = lash_ext_ts_helpers::builtins::table().functions.get(path)?;
                     let id = library.resolve(helper)?;
                     let header = library.header(&id)?;
-                    (header.signature.result == lash_vocabulary::Type::Text).then_some(*name)
+                    (header.signature.result == lash_kernel_value::Type::Text).then_some(*name)
                 })
                 .collect(),
             assigned: collector
@@ -340,7 +340,8 @@ impl Facts {
             loop {
                 match expression {
                     Expr::Ident(name, _)
-                        if facts.unbound(name) && crate::builtins::is_global(name) =>
+                        if facts.unbound(name)
+                            && lash_ext_ts_helpers::builtins::is_global(name) =>
                     {
                         let mut path = name.clone();
                         for field in suffix.into_iter().rev() {
@@ -372,7 +373,9 @@ impl Facts {
         }
         path(self, expression, &mut Default::default()).is_some_and(|path| {
             let path = path.strip_prefix("globalThis.").unwrap_or(&path);
-            crate::builtins::table().builtin(path).is_some()
+            lash_ext_ts_helpers::builtins::table()
+                .builtin(path)
+                .is_some()
         })
     }
 
@@ -453,10 +456,10 @@ impl Facts {
         annotation: &TypeAnnotation,
         settled: bool,
     ) -> Result<
-        lash_vocabulary::Type,
+        lash_kernel_value::Type,
         (
             crate::SourceSpan,
-            lash_vocabulary::AnnotationResolutionReason,
+            lash_kernel_value::AnnotationResolutionReason,
         ),
     > {
         self.annotations.get(annotation, settled)
@@ -1363,7 +1366,7 @@ impl<'a> Collector<'a> {
                     property: MemberProperty::Field(method),
                     ..
                 } = callee.as_ref()
-                    && crate::builtins::array_callback(method).is_some()
+                    && lash_ext_ts_helpers::builtins::array_callback(method).is_some()
                     && args.iter().all(|arg| matches!(arg, CallArg::Value(_)))
                     && let Some(CallArg::Value(Expr::Ident(name, _))) = args.first()
                 {

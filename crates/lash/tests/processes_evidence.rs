@@ -550,12 +550,12 @@ fn processes_area_witnesses() {
     // W0283: lash::process::ProcessStartOptions::with_initial_observer [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observer(
         todo!(),
-        lash_vocabulary::identity::SessionId::from("x"),
+        lash_kernel_value::identity::SessionId::from("x"),
     );
     // W0284: lash::process::ProcessStartOptions::with_initial_observers [function]
     let _ = lash::process::ProcessStartOptions::with_initial_observers(
         todo!(),
-        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
+        std::iter::empty::<lash_kernel_value::identity::SessionId>(),
     );
     // W0285: lash::process::ProcessStartOptions::with_spawn_provenance [function]
     let _ = lash::process::ProcessStartOptions::with_spawn_provenance;
@@ -591,7 +591,7 @@ fn processes_area_witnesses() {
     // W0305: lash::process::ProcessStartRequest::with_observers [function]
     let _ = lash::process::ProcessStartRequest::with_observers(
         todo!(),
-        std::iter::empty::<lash_vocabulary::identity::SessionId>(),
+        std::iter::empty::<lash_kernel_value::identity::SessionId>(),
     );
     // W0307: lash::process::ProcessStatus::Abandoned [variant]
     variant_witness(|value: &lash::process::ProcessStatus| {
@@ -1041,7 +1041,7 @@ mod named_component_laws {
             let session = self
                 .core
                 .session(
-                    lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                    lash_kernel_value::identity::SessionId::try_from(name.to_owned())
                         .expect("a session id"),
                 )
                 .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -1596,7 +1596,7 @@ mod named_component_laws {
             Vec::new(),
         );
         document.main = None;
-        let signature = lash_vocabulary::json_schema::tool_signature(
+        let signature = lash_kernel_value::json_schema::tool_signature(
             &definition.contract.input_schema.canonical,
             &definition.contract.output_schema.canonical,
         );
@@ -1614,7 +1614,7 @@ mod named_component_laws {
             },
         );
         let requirement =
-            lash_vocabulary::OperationRequirement::new(signature, definition.contract_id());
+            lash_kernel_value::OperationRequirement::new(signature, definition.contract_id());
         let link = lash::package::Link {
             document: document.identity(),
             fills: [(
@@ -1697,7 +1697,7 @@ mod named_component_laws {
             &env,
             &ToolCatalog::from_tool_definitions(Vec::new())
         ));
-        let session = lash_vocabulary::identity::SessionId::try_from("granted-session").unwrap();
+        let session = lash_kernel_value::identity::SessionId::try_from("granted-session").unwrap();
         let capability = lash::CapabilityRef {
             binding: lash::BindingId::new("binding:one"),
             contract: lash::ContractRef::new("integration", 1),

@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Value};
 
-use lash_vocabulary::Type;
+use lash_kernel_value::Type;
 
 use super::{Function, arg, count_arg, definition, raise, text_arg};
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {

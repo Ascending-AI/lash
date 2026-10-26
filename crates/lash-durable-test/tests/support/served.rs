@@ -499,7 +499,7 @@ impl World {
     pub async fn session(&self, name: &str, spec: lash::SessionSpec) -> lash::DurableSession {
         self.core
             .session(
-                lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                lash_kernel_value::identity::SessionId::try_from(name.to_owned())
                     .expect("a session id"),
             )
             .create(lash::SessionCreation::root(spec))
@@ -533,7 +533,7 @@ impl World {
     pub async fn read(&self, name: &str) -> lash::persistence::SessionReadView {
         self.core
             .session(
-                lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                lash_kernel_value::identity::SessionId::try_from(name.to_owned())
                     .expect("session id"),
             )
             .durable()

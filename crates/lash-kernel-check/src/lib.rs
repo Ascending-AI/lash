@@ -29,8 +29,8 @@ mod graph;
 mod link;
 mod manifest;
 mod refusal;
-pub use lash_vocabulary::schema;
-pub use lash_vocabulary::type_relations as types;
+pub use lash_kernel_value::schema;
+pub use lash_kernel_value::type_relations as types;
 mod typing;
 mod workflow;
 
@@ -64,8 +64,8 @@ pub use workflow::{
     validate_start_input, validate_start_result,
 };
 
-pub use lash_vocabulary::entry_schema::*;
-pub use lash_vocabulary::type_relations::type_mismatch;
+pub use lash_kernel_value::entry_schema::*;
+pub use lash_kernel_value::type_relations::type_mismatch;
 
 mod binding_uses;
 pub use binding_uses::{binding_references, rename_binding_uses};

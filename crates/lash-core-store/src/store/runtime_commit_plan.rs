@@ -6,7 +6,7 @@
 //! set, and the receipt/result projection. A backend therefore reads typed
 //! facts, asks the planner once, and executes the returned plan.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::HashSet;
 
 use super::{

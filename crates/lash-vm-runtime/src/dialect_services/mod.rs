@@ -10,14 +10,17 @@ use lash_core_execution::{
 };
 use lash_core_store::tool_surface::{OperationRoute, RouteSource};
 use lash_execution_contracts::{PluginError, process::linking::EnginePortError};
-use lash_vocabulary::{
-    ExecutionPolicy, ParkBound, ToolContract, ToolDeclaration, ToolDefinition, ToolManifest,
-    TurnControls, names::*, package::*, providers::ToolProviderHandle,
-};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::Duration,
+};
+use {
+    lash_kernel_value::ExecutionPolicy, lash_kernel_value::TurnControls,
+    lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::ParkBound,
+    lash_vocabulary::ToolContract, lash_vocabulary::ToolDeclaration,
+    lash_vocabulary::ToolDefinition, lash_vocabulary::ToolManifest,
+    lash_vocabulary::providers::ToolProviderHandle,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,8 +31,8 @@ pub enum Dialect {
 impl Dialect {
     fn operations(self) -> &'static [lash_kernel_dialect::authoring::HelperOperation] {
         match self {
-            Self::TypeScript => &lash_dialect_services::TYPESCRIPT,
-            Self::Python => &lash_dialect_services::PYTHON,
+            Self::TypeScript => &lash_kernel_services::TYPESCRIPT,
+            Self::Python => &lash_kernel_services::PYTHON,
         }
     }
     pub fn package(self) -> &'static str {

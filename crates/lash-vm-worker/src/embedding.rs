@@ -8,10 +8,10 @@ use std::sync::{Arc, OnceLock};
 use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
 use lash_kernel_doc::{FunctionRegistry, NativeFunction};
 
+use lash_kernel_value::names::FunctionId;
 use lash_kernel_vm::PreparedLibrary;
 use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
 use lash_vm_client::packages::WorkerLibrary;
-use lash_vocabulary::names::FunctionId;
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build or of the host's configuration,
@@ -150,7 +150,7 @@ pub fn library_for(
     embedding: &Embedding,
     document: &lash_kernel_doc::Document,
     definitions: &[(FunctionId, &[u8])],
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<
     Result<
@@ -212,10 +212,10 @@ pub fn library_for(
 pub(crate) fn linked_library_for(
     embedding: &Embedding,
     root: &lash_kernel_doc::Document,
-    documents: &BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
-    functions: &BTreeMap<lash_vocabulary::LinkId, std::collections::BTreeSet<FunctionId>>,
+    documents: &BTreeMap<lash_kernel_value::DocumentId, Arc<lash_kernel_doc::Document>>,
+    functions: &BTreeMap<lash_kernel_value::LinkId, std::collections::BTreeSet<FunctionId>>,
     definitions: &[(FunctionId, &[u8])],
-    limits: lash_vocabulary::KernelDataLimits,
+    limits: lash_kernel_value::KernelDataLimits,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<
     Result<
@@ -389,7 +389,7 @@ impl Embedder {
 pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Result<Dialect, EmbedError> {
     let front_end = typescript::FrontEnd::new(tuning)?;
     Ok(Dialect {
-        name: lash_vm_releases::TYPESCRIPT.to_owned(),
+        name: lash_kernel_releases::TYPESCRIPT.to_owned(),
         front_end: Box::new(front_end),
         read: |source, base, library, limits, source_limits| {
             lash_dialect_typescript::read(source, base, library, limits, source_limits)
@@ -438,7 +438,7 @@ mod typescript {
                 tuning.typescript_source_nesting,
             )
             .map_err(|error| super::EmbedError::Dialect {
-                dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
+                dialect: lash_kernel_releases::TYPESCRIPT.to_owned(),
                 message: error.to_string(),
             })?;
             Ok(Self {
@@ -493,8 +493,10 @@ pub(crate) mod tests {
     use lash_kernel_dialect::{
         EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
     };
-    use lash_vocabulary::{
-        EffectName, OperationMode, QualifiedOperation, Signature, TurnControls, package::Visibility,
+    use {
+        lash_kernel_value::EffectName, lash_kernel_value::OperationMode,
+        lash_kernel_value::QualifiedOperation, lash_kernel_value::Signature,
+        lash_kernel_value::TurnControls, lash_kernel_value::package::Visibility,
     };
     pub(crate) fn namespaces(
         effects: &BTreeMap<EffectName, Signature>,
@@ -506,7 +508,7 @@ pub(crate) mod tests {
             let flags = controls.get(name);
             let mut accepted = TurnControls::none();
             if flags.is_some_and(|flags| flags.contains(&EffectControl::Finish)) {
-                accepted = accepted.with_finish(lash_vocabulary::JsonSchema::any());
+                accepted = accepted.with_finish(lash_kernel_value::JsonSchema::any());
             }
             if flags.is_some_and(|flags| flags.contains(&EffectControl::SwitchAgentFrame)) {
                 accepted = accepted.with_switch_agent_frame();
@@ -583,7 +585,7 @@ pub(crate) mod tests {
             error,
             lash_kernel_doc::RegistryError::FramePlanMissing {
                 function,
-                name: lash_vocabulary::FunctionName::written(original.name),
+                name: lash_kernel_value::FunctionName::written(original.name),
             }
         );
         assert!(matches!(EmbedError::from(error), EmbedError::Library(
@@ -593,7 +595,7 @@ pub(crate) mod tests {
 
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> WorkerLibrary {
-        let release = lash_vm_releases::helper_release().expect("helper release");
+        let release = lash_kernel_releases::helper_release().expect("helper release");
         WorkerLibrary::with_helpers(
             &release.functions,
             release.resolver_roots(),
@@ -609,7 +611,10 @@ pub(crate) mod tests {
         document: lash_kernel_doc::Document,
         library: PreparedLibrary,
     ) -> lash_kernel_vm::Program {
-        use lash_vocabulary::{Fill, ImportKind, OperationRequirement};
+        use {
+            lash_kernel_value::Fill, lash_kernel_value::ImportKind,
+            lash_kernel_value::OperationRequirement,
+        };
         let fills = document
             .imports
             .iter()
@@ -621,12 +626,12 @@ pub(crate) mod tests {
                     *slot,
                     Fill::Operation(OperationRequirement::new(
                         signature.clone(),
-                        lash_vocabulary::ContractId::new("1"),
+                        lash_kernel_value::ContractId::new("1"),
                     )),
                 )
             })
             .collect();
-        let root = lash_vocabulary::Link {
+        let root = lash_kernel_value::Link {
             document: document.identity(),
             fills,
         };
@@ -703,19 +708,19 @@ pub(crate) mod tests {
     /// retired spelling fails here instead of rotting in the example.
     #[test]
     fn the_typescript_host_flow_examples_lower_against_their_host_catalogue() {
-        use lash_vocabulary::names::EffectName;
-        use lash_vocabulary::names::Name;
-        use lash_vocabulary::types::Signature;
+        use lash_kernel_value::names::EffectName;
+        use lash_kernel_value::names::Name;
+        use lash_kernel_value::types::Signature;
         use std::collections::BTreeSet;
 
         let embedding = typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
         let tool = Signature {
-            params: vec![lash_vocabulary::types::Param {
+            params: vec![lash_kernel_value::types::Param {
                 name: Name::new("input"),
-                ty: lash_vocabulary::types::Type::Any,
+                ty: lash_kernel_value::types::Type::Any,
                 optional: false,
             }],
-            result: lash_vocabulary::types::Type::Any,
+            result: lash_kernel_value::types::Type::Any,
         };
         let effects: BTreeMap<_, _> = [
             "web.fetch",
@@ -744,7 +749,7 @@ pub(crate) mod tests {
         ] {
             let lowered = embedding
                 .lower(
-                    lash_vm_releases::TYPESCRIPT,
+                    lash_kernel_releases::TYPESCRIPT,
                     source,
                     &lash_kernel_dialect::Environment::new(
                         embedding.library(),
@@ -780,7 +785,7 @@ pub(crate) mod tests {
         let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(
-                lash_vm_releases::TYPESCRIPT,
+                lash_kernel_releases::TYPESCRIPT,
                 &source,
                 &environment,
                 Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
@@ -801,7 +806,7 @@ pub(crate) mod tests {
         let environment = Environment::new(embedding.library(), &environment_namespaces);
         embedding
             .lower(
-                lash_vm_releases::PYTHON,
+                lash_kernel_releases::PYTHON,
                 &python_source,
                 &environment,
                 Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),

@@ -12,7 +12,7 @@
 use crate::PendingTurnInputDraft;
 use crate::run_spec::RunSpecHash;
 use crate::store::StoreError;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// What admitting one draft writes for its spec: nothing for the default

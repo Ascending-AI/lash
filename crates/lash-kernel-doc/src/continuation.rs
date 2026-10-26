@@ -28,8 +28,8 @@ use crate::ast::Node;
 use crate::ast::Place;
 use crate::ast::Stmt;
 use crate::document::Document;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 /// Why [`live_roles`] gives no answer.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

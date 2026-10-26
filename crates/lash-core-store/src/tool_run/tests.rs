@@ -162,7 +162,7 @@ fn declarations_refuse_typed() {
         may_defer: true,
         intents: vec![ToolIntentKind::CancelProcess],
         isolated: false,
-        controls: lash_vocabulary::tool_declaration::TurnControls::none(),
+        controls: lash_kernel_value::tool_declaration::TurnControls::none(),
     };
     assert_eq!(deferring.admits(OutcomeShape::Deferred), Ok(()));
     assert_eq!(
@@ -614,7 +614,7 @@ fn only_sequential_turn_and_tool_result_check_callbacks_publish_state() {
 #[test]
 fn the_state_frontier_applies_each_publication_once_in_order() {
     let resolution = |ordinal: u64, predecessor: Option<u64>, segment: u32| StateResolution {
-        format_version: lash_vocabulary::providers::FormatVersion::ONE,
+        format_version: lash_kernel_value::providers::FormatVersion::ONE,
         publisher: crate::EffectAddress::new(
             ExecutionScope::turn("session-1", "turn-1"),
             "attempt:a",

@@ -20,7 +20,7 @@ fn kernel() -> &'static Kernel {
     KERNEL.get_or_init(|| {
         let mut registry = super::kernel_registry();
         let mut library = NamedLibrary::from_registry(&registry).unwrap();
-        for definition in crate::define_helpers(&mut library).unwrap() {
+        for definition in lash_ext_ts_helpers::package::define_helpers(&mut library).unwrap() {
             registry.register(definition, None).unwrap();
         }
         Kernel {

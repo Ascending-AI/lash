@@ -6,7 +6,7 @@ use super::*;
 #[tokio::test]
 async fn effect_executor_allocations_are_independent_of_history_depth() {
     let backend = crate::testing::sqlite_recording_backend().await;
-    let session_id = lash_vocabulary::identity::SessionId::fixture("sequence-sharing");
+    let session_id = lash_kernel_value::identity::SessionId::fixture("sequence-sharing");
     let store =
         crate::testing::runtime_helpers::recording_session_store(&backend, session_id.clone())
             .await;

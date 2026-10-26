@@ -338,7 +338,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     assert!(
         source
             .lowering_functions()
-            .contains_key(&lash_vocabulary::names::Name::new("shout")),
+            .contains_key(&lash_kernel_value::names::Name::new("shout")),
         "{:?}",
         source.not_carried()
     );
@@ -421,12 +421,12 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     );
     let not_carried = state.not_carried();
     let why = not_carried
-        .get(&lash_vocabulary::names::Name::new("later"))
+        .get(&lash_kernel_value::names::Name::new("later"))
         .expect("the session records why `later` was not kept");
     assert_eq!(
         why,
         &lash_kernel_dialect::NotSaved::Capture {
-            name: lash_vocabulary::names::Name::new("pending"),
+            name: lash_kernel_value::names::Name::new("pending"),
             why: lash_kernel_dialect::CaptureRefusal::Task,
         }
         .to_string()
@@ -460,8 +460,8 @@ impl EchoEndsTheTurn {
             "echo.say",
             "Echo the text back, ending the turn",
             lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
-            lash_vocabulary::tool_declaration::TurnControls::finish(
-                lash_vocabulary::json_schema::JsonSchema::any(),
+            lash_kernel_value::tool_declaration::TurnControls::finish(
+                lash_kernel_value::json_schema::JsonSchema::any(),
             ),
         )
         .expect("valid declared tool schema")
@@ -555,7 +555,7 @@ async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
     assert!(
         !state
             .lowering_functions()
-            .contains_key(&lash_vocabulary::names::Name::new("done"))
+            .contains_key(&lash_kernel_value::names::Name::new("done"))
     );
 }
 
@@ -629,7 +629,7 @@ async fn saved_function_declarations_live_until_their_frame_ends() {
     )
     .await;
     assert!(defined.error().is_none(), "{:?}", defined.error());
-    let document = state.lowering_functions()[&lash_vocabulary::Name::new("keep")]
+    let document = state.lowering_functions()[&lash_kernel_value::Name::new("keep")]
         .document
         .id()
         .to_string();
@@ -695,7 +695,7 @@ async fn a_saved_function_and_its_aliases_relink_to_the_next_cells_operation_con
                 serde_json::json!({"type": "string"}),
             )
             .expect("echo schema")
-            .declared_contract(lash_vocabulary::operations::ContractId::new(self.0))
+            .declared_contract(lash_kernel_value::operations::ContractId::new(self.0))
             .with_execution(std::time::Duration::from_secs(120))
         }
     }

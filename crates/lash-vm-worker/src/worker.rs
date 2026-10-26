@@ -41,17 +41,17 @@ struct Hosted {
     observe_sites: bool,
     /// The document's site ordinals, when the parent records the run's
     /// statement path.
-    path: Option<std::collections::BTreeMap<lash_vocabulary::sites::Site, u32>>,
+    path: Option<std::collections::BTreeMap<lash_kernel_value::sites::Site, u32>>,
 }
 
 struct WorkerContent {
     document: lash_kernel_doc::IdentifiedDocument,
     indexed: std::collections::BTreeMap<
-        lash_vocabulary::LinkId,
+        lash_kernel_value::LinkId,
         lash_kernel_vm::interface::PreparedInstance,
     >,
     documents:
-        std::collections::BTreeMap<lash_vocabulary::DocumentId, Arc<lash_kernel_doc::Document>>,
+        std::collections::BTreeMap<lash_kernel_value::DocumentId, Arc<lash_kernel_doc::Document>>,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -829,11 +829,11 @@ impl<'embedding> Server<'embedding> {
         let definitions = &start.definitions;
         let functions = &start.functions;
         let link = start.link;
-        let supplied: Vec<(lash_vocabulary::names::FunctionId, &[u8])> = definitions
+        let supplied: Vec<(lash_kernel_value::names::FunctionId, &[u8])> = definitions
             .iter()
             .map(|definition| {
                 (
-                    lash_vocabulary::names::FunctionId::from_bytes(definition.function),
+                    lash_kernel_value::names::FunctionId::from_bytes(definition.function),
                     definition.body.0.as_slice(),
                 )
             })

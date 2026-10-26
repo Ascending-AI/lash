@@ -10,7 +10,7 @@ use lash_kernel_doc::NativeCall;
 use lash_kernel_doc::NativeError;
 use lash_kernel_doc::NativeFunction;
 use lash_kernel_doc::Value;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 
 use super::{Kit, Law, Witness};
 use crate::{Case, Expected, ExpectedEnd};

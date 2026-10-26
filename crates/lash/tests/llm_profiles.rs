@@ -288,16 +288,18 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 }
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
-    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            key,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            lash::NoProgressBudget::bounded(12),
-        )))
-        .await
-        .expect("create the session");
-    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
+    core.session(
+        lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
+    )
+    .create(lash::SessionCreation::root(lash::SessionSpec::new(
+        key,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        lash::NoProgressBudget::bounded(12),
+    )))
+    .await
+    .expect("create the session");
+    core.session(lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await
         .expect("open the session")
@@ -547,7 +549,7 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_profile_change(tier: Ti
     );
     let session = edited
         .session(
-            lash_vocabulary::identity::SessionId::parse(session_id)
+            lash_kernel_value::identity::SessionId::parse(session_id)
                 .expect("nonblank host identity"),
         )
         .open()
@@ -750,7 +752,7 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
 
     let created = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-unknown-create")
+            lash_kernel_value::identity::SessionId::parse("keys-unknown-create")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -767,7 +769,7 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
     );
     let reopened = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-unknown-create")
+            lash_kernel_value::identity::SessionId::parse("keys-unknown-create")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -885,7 +887,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     // Creation: a key with no reasoning controls cannot record an effort.
     let created = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-reasoning-refused")
+            lash_kernel_value::identity::SessionId::parse("keys-reasoning-refused")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(
@@ -910,7 +912,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     }
     let reopened = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-reasoning-refused")
+            lash_kernel_value::identity::SessionId::parse("keys-reasoning-refused")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -923,7 +925,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
 
     // Send: the session records `high` on the thinking model.
     core.session(
-        lash_vocabulary::identity::SessionId::parse("keys-reasoning")
+        lash_kernel_value::identity::SessionId::parse("keys-reasoning")
             .expect("nonblank host identity"),
     )
     .create(lash::SessionCreation::root(
@@ -939,7 +941,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     .expect("the advertised effort is recorded");
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("keys-reasoning")
+            lash_kernel_value::identity::SessionId::parse("keys-reasoning")
                 .expect("nonblank host identity"),
         )
         .open()

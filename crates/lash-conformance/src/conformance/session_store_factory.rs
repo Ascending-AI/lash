@@ -9,7 +9,7 @@ use super::session_store_factory_vacuum::{
 };
 use super::*;
 use crate::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use pretty_assertions::assert_eq;
 

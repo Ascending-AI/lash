@@ -44,7 +44,7 @@ type Observed = (
     Vec<Datum>,
     Vec<Request>,
     u64,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 fn observe(setup: Setup) -> Observed {
@@ -68,8 +68,10 @@ fn observe(setup: Setup) -> Observed {
     if let End::Finished(finished) = &mut end
         && let Some(carry) = finished.carry.take()
     {
-        checkpoints
-            .push(crate::conformance::session(&carry, Box::new(embedder.source.clone())).unwrap());
+        checkpoints.push(
+            lash_kernel_state::semantic::session(&carry, Box::new(embedder.source.clone()))
+                .unwrap(),
+        );
     }
     (
         end,
@@ -176,8 +178,11 @@ main {
                     && let Some(carry) = &finished.carry
                 {
                     continuations.push(
-                        crate::conformance::session(carry, Box::new(embedder.source.clone()))
-                            .unwrap(),
+                        lash_kernel_state::semantic::session(
+                            carry,
+                            Box::new(embedder.source.clone()),
+                        )
+                        .unwrap(),
                     );
                 }
                 break match end {
@@ -324,8 +329,11 @@ body {
                     && let Some(carry) = finished.carry.take()
                 {
                     saved.push(
-                        crate::conformance::session(&carry, Box::new(embedder.source.clone()))
-                            .unwrap(),
+                        lash_kernel_state::semantic::session(
+                            &carry,
+                            Box::new(embedder.source.clone()),
+                        )
+                        .unwrap(),
                     );
                 }
                 break end;
@@ -428,14 +436,16 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
         for name in ["v0", "v69", long.as_str()] {
             assert!(
-                heap.session_binding(&lash_vocabulary::names::Name::new(name))
+                heap.session_binding(&lash_kernel_value::names::Name::new(name))
                     .unwrap()
                     .is_some(),
                 "the prepared key must equal the canonical key for {name}"
             );
         }
-        images
-            .push(crate::conformance::session(&carry, Box::new(embedder.source.clone())).unwrap());
+        images.push(
+            lash_kernel_state::semantic::session(&carry, Box::new(embedder.source.clone()))
+                .unwrap(),
+        );
         (
             images,
             embedder.machine.meters().charged.expect("exact charge"),
@@ -451,8 +461,8 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
 /// The general call uses the document's checked semantics as the oracle.
 pub(super) fn scalar_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    _: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    _: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
     struct Scalar(ScalarOp);
@@ -547,7 +557,7 @@ type ScalarObserved = (
     Vec<Request>,
     Vec<lash_kernel_exec::Weight>,
     u64,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 fn observe_scalar(
@@ -696,8 +706,8 @@ fn scalar_layouts_agree() {
 
 fn call_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    ids: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut probes = scalar_probes(registry, ids);
     probes.extend(
         lash_kernel_lib::numbers()
@@ -779,8 +789,8 @@ fn allocating_operations_agree() {
 /// prepared heap paths; source layouts run the ordinary helper plans.
 pub(super) fn allocation_probes(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    _: &std::collections::BTreeMap<&'static str, lash_vocabulary::names::FunctionId>,
-) -> Vec<(&'static str, lash_vocabulary::names::FunctionId)> {
+    _: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     use lash_kernel_doc::plan::{HeapTemplate, HelperPlan, HelperTemplate};
     let mut functions = Vec::new();
     for (name, signature, body, registers, writes) in [
@@ -995,7 +1005,7 @@ fn free_cells_agree() {
         crate::kernel_internals::call_islands(&program).unwrap() > 0,
         "the free-cell body must form a register program"
     );
-    let export = &program.document.exports[&lash_vocabulary::Name::new("free")];
+    let export = &program.document.exports[&lash_kernel_value::Name::new("free")];
     let lash_kernel_doc::Export::Function(export) = export else {
         panic!("function export");
     };
@@ -1003,12 +1013,12 @@ fn free_cells_agree() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
-        callable: lash_vocabulary::CallableId {
+        callable: lash_kernel_value::CallableId {
             link: program.link,
             function: export.function,
         },
         captures: std::collections::BTreeMap::from([(
-            lash_vocabulary::Name::new("count"),
+            lash_kernel_value::Name::new("count"),
             CaptureValue::Data(int(4)),
         )]),
         signature: export.signature.clone(),

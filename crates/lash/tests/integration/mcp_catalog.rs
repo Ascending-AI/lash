@@ -27,7 +27,7 @@ async fn turn_prompt(
     use lash_core::testing::prompt::{PromptCutParts, compose};
     let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
-            session_id: lash_vocabulary::identity::SessionId::from("advertised-surface"),
+            session_id: lash_kernel_value::identity::SessionId::from("advertised-surface"),
             frame: None,
             run: None,
             turn: None,
@@ -474,7 +474,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
     .expect("valid refresh publication");
     let reopened = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("catalog-storm")
+            lash_kernel_value::identity::SessionId::parse("catalog-storm")
                 .expect("nonblank host identity"),
         )
         .open()

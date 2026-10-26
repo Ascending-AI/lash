@@ -2,9 +2,12 @@
 
 use lash_kernel_doc::{ActExpr, ActKind, Callee, Expr, Literal, RecordEntry, Rhs, Stmt};
 
-use lash_vocabulary::{EffectName, RecordType, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::RecordType, lash_kernel_value::Signature,
+    lash_kernel_value::Type,
+};
 
 use lash_kernel_dialect::{Resolution, Spelling};
 
@@ -235,11 +238,11 @@ impl Lowerer<'_> {
         if package.is_empty()
             || !package
                 .iter()
-                .all(|segment| lash_vocabulary::Segment::is_canonical(segment))
+                .all(|segment| lash_kernel_value::Segment::is_canonical(segment))
         {
             return Ok(None);
         }
-        if lash_vocabulary::Segment::is_canonical(name) {
+        if lash_kernel_value::Segment::is_canonical(name) {
             return Ok(Some(path.to_owned()));
         }
         let Some(canonical) =
@@ -741,10 +744,10 @@ impl Lowerer<'_> {
                     }))
                 })
                 .collect();
-            let operation = lash_vocabulary::names::QualifiedOperation::from_effect(effect)
+            let operation = lash_kernel_value::names::QualifiedOperation::from_effect(effect)
                 .map_err(|error| diagnostics::unplaced(Code::LibraryMissing, error.to_string()))?;
             let slot = self.imports.operation(
-                lash_vocabulary::names::QualifiedName {
+                lash_kernel_value::names::QualifiedName {
                     package: operation.package,
                     member: operation.name,
                     type_member: None,
@@ -806,11 +809,11 @@ impl Lowerer<'_> {
         } else {
             self.tool_arguments(effect, signature, call)?
         };
-        let operation = lash_vocabulary::names::QualifiedOperation::from_effect(effect)
+        let operation = lash_kernel_value::names::QualifiedOperation::from_effect(effect)
             .map_err(|error| diagnostics::unplaced(Code::LibraryMissing, error.to_string()))?;
         let deferred = self.namespaces.operation(effect).is_none();
         let slot = self.imports.operation(
-            lash_vocabulary::names::QualifiedName {
+            lash_kernel_value::names::QualifiedName {
                 package: operation.package,
                 member: operation.name,
                 type_member: None,

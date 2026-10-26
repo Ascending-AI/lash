@@ -4,8 +4,8 @@ use lash_kernel_doc::{
     Document, Export, FunctionExport, NumberPolicy, StartConvention, parse_definition_with_locals,
 };
 
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Unit;
 /// K-CLO-001/K-SITE: anonymous bodies resolve lexical captures and retain their defining sites.
 #[test]
 fn anonymous_definition_keeps_lexical_capture_and_its_own_unit() {
@@ -72,8 +72,8 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
-        callable: lash_vocabulary::CallableId {
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+        callable: lash_kernel_value::CallableId {
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function,
         },
         captures: Default::default(),
@@ -81,7 +81,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         convention: StartConvention::Direct,
         captions: lash_kernel_doc::Captions::empty(document.identity()),
         representation: lash_kernel_doc::FunctionRepresentation::Bare,
-        creation: Some(lash_vocabulary::sites::Site::new(Unit::Main, [0, 0])),
+        creation: Some(lash_kernel_value::sites::Site::new(Unit::Main, [0, 0])),
         token: None,
     };
     captured
@@ -115,13 +115,13 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         "SIGNATURE_REQUIRED"
     );
     let presentation = lash_kernel_doc::CallablePresentation {
-        signature: lash_vocabulary::Signature {
-            params: vec![lash_vocabulary::Param {
+        signature: lash_kernel_value::Signature {
+            params: vec![lash_kernel_value::Param {
                 name: Name::new("value"),
-                ty: lash_vocabulary::Type::Json,
+                ty: lash_kernel_value::Type::Json,
                 optional: false,
             }],
-            result: lash_vocabulary::Type::Any,
+            result: lash_kernel_value::Type::Any,
         },
         representation: lash_kernel_doc::FunctionRepresentation::Bare,
         convention: StartConvention::Direct,
@@ -134,8 +134,8 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         presentation
             .promote_entry(function, location.clone(), false, false, None)
             .unwrap_err(),
-        lash_vocabulary::EntrySignatureRefusal::Required(Box::new(
-            lash_vocabulary::SignatureRequired {
+        lash_kernel_value::EntrySignatureRefusal::Required(Box::new(
+            lash_kernel_value::SignatureRequired {
                 function: location.clone(),
                 position: lash_kernel_doc::SignaturePosition::Result,
                 span: None
@@ -143,8 +143,8 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         ))
     );
     let complete = lash_kernel_doc::CallablePresentation {
-        signature: lash_vocabulary::Signature {
-            result: lash_vocabulary::Type::Json,
+        signature: lash_kernel_value::Signature {
+            result: lash_kernel_value::Type::Json,
             ..presentation.signature
         },
         ..presentation
@@ -172,14 +172,14 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
-        callable: lash_vocabulary::CallableId {
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+        callable: lash_kernel_value::CallableId {
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: id,
         },
         captures: Default::default(),
-        signature: lash_vocabulary::Signature {
+        signature: lash_kernel_value::Signature {
             params: vec![],
-            result: lash_vocabulary::Type::Bool,
+            result: lash_kernel_value::Type::Bool,
         },
         convention: StartConvention::Direct,
         captions: lash_kernel_doc::Captions::empty(document.identity()),
@@ -198,7 +198,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
             .signature,
         value.signature
     );
-    value.signature.result = lash_vocabulary::Type::Text;
+    value.signature.result = lash_kernel_value::Type::Text;
     assert_eq!(
         value
             .entry_export(
@@ -249,8 +249,8 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
-        callable: lash_vocabulary::CallableId {
-            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+        callable: lash_kernel_value::CallableId {
+            link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: root_id,
         },
         signature,
@@ -273,7 +273,7 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
         .is_err()
     );
     assert!(!Selection::Fresh.admits_helper(
-        &lash_vocabulary::CallableId {
+        &lash_kernel_value::CallableId {
             link: function.callable.link,
             function: helper_id
         },

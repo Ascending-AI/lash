@@ -3,12 +3,12 @@
 //! decides nothing else.
 
 use lash_core::ToolCatalog;
+use lash_kernel_value::json_schema::JsonSchema;
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, ToolPresenterSlot, WrappedToolPresenter,
 };
 use lash_tool_presenter_typescript::TypescriptToolPresenter;
-use lash_vocabulary::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use lash_vocabulary::tool_contract::ToolManifest;

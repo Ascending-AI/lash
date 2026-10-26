@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     parse_definition,
 };
 
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::{Bounds, End, Layout, Machine, Step};
@@ -211,7 +211,7 @@ type Trace = (
     Vec<Datum>,
     Vec<crate::Request>,
     u64,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
@@ -236,7 +236,8 @@ fn observe(program: &str, bounds: Bounds, layout: Layout, cold: bool) -> Trace {
                 && let Some(carry) = &finished.carry
             {
                 continuations.push(
-                    crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap(),
+                    lash_kernel_state::semantic::session(carry, Box::new(embedder.source.clone()))
+                        .unwrap(),
                 );
             }
             break match end {
@@ -605,7 +606,7 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         String,
         Option<u64>,
         Vec<lash_kernel_exec::Weight>,
-        Vec<crate::conformance::Checkpoint>,
+        Vec<lash_kernel_state::semantic::Checkpoint>,
     ) {
         let mut embedder = Embedder::with(
             source,

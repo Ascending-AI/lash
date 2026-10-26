@@ -10,7 +10,7 @@
 //! is not exactly it: there is no reinterpretation fallback.
 //!
 //! The codecs here write canonical tokens
-//! ([`lash_vocabulary::tokens`]): structs are sequences of all their
+//! ([`lash_kernel_value::tokens`]): structs are sequences of all their
 //! fields, enums are sums with the explicit numbers below. Nested payloads
 //! this crate does not model field by field (a failure's cause, a control's
 //! frame nodes and schema, a view) are written as a canonical JSON value
@@ -18,14 +18,14 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::tokens::DecodeDimension;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
-use lash_vocabulary::tokens::check_ascending;
-use lash_vocabulary::tokens::encode_body;
-use lash_vocabulary::tokens::within;
+use lash_kernel_value::tokens::DecodeDimension;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
+use lash_kernel_value::tokens::check_ascending;
+use lash_kernel_value::tokens::encode_body;
+use lash_kernel_value::tokens::within;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Number, Value};
@@ -39,9 +39,9 @@ use crate::llm::attachment_delivery::AttachmentPosition;
 use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, RetainedOutput};
 
 /// The deepest tool value tree a decoder reads.
-pub const MAX_VALUE_DEPTH: u64 = lash_vocabulary::tokens::MAX_DECODE_DEPTH;
+pub const MAX_VALUE_DEPTH: u64 = lash_kernel_value::tokens::MAX_DECODE_DEPTH;
 
-use lash_vocabulary::tokens::{FROZEN_JSON, FROZEN_TOOL_VALUE};
+use {lash_vocabulary::tokens::FROZEN_JSON, lash_vocabulary::tokens::FROZEN_TOOL_VALUE};
 
 fn unsupported(variant: u32) -> TokenError {
     TokenError::UnsupportedVariant { variant }
@@ -192,7 +192,7 @@ fn decode_tree<T: Serialize + DeserializeOwned>(
     let tree = decode_json(input)?;
     let value: T =
         serde::Deserialize::deserialize(&tree).map_err(|error| invalid(error.to_string()))?;
-    if !lash_vocabulary::tokens::matches_json(&value, &tree) {
+    if !lash_vocabulary::matches_json(&value, &tree) {
         return Err(invalid("a payload tree is not its value's one spelling"));
     }
     Ok(value)

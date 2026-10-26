@@ -2,7 +2,7 @@
 use crate::CheckpointKind;
 pub use lash_core_store::turn_input_vocabulary::*;
 #[allow(unused_imports)]
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Generates the checkpoint enumeration an admission can name, from one variant list.
 ///

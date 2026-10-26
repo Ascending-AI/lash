@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use lash_kernel_check::WorkflowDocument;
 use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, FieldPath, ParamTarget};
 
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

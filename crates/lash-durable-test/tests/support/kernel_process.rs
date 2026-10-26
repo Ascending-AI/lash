@@ -14,7 +14,7 @@ pub async fn publish(
     let pin = lash_core::HostArtifactPin::mint();
     let (packages, environment) = namespace(core, &pin, env).await;
     for import in document.imports.values_mut() {
-        if let lash_vocabulary::ImportKind::Operation { signature } = &mut import.kind {
+        if let lash_kernel_value::ImportKind::Operation { signature } = &mut import.kind {
             for accepted in &packages.snapshot.advertisements {
                 if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement
                     && package.path == import.name.package

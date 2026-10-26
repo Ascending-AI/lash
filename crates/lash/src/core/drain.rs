@@ -70,7 +70,7 @@ impl serde::Serialize for DeploymentDrainStatus {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeDrainReport {
     /// The sessions it released.
-    pub sessions: Vec<lash_vocabulary::identity::SessionId>,
+    pub sessions: Vec<lash_kernel_value::identity::SessionId>,
     /// The processes it released.
     pub processes: Vec<lash_vocabulary::identity::ProcessId>,
 }
@@ -84,7 +84,7 @@ impl NodeDrainReport {
         for actor in released {
             match actor.kind() {
                 lash_core::durable_port::ActorKind::Session => report.sessions.extend(
-                    lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned()).ok(),
+                    lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned()).ok(),
                 ),
                 lash_core::durable_port::ActorKind::Process => report
                     .processes

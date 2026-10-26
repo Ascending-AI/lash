@@ -30,7 +30,7 @@ impl SqliteBlobProbe {
 impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
     async fn session_config_ref(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> lash_core_store::store::BlobRef {
         let config_ref: String = rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite config-root probe")

@@ -250,7 +250,7 @@ type Tx = GuardedTx<'static>;
 /// delete's to peel.
 pub(crate) async fn retire_session_rows(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -281,7 +281,7 @@ pub(crate) async fn retire_process_rows(
     facts.extend(
         model_calls::delete_session(
             tx,
-            &lash_vocabulary::identity::SessionId::prefixed("process:", process.as_str()),
+            &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
         )
         .await?,
     );
@@ -744,7 +744,7 @@ pub(crate) async fn wake_within(
 /// Guard and advance a fresh direct session mutation under its actor lock.
 pub(crate) async fn bump_unclaimed_session(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     use lash_core_store::store::{HeadOwnershipFacts, require_unclaimed_actor};
@@ -786,7 +786,7 @@ pub(crate) async fn bump_unclaimed_session(
 /// 0132 §12), creating it ready first when the session has none yet.
 pub(crate) async fn wake_session_within(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Result<Woken, DurableError> {
@@ -811,7 +811,7 @@ pub(crate) async fn wake_session_within(
 /// session itself.
 pub(crate) async fn wake_session_tx(
     tx: &mut PgConnection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, StoreError> {
@@ -1309,7 +1309,7 @@ impl DurableStore for PostgresDurableStore {
         }
         let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
             (Some(session), Some(run)) => {
-                let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
+                let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
                 let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("turn id", &run))?;

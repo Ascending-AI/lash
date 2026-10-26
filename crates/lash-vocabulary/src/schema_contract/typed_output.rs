@@ -1,12 +1,14 @@
 //! Parsing for the typed-output schema witness vocabulary.
 
-use crate::{
-    EntrySchemaPolicy, RecordType, RecordTypeField, Type, TypeSchemaRefusal, json_schema_of_type,
-};
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 use thiserror::Error;
+use {
+    lash_kernel_value::EntrySchemaPolicy, lash_kernel_value::RecordType,
+    lash_kernel_value::RecordTypeField, lash_kernel_value::Type,
+    lash_kernel_value::TypeSchemaRefusal, lash_kernel_value::json_schema_of_type,
+};
 
 /// Marker key that wraps a Type literal at its outermost level so a host-side
 /// consumer can tell a Type value apart from a plain record. The inner value
@@ -169,7 +171,7 @@ pub fn parse_output_schema_with_limits(
     json_schema_of_type(
         &Type::Record(RecordType {
             fields,
-            rest: crate::RecordRest::Closed,
+            rest: lash_kernel_value::RecordRest::Closed,
         }),
         EntrySchemaPolicy::default(),
     )
@@ -244,7 +246,7 @@ fn type_descriptor(descriptor: &str) -> Result<Type, OutputSchemaError> {
             "bool" | "boolean" => Type::Bool,
             "record" | "dict" | "object" => Type::Record(RecordType {
                 fields: vec![],
-                rest: crate::RecordRest::Keep(Box::new(Type::Json)),
+                rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
             }),
             _ => return Err(OutputSchemaError::UnknownScalar { kind: ty.into() }),
         })

@@ -2,7 +2,7 @@
 use crate::EditDiagnosticKind as Cause;
 use crate::apply::{Fault, FaultKind, Working, at, node};
 use lash_kernel_doc::{Expr, FunctionCatalog, NodeMut, Stmt};
-use lash_vocabulary::{Name, sites::Site};
+use {lash_kernel_value::Name, lash_kernel_value::sites::Site};
 
 impl Working {
     pub(super) fn rename_binding(
@@ -75,7 +75,7 @@ impl Working {
         // Rehashing changes function coordinates, never which declaration a use names.
         let translate = |site: &Site| {
             let mut site = site.clone();
-            if let lash_vocabulary::sites::Unit::Library(id) = &mut site.unit {
+            if let lash_kernel_value::sites::Unit::Library(id) = &mut site.unit {
                 *id = ids.get(id).copied().unwrap_or(*id);
             }
             site

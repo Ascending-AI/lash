@@ -2,7 +2,7 @@
 //! or nested in its expression (`K-EVAL-008`).
 
 use lash_kernel_state::paged::HeapLifecycle;
-use lash_vocabulary::sites::EffectIdentity;
+use lash_kernel_value::sites::EffectIdentity;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -10,8 +10,8 @@ use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_doc::{Datum, JoinMode, NewObject, TaskId, Value};
 
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::types::Type;
 
 use super::exec::Call;
 use super::ops::{Flow, Reg, Status};
@@ -29,18 +29,18 @@ use lash_kernel_doc::heap::ErrorRef;
 use lash_kernel_state::kernel_internals::directory::ordinal_key;
 use lash_kernel_state::kernel_internals::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{PhaseRecord, WaitKindRecord, WaitPhase, WaitRecord};
-use lash_vocabulary::tokens::{decode_body, encode_body};
+use {lash_kernel_value::tokens::decode_body, lash_kernel_value::tokens::encode_body};
 
 /// What a call or a `spawn` runs, once its callee is read.
 pub(super) enum Target {
     Code(
         CodeId,
         Vec<ArenaHandle>,
-        lash_vocabulary::content_ids::LinkId,
+        lash_kernel_value::content_ids::LinkId,
     ),
-    Library(LibId, lash_vocabulary::content_ids::LinkId),
+    Library(LibId, lash_kernel_value::content_ids::LinkId),
     Export(
-        lash_vocabulary::names::CallableId,
+        lash_kernel_value::names::CallableId,
         Box<lash_kernel_doc::FunctionExport>,
     ),
 }
@@ -218,7 +218,7 @@ impl KernelMachine {
         if matches!(entry.kind, NestedKind::Call(NestedCallee::CheckedHelper(_))) {
             self.check_call_arguments(
                 running.exe,
-                lash_vocabulary::CallableId {
+                lash_kernel_value::CallableId {
                     function: function.id,
                     link: self.current_link(),
                 },
@@ -472,7 +472,7 @@ impl KernelMachine {
     pub(super) fn callable_target(
         &self,
         exe: &Executable,
-        callable: lash_vocabulary::names::CallableId,
+        callable: lash_kernel_value::names::CallableId,
     ) -> Eval<Target> {
         if !exe.admits_callable(&callable) {
             return Err(fault("callable is not admitted by its defining Link").into());
@@ -605,7 +605,7 @@ impl KernelMachine {
         task: TaskId,
         stmt: StmtId,
         site: &Site,
-        effect: lash_vocabulary::names::OperationUse,
+        effect: lash_kernel_value::names::OperationUse,
         args: Vec<Datum>,
     ) -> Result<(), Halt> {
         let wait = self.request(task, stmt, site)?;
@@ -629,7 +629,7 @@ impl KernelMachine {
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
         site: &Site,
         result: &Type,
@@ -742,7 +742,7 @@ impl KernelMachine {
         } else {
             origin
         };
-        let identity = lash_kernel_doc::kernel_internals::effect_id(EffectIdentity {
+        let identity = lash_kernel_value::kernel_internals::effect_id(EffectIdentity {
             task: running.identity.resolve(&access)?,
             site: site.clone(),
             occurrence,
@@ -821,7 +821,8 @@ impl KernelMachine {
             .occurrence_index(site)
             .ok_or_else(|| fault("spawn site has no occurrence index"))?;
         let occurrence = self.task(task)?.counters.advance(index)?;
-        if !matches!(site.unit, lash_vocabulary::sites::Unit::Library(_)) && host.observes_sites() {
+        if !matches!(site.unit, lash_kernel_value::sites::Unit::Library(_)) && host.observes_sites()
+        {
             let at = self.action_location(task, site, occurrence)?;
             host.enter_site(&at);
         }
@@ -846,7 +847,7 @@ impl KernelMachine {
         // A task root is outside its spawner's synchronous library call.
         // A native answer bills the same root formula as a body frame.
         self.refresh_charging(child)?;
-        let exported_callable = export.as_ref().map(|export| lash_vocabulary::CallableId {
+        let exported_callable = export.as_ref().map(|export| lash_kernel_value::CallableId {
             function: export.function,
             link: match &target {
                 Target::Library(_, link) | Target::Code(_, _, link) => *link,
@@ -1143,7 +1144,7 @@ impl KernelMachine {
 pub(super) fn waiting(
     exe: &Executable,
     frame: &super::Frame,
-) -> Option<(Site, Option<(lash_vocabulary::names::ImportSlot, Type)>)> {
+) -> Option<(Site, Option<(lash_kernel_value::names::ImportSlot, Type)>)> {
     let (stream, statement, _) = exe.statement(frame.awaiting?);
     match frame.nested {
         Some(act) => {
@@ -1219,7 +1220,7 @@ mod laws {
     use crate::laws::embedder::Embedder;
     use lash_kernel_doc::Value;
     use lash_kernel_doc::arena::LocalCode;
-    use lash_vocabulary::sites::Unit;
+    use lash_kernel_value::sites::Unit;
 
     /// K-FN-005: the code a call found for a closure's site is cached on
     /// the closure for the executable that found it alone. A cache naming

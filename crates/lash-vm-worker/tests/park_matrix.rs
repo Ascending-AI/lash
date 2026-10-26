@@ -58,6 +58,7 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Integer, NumberPolicy, NumberToken, parse_document,
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
+use lash_kernel_value::identity::SessionId;
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
 use lash_protocol_types::ToolCallId;
 use lash_vm_broker::kernel::graph::{
@@ -74,13 +75,12 @@ use lash_vm_broker::{
 };
 use lash_vm_client::RunStart;
 use lash_vocabulary::ToolId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::tokens::encode_body;
 use tokio_util::sync::CancellationToken;
 
 #[path = "support/park_store.rs"]
@@ -163,7 +163,7 @@ main {{
     );
     let document = Arc::new(parse_document(&text).expect("the linked park fixture is valid"));
     let package = operation_package(&document);
-    let advertisement = lash_vocabulary::PackageAdvertisement::Enumerated(package);
+    let advertisement = lash_kernel_value::PackageAdvertisement::Enumerated(package);
     let context = publication_context();
     let content = lash_kernel_package::LinkedContent {
         documents: [(document.identity(), std::sync::Arc::clone(&document))].into(),
@@ -186,42 +186,44 @@ main {{
     .expect("the linked park fixture is valid")
 }
 
-fn publication_context() -> lash_vocabulary::PublicationContext {
-    lash_vocabulary::PublicationContext {
-        domain: lash_vocabulary::PublicationDomain("park-law".into()),
-        scope: lash_vocabulary::PublicationScope::Host,
-        publisher: lash_vocabulary::PublisherInstance("park-law-tools".into()),
-        root: lash_vocabulary::Segment::new("tools").expect("a valid root"),
+fn publication_context() -> lash_kernel_value::PublicationContext {
+    lash_kernel_value::PublicationContext {
+        domain: lash_kernel_value::PublicationDomain("park-law".into()),
+        scope: lash_kernel_value::PublicationScope::Host,
+        publisher: lash_kernel_value::PublisherInstance("park-law-tools".into()),
+        root: lash_kernel_value::Segment::new("tools").expect("a valid root"),
     }
 }
 
-fn operation_package(document: &lash_kernel_doc::Document) -> lash_vocabulary::Package {
+fn operation_package(document: &lash_kernel_doc::Document) -> lash_kernel_value::Package {
     let members = document
         .imports
         .values()
         .map(|import| {
-            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
                 unreachable!()
             };
             (
                 import.name.member.clone(),
-                lash_vocabulary::Member {
-                    visibility: lash_vocabulary::Visibility::Public,
-                    kind: lash_vocabulary::MemberKind::Operation(lash_vocabulary::OperationOffer {
-                        requirement: lash_vocabulary::OperationRequirement::new(
-                            signature.clone(),
-                            lash_vocabulary::ContractId::new("1"),
-                        ),
-                        mode: lash_vocabulary::OperationMode::Waited,
-                        intents: Default::default(),
-                        controls: Default::default(),
-                    }),
+                lash_kernel_value::Member {
+                    visibility: lash_kernel_value::Visibility::Public,
+                    kind: lash_kernel_value::MemberKind::Operation(
+                        lash_kernel_value::OperationOffer {
+                            requirement: lash_kernel_value::OperationRequirement::new(
+                                signature.clone(),
+                                lash_kernel_value::ContractId::new("1"),
+                            ),
+                            mode: lash_kernel_value::OperationMode::Waited,
+                            intents: Default::default(),
+                            controls: Default::default(),
+                        },
+                    ),
                 },
             )
         })
         .collect();
-    lash_vocabulary::Package {
-        path: lash_vocabulary::PackagePath::parse("tools").expect("a valid package path"),
+    lash_kernel_value::Package {
+        path: lash_kernel_value::PackagePath::parse("tools").expect("a valid package path"),
         members,
     }
 }
@@ -281,9 +283,9 @@ fn page_plan() -> PagePlan {
 /// The identity of worker `index`'s `perform`: the task the `index`th run
 /// of `main`'s spawn started, at the one `perform` of its function.
 fn worker_identity(index: u64) -> EffectId {
-    lash_vocabulary::sites::testkit::effect(
-        lash_vocabulary::sites::testkit::spawned_task(
-            lash_vocabulary::sites::testkit::root_task(),
+    lash_kernel_value::sites::testkit::effect(
+        lash_kernel_value::sites::testkit::spawned_task(
+            lash_kernel_value::sites::testkit::root_task(),
             Site::new(Unit::Main, [1, 1, 0, 0]),
             index,
         ),
@@ -294,8 +296,8 @@ fn worker_identity(index: u64) -> EffectId {
 }
 
 fn sum_identity() -> EffectId {
-    lash_vocabulary::sites::testkit::effect(
-        lash_vocabulary::sites::testkit::root_task(),
+    lash_kernel_value::sites::testkit::effect(
+        lash_kernel_value::sites::testkit::root_task(),
         Site::new(Unit::Main, [5, 0, 0, 0]),
         0,
         Vec::new(),
@@ -676,7 +678,7 @@ impl Activation for ParkActivation {
     /// kernel versions a parked run's hard record names (FIG-6993).
     async fn capabilities(&self) -> Result<lash_durable::NodeCapabilities, DurableError> {
         Ok(lash_vocabulary::claims::NodeCapabilities {
-            machine: lash_vocabulary::claims::NodeRequirements {
+            machine: lash_kernel_value::claims::NodeRequirements {
                 kernels: [lash_kernel_doc::KERNEL_VERSION].into(),
                 ..Default::default()
             },
@@ -703,7 +705,7 @@ impl Activation for ParkActivation {
                 PolicyView::new(["work", "sum"].map(|tool| {
                     (
                         ToolId::new(format!("tool:{tool}")),
-                        lash_vocabulary::ExecutionPolicy::Once,
+                        lash_kernel_value::ExecutionPolicy::Once,
                     )
                 })),
             )
@@ -1193,7 +1195,7 @@ impl KernelEffects for LawHost {
                 id: call.clone(),
                 tool_id: tool.clone(),
                 args,
-                contract: lash_vocabulary::operations::ContractId::new("1"),
+                contract: lash_kernel_value::operations::ContractId::new("1"),
                 execution_grant: None,
                 issuing_language_node_id: None,
             },
@@ -1208,7 +1210,7 @@ impl KernelEffects for LawHost {
             frozen,
             identities().opener(),
             (
-                lash_vocabulary::ExecutionPolicy::Once,
+                lash_kernel_value::ExecutionPolicy::Once,
                 lash_protocol_types::ExecutionLimit::starting_at(
                     u64::try_from(now.0).expect("a time after the epoch"),
                     Duration::from_secs(3600),
@@ -1250,14 +1252,14 @@ impl KernelEffects for LawHost {
 /// A host part of the law's cell: one text.
 struct LawHostPart(&'static str);
 
-impl lash_vocabulary::tokens::TokenCodec for LawHostPart {
-    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+impl lash_kernel_value::tokens::TokenCodec for LawHostPart {
+    fn encode(&self, out: &mut lash_kernel_value::tokens::TokenWriter) {
         out.text(self.0);
     }
 
     fn decode(
-        _input: &mut lash_vocabulary::tokens::TokenReader<'_>,
-    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        _input: &mut lash_kernel_value::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         unreachable!("the law never reads its host parts back")
     }
 }
@@ -1429,7 +1431,7 @@ mod postgres {
     }
 }
 
-fn operation_name(use_: lash_vocabulary::OperationUse) -> String {
+fn operation_name(use_: lash_kernel_value::OperationUse) -> String {
     program(NumberPolicy::BySpelling).document.imports[&use_.slot]
         .name
         .to_string()

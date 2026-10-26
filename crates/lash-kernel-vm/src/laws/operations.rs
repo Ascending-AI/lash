@@ -13,7 +13,7 @@ use lash_kernel_doc::{
     Datum, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
 };
 
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, text};
 use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
@@ -188,7 +188,7 @@ main {
 /// How a run ended: a finished run's result, finish and the bindings it did
 /// not carry, or any other end. The carry's page identities are left out,
 /// for a run reopened cold may lay its heap out on other pages.
-type Ended = Result<(Datum, bool, Vec<(lash_vocabulary::names::Name, String)>), Box<End>>;
+type Ended = Result<(Datum, bool, Vec<(lash_kernel_value::names::Name, String)>), Box<End>>;
 
 /// What a law compares of a run: how it ended, what it printed, the
 /// requests it made, and its charge.
@@ -197,7 +197,7 @@ type Observed = (
     Vec<Datum>,
     Vec<crate::Request>,
     u64,
-    Vec<crate::conformance::Checkpoint>,
+    Vec<lash_kernel_state::semantic::Checkpoint>,
 );
 
 fn ended(end: End) -> Ended {
@@ -250,8 +250,9 @@ fn observe(program: &str, bounds: Bounds, plan: &Plan) -> Observed {
     if let End::Finished(finished) = &end
         && let Some(carry) = &finished.carry
     {
-        checkpoints
-            .push(crate::conformance::session(carry, Box::new(embedder.source.clone())).unwrap());
+        checkpoints.push(
+            lash_kernel_state::semantic::session(carry, Box::new(embedder.source.clone())).unwrap(),
+        );
     }
     let charged = crate::Machine::meters(&embedder.machine)
         .charged

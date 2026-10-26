@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{FunctionRegistry, ParseError, RegistryError, parse_definition};
 
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 
 /// A collection registry could not resolve a required definition or admit a body.
 #[derive(Debug)]

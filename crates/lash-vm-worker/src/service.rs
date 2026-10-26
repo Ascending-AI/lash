@@ -166,8 +166,8 @@ fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
 
 fn dialect_name(language: SourceLanguage) -> &'static str {
     match language {
-        SourceLanguage::TypeScript => lash_vm_releases::TYPESCRIPT,
-        SourceLanguage::Python => lash_vm_releases::PYTHON,
+        SourceLanguage::TypeScript => lash_kernel_releases::TYPESCRIPT,
+        SourceLanguage::Python => lash_kernel_releases::PYTHON,
     }
 }
 
@@ -252,7 +252,7 @@ fn python_module(
 }
 
 fn decoded_document(body: Vec<u8>) -> Result<Document, PoolError> {
-    lash_vocabulary::tokens::decode_body(&body).map_err(|error| {
+    lash_kernel_value::tokens::decode_body(&body).map_err(|error| {
         PoolError::refused(RunRefusal::Undecodable {
             input: RunInput::Document,
             detail: Detail::new(error),
@@ -281,8 +281,8 @@ mod tests {
     /// FIG-7142: discovery reports namespace collisions as facts, not hints.
     #[test]
     fn discovery_reports_a_namespace_shadowed_by_a_cell_local() {
-        use lash_vocabulary::{Name, PackagePath};
         use std::collections::{BTreeMap, BTreeSet};
+        use {lash_kernel_value::Name, lash_kernel_value::PackagePath};
         let embedding = crate::embedding::tests::every_dialect(&Default::default()).unwrap();
         for dialect in ["typescript", "python"] {
             let namespaces = lash_kernel_dialect::Namespaces::new(
@@ -358,9 +358,8 @@ mod tests {
     /// FIG-7109: the worker preserves an unprintable callable as a typed site.
     #[test]
     fn unprintable_callable_sites_cross_the_worker_wire() {
-        use lash_vocabulary::{
-            Name,
-            sites::{Site, Unit},
+        use {
+            lash_kernel_value::Name, lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit,
         };
         let embedding =
             crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
@@ -408,7 +407,7 @@ mod tests {
             },
             position: lash_kernel_doc::SignaturePosition::Parameter {
                 index: 0,
-                name: lash_vocabulary::Name::new("event"),
+                name: lash_kernel_value::Name::new("event"),
             },
             span: Some(lash_kernel_doc::Span { start: 17, end: 22 }),
         };

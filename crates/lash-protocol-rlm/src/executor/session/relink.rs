@@ -19,7 +19,7 @@ impl CodeModeExecutionState {
         documents: &lash_vm_runtime::KernelDocuments,
         boundary: &lash_vm_runtime::HostBoundary,
         claim: &lash_core::ReferrerClaim,
-    ) -> Result<BTreeSet<lash_vocabulary::LinkId>, RelinkError> {
+    ) -> Result<BTreeSet<lash_kernel_value::LinkId>, RelinkError> {
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();

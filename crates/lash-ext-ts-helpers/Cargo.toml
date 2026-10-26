@@ -1,0 +1,22 @@
+[package]
+name = "lash-ext-ts-helpers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Dialect helper definitions independent of source lowering"
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-services = { workspace = true }

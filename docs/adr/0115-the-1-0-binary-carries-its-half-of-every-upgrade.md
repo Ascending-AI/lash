@@ -441,7 +441,7 @@ then finish backfills and contract. The current `lashctl` supplies `migrate`,
 `kernel-migration list`, `kernel-migration run` and `version`. A build that
 retires the previous kernel version's formats does not start while a process
 or session is still in them (`DurableError::Unmigrated`, naming
-`lashctl kernel-migration run`; `docs/kernel/design.md` §6). Build helpers come from `lash-vm-releases` as one immutable exact-FunctionId
+`lashctl kernel-migration run`; `docs/kernel/design.md` §6). Build helpers come from `lash-kernel-releases` as one immutable exact-FunctionId
 image. A checkpoint records its `HelperLibraryId`; an equal image resumes
 without compatibility work, while a mismatch checks the exact live helper
 reach and refuses `KernelRestoreRefusal::MissingHelper` before executable

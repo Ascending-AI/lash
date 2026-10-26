@@ -67,7 +67,7 @@ impl CodeModeExecutionState {
                 .ok_or_else(|| refuse("saved function differs from its defining Link".into()))?;
             let document =
                 lash_kernel_doc::IdentifiedDocument::new(plan.rewritten.document.clone());
-            let next = lash_vocabulary::package::Link {
+            let next = lash_kernel_value::package::Link {
                 document: document.id(),
                 fills: old.fills.clone(),
             };
@@ -121,7 +121,7 @@ impl CodeModeExecutionState {
             publications.push((function.link, document.clone(), link));
             function.document = document;
             function.link = link;
-            function.callable = lash_vocabulary::CallableId { link, function: id };
+            function.callable = lash_kernel_value::CallableId { link, function: id };
             edits.push((
                 name.clone(),
                 function.description(),

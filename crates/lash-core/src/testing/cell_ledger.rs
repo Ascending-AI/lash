@@ -12,10 +12,10 @@ use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::closure;
 use lash_durable::domain::HydratedGraph;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 struct PreviousReport {
     entries: Vec<(NodeId, NodeId, serde_json::Value)>,
@@ -88,7 +88,7 @@ impl TokenCodec for PreviousOutcome<'_> {
 /// transcript.
 pub async fn turn_transcript(
     reads: &dyn lash_durable::DurableReads,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<HydratedGraph, lash_durable::DurableError> {
     reads

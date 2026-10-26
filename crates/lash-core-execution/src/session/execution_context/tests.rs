@@ -153,7 +153,7 @@ fn scoped_context(
     crate::testing::TestExecutionContextBuilder::over_controller(
         crate::testing::TestEffectController::Borrowed(controller),
     )
-    .session_id(lash_vocabulary::identity::SessionId::fixture(session_id))
+    .session_id(lash_kernel_value::identity::SessionId::fixture(session_id))
     .plugin_factories(vec![])
     .build()
     .into_runtime()

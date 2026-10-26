@@ -19,8 +19,8 @@ use lash_core_store::tool_surface::ExecutionEnvironment;
 use lash_execution_contracts::process::linking::LinkInspection;
 use lash_kernel_dialect::Written;
 use lash_kernel_doc::{Datum, IdentifiedDocument};
-use lash_vocabulary::package::LinkId;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::package::LinkId;
+use lash_kernel_value::sites::Site;
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
 use super::host_graph::{CallStatus, CellEnd, HostState};
@@ -79,7 +79,7 @@ pub(super) struct ResumedCell {
     pub started_process_ids: Vec<lash_vocabulary::identity::ProcessId>,
     pub graph: HostGraph,
     /// The effect identity each open call was performed at.
-    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>,
+    pub open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_value::sites::EffectId>,
     /// The session an ended root's end names, as the activation that
     /// recorded the end left it: its descriptor page, which the session
     /// adopts (FIG-6315). None for a parked root.
@@ -357,11 +357,11 @@ use lash_core_store::checkpoint_graph::GraphStaging;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::TypedBody;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 use lash_vm_broker::round_graph::{decode_opt_tree, decode_tree, encode_opt_tree, encode_tree};
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
 
 fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal {
     GraphRefusal::InvalidBody {
@@ -397,7 +397,7 @@ impl TokenCodec for EffectTable {
 struct EnvelopeBody {
     code: String,
     dialect: String,
-    document_id: lash_vocabulary::names::DocumentId,
+    document_id: lash_kernel_value::names::DocumentId,
     document: NodeId,
     link: LinkId,
     source_map: Option<NodeId>,
@@ -427,7 +427,7 @@ impl TokenCodec for EnvelopeBody {
         Ok(Self {
             code: input.text()?.to_owned(),
             dialect: input.text()?.to_owned(),
-            document_id: lash_vocabulary::names::DocumentId::decode(input)?,
+            document_id: lash_kernel_value::names::DocumentId::decode(input)?,
             document: NodeId::decode(input)?,
             link: LinkId::decode(input)?,
             source_map: Option::decode(input)?,

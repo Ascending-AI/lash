@@ -18,7 +18,7 @@ import uuid
 from perf_artifacts import artifacts
 from perf_capture import checked, instruction_window, run_profiled
 
-LABEL = "//crates/lash-dialect-typescript:kernel_perf__example"
+LABEL = "//crates/lash-vm-worker:kernel_perf__example"
 IDENTITY_FIELDS = ("experiment_id", "host_id", "program", "workload_sha256", "artifact_sha256", "result_sha256",
                    "statement_path_sha256", "charged", "backend", "worker", "window",
                    "terminal", "compiler", "build_profile", "allocator")

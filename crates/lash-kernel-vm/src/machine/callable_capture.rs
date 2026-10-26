@@ -2,7 +2,7 @@
 use super::*;
 use lash_kernel_doc::arena::{ClosureIdentity, LocalCode};
 use lash_kernel_doc::{CaptureValue, FunctionRepresentation, FunctionValue, NewObject};
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 
 struct Node<'a> {
     function: &'a FunctionValue,

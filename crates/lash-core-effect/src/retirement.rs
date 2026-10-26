@@ -3,8 +3,8 @@
 //! Split out of `control.rs` verbatim to keep every file in this module under
 //! the production file-size budget; no item, signature or path changed.
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

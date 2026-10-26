@@ -32,7 +32,7 @@ use lash_vm_protocol::page::{
 };
 use lash_vm_protocol::*;
 
-use lash_vocabulary::sites::TaskLabel;
+use lash_kernel_value::sites::TaskLabel;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::unix::net::UnixStream;
@@ -96,7 +96,7 @@ impl Wire {
     /// stack owns the request until the exact identity is answered.
     pub(crate) fn document(
         &self,
-        document: lash_vocabulary::DocumentId,
+        document: lash_kernel_value::DocumentId,
     ) -> Result<lash_vm_protocol::message::StoredDocument, PoolError> {
         let mut pipe = self
             .pipe
@@ -304,12 +304,12 @@ pub(crate) struct WireHost {
 /// a stretch of pure compute names the last site each task entered.
 #[derive(Default)]
 pub(crate) struct EnteredSites {
-    last: BTreeMap<TaskLabel, (u64, lash_vocabulary::sites::EffectLocation)>,
+    last: BTreeMap<TaskLabel, (u64, lash_kernel_value::sites::EffectLocation)>,
     entries: u64,
 }
 
 impl EnteredSites {
-    fn enter(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
+    fn enter(&mut self, at: &lash_kernel_value::sites::EffectLocation) {
         self.entries += 1;
         match self.last.get_mut(&at.at.task()) {
             Some(last) => *last = (self.entries, at.clone()),
@@ -320,7 +320,7 @@ impl EnteredSites {
     }
 
     /// The entries the next frame carries, in the order they were entered.
-    fn take(&mut self) -> Vec<lash_vocabulary::sites::EffectLocation> {
+    fn take(&mut self) -> Vec<lash_kernel_value::sites::EffectLocation> {
         let mut entered: Vec<_> = std::mem::take(&mut self.last).into_values().collect();
         entered.sort_unstable_by_key(|(order, _)| *order);
         entered.into_iter().map(|(_, at)| at).collect()
@@ -377,7 +377,7 @@ impl lash_kernel_vm::Host for WireHost {
         self.sites.is_some()
     }
 
-    fn enter_site(&mut self, at: &lash_vocabulary::sites::EffectLocation) {
+    fn enter_site(&mut self, at: &lash_kernel_value::sites::EffectLocation) {
         if let Some(sites) = self.sites.as_mut() {
             sites.enter(at);
         }
@@ -392,10 +392,10 @@ impl lash_kernel_vm::Host for WireHost {
     /// on. The parent's own failure never crosses: it stops the run there.
     fn perform(
         &mut self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         let answer: EffectAnswer = self.exchange(
             HostReadKind::Effect,

@@ -1,8 +1,8 @@
 use crate::runtime_error::SessionStateVersionRefusal;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 
 /// Why a window's rows do not form one anchored frame (ADR 0112 §5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,7 +280,7 @@ pub enum StoreError {
 
     #[error("session {session_id} already has unfinished run {run}")]
     UnfinishedRunConflict {
-        session_id: lash_vocabulary::identity::SessionId,
+        session_id: lash_kernel_value::identity::SessionId,
         run: lash_vocabulary::identity::TurnId,
     },
     /// Capturing dirty executor state failed before any store commit was
@@ -445,7 +445,7 @@ pub enum StoreError {
     /// host-supplied id, or one read back from a stored row. No retry repairs
     /// either.
     #[error(transparent)]
-    BlankIdentity(#[from] lash_vocabulary::identity::BlankIdentity),
+    BlankIdentity(#[from] lash_kernel_value::identity::BlankIdentity),
     #[error(
         "session `{session_id}` was used and deleted; session ids cannot be reused in this store"
     )]

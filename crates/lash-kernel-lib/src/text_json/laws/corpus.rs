@@ -483,7 +483,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             }
             (actual, expected) => panic!("{name}: {actual:?} != {expected:?}"),
         };
-        let param = |name: &lash_vocabulary::names::Name| {
+        let param = |name: &lash_kernel_value::names::Name| {
             registered
                 .definition()
                 .signature

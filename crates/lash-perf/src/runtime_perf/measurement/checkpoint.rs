@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 pub(super) fn measure_runtime_perf_phase<T>(
@@ -156,9 +156,10 @@ fn checkpoint_packages(
     services: &lash_vm_runtime::dialect_services::Services,
 ) -> Result<lash_core::plugin::packages::RecordedPackages, CheckpointAssignmentError> {
     use lash_core::plugin::packages::{PackageProvider, RecordedPackages};
-    use lash_vocabulary::{
-        AcceptedAdvertisement, PublicationContext, PublicationDomain, PublicationScope,
-        PublisherInstance, names::Segment,
+    use {
+        lash_kernel_value::PublicationContext, lash_kernel_value::PublicationDomain,
+        lash_kernel_value::PublicationScope, lash_kernel_value::PublisherInstance,
+        lash_kernel_value::names::Segment, lash_vocabulary::AcceptedAdvertisement,
     };
     let consumer = PublicationContext {
         domain: PublicationDomain(backend.binding_identity().to_string()),
@@ -205,8 +206,8 @@ impl lash_core::plugin::PluginOperation for AssignCheckpointBinding {
     type Output = ();
     type Error = CheckpointAssignmentError;
     const ERROR_TYPE: &'static str = Self::NAME;
-    const ERROR_VERSION: lash_vocabulary::providers::FormatVersion =
-        lash_vocabulary::providers::FormatVersion::ONE;
+    const ERROR_VERSION: lash_kernel_value::providers::FormatVersion =
+        lash_kernel_value::providers::FormatVersion::ONE;
     fn error_class(_: &CheckpointAssignmentError) -> lash_core::plugin::PluginFailureClass {
         lash_core::plugin::PluginFailureClass::Terminal
     }
@@ -289,7 +290,7 @@ impl CheckpointBindingFixture {
                         .map_err(checkpoint_setup_error)?;
                     let store = backend.package_store();
                     for accepted in &packages.snapshot.advertisements {
-                        if let lash_vocabulary::PackageAdvertisement::Enumerated(package) =
+                        if let lash_kernel_value::PackageAdvertisement::Enumerated(package) =
                             &accepted.advertisement
                         {
                             store

@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionRegistry, KernelVersion, RegistryError,
 };
-use lash_vocabulary::{KernelDataLimits, names::FunctionId};
+use {lash_kernel_value::KernelDataLimits, lash_kernel_value::names::FunctionId};
 
 use super::closure::{Closure, ClosureRefusal};
 
@@ -85,7 +85,7 @@ pub enum LoadRefusal {
     )]
     InternalOperation {
         function: FunctionId,
-        operation: lash_vocabulary::names::EffectName,
+        operation: lash_kernel_value::names::EffectName,
     },
     /// A definition did not encode as a graph node.
     #[error("the closure does not encode: {problem}")]
@@ -137,7 +137,7 @@ pub fn decode(
     limits: KernelDataLimits,
 ) -> Result<FunctionDefinition, LoadRefusal> {
     let definition =
-        lash_vocabulary::tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
+        lash_kernel_value::tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
             .map_err(|error| LoadRefusal::Undecodable {
                 function,
                 problem: error.to_string(),
@@ -450,7 +450,7 @@ pub fn requirements<'a>(
     links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationRoute>,
 ) -> lash_vocabulary::claims::ClaimRequirements {
     let mut requirements = lash_vocabulary::claims::ClaimRequirements {
-        machine: lash_vocabulary::claims::NodeRequirements {
+        machine: lash_kernel_value::claims::NodeRequirements {
             libraries: Default::default(),
             natives: closure
                 .body()
@@ -598,9 +598,12 @@ impl<L: Clone> Libraries<L> {
 /// The temporary loader input is never published or assigned a content identity.
 pub fn declare_reach(
     root: &Document,
-    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
-    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
-    machine: &lash_vocabulary::claims::NodeRequirements,
+    documents: &BTreeMap<lash_kernel_value::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<
+        lash_kernel_value::package::LinkId,
+        std::collections::BTreeSet<FunctionId>,
+    >,
+    machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
     selection: &lash_kernel_doc::Selection,
@@ -619,9 +622,12 @@ pub fn declare_reach(
 /// its own document's version and requiring every selected native implementation.
 pub fn assemble_reach(
     root: &Document,
-    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
-    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
-    machine: &lash_vocabulary::claims::NodeRequirements,
+    documents: &BTreeMap<lash_kernel_value::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<
+        lash_kernel_value::package::LinkId,
+        std::collections::BTreeSet<FunctionId>,
+    >,
+    machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
     selection: &lash_kernel_doc::Selection,
@@ -632,9 +638,12 @@ pub fn assemble_reach(
 
 fn admit_reach(
     root: &Document,
-    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
-    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
-    machine: &lash_vocabulary::claims::NodeRequirements,
+    documents: &BTreeMap<lash_kernel_value::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<
+        lash_kernel_value::package::LinkId,
+        std::collections::BTreeSet<FunctionId>,
+    >,
+    machine: &lash_kernel_value::claims::NodeRequirements,
     held: &Arc<FunctionRegistry>,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<(Admitted, lash_kernel_doc::LibraryDependencies), LoadRefusal> {

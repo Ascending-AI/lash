@@ -2,10 +2,10 @@
 //! each of them.
 
 use super::{AnchorUnavailable, StoreError, WindowAnchorViolation};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// `store_error_samples!` names every `StoreError` variant with one value of
@@ -145,7 +145,7 @@ store_error_samples! {
     },
     InvalidSessionId { .. } => StoreError::InvalidSessionId { reason: "sampled" },
     BlankIdentity(_) => StoreError::BlankIdentity(
-        lash_vocabulary::identity::SessionId::parse("").expect_err("an empty string is no session id"),
+        lash_kernel_value::identity::SessionId::parse("").expect_err("an empty string is no session id"),
     ),
     SessionDeleted { .. } => StoreError::SessionDeleted { session_id: session() },
     UnsupportedStoreOperation { .. } => StoreError::UnsupportedStoreOperation {

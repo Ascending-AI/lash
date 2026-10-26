@@ -674,7 +674,8 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             ))
             .expect("the core builds");
         let session_id =
-            lash_vocabulary::identity::SessionId::try_from("provider-activity".to_owned()).unwrap();
+            lash_kernel_value::identity::SessionId::try_from("provider-activity".to_owned())
+                .unwrap();
         let session = core
             .session(session_id.clone())
             .create(lash::SessionCreation::root(served::spec(8)))
@@ -885,7 +886,7 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
     let observed = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+            lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned())
                 .expect("a session id"),
         )
         .open()
@@ -1028,7 +1029,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         ))
         .expect("the attached core builds");
     let session_id =
-        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
+        lash_kernel_value::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let session = attached
         .session(session_id.clone())
         .create(lash::SessionCreation::root(served::spec(8)))

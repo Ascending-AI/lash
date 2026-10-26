@@ -698,7 +698,7 @@ impl SessionReadyContext {
 }
 
 pub use lash_core_ids::PluginId;
-pub use lash_vocabulary::providers::FormatVersion;
+pub use lash_kernel_value::providers::FormatVersion;
 
 /// What a plugin declares about itself before any session is built
 /// (FIG-4732): its id, namespace formats, and readable stream-state formats.

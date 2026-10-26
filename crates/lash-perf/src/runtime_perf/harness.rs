@@ -1,4 +1,4 @@
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
@@ -785,7 +785,7 @@ fn benchmark_rlm_builder(
 /// The benchmark tools' process component.
 const RUNTIME_PERF_TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "runtime_perf_tools",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// A process component and the key it registers under.

@@ -14,9 +14,9 @@ use std::collections::HashSet;
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
 
-use lash_vocabulary::{Name, Signature};
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::TextRange;
+use {lash_kernel_value::Name, lash_kernel_value::Signature};
 
 use super::statements::Body;
 use super::{Buf, Lowerer, Lowering, Scope, ScopeKind};
@@ -232,16 +232,16 @@ impl Lowerer<'_> {
         )
         .require(
             &signature,
-            lash_vocabulary::FunctionLocation {
+            lash_kernel_value::FunctionLocation {
                 name: Some(def.name.id.to_string()),
                 site: None,
             },
         )
         .map_err(|refusal| match refusal {
-            lash_vocabulary::EntrySignatureRefusal::Required(required) => {
+            lash_kernel_value::EntrySignatureRefusal::Required(required) => {
                 lash_kernel_dialect::Diagnostic::from(*required)
             }
-            lash_vocabulary::EntrySignatureRefusal::Annotation(refused) => {
+            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => {
                 lash_kernel_dialect::Diagnostic {
                     code: "ENTRY_ANNOTATION_REFUSED".into(),
                     span: refused.span,

@@ -1,10 +1,11 @@
 //! L-SUPERSET and L-DEFERRED-ATTACH at the source-name boundary.
 use crate::{NamespaceKind, NamespaceMember, Namespaces, Resolution, Spelling};
-use lash_vocabulary::{
-    PackagePath, Segment, TurnControls,
-    package::{OperationMode, OperationOffer, Visibility},
-};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::PackagePath, lash_kernel_value::Segment, lash_kernel_value::TurnControls,
+    lash_kernel_value::package::OperationMode, lash_kernel_value::package::OperationOffer,
+    lash_kernel_value::package::Visibility,
+};
 fn path(name: &str) -> PackagePath {
     PackagePath::parse(name).unwrap()
 }
@@ -16,12 +17,12 @@ fn package() -> BTreeMap<Segment, NamespaceMember> {
             visibility: Visibility::Public,
             kind: NamespaceKind::Operation(
                 OperationOffer {
-                    requirement: lash_vocabulary::OperationRequirement::new(
-                        lash_vocabulary::Signature {
+                    requirement: lash_kernel_value::OperationRequirement::new(
+                        lash_kernel_value::Signature {
                             params: vec![],
-                            result: lash_vocabulary::Type::Timestamp,
+                            result: lash_kernel_value::Type::Timestamp,
                         },
-                        lash_vocabulary::ContractId::new("fixture.clock"),
+                        lash_kernel_value::ContractId::new("fixture.clock"),
                     ),
                     intents: BTreeSet::new(),
                     controls: TurnControls::none(),

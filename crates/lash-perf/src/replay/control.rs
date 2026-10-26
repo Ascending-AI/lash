@@ -226,7 +226,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         tools,
     )?;
     let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
-    let id = lash_vocabulary::identity::SessionId::from("code-mode-control");
+    let id = lash_kernel_value::identity::SessionId::from("code-mode-control");
     if args.phase != Phase::Resume {
         core.session(id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(

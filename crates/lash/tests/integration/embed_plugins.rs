@@ -363,7 +363,7 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
         .expect("encode the plugin's creation options"),
         None => lash::plugins::PluginOptions::default(),
     };
-    core.session(lash_vocabulary::identity::SessionId::fixture(
+    core.session(lash_kernel_value::identity::SessionId::fixture(
         session_id.to_string(),
     ))
     .create(lash::SessionCreation::root(
@@ -390,7 +390,7 @@ async fn turn_hook_and_tool_provider_read_recorded_session_config() {
     created_with_label(&core, "typed-context", Some("page-a")).await;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("typed-context")
+            lash_kernel_value::identity::SessionId::parse("typed-context")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -417,7 +417,7 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
     created_with_label(&core, "without-typed-config", None).await;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("without-typed-config")
+            lash_kernel_value::identity::SessionId::parse("without-typed-config")
                 .expect("nonblank host identity"),
         )
         .open()

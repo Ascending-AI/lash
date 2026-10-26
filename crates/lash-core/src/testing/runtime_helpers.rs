@@ -1039,13 +1039,13 @@ impl TerminalControlTool {
                     description,
                     input,
                     match control.kind() {
-                        lash_vocabulary::tool_declaration::TurnControlKind::Finish => {
-                            lash_vocabulary::tool_declaration::TurnControls::finish(
-                                lash_vocabulary::json_schema::JsonSchema::any(),
+                        lash_kernel_value::tool_declaration::TurnControlKind::Finish => {
+                            lash_kernel_value::tool_declaration::TurnControls::finish(
+                                lash_kernel_value::json_schema::JsonSchema::any(),
                             )
                         }
-                        lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame => {
-                            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame()
+                        lash_kernel_value::tool_declaration::TurnControlKind::SwitchAgentFrame => {
+                            lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame()
                         }
                     },
                 )

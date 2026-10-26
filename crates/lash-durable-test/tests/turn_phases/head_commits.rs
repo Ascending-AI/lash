@@ -62,12 +62,12 @@ pub(super) fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, Tur
     let mut execution = runtime.config.clone();
     runtime.config.plugin_config.insert_versioned(
         WRITER_PLUGIN,
-        lash_vocabulary::providers::FormatVersion::ONE,
+        lash_kernel_value::providers::FormatVersion::ONE,
         serde_json::json!({}),
     );
     execution.plugin_config.insert_versioned(
         WRITER_PLUGIN,
-        lash_vocabulary::providers::FormatVersion::new(2).expect("2 is a format version"),
+        lash_kernel_value::providers::FormatVersion::new(2).expect("2 is a format version"),
         serde_json::json!({}),
     );
     runtime.execution_config = Some(Box::new(execution));

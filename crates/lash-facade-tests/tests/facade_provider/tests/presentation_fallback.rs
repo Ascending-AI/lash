@@ -164,7 +164,7 @@ async fn presentation_step_failure_feeds_fallback_to_next_step() -> Result<()> {
     let core = deploy(&sqlite_memory_store_backend().await, &seen, false)?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("presentation-fallback")
+            lash_kernel_value::identity::SessionId::parse("presentation-fallback")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(mock_session_spec()))
@@ -210,7 +210,7 @@ async fn a_recorded_presentation_is_served_after_its_owners_loss_without_its_ste
     let backend = sqlite_memory_store_backend().await;
     let core = deploy(&backend, &seen, true)?;
     let session_id =
-        lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity");
+        lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))

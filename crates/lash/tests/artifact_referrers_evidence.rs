@@ -366,7 +366,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     // initial frame is read back through the history pages.
     let history = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("artifact-referrers-first-switch")
+            lash_kernel_value::identity::SessionId::parse("artifact-referrers-first-switch")
                 .expect("nonblank host identity"),
         )
         .durable()
@@ -485,7 +485,7 @@ fn assert_document_and_link(writes: &[(String, String)]) {
     assert_eq!(
         artifacts
             .iter()
-            .filter(|artifact| lash_vocabulary::DocumentId::parse(artifact).is_ok())
+            .filter(|artifact| lash_kernel_value::DocumentId::parse(artifact).is_ok())
             .count(),
         1,
         "one authored Document: {artifacts:?}"
@@ -495,7 +495,7 @@ fn assert_document_and_link(writes: &[(String, String)]) {
             .iter()
             .filter(|artifact| artifact
                 .strip_prefix("link:v1:")
-                .is_some_and(|id| id.parse::<lash_vocabulary::LinkId>().is_ok()))
+                .is_some_and(|id| id.parse::<lash_kernel_value::LinkId>().is_ok()))
             .count(),
         1,
         "one canonical Link: {artifacts:?}"
@@ -822,7 +822,7 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     assert!(
         private
             .iter()
-            .any(|edge| lash_vocabulary::DocumentId::parse(&edge.artifact_ref).is_ok()),
+            .any(|edge| lash_kernel_value::DocumentId::parse(&edge.artifact_ref).is_ok()),
         "the deleted session also owns a private Document: {frame_edges:?}"
     );
     assert!(
@@ -910,7 +910,7 @@ impl lash::dialect::regions::Regions for SourceReadback {
 #[tokio::test]
 async fn cell_published_text_callable_prints_and_reads_back() {
     use lash::dialect::{PrintOptions, SourceFormat};
-    let release = lash_vm_releases::helper_release().expect("helpers");
+    let release = lash_kernel_releases::helper_release().expect("helpers");
     let roots = release.resolver_roots();
     let library =
         lash::dialect::NamedLibrary::resolving(&release.functions, |id| roots.contains(id))
@@ -1167,7 +1167,7 @@ async fn saved_function_process(
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    session_id: impl Into<lash_vocabulary::identity::SessionId>,
+    session_id: impl Into<lash_kernel_value::identity::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core

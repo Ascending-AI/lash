@@ -1268,7 +1268,7 @@ struct StoredHead {
 /// identity ([`crate::support::validate_config_root_tx`]).
 async fn held_head(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
     fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<Option<StoredHead>, StoreError> {

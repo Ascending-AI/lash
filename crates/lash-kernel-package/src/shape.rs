@@ -1,8 +1,8 @@
 //! Nominal Brands do not freeze representation. The consumer checks its current shape.
 use lash_kernel_doc::{Datum, Decoder, ErrorDatum, NumberPolicy};
 
-use lash_vocabulary::names::Brand;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::Brand;
+use lash_kernel_value::types::Type;
 pub const STALE_VALUE: &str = "package.stale_value";
 /// A value with another Brand is a type error; a matching Brand with an obsolete shape is catchable stale_value.
 pub fn check_branded(

@@ -1,7 +1,7 @@
 //! Backend-neutral lineage derivation for zero-copy forks.
 
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 
 use super::StoreError;

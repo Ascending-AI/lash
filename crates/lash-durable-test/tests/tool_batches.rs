@@ -366,7 +366,7 @@ struct GrantedLeaves;
 impl lash_core::plugin::packages::DeferredPackageProvider for GrantedLeaves {
     fn validate_grant(
         &self,
-        grant: &lash_vocabulary::package::DeferredGrant,
+        grant: &lash_kernel_value::package::DeferredGrant,
         registry: lash_vocabulary::claims::RegistryKind,
     ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
         packages::validate_grant("tools", "deferred", "dynamic", grant, registry)
@@ -374,8 +374,8 @@ impl lash_core::plugin::packages::DeferredPackageProvider for GrantedLeaves {
     async fn resolve(
         &self,
         _: &lash_core::DeferredResolveContext<'_>,
-        _: &lash_vocabulary::package::DeferredGrant,
-        requested: &lash_vocabulary::names::QualifiedName,
+        _: &lash_kernel_value::package::DeferredGrant,
+        requested: &lash_kernel_value::names::QualifiedName,
     ) -> Result<
         lash_core::plugin::packages::DeferredAnswer,
         lash_core::plugin::packages::ResolverFault,
@@ -895,7 +895,7 @@ async fn refusals(
 ) -> Vec<lash_core::ToolFailure> {
     let session = world
         .core
-        .session(lash_vocabulary::identity::SessionId::parse(name).unwrap())
+        .session(lash_kernel_value::identity::SessionId::parse(name).unwrap())
         .durable()
         .await
         .unwrap();
@@ -1449,7 +1449,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     let view = world.read(context).await;
     let session = world
         .core
-        .session(lash_vocabulary::identity::SessionId::from(context))
+        .session(lash_kernel_value::identity::SessionId::from(context))
         .durable()
         .await
         .unwrap();
@@ -1608,7 +1608,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     assert_eq!(status, lash_protocol_types::ToolCallStatus::Failure);
     let session = world
         .core
-        .session(lash_vocabulary::identity::SessionId::from(context))
+        .session(lash_kernel_value::identity::SessionId::from(context))
         .durable()
         .await
         .unwrap();

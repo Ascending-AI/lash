@@ -19,7 +19,7 @@
 
 use lash_kernel_doc::TaskId;
 use lash_kernel_exec::ActIx;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 use super::{Control, Frame, Halt, KernelMachine};
 use crate::compile::{ActionKind, BlockId, Executable, Form, NestedKind, StmtId};

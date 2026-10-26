@@ -2,15 +2,20 @@
 use lash_kernel_dialect::{
     EffectControl, NamespaceKind, NamespaceMember, Namespaces, OperationSignature,
 };
-use lash_vocabulary::package::{Fill, Link, Visibility};
-use lash_vocabulary::{
-    EffectName, ImportKind, Name, OperationMode, OperationUse, QualifiedName, QualifiedOperation,
-    Signature, TurnControls,
-};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+};
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::ImportKind, lash_kernel_value::Name,
+    lash_kernel_value::OperationMode, lash_kernel_value::OperationUse,
+    lash_kernel_value::QualifiedName, lash_kernel_value::QualifiedOperation,
+    lash_kernel_value::Signature, lash_kernel_value::TurnControls,
+};
+use {
+    lash_kernel_value::package::Fill, lash_kernel_value::package::Link,
+    lash_kernel_value::package::Visibility,
 };
 
 pub(super) fn namespaces(
@@ -23,7 +28,7 @@ pub(super) fn namespaces(
         let flags = controls.get(name);
         let mut accepted = TurnControls::none();
         if flags.is_some_and(|flags| flags.contains(&EffectControl::Finish)) {
-            accepted = accepted.with_finish(lash_vocabulary::JsonSchema::any());
+            accepted = accepted.with_finish(lash_kernel_value::JsonSchema::any());
         }
         if flags.is_some_and(|flags| flags.contains(&EffectControl::SwitchAgentFrame)) {
             accepted = accepted.with_switch_agent_frame();
@@ -72,13 +77,13 @@ pub(super) fn program(
     for (slot, import) in &document.imports {
         let fill = match &import.kind {
             ImportKind::Operation { signature } => Fill::Operation(
-                crate::helper_operations()
+                lash_ext_py_helpers::package::helper_operations()
                     .iter()
                     .find(|operation| operation.name == import.name)
                     .map(|operation| operation.requirement.clone())
-                    .unwrap_or_else(|| lash_vocabulary::OperationRequirement {
+                    .unwrap_or_else(|| lash_kernel_value::OperationRequirement {
                         signature: signature.clone(),
-                        contract: lash_vocabulary::ContractId::new("fixture"),
+                        contract: lash_kernel_value::ContractId::new("fixture"),
                     }),
             ),
             _ => panic!("ordinary code fixtures supply their own Link graph"),
@@ -186,7 +191,7 @@ pub(super) fn exported<'a>(
 pub(super) fn helper_reference(
     document: &lash_kernel_doc::Document,
     helper: &str,
-) -> Option<lash_vocabulary::FunctionId> {
+) -> Option<lash_kernel_value::FunctionId> {
     use lash_kernel_dialect::Library as _;
     let id = super::machine::library().resolve(helper)?;
     document.library.contains(&id).then_some(id)
@@ -196,7 +201,7 @@ pub(super) fn helper_reference(
 pub(super) fn operation_slot(
     document: &lash_kernel_doc::Document,
     operation: &str,
-) -> Option<lash_vocabulary::ImportSlot> {
+) -> Option<lash_kernel_value::ImportSlot> {
     let name = QualifiedOperation::from_effect(&EffectName::new(operation).unwrap())
         .expect("operation name");
     document.imports.iter().find_map(|(slot, import)| {

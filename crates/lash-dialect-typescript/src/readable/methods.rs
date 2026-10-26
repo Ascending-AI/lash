@@ -16,8 +16,8 @@
 
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::Name;
+use lash_kernel_value::sites::Site;
 
 use super::lift::{Lift, Lifter};
 use super::source::Expr;
@@ -269,7 +269,7 @@ impl Lifter<'_> {
         let Some(helper) = self.library(slot) else {
             return Ok(None);
         };
-        let Some(method) = crate::builtins::array_callback_method(&helper) else {
+        let Some(method) = lash_ext_ts_helpers::builtins::array_callback_method(&helper) else {
             return Ok(None);
         };
         let (context, callable) = match call.args.as_slice() {
@@ -328,7 +328,7 @@ impl Lifter<'_> {
             })
             .collect::<Lift<Vec<_>>>()?;
         let at = Site::new(
-            lash_vocabulary::sites::Unit::Library(closure.function),
+            lash_kernel_value::sites::Unit::Library(closure.function),
             Vec::new(),
         );
         let body = match body.as_slice() {

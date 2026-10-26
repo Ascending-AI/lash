@@ -8,7 +8,7 @@ pub use lash_core::facade_support::*;
 pub use lash_core::*;
 pub use lash_core_execution as execution;
 #[doc(hidden)]
-pub use lash_vocabulary::json_schema::JsonSchema;
+pub use lash_kernel_value::json_schema::JsonSchema;
 
 #[doc(hidden)]
 pub mod runtime {

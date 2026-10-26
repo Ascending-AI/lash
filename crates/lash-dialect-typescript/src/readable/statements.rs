@@ -2,8 +2,8 @@
 
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::Name;
+use lash_kernel_value::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Arm, Expr, StmtKind};

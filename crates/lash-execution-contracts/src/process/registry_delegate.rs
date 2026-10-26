@@ -140,7 +140,7 @@ macro_rules! delegate_process_registrar {
             async fn register_process_with_observers(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[lash_vocabulary::identity::SessionId],
+                observers: &[lash_kernel_value::identity::SessionId],
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
                 let $registration_self = self;
                 let $registration_call = self
@@ -152,7 +152,7 @@ macro_rules! delegate_process_registrar {
             async fn register_process_reporting_outcome(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[lash_vocabulary::identity::SessionId],
+                observers: &[lash_kernel_value::identity::SessionId],
             ) -> Result<$crate::ProcessRegistrationReceipt, $crate::PluginError> {
                 let $registration_self = self;
                 let $registration_call = self
@@ -164,7 +164,7 @@ macro_rules! delegate_process_registrar {
             async fn prepare_process_registration(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[lash_vocabulary::identity::SessionId],
+                observers: &[lash_kernel_value::identity::SessionId],
             ) -> Result<$crate::PreparedProcessRegistration, $crate::PluginError> {
                 self.$inner
                     .prepare_process_registration(registration, observers)
@@ -394,7 +394,7 @@ macro_rules! delegate_process_observer_registry {
             async fn observers_for_process(
                 &self,
                 process_id: &ProcessId,
-            ) -> Result<Vec<lash_vocabulary::identity::SessionId>, $crate::PluginError> {
+            ) -> Result<Vec<lash_kernel_value::identity::SessionId>, $crate::PluginError> {
                 self.$inner.observers_for_process(process_id).await
             }
 

@@ -12,11 +12,11 @@ use lash_kernel_doc::{
 };
 
 use lash_kernel_state::paged::SealBudget;
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, int, result};
-use crate::conformance::{Checkpoint, checkpoint};
 use crate::{Layout, Machine, MachineError, Step};
+use lash_kernel_state::semantic::{Checkpoint, checkpoint};
 
 /// `probe.wrap(x)` answers `[x]`. Its native allocates that list alone;
 /// its body, which layout 3 runs, allocates two lists before it.

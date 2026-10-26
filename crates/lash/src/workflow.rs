@@ -85,14 +85,25 @@ pub mod document {
         validate_definition, validate_definition_with_limits, validate_document,
         validate_document_with_limits,
     };
-    pub use lash_vocabulary::names::{DocumentId, FunctionId, FunctionName, QualifiedName};
-    pub use lash_vocabulary::names::{
-        EffectName, InvalidIdentity, InvalidQualifiedName, SourceMapId,
+    pub use {
+        lash_kernel_value::names::DocumentId, lash_kernel_value::names::FunctionId,
+        lash_kernel_value::names::FunctionName, lash_kernel_value::names::QualifiedName,
     };
-    pub use lash_vocabulary::operations::{ContractId, OperationRequirement};
-    pub use lash_vocabulary::sites::{
-        EffectId, LoopCounts, ObservationReader, PositionCounts, PositionLabel, Site, TaskLabel,
-        Unit, VisitId, WaitId,
+    pub use {
+        lash_kernel_value::names::EffectName, lash_kernel_value::names::InvalidIdentity,
+        lash_kernel_value::names::InvalidQualifiedName, lash_kernel_value::names::SourceMapId,
+    };
+    pub use {
+        lash_kernel_value::operations::ContractId,
+        lash_kernel_value::operations::OperationRequirement,
+    };
+    pub use {
+        lash_kernel_value::sites::EffectId, lash_kernel_value::sites::LoopCounts,
+        lash_kernel_value::sites::ObservationReader, lash_kernel_value::sites::PositionCounts,
+        lash_kernel_value::sites::PositionLabel, lash_kernel_value::sites::Site,
+        lash_kernel_value::sites::SourceLocations, lash_kernel_value::sites::TaskLabel,
+        lash_kernel_value::sites::Unit, lash_kernel_value::sites::VisitId,
+        lash_kernel_value::sites::WaitId,
     };
 
     pub use lash_kernel_doc::linked_site::LinkedSite;
@@ -104,10 +115,11 @@ pub mod document {
         CaptionKind, CaptionRefusal, CaptionTarget, Captions, CaptionsRefusal, FieldPath,
         FieldRoot, FieldTarget, ParamTarget, Rekeyed,
     };
-    pub use lash_vocabulary::sites::testkit;
-    pub use lash_vocabulary::tokens;
-    pub use lash_vocabulary::tokens::{
-        FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, MAX_DECODE_DEPTH,
+    pub use lash_kernel_value::sites::testkit;
+    pub use lash_kernel_value::tokens;
+    pub use {
+        lash_kernel_value::tokens::FROZEN_DATUM, lash_kernel_value::tokens::MAX_DECODE_DEPTH,
+        lash_vocabulary::tokens::FROZEN_JSON, lash_vocabulary::tokens::FROZEN_TOOL_VALUE,
     };
 }
 
@@ -146,6 +158,9 @@ pub use lash_kernel_edit::authoring;
 /// join their own labels separately.
 #[cfg(feature = "workflow-view")]
 pub mod view {
+    pub use lash_kernel_value::observation::RanCounts;
+    pub use lash_kernel_value::observation::ReplayPath;
+    pub use lash_kernel_value::observation::TaskPath;
     pub use lash_kernel_view::ActionActivity;
     pub use lash_kernel_view::ActionObservation;
     pub use lash_kernel_view::ActionRole;
@@ -206,9 +221,6 @@ pub mod view {
         NodeCaption, ParamCaption,
     };
     pub use lash_kernel_view::{Comparison, LabelError, MemberDisplay};
-    pub use lash_vocabulary::observation::RanCounts;
-    pub use lash_vocabulary::observation::ReplayPath;
-    pub use lash_vocabulary::observation::TaskPath;
 }
 
 /// A checked document entered at one entry, with its graph and the library
@@ -236,7 +248,7 @@ pub use lash_vm_runtime::{
 /// Which document an execution runs, as a process's observation snapshot
 /// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity))
 /// and an execution's start name it.
-pub use lash_vocabulary::names::{LinkedStart, StartSelector};
+pub use {lash_kernel_value::names::LinkedStart, lash_kernel_value::names::StartSelector};
 
 use crate::Result;
 #[cfg(feature = "codemode")]
@@ -397,7 +409,7 @@ pub mod link {
 #[derive(Clone, Debug)]
 pub struct OpenedWorkflow {
     pub draft: authoring::Draft,
-    pub selector: lash_vocabulary::StartSelector,
+    pub selector: lash_kernel_value::StartSelector,
     pub captions: document::Captions,
     pub dropped: Vec<document::CaptionTarget>,
 }

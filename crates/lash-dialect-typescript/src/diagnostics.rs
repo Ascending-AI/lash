@@ -488,14 +488,14 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub(crate) fn entry_signature(refusal: lash_vocabulary::EntrySignatureRefusal) -> Self {
+    pub(crate) fn entry_signature(refusal: lash_kernel_value::EntrySignatureRefusal) -> Self {
         let (code, span, fact) = match refusal {
-            lash_vocabulary::EntrySignatureRefusal::Required(required) => (
+            lash_kernel_value::EntrySignatureRefusal::Required(required) => (
                 DiagnosticCode::SignatureRequired,
                 required.span,
                 lash_kernel_dialect::DiagnosticFact::SignatureRequired(*required),
             ),
-            lash_vocabulary::EntrySignatureRefusal::Annotation(refused) => (
+            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => (
                 DiagnosticCode::EntryAnnotationRefused,
                 refused.span,
                 lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(*refused),
@@ -556,7 +556,7 @@ impl Diagnostic {
     }
 
     pub(crate) fn namespace_shadowed(
-        shadowing: lash_vocabulary::NamespaceShadowing,
+        shadowing: lash_kernel_value::NamespaceShadowing,
         span: SourceSpan,
     ) -> Self {
         let diagnostic = lash_kernel_dialect::Diagnostic::namespace_shadowed(shadowing, Some(span));

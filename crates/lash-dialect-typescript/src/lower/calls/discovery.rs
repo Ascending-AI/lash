@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use crate::adapter as ast;
 use crate::lower::walk;
@@ -371,7 +371,7 @@ impl Discovery<'_> {
                 if let Some((root, path)) = super::static_path(callee)
                     && path.contains('.')
                     && !self.is_bound(root)
-                    && !crate::builtins::is_global(root)
+                    && !lash_ext_ts_helpers::builtins::is_global(root)
                     && lash_kernel_dialect::value_constructors::Constructor::named(&path).is_none()
                 {
                     self.calls.insert(path);

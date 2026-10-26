@@ -408,7 +408,7 @@ impl ArtifactCleanupRelay {
     /// Where `session` stands for its upload and session guards.
     async fn session_state(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
     ) -> Result<crate::SessionReferrerState, DeliveryFailure> {
         self.ports
             .attachments

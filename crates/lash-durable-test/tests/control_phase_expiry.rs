@@ -182,7 +182,7 @@ async fn prove(tool: bool, denied: bool) {
     ));
     let backend = served::backend(Arc::new(stores.clone()));
     let first = core(&backend, plugin.clone(), tool, "first");
-    let id = lash_vocabulary::identity::SessionId::from("phase-law-session");
+    let id = lash_kernel_value::identity::SessionId::from("phase-law-session");
     let run = lash_vocabulary::identity::TurnId::parse("phase-law-run").unwrap();
     let session = first
         .session(id.clone())

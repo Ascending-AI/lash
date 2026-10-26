@@ -6,11 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 use lash_kernel_doc::FunctionCatalog;
-use lash_vocabulary::names::EffectName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::EffectName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 #[repr(C)]
 #[derive(Default)]
@@ -82,7 +82,7 @@ fn main() -> Result<()> {
     );
     let counter = Counter::open()?;
     let (standard, assembly) = counter.measure(|| {
-        lash_vm_releases::helper_release()
+        lash_kernel_releases::helper_release()
             .map(|release| std::sync::Arc::new(release.functions.clone()))
     })?;
     let standard = standard?;
@@ -131,24 +131,24 @@ fn main() -> Result<()> {
     let functions = BTreeMap::new();
     let mut packages: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
     for (effect, signature) in &effects {
-        let operation = lash_vocabulary::QualifiedOperation::from_effect(effect)?;
-        let offer = lash_vocabulary::OperationOffer {
-            requirement: lash_vocabulary::OperationRequirement::new(
+        let operation = lash_kernel_value::QualifiedOperation::from_effect(effect)?;
+        let offer = lash_kernel_value::OperationOffer {
+            requirement: lash_kernel_value::OperationRequirement::new(
                 signature.clone(),
-                lash_vocabulary::ContractId::new("1"),
+                lash_kernel_value::ContractId::new("1"),
             ),
-            mode: lash_vocabulary::OperationMode::Waited,
+            mode: lash_kernel_value::OperationMode::Waited,
             intents: Default::default(),
             controls: if effect.as_str() == "control.finish" {
-                lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any())
+                lash_kernel_value::TurnControls::finish(lash_kernel_value::JsonSchema::any())
             } else {
-                lash_vocabulary::TurnControls::none()
+                lash_kernel_value::TurnControls::none()
             },
         };
         packages.entry(operation.package).or_default().insert(
             operation.name,
             lash_kernel_dialect::NamespaceMember {
-                visibility: lash_vocabulary::Visibility::Public,
+                visibility: lash_kernel_value::Visibility::Public,
                 kind: lash_kernel_dialect::NamespaceKind::Operation(offer.into()),
             },
         );

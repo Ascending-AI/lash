@@ -2,13 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_vocabulary::tool_shape::DefinitionId;
-use lash_vocabulary::tool_shape::ExtraKeys;
-use lash_vocabulary::tool_shape::ReadableNameAllocator;
-use lash_vocabulary::tool_shape::SchemaDocument;
-use lash_vocabulary::tool_shape::SchemaShape;
-use lash_vocabulary::tool_shape::ShapeImportRefusal;
-use lash_vocabulary::tool_shape::ShapeKind;
+use lash_kernel_value::tool_shape::DefinitionId;
+use lash_kernel_value::tool_shape::ExtraKeys;
+use lash_kernel_value::tool_shape::SchemaDocument;
+use lash_kernel_value::tool_shape::SchemaShape;
+use lash_kernel_value::tool_shape::ShapeImportRefusal;
+use lash_kernel_value::tool_shape::ShapeKind;
+use lash_vocabulary::shape_names::ReadableNameAllocator;
 
 use crate::{DefinitionNames, note_rows, render_type_expression, render_type_name, reserved_words};
 

@@ -186,7 +186,7 @@ impl TraceRuntime {
     /// `true`, it is.
     pub fn report_composition(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         fingerprint: [u8; 32],
     ) -> bool {
         self.parts
@@ -349,7 +349,7 @@ impl TraceRuntime {
     #[must_use]
     pub fn hold_turn_emissions(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) -> impl Drop + Send + use<> {
         self.parts.turn_emissions.hold(session, run)
@@ -359,7 +359,7 @@ impl TraceRuntime {
     /// that exact turn. Other nodes' sinks and future turns are independent.
     pub async fn turn_emissions_handed_off(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) {
         self.parts.turn_emissions.handed_off(session, run).await;

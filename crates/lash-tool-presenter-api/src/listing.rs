@@ -6,10 +6,10 @@
 //! and joins them. A tool appended to the catalogue appends its doc and leaves
 //! every byte before it as it was (FIG-1435).
 
+use lash_kernel_value::tool_shape::SchemaShape;
+use lash_kernel_value::tool_shape::ShapeRow;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolManifest;
-use lash_vocabulary::tool_shape::SchemaShape;
-use lash_vocabulary::tool_shape::ShapeRow;
 
 use crate::{PresentedToolSection, ToolDisclosure, ToolPresentationEntry};
 
@@ -173,14 +173,14 @@ pub fn plan<S>(
 /// ```
 #[derive(Clone, Debug)]
 pub struct DefinitionPool {
-    allocator: lash_vocabulary::tool_shape::ReadableNameAllocator,
+    allocator: lash_vocabulary::shape_names::ReadableNameAllocator,
     emitted: std::collections::BTreeSet<(
-        lash_vocabulary::tool_shape::CanonicalIdentity,
+        lash_kernel_value::tool_shape::CanonicalIdentity,
         Option<String>,
     )>,
     contexts: std::collections::BTreeMap<
         Option<String>,
-        (lash_vocabulary::tool_shape::ReadableNameAllocator, usize),
+        (lash_vocabulary::shape_names::ReadableNameAllocator, usize),
     >,
     used_names: Vec<String>,
 }
@@ -188,8 +188,8 @@ pub struct DefinitionPool {
 /// All reachable names and the definitions not yet emitted by a pool.
 #[derive(Clone, Debug)]
 pub struct PreparedDefinitions {
-    pub names: std::collections::BTreeMap<lash_vocabulary::tool_shape::DefinitionId, String>,
-    pub introduced: Vec<lash_vocabulary::tool_shape::DefinitionId>,
+    pub names: std::collections::BTreeMap<lash_kernel_value::tool_shape::DefinitionId, String>,
+    pub introduced: Vec<lash_kernel_value::tool_shape::DefinitionId>,
 }
 
 impl DefinitionPool {
@@ -199,7 +199,7 @@ impl DefinitionPool {
     /// let pool = DefinitionPool::new(["Row", "Field"]);
     /// ```
     pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
-        Self::with_allocator(lash_vocabulary::tool_shape::ReadableNameAllocator::new(
+        Self::with_allocator(lash_vocabulary::shape_names::ReadableNameAllocator::new(
             reserved,
         ))
     }
@@ -209,7 +209,7 @@ impl DefinitionPool {
     /// ```rust,ignore
     /// let pool = DefinitionPool::with_allocator(compact_name_allocator(&[&input], &["Host"]));
     /// ```
-    pub fn with_allocator(allocator: lash_vocabulary::tool_shape::ReadableNameAllocator) -> Self {
+    pub fn with_allocator(allocator: lash_vocabulary::shape_names::ReadableNameAllocator) -> Self {
         Self {
             allocator,
             emitted: Default::default(),
@@ -242,7 +242,7 @@ impl DefinitionPool {
     /// Refuses a dangling graph reference before allocating any names.
     pub fn prepare(
         &mut self,
-        document: &lash_vocabulary::tool_shape::SchemaDocument,
+        document: &lash_kernel_value::tool_shape::SchemaDocument,
     ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
         self.prepare_document(document, None)
     }
@@ -262,8 +262,8 @@ impl DefinitionPool {
     /// Refuses a dangling graph reference or an absent projection target.
     pub fn prepare_projected(
         &mut self,
-        document: &lash_vocabulary::tool_shape::SchemaDocument,
-        changed: lash_vocabulary::tool_shape::DefinitionId,
+        document: &lash_kernel_value::tool_shape::SchemaDocument,
+        changed: lash_kernel_value::tool_shape::DefinitionId,
         projection: &serde_json::Value,
     ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
         self.prepare_document(document, Some((changed, projection.to_string())))
@@ -271,8 +271,8 @@ impl DefinitionPool {
 
     fn prepare_document(
         &mut self,
-        document: &lash_vocabulary::tool_shape::SchemaDocument,
-        projection: Option<(lash_vocabulary::tool_shape::DefinitionId, String)>,
+        document: &lash_kernel_value::tool_shape::SchemaDocument,
+        projection: Option<(lash_kernel_value::tool_shape::DefinitionId, String)>,
     ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
         // Check every edge before asking the graph's canonical identity and
         // allocator helpers to traverse it. Imported graphs already satisfy
@@ -281,19 +281,19 @@ impl DefinitionPool {
         let mut pending = document
             .roots
             .iter()
-            .flat_map(lash_vocabulary::tool_shape::SchemaDocument::references)
+            .flat_map(lash_kernel_value::tool_shape::SchemaDocument::references)
             .collect::<std::collections::VecDeque<_>>();
         while let Some(id) = pending.pop_front() {
             if closure.contains(&id) {
                 continue;
             }
             let definition = document.definition(id).ok_or_else(|| {
-                lash_vocabulary::tool_shape::ShapeImportRefusal::InvalidSchema {
+                lash_kernel_value::tool_shape::ShapeImportRefusal::InvalidSchema {
                     keyword: format!("definition {}", id.0),
                 }
             })?;
             closure.push(id);
-            pending.extend(lash_vocabulary::tool_shape::SchemaDocument::references(
+            pending.extend(lash_kernel_value::tool_shape::SchemaDocument::references(
                 &definition.shape,
             ));
         }
@@ -301,7 +301,7 @@ impl DefinitionPool {
             && document.definition(*id).is_none()
         {
             return Err(
-                lash_vocabulary::tool_shape::ShapeImportRefusal::InvalidSchema {
+                lash_kernel_value::tool_shape::ShapeImportRefusal::InvalidSchema {
                     keyword: format!("definition {}", id.0),
                 }
                 .into(),
@@ -314,9 +314,9 @@ impl DefinitionPool {
                 .as_ref()
                 .filter(|(changed, _)| {
                     document
-                        .reachable_closure(
-                            &[lash_vocabulary::tool_shape::ShapeKind::Ref(id).into()],
-                        )
+                        .reachable_closure(&[
+                            lash_kernel_value::tool_shape::ShapeKind::Ref(id).into()
+                        ])
                         .contains(changed)
                 })
                 .map(|(_, key)| key.clone());

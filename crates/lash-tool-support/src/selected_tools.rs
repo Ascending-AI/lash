@@ -312,7 +312,7 @@ impl ToolProvider for Selected {
         self.inner.execute(call).await
     }
 
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
         self.inner.readable_binding_formats()
     }
 

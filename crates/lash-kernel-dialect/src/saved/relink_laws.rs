@@ -2,11 +2,11 @@
 use super::*;
 use lash_kernel_doc::{NumberPolicy, parse_definition};
 
-use lash_vocabulary::{
-    CallableId,
-    names::{ImportSlot, Name},
-    operations::{ContractId, OperationRequirement},
-    package::{Fill, Link},
+use {
+    lash_kernel_value::CallableId, lash_kernel_value::names::ImportSlot,
+    lash_kernel_value::names::Name, lash_kernel_value::operations::ContractId,
+    lash_kernel_value::operations::OperationRequirement, lash_kernel_value::package::Fill,
+    lash_kernel_value::package::Link,
 };
 #[test]
 fn relink_preserves_document_function_environment_and_nested_membership() {
@@ -17,21 +17,21 @@ fn relink_preserves_document_function_environment_and_nested_membership() {
     let function = definition.identity();
     let mut document = Document::new(NumberPolicy::Float, vec![]);
     document.functions.insert(function, definition);
-    let signature = lash_vocabulary::types::Signature {
+    let signature = lash_kernel_value::types::Signature {
         params: vec![],
-        result: lash_vocabulary::types::Type::Json,
+        result: lash_kernel_value::types::Type::Json,
     };
     document.imports.insert(
         ImportSlot(0),
-        lash_vocabulary::names::Import {
-            name: lash_vocabulary::names::QualifiedName {
-                package: lash_vocabulary::names::Vec1::new(
-                    lash_vocabulary::names::Segment::new("app").unwrap(),
+        lash_kernel_value::names::Import {
+            name: lash_kernel_value::names::QualifiedName {
+                package: lash_kernel_value::names::Vec1::new(
+                    lash_kernel_value::names::Segment::new("app").unwrap(),
                 ),
-                member: lash_vocabulary::names::Segment::new("fetch").unwrap(),
+                member: lash_kernel_value::names::Segment::new("fetch").unwrap(),
                 type_member: None,
             },
-            kind: lash_vocabulary::names::ImportKind::Operation {
+            kind: lash_kernel_value::names::ImportKind::Operation {
                 signature: signature.clone(),
             },
         },

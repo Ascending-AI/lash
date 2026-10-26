@@ -57,7 +57,7 @@ async fn single_statement_durable_reads_use_their_implicit_snapshots() {
 
     let set = SqliteStoreSet::memory().await.unwrap();
     let store = set.durable_store();
-    let session = lash_vocabulary::identity::SessionId::fixture("metadata-read-work");
+    let session = lash_kernel_value::identity::SessionId::fixture("metadata-read-work");
     let run = lash_vocabulary::identity::TurnId::fixture("metadata-read-run");
     let exec = ExecKey::Cell(
         session.clone(),
@@ -475,7 +475,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
     // but the actor fence still refuses first when this attempt is stale.
     stale.write(lash_durable::domain::DomainWrite::SessionCommit(
         lash_durable::domain::SessionCommitWrite {
-            session: lash_vocabulary::identity::SessionId::parse("batch-lost").unwrap(),
+            session: lash_kernel_value::identity::SessionId::parse("batch-lost").unwrap(),
             expected_head: 0,
             commit_json: "malformed session commit".to_owned(),
             execution: None,
@@ -610,7 +610,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
 
     let (_root, set, _clock) = world(false).await;
     let store = set.durable_store();
-    let session = lash_vocabulary::identity::SessionId::from("fragment-session");
+    let session = lash_kernel_value::identity::SessionId::from("fragment-session");
     let actor = ActorKey::session(session.as_str()).unwrap();
     let formats = FormatSet::new("fragment-index-formats");
     let mut create = MailTx::new();
@@ -874,7 +874,7 @@ mod lo_root_retirement_sql_is_depth_independent {
             let store = set.durable_store();
             let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
             let actor = ActorKey::session("sql-work-owner").unwrap();
-            let session = lash_vocabulary::identity::SessionId::from("sql-work-owner");
+            let session = lash_kernel_value::identity::SessionId::from("sql-work-owner");
 
             let segments: Vec<_> = (0..depth)
                 .map(|index| {
@@ -1052,7 +1052,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
-            session: lash_vocabulary::identity::SessionId::from("sql-work-owner"),
+            session: lash_kernel_value::identity::SessionId::from("sql-work-owner"),
             call: ModelCallId::Turn {
                 run: lash_vocabulary::identity::TurnId::from("batch-read"),
                 ordinal: 1,
@@ -1136,7 +1136,7 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
     use lash_core_store::session_state::RuntimeSessionState;
     use lash_core_store::store::{RuntimeCommit, SessionCatalogStore, SessionCommitStore};
     use lash_durable::{ActorKey, DurableStore, FormatSet, MailTx, NodeId, NodeSpec};
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     async fn run(file: bool) {
         let (_root, set, _clock) = world(file).await;
@@ -1459,7 +1459,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
         ActorKey, CommitLabel, DurableReads, DurableStore, FormatSet, MailTx, NodeId, NodeSpec,
         Release,
     };
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     async fn run(file: bool) {
         let (_root, set, _clock) = world(file).await;
@@ -1732,11 +1732,11 @@ async fn a_publication_retains_its_complete_content_dag() {
     use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
     let set = SqliteStoreSet::memory().await.expect("memory store");
     let store = set.open_store().await.expect("module store");
-    let document = lash_vocabulary::names::DocumentId::from_bytes([72; 32]);
+    let document = lash_kernel_value::names::DocumentId::from_bytes([72; 32]);
     use lash_core_store::store::SessionCatalogStore;
     let catalog = set.session_store_factory();
-    let session_id = lash_vocabulary::identity::SessionId::fixture("package-law-session");
-    let child_id = lash_vocabulary::identity::SessionId::fixture("package-law-child");
+    let session_id = lash_kernel_value::identity::SessionId::fixture("package-law-session");
+    let child_id = lash_kernel_value::identity::SessionId::fixture("package-law-child");
     for id in [&session_id, &child_id] {
         catalog
             .admit_session(&lash_core_execution::testing::store_fixtures::root_session_request(id))
@@ -1764,7 +1764,7 @@ async fn a_publication_retains_its_complete_content_dag() {
     )
     .await
     .expect("L-PIN");
-    let racing_id = lash_vocabulary::identity::SessionId::fixture("package-hold-cleanup-race");
+    let racing_id = lash_kernel_value::identity::SessionId::fixture("package-hold-cleanup-race");
     catalog
         .admit_session(
             &lash_core_execution::testing::store_fixtures::root_session_request(&racing_id),

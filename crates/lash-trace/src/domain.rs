@@ -43,7 +43,7 @@ pub enum TraceDomainSubject {
     },
     /// One occurrence of a workflow node, by its whole effect identity.
     WorkflowNode {
-        at: lash_vocabulary::sites::EffectId,
+        at: lash_kernel_value::sites::EffectId,
     },
     ToolIntent {
         kind: lash_vocabulary::ToolIntentKind,

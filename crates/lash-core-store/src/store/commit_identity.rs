@@ -21,7 +21,7 @@ const LASH_INTENT_DOMAIN_VERSION: &str = "lash-intent/v2";
 const LASH_HISTORY_NODE_DOMAIN_VERSION: &str = "lash-history-node/v3";
 
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// Stable caller-selected identity for one durable commit operation.

@@ -29,7 +29,7 @@ impl Lowerer<'_> {
         if let Some(name) = path.strip_prefix("globalThis.")
             && !name.contains('.')
         {
-            if crate::builtins::is_global(name) {
+            if lash_ext_ts_helpers::builtins::is_global(name) {
                 return self.read_global(name, span);
             }
             return None;
@@ -40,7 +40,7 @@ impl Lowerer<'_> {
         if let Some(token) = self.token(path) {
             return Some(token);
         }
-        (!path.contains('.') && crate::builtins::is_global(path)).then(|| {
+        (!path.contains('.') && lash_ext_ts_helpers::builtins::is_global(path)).then(|| {
             Err(Diagnostic {
                 kind: DiagnosticKind::Refusal,
                 ..Diagnostic::with_repair(
@@ -56,15 +56,19 @@ impl Lowerer<'_> {
     /// The token a built-in path is as a value (`builtins/mod.rs`), with
     /// the closure that calls it when it is a function.
     pub(super) fn token(&mut self, path: &str) -> Option<Lowering<Operand>> {
-        let path = crate::builtins::canonical(path);
+        let path = lash_ext_ts_helpers::builtins::canonical(path);
         let builtin = self.table.builtin(path)?;
         Some(self.make_token(path, builtin))
     }
 
-    fn make_token(&mut self, path: &str, builtin: crate::builtins::Builtin) -> Lowering<Operand> {
+    fn make_token(
+        &mut self,
+        path: &str,
+        builtin: lash_ext_ts_helpers::builtins::Builtin,
+    ) -> Lowering<Operand> {
         let text = |value: &str| Expr::Literal(Literal::Text(value.to_string()));
         let items = match builtin {
-            crate::builtins::Builtin::Function { call, length } => {
+            lash_ext_ts_helpers::builtins::Builtin::Function { call, length } => {
                 let (helper, class) = call.callee(path);
                 let function = self.helper_callee(helper)?;
                 let this = self.fresh("this");
@@ -91,17 +95,17 @@ impl Lowerer<'_> {
                 vec![
                     text(crate::FUNCTION_TAG),
                     text(path),
-                    text(crate::builtins::function_name(path)),
+                    text(lash_ext_ts_helpers::builtins::function_name(path)),
                     Expr::Literal(Literal::Float(lash_kernel_doc::Float::new(f64::from(
                         length,
                     )))),
                     call,
                 ]
             }
-            crate::builtins::Builtin::Object => vec![
+            lash_ext_ts_helpers::builtins::Builtin::Object => vec![
                 text("ts.object"),
                 text(path),
-                text(crate::builtins::object_tag(path)),
+                text(lash_ext_ts_helpers::builtins::object_tag(path)),
             ],
         };
         Ok(self.inline(Expr::Tuple(items), Ty::Builtin))

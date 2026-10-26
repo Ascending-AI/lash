@@ -91,7 +91,7 @@ pub fn define_functions_with(
         let (mut definition, locals) = lash_kernel_doc::core_support::parse_definition_over(
             &text,
             imports.clone(),
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
         .map_err(|error: ParseError| SourceError::Parse {
             function: label.clone(),

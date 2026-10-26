@@ -52,10 +52,10 @@ use lash_protocol_types::{
     tool_output::graph::encode_output,
 };
 
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 use lash_vocabulary::tool_contract::LimitCause;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -93,7 +93,7 @@ pub fn decode_tree<T: Serialize + DeserializeOwned>(
     let tree = decode_json(input)?;
     let value: T =
         serde::Deserialize::deserialize(&tree).map_err(|error| invalid(error.to_string()))?;
-    if !lash_vocabulary::tokens::matches_json(&value, &tree) {
+    if !lash_vocabulary::matches_json(&value, &tree) {
         return Err(invalid("a payload tree is not its value's one spelling"));
     }
     Ok(value)
@@ -863,7 +863,7 @@ pub struct PinnedMember {
     pub call: ToolCallId,
     pub tool: String,
     pub request: MaterialRef,
-    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
+    pub policy: lash_kernel_value::tool_contract::ExecutionPolicy,
     pub limit_expires_at_ms: u64,
     pub limit_max_slice_ms: u64,
     /// The completion wait pinned with the admission, by its id's hex: a

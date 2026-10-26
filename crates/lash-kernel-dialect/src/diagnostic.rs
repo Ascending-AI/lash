@@ -35,7 +35,7 @@ pub struct Diagnostic {
 impl Diagnostic {
     /// A lexical binding wins over the namespace, so this call is unreachable.
     pub fn namespace_shadowed(
-        shadowing: lash_vocabulary::NamespaceShadowing,
+        shadowing: lash_kernel_value::NamespaceShadowing,
         span: Option<Span>,
     ) -> Self {
         Self {
@@ -73,8 +73,8 @@ pub use lash_kernel_doc::SourceOperandType;
 #[non_exhaustive]
 pub enum DiagnosticFact {
     SignatureRequired(lash_kernel_doc::SignatureRequired),
-    EntryAnnotationRefused(lash_vocabulary::EntryAnnotationRefusal),
-    NamespaceShadowing(lash_vocabulary::NamespaceShadowing),
+    EntryAnnotationRefused(lash_kernel_value::EntryAnnotationRefusal),
+    NamespaceShadowing(lash_kernel_value::NamespaceShadowing),
 }
 
 impl From<lash_kernel_doc::SignatureRequired> for Diagnostic {

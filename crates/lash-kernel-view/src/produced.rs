@@ -17,7 +17,7 @@ use lash_kernel_check::{
     Reference, StmtNode,
 };
 
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::sites::Site;
 
 use crate::ActionView;
 
@@ -90,7 +90,7 @@ impl<'a> Producers<'a> {
     }
     fn receives(&self, callee: &lash_kernel_check::CalleeNode, count: usize) -> bool {
         let function = match callee {
-            lash_kernel_check::CalleeNode::Local(function) => Some(lash_vocabulary::CallableId {
+            lash_kernel_check::CalleeNode::Local(function) => Some(lash_kernel_value::CallableId {
                 link: self.context.reference.link(),
                 function: *function,
             }),

@@ -611,7 +611,7 @@ mod tests {
 
     fn session(id: &str) -> lash_vocabulary::identity::RuntimeOwner {
         lash_vocabulary::identity::RuntimeOwner::Session(
-            lash_vocabulary::identity::SessionId::fixture(id),
+            lash_kernel_value::identity::SessionId::fixture(id),
         )
     }
 

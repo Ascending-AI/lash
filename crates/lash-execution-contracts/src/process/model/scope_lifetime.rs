@@ -22,7 +22,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::EffectOpener;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 pub use lash_core_store::scope_identity::{
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeId, ScopeStorageError,

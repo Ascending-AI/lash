@@ -211,7 +211,7 @@ mod intent_shape_laws {
     fn realized_start_cannot_decode_without_its_handle() {
         let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
             &lash_vocabulary::identity::RuntimeOwner::Session(
-                lash_vocabulary::identity::SessionId::from("session"),
+                lash_kernel_value::identity::SessionId::from("session"),
             ),
             "turn",
             &crate::ToolCallId::fixture("call"),

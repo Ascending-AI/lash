@@ -9,9 +9,9 @@ use lash_core::SessionProcessEventKind;
 use lash_core::facade_support::{ProcessEventSink, RuntimeHandle};
 use lash_execution_contracts::process::ProcessEvent;
 use lash_execution_contracts::process::ProcessRegistry;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 /// One open handle's route: the revision its observation stands at, or
 /// `None` once the handle is gone.

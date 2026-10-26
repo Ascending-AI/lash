@@ -286,7 +286,7 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
                 lash::tools::ToolDefinition::any_output(),
             )
             .unwrap()
-            .declared_contract(lash_vocabulary::operations::ContractId::new("canvas/1"))
+            .declared_contract(lash_kernel_value::operations::ContractId::new("canvas/1"))
             .with_execution(std::time::Duration::from_secs(120)),
         ],
         super::Echo,

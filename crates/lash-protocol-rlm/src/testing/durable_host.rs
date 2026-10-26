@@ -302,7 +302,7 @@ impl DurableHost {
 }
 
 async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
-    let release = lash_vm_releases::helper_release().expect("the fixture's helper release");
+    let release = lash_kernel_releases::helper_release().expect("the fixture's helper release");
     let mut capabilities = lash_vocabulary::claims::NodeCapabilities::default();
     capabilities.machine.kernels.extend(
         release

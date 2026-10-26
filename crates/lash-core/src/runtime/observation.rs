@@ -1,5 +1,5 @@
 use crate::ActorContext;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 mod process_lifecycle;
 mod process_replay;

@@ -25,8 +25,8 @@ use lash_core_store::store::RuntimeStore;
 use lash_core_store::store::StoreError;
 use lash_core_store::store::plugin_writers::PluginWriterRegistration;
 use lash_execution_contracts::process::ProcessEnvStore as _;
-use lash_vocabulary::identity::SessionId;
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::providers::FormatVersion;
 use rusqlite::Connection;
 
 use crate::{SqliteLocation, SqliteStoreSet};
@@ -116,7 +116,7 @@ fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>
 
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
-        session_id: lash_vocabulary::identity::SessionId::fixture(session_id),
+        session_id: lash_kernel_value::identity::SessionId::fixture(session_id),
         ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
             lash_protocol_types::session_model::TurnBudget::Unbounded,
             lash_protocol_types::session_model::MaxToolCalls::new(1024),

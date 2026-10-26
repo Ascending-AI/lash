@@ -57,7 +57,7 @@ impl Traced {
     async fn session(&self, id: &str) -> Result<lash::LashSession> {
         created_session(
             &self.core,
-            lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+            lash_kernel_value::identity::SessionId::parse(id).expect("nonblank host identity"),
         )
         .await
         .open()
@@ -1176,7 +1176,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() -> Res
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("extended-without-sink")
+        lash_kernel_value::identity::SessionId::parse("extended-without-sink")
             .expect("nonblank host identity"),
     )
     .await
@@ -1451,7 +1451,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let session = node_b
         .core
         .session(
-            lash_vocabulary::identity::SessionId::parse(TREE_SESSION)
+            lash_kernel_value::identity::SessionId::parse(TREE_SESSION)
                 .expect("nonblank host identity"),
         )
         .open()

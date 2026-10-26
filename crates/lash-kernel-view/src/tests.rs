@@ -60,7 +60,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
     use lash_kernel_doc::{Document, NumberPolicy, parse_definition_with_locals};
 
     use lash_kernel_package::{LinkedStart, StartSelector};
-    use lash_vocabulary::sites::Unit;
+    use lash_kernel_value::sites::Unit;
     let (root, locals) = parse_definition_with_locals("function app.make(value: Any) -> Any\nkernel 1\nmetering statements\nbody { let f = fn() { return value } return f }").unwrap();
     let anonymous = locals[0].identity();
     let root_id = root.identity();
@@ -69,7 +69,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
     document
         .functions
         .extend(locals.into_iter().map(|f| (f.identity(), f)));
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills: Default::default(),
     };
@@ -116,9 +116,9 @@ fn helper_view_reads_walk_admission_edges_once_per_link() {
         BuildHelpers, Document, FunctionRegistry, NumberPolicy, parse_definition,
     };
     use lash_kernel_package::{LinkedContent, LinkedStart, StartSelector};
-    use lash_vocabulary::{CallableId, Link};
     use std::collections::BTreeMap;
     use std::sync::Arc;
+    use {lash_kernel_value::CallableId, lash_kernel_value::Link};
 
     let mut registry = FunctionRegistry::declarations();
     let mut previous = None;

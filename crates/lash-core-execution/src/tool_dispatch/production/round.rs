@@ -48,7 +48,7 @@ pub(super) struct ParkedCall {
     declaration: lash_vocabulary::tool_declaration::ToolDeclaration,
     /// The output schema of the contract the call was prepared under, which
     /// its resolution's success value settles against.
-    output_schema: lash_vocabulary::json_schema::JsonSchema,
+    output_schema: lash_kernel_value::json_schema::JsonSchema,
 }
 
 impl ParkedCall {

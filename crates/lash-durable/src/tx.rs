@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget, GraphRefusal, GraphStaging, NodeId,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use crate::domain::RootOwner;

@@ -13,7 +13,7 @@
 use super::*;
 use crate::TurnInput;
 use crate::TurnOutcome;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// The stores a law's deployment runs over, and what must outlive them.
 async fn stores(

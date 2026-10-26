@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use lash_core_ids::clock::{Clock, SystemClock};
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 

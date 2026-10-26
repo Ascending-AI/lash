@@ -1,5 +1,5 @@
 use crate::plugin::PluginSessionRequest;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 use lash_protocol_types::sync::MutexExt;
 use std::sync::{Arc, Mutex};
@@ -141,7 +141,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     impl crate::plugin::SessionReadService for Sessions {
         async fn committed_turn(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
             _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<crate::transcript::CommittedTurnWithCalls>,
@@ -167,7 +167,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         }
         async fn snapshot_session(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
         ) -> Result<lash_core::SessionSnapshot, lash_execution_contracts::plugin_error::PluginError>
         {
             Err(
@@ -178,7 +178,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         }
         async fn tool_catalog(
             &self,
-            _session_id: &lash_vocabulary::identity::SessionId,
+            _session_id: &lash_kernel_value::identity::SessionId,
         ) -> Result<Vec<serde_json::Value>, lash_execution_contracts::plugin_error::PluginError>
         {
             Err(
@@ -223,7 +223,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                 id: crate::plugin::PluginTransitionId(
                     crate::EffectAddress::new(
                         crate::ExecutionScope::turn(
-                            lash_vocabulary::identity::SessionId::fixture(id),
+                            lash_kernel_value::identity::SessionId::fixture(id),
                             "run",
                         ),
                         "plugin-transition",
@@ -231,7 +231,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                     .unwrap(),
                 ),
                 owner: lash_vocabulary::identity::RuntimeOwner::Session(
-                    lash_vocabulary::identity::SessionId::fixture(id),
+                    lash_kernel_value::identity::SessionId::fixture(id),
                 ),
                 base: crate::plugin::PluginTransitionBase::Session {
                     head: crate::store::SessionHeadRef {

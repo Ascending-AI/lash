@@ -1,8 +1,8 @@
 //! Store-factory decorator that observes real runtime-checkpoint commits, so a
 //! harness can render durable-write lines from facts the backend accepted.
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

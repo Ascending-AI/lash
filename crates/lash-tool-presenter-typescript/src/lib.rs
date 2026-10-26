@@ -12,16 +12,16 @@ mod types;
 pub use definitions::{PreparedDefinitions, TypescriptDefinitions, emit_definition};
 pub use notes::note_rows;
 
+use lash_kernel_value::json_schema::JsonSchema;
+use lash_kernel_value::tool_shape::SchemaDocument;
+use lash_kernel_value::tool_shape::SchemaShape;
+use lash_kernel_value::tool_shape::ShapeImportRefusal;
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, import_admitted_schema, listing,
 };
-use lash_vocabulary::json_schema::JsonSchema;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolManifest;
-use lash_vocabulary::tool_shape::SchemaDocument;
-use lash_vocabulary::tool_shape::SchemaShape;
-use lash_vocabulary::tool_shape::ShapeImportRefusal;
 use serde_json::Value;
 
 pub use types::{
@@ -222,7 +222,7 @@ pub fn render_tool_doc(
         ("Return fields", output, &output_definitions.names, "output"),
     ] {
         // A referenced # already owns its root notes in its declaration.
-        if names.contains_key(&lash_vocabulary::tool_shape::DefinitionId(0)) {
+        if names.contains_key(&lash_kernel_value::tool_shape::DefinitionId(0)) {
             continue;
         }
         let rows = note_rows(&document.roots[0], path);
@@ -308,7 +308,7 @@ pub fn tool_signature(
 mod tests;
 
 /// Render an entry's public signature in this dialect.
-pub fn render_entry_signature(signature: &lash_vocabulary::Signature) -> String {
+pub fn render_entry_signature(signature: &lash_kernel_value::Signature) -> String {
     lash_tool_presenter_api::entry::render_entry_signature(
         signature,
         0,
@@ -320,7 +320,7 @@ pub fn render_entry_signature(signature: &lash_vocabulary::Signature) -> String 
 pub use lash_tool_presenter_api::entry::render_signature_required;
 
 /// Render the owning entry mismatch in this dialect.
-pub fn render_entry_type_mismatch(source: &lash_vocabulary::EntryTypeMismatch) -> String {
+pub fn render_entry_type_mismatch(source: &lash_kernel_value::EntryTypeMismatch) -> String {
     lash_tool_presenter_api::entry::render_entry_type_mismatch(
         source,
         lash_tool_presenter_api::entry::TYPESCRIPT_SPELLING,

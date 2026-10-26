@@ -88,9 +88,12 @@ impl ActorContext {
         if terminal || command || !outcomes.is_empty() {
             let scope = self.execution_scope();
             let session = match scope {
-                crate::ExecutionScope::Process { process_id } => Some(
-                    lash_vocabulary::identity::SessionId::prefixed("process:", process_id.as_str()),
-                ),
+                crate::ExecutionScope::Process { process_id } => {
+                    Some(lash_kernel_value::identity::SessionId::prefixed(
+                        "process:",
+                        process_id.as_str(),
+                    ))
+                }
                 scope => scope.session_id().cloned(),
             };
             if let Some(session) = session {

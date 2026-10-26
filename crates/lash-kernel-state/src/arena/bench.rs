@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     Reservation, Retry, Timestamp, Value, WorkCounter,
 };
 
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 use super::Arena;
 

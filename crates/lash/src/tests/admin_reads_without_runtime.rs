@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::TurnInput;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::result::Result;
 
 /// What the durable admin reads answered.

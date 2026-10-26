@@ -2,7 +2,7 @@
 use super::machine::{self, Ended};
 use super::pages::Session;
 use lash_kernel_doc::Datum;
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 /// BRAND-ONE: native and body constructors agree on one canonical brand
 /// and stamp the value with their own identity, including nested URL

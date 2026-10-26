@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     Value,
 };
 
-use lash_vocabulary::Type;
+use lash_kernel_value::Type;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -216,7 +216,7 @@ fn check<'j>(
                 fields
                     .iter()
                     .filter(|(name, _)| {
-                        !matches!(record.rest, lash_vocabulary::RecordRest::Drop)
+                        !matches!(record.rest, lash_kernel_value::RecordRest::Drop)
                             || record.fields.iter().any(|field| field.name == **name)
                     })
                     .map(|(name, value)| {

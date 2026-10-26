@@ -1,6 +1,6 @@
 pub use lash_core_store::queued_work_vocabulary::*;
 #[allow(unused_imports)]
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// An accepted session command waiting for its queue completion to be
 /// committed atomically with the new session head.

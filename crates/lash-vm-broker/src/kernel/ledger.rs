@@ -23,9 +23,9 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::ErrorDatum;
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
 use lash_kernel_vm::WaitId;
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
 
 use crate::snapshot::OperationId;
 
@@ -53,7 +53,7 @@ pub enum Standing {
 pub struct PendingEffect {
     /// The machine's number for the wait, which its outcome is delivered
     /// to.
-    pub wait: lash_vocabulary::sites::WaitId,
+    pub wait: lash_kernel_value::sites::WaitId,
     /// The effect performed; none for a sleep.
     pub effect: Option<OperationUse>,
     pub standing: Standing,
@@ -98,7 +98,7 @@ pub enum LedgerRefusal {
     UnissuedPark { park: u64, parks: u64 },
     #[error("two of the ledger's waits share wait {wait}")]
     SharedWait {
-        wait: lash_vocabulary::sites::WaitId,
+        wait: lash_kernel_value::sites::WaitId,
     },
     #[error("two of the ledger's entries share execution {operation:?}")]
     SharedExecution { operation: OperationId },

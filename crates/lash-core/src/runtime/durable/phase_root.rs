@@ -33,13 +33,13 @@ use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 use lash_sansio::{
     CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
 };
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
 
 use super::run_config::{RecordedRunConfig, RunConfigStored};
 use super::session::PhaseCheckpoint;
@@ -663,7 +663,7 @@ pub struct RecordedPluginPhase {
 /// Read only retained evidence. Absence is not evidence of a pruning history.
 pub async fn read_plugin_phase(
     store: &dyn lash_durable::DurableStore,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<RecordedPluginPhase>, lash_durable::DurableError> {
     let Some(phase) = read_phase(store, session, run).await? else {
@@ -694,7 +694,7 @@ pub async fn read_plugin_phase(
 /// A retired phase has no retained events.
 pub async fn read_protocol_events(
     reads: &dyn lash_durable::DurableReads,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Vec<crate::ProtocolEvent>, lash_durable::DurableError> {
     let Some(phase) = read_phase(reads, session, run).await? else {
@@ -717,7 +717,7 @@ pub async fn read_protocol_events(
 
 async fn read_phase(
     reads: &dyn lash_durable::DurableReads,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<PhaseCheckpoint>, lash_durable::DurableError> {
     lash_core_ids::operational_metrics::sql::owner_state_read(

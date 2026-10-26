@@ -5,15 +5,19 @@ use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::{PageKind, SealBudget};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{key_digest, text_summary};
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::sites::{SpawnIdentity, TaskIdentity};
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter, encode_body};
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
+use {lash_kernel_value::sites::SpawnIdentity, lash_kernel_value::sites::TaskIdentity};
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::encode_body,
+};
 
 fn budget() -> SealWork {
     SealWork::new(SealBudget {

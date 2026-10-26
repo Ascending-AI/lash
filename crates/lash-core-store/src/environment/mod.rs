@@ -10,8 +10,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_vocabulary::claims::{ClaimRequirements, RegistryKind};
-use lash_vocabulary::package::{AcceptedAdvertisement, DeferredGrant, PublicationContext};
 use serde::{Deserialize, Serialize};
+use {
+    lash_kernel_value::package::DeferredGrant, lash_kernel_value::package::PublicationContext,
+    lash_vocabulary::package::AcceptedAdvertisement,
+};
 
 use crate::tool_surface::{AdvertisedRoute, SurfaceEntry};
 
@@ -75,7 +78,7 @@ pub struct SourceSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentFragment {
     pub tools: Vec<SurfaceEntry>,
-    pub model_removals: BTreeSet<lash_vocabulary::names::QualifiedOperation>,
+    pub model_removals: BTreeSet<lash_kernel_value::names::QualifiedOperation>,
     pub deferred_provider: Option<crate::tool_surface::ProviderKey>,
     pub package_roots: Vec<AcceptedAdvertisement>,
     pub routes: Vec<AdvertisedRoute>,
@@ -153,7 +156,7 @@ impl EnvironmentBody {
         &self,
     ) -> Result<crate::tool_surface::RecordedSurface, Box<crate::tool_surface::SurfaceRefusal>>
     {
-        let mut removed = BTreeSet::<lash_vocabulary::names::QualifiedOperation>::new();
+        let mut removed = BTreeSet::<lash_kernel_value::names::QualifiedOperation>::new();
         let mut deferred = None;
         let mut tools = Vec::new();
         let mut packages = crate::tool_surface::RecordedPackages::default();

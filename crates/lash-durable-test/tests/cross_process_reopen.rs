@@ -331,7 +331,7 @@ impl lash_durable::DurableProbe for ParkProbe {
     }
     fn checkpoint_restored(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) {
         self.tripwire.checkpoint_restored(session, run);
@@ -374,13 +374,13 @@ async fn charge(core: &lash::LashCore, process: &ProcessId, path: &Path) -> Opti
         .unwrap()
         .map(Result::unwrap)
         .collect();
-    let checkpoint: lash_kernel_state::paged::CheckpointRoot = GraphDecoder::new(&nodes, limits)
+    let checkpoint: lash_kernel_state::paged::Checkpoint = GraphDecoder::new(&nodes, limits)
         .decode(root, NodeKind::CHECKPOINT_ROOT)
         .unwrap();
     Some((
         root.to_hex(),
         checkpoint
-            .meters
+            .header()
             .charged
             .expect("the corpus runs with exact charges"),
     ))

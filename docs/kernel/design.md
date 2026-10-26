@@ -233,6 +233,7 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 
 | Crate | Owns | Used by |
 | --- | --- | --- |
+| `lash-kernel-value` | Neutral values, types, names, content identities, link records, schemas and token encoding shared by the kernel set; host providers, claims and tool catalogues stay in lash | Kernel crates and host code that exchanges their values |
 | `lash-kernel-doc` | Values, types, forms, the document, function definitions and the native-function interface, the manifest, source maps and correspondences, serialisation, structural validation, the kernel text notation | Everything; a host that only reads documents needs nothing else |
 | `lash-kernel-check` | Linking, typing, derived facts, admission against an environment's effect and function signatures, the checked document holder (document, graph, entry and linked declarations) | Viewers, editors, the engine |
 | `lash-kernel-view` | The canvas read of a checked document's entry and its host schema; no dialect, editor or runtime | Viewers, editors |
@@ -241,9 +242,12 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 | `lash-kernel-vm` | Compile to the executable, run tasks, charge, park, resume. The embedder assembles the function registry, prepares it once and hands it in | lash, other embedders |
 | `lash-kernel-state` | The persistent heap: pages, the object directory, the checkpoint and session roots and their records, the memory census and frozen families | The machine; a host that reads a run as data |
 | `lash-kernel-dialect` | The front end and printer interfaces, diagnostics, bounded final-text writing and optional spans | Dialect packages |
+| `lash-kernel-labels` | Human-readable labels for the fixed helper declarations | Package admission and viewers |
+| `lash-kernel-services` | Shared operation declarations for the shipped dialect services | Dialects and the helper release |
+| `lash-kernel-releases` | The build's helper release and its exact helper identities | Standalone embedders and lash workers |
 | `lash-kernel-conformance` | The corpus and the harness that runs it against a reader, a front end or a function | Everyone's tests |
 
-Dialect packages sit beside them: `lash-dialect-typescript`, `lash-ext-regex-ecma`, `lash-ext-url-whatwg`.
+Dialect packages sit beside them: `lash-dialect-typescript` and `lash-dialect-python`. The extension crates include `lash-ext-regex-ecma`, `lash-ext-url-whatwg`, and `lash-ext-ts-helpers` / `lash-ext-py-helpers`, which own helper definitions separately from source-language lowering. The helper release can therefore build those definitions without linking a dialect.
 
 **Rules.**
 1. **One direction.** `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates depend only on each other and on third-party crates. A forked engine an extension is built on is in the set under its own name: `lash-regress`, the matcher under `lash-ext-regex-ecma`. A CI check enforces it.

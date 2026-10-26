@@ -567,7 +567,7 @@ fn final_value_of_turn(
 /// the child to repair it.
 fn checked_final_value(
     value: serde_json::Value,
-    schema: Option<&lash_vocabulary::schema_contract::JsonSchema>,
+    schema: Option<&lash_kernel_value::JsonSchema>,
 ) -> Result<serde_json::Value, Box<lash_protocol_types::tool_output::ToolFailure>> {
     let Some(schema) = schema else {
         return Ok(value);

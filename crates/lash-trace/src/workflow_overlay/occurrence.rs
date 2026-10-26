@@ -244,7 +244,7 @@ pub(super) enum Placement {
     Execution(WorkflowOverlayExecutionTransition),
     Occurrence {
         site: WorkflowTaskSite,
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         transition: Transition,
     },
 }
@@ -291,7 +291,7 @@ impl Placement {
 impl Observation {
     /// The occurrence the observation is about, loops and all; `None` for a
     /// fact about the whole execution.
-    fn at(&self) -> Option<&lash_vocabulary::sites::EffectId> {
+    fn at(&self) -> Option<&lash_kernel_value::sites::EffectId> {
         match &self.fact {
             WorkflowOverlayFact::StepBodyStarted { step } => Some(&step.at),
             WorkflowOverlayFact::Language { payload, .. } => payload.at(),
@@ -451,7 +451,7 @@ impl OccurrenceHistory {
 
 #[derive(Default)]
 struct OccurrenceFold<'a> {
-    origin: Option<&'a lash_vocabulary::sites::Site>,
+    origin: Option<&'a lash_kernel_value::sites::Site>,
     /// Whether anything but a child link was observed: a child link is a
     /// fact about the site, not a transition of one of its occurrences.
     counted: bool,
@@ -506,7 +506,7 @@ impl<'a> OccurrenceFold<'a> {
 
     fn state(
         &self,
-        occurrence: lash_vocabulary::sites::VisitId,
+        occurrence: lash_kernel_value::sites::VisitId,
         cancelled_at: Option<DateTime<Utc>>,
     ) -> WorkflowOverlayOccurrence {
         let start = self.start;
@@ -577,7 +577,9 @@ impl WorkflowOverlaySiteState {
     /// process's committed cancellation ended what was still in flight.
     pub(super) fn fold<'a>(
         &mut self,
-        occurrences: impl IntoIterator<Item = (lash_vocabulary::sites::VisitId, &'a OccurrenceHistory)>,
+        occurrences: impl IntoIterator<
+            Item = (lash_kernel_value::sites::VisitId, &'a OccurrenceHistory),
+        >,
         cancelled_at: Option<DateTime<Utc>>,
         children: &mut SiteChildren,
     ) {

@@ -24,8 +24,8 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, CommitId, DecodeLimits, EncodedNode, NodeId, NodeSource, RootSource, StoredNode,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::ToolCallId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use super::DomainWrite;
@@ -78,7 +78,7 @@ impl LockStep {
 }
 
 /// A canonical binary `EffectId`: the token encoding of
-/// [`lash_vocabulary::sites::EffectId`], the `effect_admissions` key.
+/// [`lash_kernel_value::sites::EffectId`], the `effect_admissions` key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectKey(pub Arc<[u8]>);
 

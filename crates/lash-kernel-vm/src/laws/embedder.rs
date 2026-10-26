@@ -14,9 +14,9 @@ use lash_kernel_doc::{
 };
 
 use lash_kernel_state::paged::*;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -351,7 +351,7 @@ fn shared_library(native_twice: bool, probes: Option<Probes>) -> Library {
 pub(crate) struct World {
     pub(crate) printed: Vec<Datum>,
     /// Each read-bound `perform`, with its arguments and its origin.
-    pub(crate) performed: Vec<(lash_vocabulary::OperationUse, Vec<Datum>, Site)>,
+    pub(crate) performed: Vec<(lash_kernel_value::OperationUse, Vec<Datum>, Site)>,
     pub(crate) cancel: bool,
 }
 
@@ -359,9 +359,9 @@ impl Host for World {
     /// Answers a read-bound `perform` from the effects' table.
     fn perform(
         &mut self,
-        effect: &lash_vocabulary::OperationUse,
+        effect: &lash_kernel_value::OperationUse,
         args: &[Datum],
-        _site: &lash_vocabulary::sites::PositionLabel,
+        _site: &lash_kernel_value::sites::PositionLabel,
         origin: &Site,
     ) -> Result<Result<Datum, ErrorDatum>, crate::HostFault> {
         self.performed
@@ -507,7 +507,7 @@ impl Embedder {
         if setup.cleanup {
             let lash_kernel_doc::Export::Function(export) = document
                 .exports
-                .get_mut(&lash_vocabulary::Name::new("run"))
+                .get_mut(&lash_kernel_value::Name::new("run"))
                 .unwrap()
             else {
                 panic!("cleanup fixture exports run")
@@ -536,7 +536,7 @@ impl Embedder {
             {
                 start.args.insert(
                     0,
-                    Datum::Function(lash_vocabulary::CallableId {
+                    Datum::Function(lash_kernel_value::CallableId {
                         link: program.link,
                         function: export.function,
                     }),
@@ -550,11 +550,11 @@ impl Embedder {
                 .keys()
                 .map(|slot| {
                     (
-                        lash_vocabulary::OperationUse {
+                        lash_kernel_value::OperationUse {
                             link: program.link,
                             slot: *slot,
                         },
-                        lash_vocabulary::package::OperationMode::Read,
+                        lash_kernel_value::package::OperationMode::Read,
                     )
                 })
                 .collect();
@@ -672,8 +672,8 @@ impl Embedder {
             })?
             .unwrap();
         let certificate = self.machine.accounting();
-        let root: CheckpointRoot = lash_vocabulary::tokens::decode_body(
-            &lash_vocabulary::tokens::encode_body(&sealed.root),
+        let root: CheckpointRoot = lash_kernel_value::tokens::decode_body(
+            &lash_kernel_value::tokens::encode_body(&sealed.root),
         )
         .unwrap();
         Ok((root, certificate))
@@ -837,7 +837,7 @@ pub(crate) fn start_machine(
     )
 }
 
-fn operation_name(slot: lash_vocabulary::ImportSlot) -> &'static str {
+fn operation_name(slot: lash_kernel_value::ImportSlot) -> &'static str {
     match slot.0 {
         0 => "echo",
         1 => "boom",
@@ -848,9 +848,10 @@ fn operation_name(slot: lash_vocabulary::ImportSlot) -> &'static str {
 }
 /// Prepare a final Document and its Operation Uses as one linked instance.
 pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Program {
-    use lash_vocabulary::{
-        ContractId, ImportKind, OperationRequirement,
-        package::{Fill, Link},
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::ImportKind,
+        lash_kernel_value::OperationRequirement, lash_kernel_value::package::Fill,
+        lash_kernel_value::package::Link,
     };
     let fills = document
         .imports

@@ -15,14 +15,14 @@ fn namespaces(
     let mut packages: BTreeMap<PackagePath, BTreeMap<Segment, lash::dialect::NamespaceMember>> =
         BTreeMap::new();
     for (name, signature) in effects {
-        let operation = lash_vocabulary::operation_text::parse(name.as_str()).unwrap();
+        let operation = lash_kernel_value::operation_text::parse(name.as_str()).unwrap();
         packages.entry(operation.package).or_default().insert(
             operation.name,
             lash::dialect::NamespaceMember {
                 visibility: Visibility::Public,
                 kind: lash::dialect::NamespaceKind::Operation(
                     OperationOffer {
-                        requirement: lash_vocabulary::OperationRequirement::new(
+                        requirement: lash_kernel_value::OperationRequirement::new(
                             signature,
                             k::ContractId::new("1"),
                         ),
@@ -53,7 +53,7 @@ fn holder(
         .iter()
         .map(|(slot, import)| {
             let fill = match &import.kind {
-                lash_vocabulary::ImportKind::Operation { signature } => {
+                lash_kernel_value::ImportKind::Operation { signature } => {
                     let offered = content
                         .packages
                         .values()
@@ -64,7 +64,7 @@ fn holder(
                             _ => None,
                         });
                     Fill::Operation(offered.unwrap_or_else(|| {
-                        lash_vocabulary::OperationRequirement::new(
+                        lash_kernel_value::OperationRequirement::new(
                             signature.clone(),
                             k::ContractId::new("1"),
                         )

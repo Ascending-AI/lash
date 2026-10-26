@@ -17,9 +17,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::StoreError;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The `admitted_by` value of the rows a run's own admission step binds

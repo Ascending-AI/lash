@@ -20,14 +20,14 @@ doctest = false
 # The dialects whose helper releases the build defines and this parent
 # holds, each off by default: a host names the dialects its sessions and
 # processes are written in (FIG-5990).
-dialect-typescript = ["lash-vm-releases/dialect-typescript"]
-dialect-python = ["lash-vm-releases/dialect-python"]
+dialect-typescript = ["lash-kernel-releases/dialect-typescript"]
+dialect-python = ["lash-kernel-releases/dialect-python"]
 testing = ["lash-vm-client/testing", "lash-core/testing"]
 # The client this crate drives and the library its workers hold move
 # versions together.
 synthetic-next = [
     "lash-vm-client/synthetic-next",
-    "lash-vm-releases/synthetic-next",
+    "lash-kernel-releases/synthetic-next",
     "lash-kernel-doc/synthetic-next",
     "lash-kernel-package/synthetic-next",
     "lash-kernel-migrate/synthetic-next",
@@ -39,7 +39,8 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
-lash-dialect-services = { workspace = true }
+lash-kernel-services = { workspace = true }
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 fastrand = { workspace = true }
 lash-execution-contracts = { workspace = true }
@@ -59,7 +60,7 @@ lash-kernel-package = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
-lash-vm-releases = { workspace = true }
+lash-kernel-releases = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-trace = { workspace = true }
@@ -75,5 +76,5 @@ lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-ids = { workspace = true, features = ["testing"] }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 # The laws' runs pin a dialect's release, so their build holds one.
-lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

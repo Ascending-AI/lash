@@ -1,13 +1,13 @@
 //! Load retained linked reach without fulfilling against current advertisements.
 use lash_kernel_doc::FunctionRegistry;
 
-use lash_vocabulary::names::LinkedStart;
+use lash_kernel_value::names::LinkedStart;
 use std::sync::Arc;
 
 pub(super) struct PreparedExecution {
     pub content: lash_kernel_package::LinkedContent,
     pub documents: std::collections::BTreeMap<
-        lash_vocabulary::DocumentId,
+        lash_kernel_value::DocumentId,
         lash_kernel_doc::IdentifiedDocument,
     >,
     pub loaded: lash_vm_broker::kernel::loader::Assembled,
@@ -16,7 +16,7 @@ pub(super) struct PreparedExecution {
 pub(super) struct LoadedCode {
     pub content: lash_kernel_package::LinkedContent,
     pub documents: std::collections::BTreeMap<
-        lash_vocabulary::DocumentId,
+        lash_kernel_value::DocumentId,
         lash_kernel_doc::IdentifiedDocument,
     >,
 }
@@ -24,7 +24,7 @@ pub(super) struct LoadedCode {
 pub(super) async fn load(
     documents: &lash_vm_runtime::KernelDocuments,
     start: &LinkedStart,
-    authored: &std::collections::BTreeSet<lash_vocabulary::LinkId>,
+    authored: &std::collections::BTreeSet<lash_kernel_value::LinkId>,
 ) -> Result<LoadedCode, String> {
     let (mut content, mut identified) = documents
         .load_linked_identified(start.link)
@@ -50,7 +50,7 @@ pub(super) fn prepare(
     loaded: LoadedCode,
     start: &LinkedStart,
     held: &Arc<FunctionRegistry>,
-    authored: &std::collections::BTreeSet<lash_vocabulary::LinkId>,
+    authored: &std::collections::BTreeSet<lash_kernel_value::LinkId>,
     documents: &lash_vm_runtime::KernelDocuments,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<PreparedExecution, String> {
@@ -232,13 +232,13 @@ mod work_laws {
             .unwrap();
         let request = |document| FulfilRequest {
             document,
-            selector: ReachSelector::Start(lash_vocabulary::StartSelector::Main),
+            selector: ReachSelector::Start(lash_kernel_value::StartSelector::Main),
             snapshot: Default::default(),
-            context: lash_vocabulary::PublicationContext {
-                domain: lash_vocabulary::PublicationDomain("custom-image-law".into()),
-                scope: lash_vocabulary::PublicationScope::Host,
-                publisher: lash_vocabulary::PublisherInstance("custom-image-law".into()),
-                root: lash_vocabulary::Segment::new("custom").unwrap(),
+            context: lash_kernel_value::PublicationContext {
+                domain: lash_kernel_value::PublicationDomain("custom-image-law".into()),
+                scope: lash_kernel_value::PublicationScope::Host,
+                publisher: lash_kernel_value::PublisherInstance("custom-image-law".into()),
+                root: lash_kernel_value::Segment::new("custom").unwrap(),
             },
             purpose: LinkPurpose::Cell,
         };
@@ -250,7 +250,7 @@ mod work_laws {
                 .kernels
                 .contains(&lash_kernel_doc::KERNEL_VERSION)
         );
-        let shipped = *lash_vm_releases::helper_release()
+        let shipped = *lash_kernel_releases::helper_release()
             .unwrap()
             .helpers
             .members()
@@ -302,7 +302,7 @@ mod work_laws {
                     .helpers(),
             ),
         );
-        let release = lash_vm_releases::helper_release().unwrap();
+        let release = lash_kernel_releases::helper_release().unwrap();
         let definition = lash_kernel_doc::parse_definition(
             "function test.run() -> Null\nkernel 1\ncharge 1\nbody { return null }",
         )
@@ -311,7 +311,7 @@ mod work_laws {
             lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return null }")
                 .unwrap();
         document.exports.insert(
-            lash_vocabulary::Name::new("run"),
+            lash_kernel_value::Name::new("run"),
             lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
                 function: definition.identity(),
                 signature: definition.signature.clone(),
@@ -328,7 +328,7 @@ mod work_laws {
             .admit_document(&claim, &document.clone().into())
             .await
             .unwrap();
-        let link = lash_vocabulary::Link {
+        let link = lash_kernel_value::Link {
             document: document.identity(),
             fills: Default::default(),
         };
@@ -349,7 +349,7 @@ mod work_laws {
             .unwrap();
         let start = LinkedStart {
             link: link.identity(),
-            selector: lash_vocabulary::StartSelector::Export(lash_vocabulary::Name::new("run")),
+            selector: lash_kernel_value::StartSelector::Export(lash_kernel_value::Name::new("run")),
         };
         let held = Arc::new(release.functions.clone());
         for _ in 0..2 {

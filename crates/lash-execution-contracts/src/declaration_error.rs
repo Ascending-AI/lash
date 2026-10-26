@@ -1,4 +1,4 @@
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 
 /// Why a factory's [`PluginDeclaration`] is refused.
 #[derive(

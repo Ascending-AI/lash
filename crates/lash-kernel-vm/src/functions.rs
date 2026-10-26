@@ -15,12 +15,12 @@ use lash_kernel_doc::{
     NativeError, NativeFunction, Operand, RegistryError, Value,
 };
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Param;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Param;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MachineFunction {

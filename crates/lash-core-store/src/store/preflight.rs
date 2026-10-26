@@ -27,8 +27,8 @@
 //! the format manifest rather than duplicated per backend.
 
 use async_trait::async_trait;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 use super::error::StoreError;
 

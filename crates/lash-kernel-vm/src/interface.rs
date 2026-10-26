@@ -39,23 +39,25 @@
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.
 
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::sites::TaskLabel;
-use lash_vocabulary::{
-    content_ids::LinkId,
-    names::{CallableId, DocumentId, ErrorKind, ExportName, FunctionId, ImportSlot, OperationUse},
-    package::OperationMode,
-};
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::sites::TaskLabel;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use {
+    lash_kernel_value::content_ids::LinkId, lash_kernel_value::names::CallableId,
+    lash_kernel_value::names::DocumentId, lash_kernel_value::names::ErrorKind,
+    lash_kernel_value::names::ExportName, lash_kernel_value::names::FunctionId,
+    lash_kernel_value::names::ImportSlot, lash_kernel_value::names::OperationUse,
+    lash_kernel_value::package::OperationMode,
+};
 
 use crate::PreparedLibrary;
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Invalid};
 
 pub use lash_kernel_state::paged::{Charge, MemoryMeter};
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::types::Type;
 
 /// What a machine runs: an admitted document and the library functions the
 /// embedder registered, prepared once for every program that uses them.
@@ -91,7 +93,7 @@ impl Program {
     pub fn prepare_identified(
         link: LinkId,
         documents: BTreeMap<DocumentId, lash_kernel_doc::IdentifiedDocument>,
-        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
         selection: lash_kernel_doc::Selection,
@@ -116,9 +118,9 @@ impl Program {
     /// and executes them. This builds no executable or library tables.
     pub fn prepare_instances(
         documents: &BTreeMap<DocumentId, Arc<Document>>,
-        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
     ) -> Result<BTreeMap<LinkId, PreparedInstance>, StartError> {
-        use lash_vocabulary::{names::ImportKind, package::Fill};
+        use {lash_kernel_value::names::ImportKind, lash_kernel_value::package::Fill};
         let invalid = |problem: &str| StartError::Linked {
             problem: problem.into(),
         };
@@ -222,7 +224,7 @@ impl Program {
     pub fn prepare(
         link: LinkId,
         documents: BTreeMap<DocumentId, Arc<Document>>,
-        links: &BTreeMap<LinkId, lash_vocabulary::package::Link>,
+        links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
         selection: lash_kernel_doc::Selection,
@@ -357,11 +359,11 @@ impl Program {
                 let import = &document.imports[slot];
                 match (&import.kind, prepared) {
                     (
-                        lash_vocabulary::names::ImportKind::Operation { .. },
+                        lash_kernel_value::names::ImportKind::Operation { .. },
                         PreparedSlot::Operation(use_),
                     ) if use_.link == *link && use_.slot == *slot => {}
                     (
-                        lash_vocabulary::names::ImportKind::Code { .. },
+                        lash_kernel_value::names::ImportKind::Code { .. },
                         PreparedSlot::Function { callable, export },
                     ) => {
                         let target = self
@@ -389,12 +391,12 @@ impl Program {
                         if descriptor.function != callable.function {
                             return Err(invalid("code target differs from its Export"));
                         }
-                        if let lash_vocabulary::ImportKind::Code {
+                        if let lash_kernel_value::ImportKind::Code {
                             signature,
                             convention,
                         } = &import.kind
                             && (descriptor.convention.semantic() != *convention
-                                || lash_vocabulary::type_relations::serves(
+                                || lash_kernel_value::type_relations::serves(
                                     &descriptor.signature,
                                     signature,
                                 )
@@ -404,11 +406,11 @@ impl Program {
                         }
                     }
                     (
-                        lash_vocabulary::names::ImportKind::Type { .. },
+                        lash_kernel_value::names::ImportKind::Type { .. },
                         PreparedSlot::Type { link, .. },
                     ) if self.instances.contains_key(link) => {}
                     (
-                        lash_vocabulary::names::ImportKind::Error { kind },
+                        lash_kernel_value::names::ImportKind::Error { kind },
                         PreparedSlot::Error(found),
                     ) if kind == found => {}
                     _ => return Err(invalid("prepared slot does not match its Import kind")),
@@ -612,8 +614,8 @@ pub trait Host {
         &mut self,
         use_: &OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         let _ = (args, site, origin);
         Err(HostFault::new(format!(
@@ -627,7 +629,7 @@ pub trait Host {
     }
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
-    fn enter_site(&mut self, _at: &lash_vocabulary::sites::EffectLocation) {}
+    fn enter_site(&mut self, _at: &lash_kernel_value::sites::EffectLocation) {}
     /// The passive semantic observer, when the host accepts live deltas.
     /// Reading this port never consumes counts unless an observer is present.
     fn observer(&mut self) -> Option<&mut dyn RunObserver> {
@@ -661,7 +663,7 @@ pub struct EffectRequest {
     /// (ORIGIN): its own statement in document code, the document
     /// statement that entered a library body. Derived when the request is
     /// reported, and no part of its identity.
-    pub origin: lash_vocabulary::sites::Site,
+    pub origin: lash_kernel_value::sites::Site,
 }
 
 /// How a wait ended.
@@ -755,7 +757,7 @@ pub enum RunError {
         /// it unwinds into, and one a `finally` held names its `try`
         /// statement. `None` when a run-root cleanup held it, or no
         /// document statement was left to name it.
-        site: Option<lash_vocabulary::sites::Site>,
+        site: Option<lash_kernel_value::sites::Site>,
     },
     /// The run reached its end with tasks that were unfinished, or that
     /// ended in an error no `join` observed.
@@ -766,7 +768,7 @@ pub enum RunError {
         /// The outermost document body still running in each unfinished task.
         /// Derived from semantic frames, separate from the actual spawn identity.
         /// An embedder resolves these sites through its validated source map.
-        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_kernel_value::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the embedder can
     /// answer.
@@ -790,7 +792,7 @@ fn uncaught_text(error: &Datum) -> String {
 #[non_exhaustive]
 pub enum StartError {
     #[error(transparent)]
-    TypeMismatch(Box<lash_vocabulary::EntryTypeMismatch>),
+    TypeMismatch(Box<lash_kernel_value::EntryTypeMismatch>),
     #[error(transparent)]
     Decode(lash_kernel_doc::DecodeRefusal),
     #[error(transparent)]
@@ -860,6 +862,6 @@ pub struct PreparedInstance {
 /// Source-owned coordinates used only when callables cross a boundary.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionOrigins {
-    pub sites: BTreeMap<(LinkId, lash_vocabulary::sites::Site), lash_kernel_dialect::Written>,
+    pub sites: BTreeMap<(LinkId, lash_kernel_value::sites::Site), lash_kernel_dialect::Written>,
     pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
 }

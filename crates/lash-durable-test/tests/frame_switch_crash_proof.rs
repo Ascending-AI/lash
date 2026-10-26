@@ -53,8 +53,8 @@ use lash_durable_test::{
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;
@@ -113,7 +113,7 @@ fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
         TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

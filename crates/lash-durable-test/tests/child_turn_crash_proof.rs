@@ -50,9 +50,9 @@ use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::SessionTurnOutcome;
 use lash_execution_contracts::session_types::SessionCreateRequest;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 const CHILD: &str = "child-turn-session";
 const MODEL: &str = "child-turn-model";

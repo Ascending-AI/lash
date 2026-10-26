@@ -8,7 +8,7 @@ use lash_core_store::environment::{
     SourceRevision, SourceSnapshot,
 };
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::package::{PublicationDomain, PublicationScope};
+use {lash_kernel_value::package::PublicationDomain, lash_kernel_value::package::PublicationScope};
 
 use super::{OwnerConfigView, PluginError, ToolProviderHandle};
 
@@ -605,7 +605,7 @@ impl EnvironmentSource for ProviderSource {
                 || candidate.route.policy != manifest.execution_policy
                 || candidate.route.projection != manifest.argument_projection
                 || !self.registry.serves(&candidate.route.provider)
-                || candidate.route.policy == lash_vocabulary::ExecutionPolicy::Read
+                || candidate.route.policy == lash_kernel_value::ExecutionPolicy::Read
                     && self.registry.reads(&candidate.route.provider).is_none()
             {
                 return Err(SourceCollectionError::InvalidRoute {
@@ -767,13 +767,13 @@ impl super::PluginSession {
         let mut host = EnvironmentFragment {
             package_roots: packages.snapshot.advertisements.clone(),
             routes: packages.routes.clone(),
-            consumer: Some(lash_vocabulary::package::PublicationContext {
+            consumer: Some(lash_kernel_value::package::PublicationContext {
                 domain: self.host.package_namespace.domain.clone(),
                 scope: PublicationScope::Session(session.clone()),
-                publisher: lash_vocabulary::package::PublisherInstance(format!(
+                publisher: lash_kernel_value::package::PublisherInstance(format!(
                     "session:{session}"
                 )),
-                root: lash_vocabulary::names::Segment::new("session")
+                root: lash_kernel_value::names::Segment::new("session")
                     .unwrap_or_else(|_| unreachable!("static root")),
             }),
             ..Default::default()

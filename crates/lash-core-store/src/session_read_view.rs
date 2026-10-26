@@ -4,7 +4,7 @@ use crate::RuntimeSessionState;
 use crate::SessionPolicy;
 use crate::SessionSnapshot;
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -172,7 +172,7 @@ impl SessionReadView {
         }
     }
 
-    pub fn session_id(&self) -> &lash_vocabulary::identity::SessionId {
+    pub fn session_id(&self) -> &lash_kernel_value::identity::SessionId {
         &self.0.meta.session_id
     }
 
@@ -412,7 +412,7 @@ pub enum SessionReadGraph {
     reason = "the initial frame material is a non-empty literal"
 )]
 pub(crate) fn initial_frame_node_id(
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
 ) -> crate::FrameNodeId {
     let frame_key = crate::FrameKey::from_caller_material("initial-frame")
         .expect("the initial frame material is non-empty");

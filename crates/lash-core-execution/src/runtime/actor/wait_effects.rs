@@ -59,7 +59,7 @@ impl ActorContext {
     /// The store's refusal; this context must own the session's actor.
     pub async fn revoke_await_events_for_session(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> Result<(), crate::RuntimeError> {
         let actor = lash_durable::ActorKey::session(session_id.as_str()).map_err(|error| {
             crate::RuntimeError::new(RuntimeErrorCode::EngineAwaitEventRevoke, error.to_string())
@@ -83,7 +83,7 @@ impl ActorContext {
     /// The store's refusal; this context must own the session's actor.
     pub async fn cancel_await_events_for_session(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
     ) -> Result<(), crate::RuntimeError> {
         self.revoke_await_events_for_session(session_id).await
     }
@@ -96,7 +96,7 @@ impl ActorContext {
     /// The store's refusal; this context must own the session's actor.
     pub async fn retire_closed_run_waits(
         &self,
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
         committed_turn: Option<&lash_vocabulary::identity::TurnId>,
     ) -> Result<(), crate::RuntimeError> {

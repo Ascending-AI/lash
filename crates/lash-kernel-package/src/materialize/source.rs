@@ -1,6 +1,6 @@
 //! Ordinary lexical function construction and invocation for source dialect ABIs.
 use super::*;
-use lash_vocabulary::{Param, Signature, Type};
+use {lash_kernel_value::Param, lash_kernel_value::Signature, lash_kernel_value::Type};
 
 pub(super) fn helper(helpers: &BuildHelpers, name: &str) -> Result<FunctionId, MaterializeRefusal> {
     helpers

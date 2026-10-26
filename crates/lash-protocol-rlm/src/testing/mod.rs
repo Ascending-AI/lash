@@ -35,7 +35,7 @@ pub(crate) async fn sqlite_memory_store_set_with_clock(
 /// default test turn. Open the [`DurableHost`] whose context serves it for it.
 pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
     lash_core::AdmittedScope::turn(
-        lash_vocabulary::identity::SessionId::from("test-session"),
+        lash_kernel_value::identity::SessionId::from("test-session"),
         lash_vocabulary::identity::TurnId::from("test-turn"),
     )
 }

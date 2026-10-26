@@ -5,7 +5,7 @@ use super::*;
 use lash_kernel_doc::Float;
 use lash_kernel_doc::PreparedNative;
 use lash_kernel_doc::Value;
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 use std::sync::Arc;
 
 fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {

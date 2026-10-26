@@ -6,7 +6,7 @@ use super::PluginConfig;
 use super::PluginHost;
 use super::PluginState;
 use lash_execution_contracts::plugin_error::PluginError;
-use lash_vocabulary::providers::FormatVersion;
+use lash_kernel_value::providers::FormatVersion;
 
 impl PluginHost {
     fn check_stamp(

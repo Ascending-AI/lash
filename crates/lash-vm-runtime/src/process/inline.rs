@@ -5,8 +5,8 @@ use lash_execution_contracts::process::{InlineCode, InlineDefinition, InlineStar
 use lash_kernel_doc::FunctionTarget;
 
 use lash_kernel_package::{LinkedContent, LinkedReach, ReachSelection, RetainedContent};
-use lash_vocabulary::{names::*, package::*};
 use std::{collections::BTreeSet, sync::Arc};
+use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 impl super::InlineRequest {
     pub(super) fn target(&self) -> Result<lash_kernel_vm::Target, String> {
@@ -100,7 +100,7 @@ impl super::KernelDocuments {
                 .check(
                     &lash_kernel_doc::FunctionRegistry::default(),
                     lash_kernel_doc::FunctionValueLimits::standard(),
-                    lash_vocabulary::data_limits::KernelDataLimits::standard(),
+                    lash_kernel_value::data_limits::KernelDataLimits::standard(),
                 )
                 .map_err(|refusal| match refusal {
                     lash_kernel_doc::FunctionValueRefusal::TooLarge { bytes, limit } => {
@@ -115,8 +115,8 @@ impl super::KernelDocuments {
                 .signature
                 .params
                 .iter()
-                .any(|param| !lash_vocabulary::types::data_only(&param.ty))
-                || !lash_vocabulary::types::data_only(&function.signature.result)
+                .any(|param| !lash_kernel_value::types::data_only(&param.ty))
+                || !lash_kernel_value::types::data_only(&function.signature.result)
             {
                 return Err(invalid("host callable signature must contain only data"));
             }

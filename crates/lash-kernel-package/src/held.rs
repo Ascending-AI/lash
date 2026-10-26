@@ -2,11 +2,12 @@
 use crate::{LinkRefusal, ReachSelection};
 use lash_kernel_doc::{Document, Export, FunctionExport};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::{
-    claims::NodeRequirements, names::*, operations::OperationRequirement, package::*,
-};
+use lash_kernel_value::names::FunctionId;
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::claims::NodeRequirements, lash_kernel_value::names::*,
+    lash_kernel_value::operations::OperationRequirement, lash_kernel_value::package::*,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct LinkedContent {
@@ -38,7 +39,7 @@ pub struct LinkedReach {
     pub operations: BTreeMap<OperationUse, OperationNeed>,
     pub machine: NodeRequirements,
     pub artifacts: BTreeSet<RetainedContent>,
-    pub signature: Option<lash_vocabulary::types::Signature>,
+    pub signature: Option<lash_kernel_value::types::Signature>,
 }
 impl LinkedContent {
     pub fn insert_document(
@@ -524,7 +525,7 @@ type Inspection = std::sync::Arc<std::sync::OnceLock<Result<LinkedReach, LinkRef
 struct Inspected {
     root: LinkId,
     selector: ReachSelection,
-    helpers: lash_vocabulary::HelperLibraryId,
+    helpers: lash_kernel_value::HelperLibraryId,
     documents: Vec<(DocumentId, std::sync::Weak<Document>)>,
     checked: Inspection,
 }
@@ -561,7 +562,7 @@ impl Inspections {
         content: &LinkedContent,
         root: LinkId,
         selector: &ReachSelection,
-        helpers: lash_vocabulary::HelperLibraryId,
+        helpers: lash_kernel_value::HelperLibraryId,
         artifacts: &BTreeSet<RetainedContent>,
     ) -> Inspection {
         let candidate = Inspected {

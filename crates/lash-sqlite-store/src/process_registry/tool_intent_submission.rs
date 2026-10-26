@@ -3,7 +3,7 @@ use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
 use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
 use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
 use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use rusqlite::{OptionalExtension as _, Transaction, params};
 

@@ -3,7 +3,7 @@
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{Datum, FunctionRegistry, Measure, NativeError, Operand, Value, WorkCounter};
 
-use lash_vocabulary::FunctionId;
+use lash_kernel_value::FunctionId;
 use num_traits::ToPrimitive;
 
 use crate::register_numbers;

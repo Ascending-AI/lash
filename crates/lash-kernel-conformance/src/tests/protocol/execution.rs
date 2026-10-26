@@ -104,7 +104,7 @@ fn session(rule: &str, case: &Case) {
     use lash_kernel_doc::heap::PageValue;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{BindingRecord, BoundRecord};
-    use lash_vocabulary::names::Name;
+    use lash_kernel_value::names::Name;
     let library = registry();
     let mut session = Session::default();
     let mut machine = start(
@@ -250,8 +250,8 @@ fn sites(rule: &str, case: &Case) {
                 assert_eq!(*outer.statement.resolve(heap.pages()).unwrap(), main(&[0]));
                 assert_eq!(
                     *inner.statement.resolve(heap.pages()).unwrap(),
-                    lash_vocabulary::sites::Site {
-                        unit: lash_vocabulary::sites::Unit::Library(
+                    lash_kernel_value::sites::Site {
+                        unit: lash_kernel_value::sites::Unit::Library(
                             at.program
                                 .document
                                 .functions
@@ -305,7 +305,7 @@ fn sites(rule: &str, case: &Case) {
             }
             "K-SITE-002" => {
                 let child = task(1);
-                let lash_vocabulary::sites::TaskIdentity::Spawned(spawn) =
+                let lash_kernel_value::sites::TaskIdentity::Spawned(spawn) =
                     lash_kernel_vm::kernel_internals::task_identity(&at.machine, child.identity)
                         .unwrap()
                 else {
@@ -329,7 +329,8 @@ fn sites(rule: &str, case: &Case) {
                     child.state,
                     lash_kernel_state::paged::TaskStateRecord::Waiting(_)
                 ));
-                let identity = lash_kernel_doc::kernel_internals::effect_parts(&effect().identity);
+                let identity =
+                    lash_kernel_value::kernel_internals::effect_parts(&effect().identity);
                 assert_eq!(identity.site.path, [0, 1, 0, 0]);
                 assert_eq!(
                     child
@@ -372,7 +373,7 @@ fn sites(rule: &str, case: &Case) {
                     .unwrap();
                 assert_eq!(site.as_ref(), &main(&[0]));
                 assert_eq!(
-                    lash_kernel_doc::kernel_internals::effect_parts(&effect().identity).loops[0]
+                    lash_kernel_value::kernel_internals::effect_parts(&effect().identity).loops[0]
                         .site,
                     main(&[0])
                 );

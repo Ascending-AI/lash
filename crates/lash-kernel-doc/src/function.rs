@@ -11,10 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::ast::Block;
 use crate::document::{DecodeError, EncodeError, from_versioned_json_with_limits, to_json};
 
-use lash_vocabulary::names::{FunctionId, FunctionName, Name};
-use lash_vocabulary::names::{Import, ImportSlot};
-use lash_vocabulary::tokens::{encode_body, logical_digest};
-use lash_vocabulary::types::Signature;
+use lash_kernel_value::types::Signature;
+use {
+    lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName,
+    lash_kernel_value::names::Name,
+};
+use {lash_kernel_value::names::Import, lash_kernel_value::names::ImportSlot};
+use {lash_kernel_value::tokens::encode_body, lash_kernel_value::tokens::logical_digest};
 
 /// A library's declarations by content identity, without native implementations.
 ///
@@ -327,12 +330,12 @@ impl FunctionDefinition {
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
         Self::from_json_with_limits(
             text,
-            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            lash_kernel_value::data_limits::KernelDataLimits::standard(),
         )
     }
     pub fn from_json_with_limits(
         text: &str,
-        limits: lash_vocabulary::data_limits::KernelDataLimits,
+        limits: lash_kernel_value::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         from_versioned_json_with_limits(text, limits)
     }

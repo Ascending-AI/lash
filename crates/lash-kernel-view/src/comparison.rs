@@ -2,14 +2,14 @@
 //! The supplied package view owns each declaration; no dialect name appears here.
 
 use crate::ViewContext;
-use lash_helper_labels::Comparison;
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingKind, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, Reference, StmtNode,
 };
 use lash_kernel_doc::Literal;
-use lash_vocabulary::CallableId;
-use lash_vocabulary::sites::Site;
+use lash_kernel_labels::Comparison;
+use lash_kernel_value::CallableId;
+use lash_kernel_value::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

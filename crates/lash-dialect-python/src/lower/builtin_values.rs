@@ -4,8 +4,11 @@ use crate::scope::Ty;
 use lash_kernel_doc::{
     CallablePresentation, Expr, FunctionRepresentation, Literal, StartConvention, Stmt,
 };
-use lash_vocabulary::{Name, Param, Signature, Type};
 use ruff_python_ast as ast;
+use {
+    lash_kernel_value::Name, lash_kernel_value::Param, lash_kernel_value::Signature,
+    lash_kernel_value::Type,
+};
 
 pub(super) struct Builtin {
     pub(super) name: &'static str,

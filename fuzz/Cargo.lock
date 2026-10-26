@@ -408,6 +408,12 @@ dependencies = [
 
 [[package]]
 name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
@@ -533,13 +539,22 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "foldhash 0.1.5",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.2.0",
 ]
 
 [[package]]
@@ -550,7 +565,16 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
@@ -798,9 +822,12 @@ dependencies = [
 name = "lash-dialect-python"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
+ "lash-ext-py-helpers",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-services",
+ "lash-kernel-value",
+ "num-bigint",
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
@@ -815,10 +842,12 @@ name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "lash-ext-regex-ecma",
- "lash-internal-vocabulary",
+ "lash-ext-ts-helpers",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-services",
+ "lash-kernel-value",
  "ryu-js",
  "serde",
  "serde_json",
@@ -831,8 +860,8 @@ dependencies = [
 name = "lash-ext-date-ecma"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-value",
  "num-traits",
 ]
 
@@ -843,33 +872,53 @@ dependencies = [
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
+ "lash-ext-py-helpers",
  "lash-ext-regex-ecma",
+ "lash-ext-ts-helpers",
  "lash-ext-url-whatwg",
- "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
  "lash-kernel-package",
+ "lash-kernel-value",
  "lash-kernel-vm",
+]
+
+[[package]]
+name = "lash-ext-py-helpers"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-services",
 ]
 
 [[package]]
 name = "lash-ext-regex-ecma"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-value",
  "lash-regress",
  "num-traits",
  "thiserror",
 ]
 
 [[package]]
+name = "lash-ext-ts-helpers"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-services",
+]
+
+[[package]]
 name = "lash-ext-url-whatwg"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-value",
  "url",
 ]
 
@@ -882,22 +931,13 @@ dependencies = [
  "lash-ext-helper-compiler",
  "lash-internal-checkpoint-encoder",
  "lash-internal-protocol-types",
- "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-conformance",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-state",
+ "lash-kernel-value",
  "libfuzzer-sys",
-]
-
-[[package]]
-name = "lash-helper-labels"
-version = "0.0.0-dev"
-dependencies = [
- "serde",
- "serde_json",
- "serde_path_to_error",
 ]
 
 [[package]]
@@ -905,7 +945,8 @@ name = "lash-internal-checkpoint-encoder"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
- "lash-internal-vocabulary",
+ "hashlink",
+ "lash-kernel-value",
  "schemars",
  "serde",
  "thiserror",
@@ -918,19 +959,11 @@ dependencies = [
  "blake3",
  "jsonschema",
  "lash-internal-vocabulary",
+ "lash-kernel-value",
  "schemars",
  "serde",
  "serde_json",
  "thiserror",
-]
-
-[[package]]
-name = "lash-internal-tool-shape"
-version = "0.0.0-dev"
-dependencies = [
- "lash-internal-vocabulary",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -939,6 +972,7 @@ version = "0.0.0-dev"
 dependencies = [
  "blake3",
  "jsonschema",
+ "lash-kernel-value",
  "schemars",
  "serde",
  "serde_json",
@@ -949,9 +983,8 @@ dependencies = [
 name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-tool-shape",
- "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-value",
  "schemars",
  "serde",
  "serde_json",
@@ -963,7 +996,6 @@ name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
- "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -971,6 +1003,7 @@ dependencies = [
  "lash-kernel-lib",
  "lash-kernel-package",
  "lash-kernel-state",
+ "lash-kernel-value",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -981,9 +1014,10 @@ dependencies = [
 name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
+ "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-state",
+ "lash-kernel-value",
  "schemars",
  "serde",
  "serde_json",
@@ -995,7 +1029,7 @@ name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
- "lash-internal-vocabulary",
+ "lash-kernel-value",
  "libc",
  "num-bigint",
  "num-traits",
@@ -1010,16 +1044,24 @@ dependencies = [
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-labels"
+version = "0.0.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
 ]
 
 [[package]]
 name = "lash-kernel-lib"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "lash-kernel-doc",
+ "lash-kernel-value",
  "libm",
  "num-bigint",
  "num-traits",
@@ -1031,22 +1073,42 @@ dependencies = [
 name = "lash-kernel-package"
 version = "0.0.0-dev"
 dependencies = [
- "lash-helper-labels",
- "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-doc",
+ "lash-kernel-labels",
+ "lash-kernel-value",
  "serde",
  "serde_json",
  "thiserror",
 ]
 
 [[package]]
+name = "lash-kernel-services"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-value",
+]
+
+[[package]]
 name = "lash-kernel-state"
 version = "0.0.0-dev"
 dependencies = [
- "foldhash",
- "lash-internal-vocabulary",
+ "foldhash 0.2.0",
  "lash-kernel-doc",
+ "lash-kernel-value",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-value"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "jsonschema",
  "schemars",
  "serde",
  "serde_json",
@@ -1057,12 +1119,12 @@ dependencies = [
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
- "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",
  "lash-kernel-package",
  "lash-kernel-state",
+ "lash-kernel-value",
  "num-bigint",
  "num-traits",
  "schemars",

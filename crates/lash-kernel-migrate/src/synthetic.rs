@@ -81,8 +81,8 @@ fn document(
     let mut survivors = Vec::new();
     for (unit, body) in written.units() {
         let to = match &unit {
-            lash_vocabulary::sites::Unit::Library(id) => {
-                lash_vocabulary::sites::Unit::Library(functions.get(id).copied().unwrap_or(*id))
+            lash_kernel_value::sites::Unit::Library(id) => {
+                lash_kernel_value::sites::Unit::Library(functions.get(id).copied().unwrap_or(*id))
             }
             _ => unit.clone(),
         };

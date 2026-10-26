@@ -1,12 +1,12 @@
 //! Bounded inline spelling for the current presenters. The graph remains
 //! authoritative: reference-aware presenters use its definitions directly.
 
-use lash_vocabulary::tool_shape::DefinitionId;
-use lash_vocabulary::tool_shape::ExtraKeys;
-use lash_vocabulary::tool_shape::SchemaDocument;
-use lash_vocabulary::tool_shape::SchemaShape;
-use lash_vocabulary::tool_shape::ShapeImportRefusal;
-use lash_vocabulary::tool_shape::ShapeKind;
+use lash_kernel_value::tool_shape::DefinitionId;
+use lash_kernel_value::tool_shape::ExtraKeys;
+use lash_kernel_value::tool_shape::SchemaDocument;
+use lash_kernel_value::tool_shape::SchemaShape;
+use lash_kernel_value::tool_shape::ShapeImportRefusal;
+use lash_kernel_value::tool_shape::ShapeKind;
 use serde_json::Value;
 
 /// Import a graph, then project its root for an inline presenter.
@@ -17,8 +17,8 @@ use serde_json::Value;
 /// ```
 /// # use lash_tool_presenter_api::inline_schema;
 /// let shape = inline_schema(&serde_json::json!({"type":"string"}), 8)?;
-/// assert!(matches!(shape.kind, lash_vocabulary::tool_shape::ShapeKind::Str));
-/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
+/// assert!(matches!(shape.kind, lash_kernel_value::tool_shape::ShapeKind::Str));
+/// # Ok::<(), lash_kernel_value::tool_shape::ShapeImportRefusal>(())
 /// ```
 ///
 /// # Errors
@@ -39,11 +39,11 @@ pub fn inline_schema(schema: &Value, max_depth: usize) -> Result<SchemaShape, Sh
 ///
 /// ```
 /// # use lash_tool_presenter_api::inline_shape;
-/// # use lash_vocabulary::tool_shape::SchemaDocument;
+/// # use lash_kernel_value::tool_shape::SchemaDocument;
 /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"type":"string"}), 8)?;
 /// let shape = inline_shape(&doc, &doc.roots[0], 8);
-/// assert!(matches!(shape.kind, lash_vocabulary::tool_shape::ShapeKind::Str));
-/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
+/// assert!(matches!(shape.kind, lash_kernel_value::tool_shape::ShapeKind::Str));
+/// # Ok::<(), lash_kernel_value::tool_shape::ShapeImportRefusal>(())
 /// ```
 pub fn inline_shape(
     document: &SchemaDocument,

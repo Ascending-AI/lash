@@ -30,6 +30,22 @@ pub(crate) enum Ty {
     Package(usize),
 }
 
+impl From<lash_ext_py_helpers::methods::ResultKind> for Ty {
+    fn from(kind: lash_ext_py_helpers::methods::ResultKind) -> Self {
+        match kind {
+            lash_ext_py_helpers::methods::ResultKind::Bool => Self::Bool,
+            lash_ext_py_helpers::methods::ResultKind::Dict => Self::Dict,
+            lash_ext_py_helpers::methods::ResultKind::Int => Self::Int,
+            lash_ext_py_helpers::methods::ResultKind::List => Self::List,
+            lash_ext_py_helpers::methods::ResultKind::None => Self::None,
+            lash_ext_py_helpers::methods::ResultKind::Set => Self::Set,
+            lash_ext_py_helpers::methods::ResultKind::Str => Self::Str,
+            lash_ext_py_helpers::methods::ResultKind::Tuple => Self::Tuple,
+            lash_ext_py_helpers::methods::ResultKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
 impl Ty {
     pub(crate) fn is_number(self) -> bool {
         matches!(self, Ty::Int | Ty::Float)
@@ -70,7 +86,7 @@ pub(crate) fn call_shape(parameters: &ast::Parameters, is_async: bool) -> CallSh
             .chain(&parameters.args)
             .chain(&parameters.kwonlyargs)
             .map(|param| CallParam {
-                name: lash_vocabulary::names::Name::new(param.parameter.name.id.as_str()),
+                name: lash_kernel_value::names::Name::new(param.parameter.name.id.as_str()),
                 has_default: param.default.is_some(),
             })
             .collect(),

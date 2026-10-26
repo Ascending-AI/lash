@@ -6,12 +6,12 @@ use std::fmt;
 
 use lash_kernel_doc::{Invalid, InvalidReason};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 /// Everything that keeps a document from being admitted. Admission does not
 /// stop at the first fault of the environment: every missing effect, every
@@ -68,7 +68,7 @@ pub enum RefusalReason {
     /// `K-ADM-001`: the environment provides no such effect.
     #[error("the environment provides no effect `{slot:?}`")]
     MissingEffect {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
     },
     /// `K-ADM-002`: the environment's effect does not serve the signature
     /// the document expects.
@@ -76,7 +76,7 @@ pub enum RefusalReason {
         "effect `{slot:?}` is provided with a signature that does not serve the one expected: {mismatch}"
     )]
     EffectSignature {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
         expected: Signature,
         provided: Signature,
         mismatch: Box<SignatureMismatch>,
@@ -104,7 +104,7 @@ pub enum RefusalReason {
     /// effect's signature can have.
     #[error("effect `{slot:?}` returns {declared:?}; this `perform` expects {stated:?}")]
     PerformResult {
-        slot: lash_vocabulary::names::ImportSlot,
+        slot: lash_kernel_value::names::ImportSlot,
         declared: Type,
         stated: Type,
     },
@@ -128,7 +128,7 @@ impl RefusalReason {
     }
 }
 
-pub use lash_vocabulary::types::{SignatureMismatch, SignatureSide};
+pub use {lash_kernel_value::types::SignatureMismatch, lash_kernel_value::types::SignatureSide};
 pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
     Refused {
         site: site.cloned(),

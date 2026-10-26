@@ -45,7 +45,7 @@ dialects expose in their own syntax. Installing a package does not add a parser.
 
 `dialect-typescript` and `dialect-python` are features of the facade
 (`lash-runtime`), `lash-vm-worker`, `lash-vm-runtime` and
-`lash-vm-releases`, which builds the immutable helper image. Each is off unless a
+`lash-kernel-releases`, which builds the immutable helper image. Each is off unless a
 host names it. A dialect's feature
 builds its helper library, and in a worker links its parser and native
 implementations. The ECMAScript regular-expression and date extensions and the

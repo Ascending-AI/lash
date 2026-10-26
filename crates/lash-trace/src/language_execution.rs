@@ -42,8 +42,8 @@ pub struct StepBodyStarted {
     pub process_id: lash_vocabulary::identity::ProcessId,
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
-    pub at: lash_vocabulary::sites::EffectId,
-    pub origin: lash_vocabulary::sites::Site,
+    pub at: lash_kernel_value::sites::EffectId,
+    pub origin: lash_kernel_value::sites::Site,
     /// The call the admission bound the step to.
     pub call_id: lash_protocol_types::ToolCallId,
     /// The one-based attempt of the admitted body.
@@ -80,7 +80,7 @@ pub enum TraceLanguageExecutionPayload {
     /// entry; the document itself is read through facade workflow inspection.
     ExecutionStarted {
         subject: crate::TraceRuntimeSubject,
-        observation: lash_vocabulary::observation::RunObservation,
+        observation: lash_kernel_value::observation::RunObservation,
     },
     ExecutionFinished {
         subject: crate::TraceRuntimeSubject,
@@ -91,7 +91,7 @@ pub enum TraceLanguageExecutionPayload {
     /// One fact about one occurrence of one execution site.
     Node {
         subject: crate::TraceRuntimeSubject,
-        at: lash_vocabulary::sites::EffectId,
+        at: lash_kernel_value::sites::EffectId,
         fact: TraceNodeFact,
     },
     /// Statement starts and empty-block entries, with their accumulation law.
@@ -169,7 +169,7 @@ impl TraceLanguageExecutionPayload {
 
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
-    pub fn at(&self) -> Option<&lash_vocabulary::sites::EffectId> {
+    pub fn at(&self) -> Option<&lash_kernel_value::sites::EffectId> {
         match self {
             Self::ExecutionStarted { .. }
             | Self::ExecutionFinished { .. }
@@ -198,7 +198,7 @@ pub enum TraceNodeFact {
     /// Display attribution from an effect request. This does not start an
     /// occurrence or change its identity, admission, counts or outcome.
     Origin {
-        origin: lash_vocabulary::sites::Site,
+        origin: lash_kernel_value::sites::Site,
     },
     Started {
         #[serde(default, skip_serializing_if = "Option::is_none")]

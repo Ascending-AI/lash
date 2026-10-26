@@ -9,10 +9,10 @@
 //! inbound datum by a type, and the kernel text notation. A host that only
 //! reads documents needs no other crate.
 //!
-//! Its neutral leaves live in lash-vocabulary; it depends on no runtime crate.
+//! Its neutral leaves live in lash-kernel-value; it depends on no runtime crate.
 
 mod ast;
-use lash_vocabulary::sites::{Site, Unit};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 mod caption;
 mod correspondence;
 mod declarations;
@@ -35,9 +35,11 @@ mod codec_variants;
 mod continuation;
 mod decode;
 pub use decode::{DecodeRefusal, Decoder, datum_type, diagnostic_datum};
-pub use lash_vocabulary::{
-    AnnotationOrigin, AnnotationResolutionReason, EntryAnnotationRefusal, EntrySignatureRefusal,
-    EntryTypeMismatch, SignatureOrigin, TypeMismatch,
+pub use {
+    lash_kernel_value::AnnotationOrigin, lash_kernel_value::AnnotationResolutionReason,
+    lash_kernel_value::EntryAnnotationRefusal, lash_kernel_value::EntrySignatureRefusal,
+    lash_kernel_value::EntryTypeMismatch, lash_kernel_value::SignatureOrigin,
+    lash_kernel_value::TypeMismatch,
 };
 pub mod document;
 
@@ -64,7 +66,7 @@ pub use identified::{IdentifiedDocument, document_work};
 /// One root-based snapshot of live code: what a saved function and a
 /// crossing function share (`K-CLO-004`).
 pub mod snapshot;
-use lash_vocabulary::names as name;
+use lash_kernel_value::names as name;
 
 mod native;
 mod number;
@@ -154,36 +156,11 @@ pub use graph_codec::heap_values;
 /// Construction seams shared only by kernel crates.
 #[doc(hidden)]
 pub mod kernel_internals {
-    pub const fn wait_id(ordinal: u64) -> lash_vocabulary::sites::WaitId {
-        lash_vocabulary::sites::WaitId(ordinal)
+    pub const fn wait_id(ordinal: u64) -> lash_kernel_value::sites::WaitId {
+        lash_kernel_value::sites::WaitId(ordinal)
     }
-    pub const fn wait_number(wait: lash_vocabulary::sites::WaitId) -> u64 {
+    pub const fn wait_number(wait: lash_kernel_value::sites::WaitId) -> u64 {
         wait.0
-    }
-
-    use lash_vocabulary::sites::EffectIdentity;
-    use lash_vocabulary::sites::TaskIdentity;
-    pub fn effect_id(raw: EffectIdentity) -> lash_vocabulary::sites::EffectId {
-        lash_vocabulary::sites::EffectId(raw)
-    }
-    pub fn effect_parts(id: &lash_vocabulary::sites::EffectId) -> &EffectIdentity {
-        &id.0
-    }
-    pub fn task_label(raw: TaskIdentity) -> lash_vocabulary::sites::TaskLabel {
-        lash_vocabulary::sites::TaskLabel(raw)
-    }
-    pub fn task_parts(id: &lash_vocabulary::sites::TaskLabel) -> &TaskIdentity {
-        &id.0
-    }
-
-    pub fn execution_path(
-        rows: Vec<(lash_vocabulary::sites::TaskIdentity, Vec<u32>)>,
-    ) -> lash_vocabulary::observation::ExecutionPath {
-        lash_vocabulary::observation::ExecutionPath(
-            rows.into_iter()
-                .map(|(task, starts)| (lash_vocabulary::sites::TaskLabel(task), starts))
-                .collect(),
-        )
     }
 }
 

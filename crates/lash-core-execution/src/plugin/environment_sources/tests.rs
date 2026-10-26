@@ -1,7 +1,7 @@
 use super::super::packages::{PackageProvider, operation_environment_fragment};
 use super::*;
 use lash_core_store::environment::{AssemblyRefusal, assemble};
-use lash_vocabulary::names::Segment;
+use lash_kernel_value::names::Segment;
 use lash_vocabulary::{ToolContract, ToolDefinition, ToolManifest};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -96,7 +96,7 @@ impl PackageProvider for Provider {
     fn advertise(
         &self,
         _: &OwnerConfigView,
-        _: &lash_vocabulary::package::PublicationContext,
+        _: &lash_kernel_value::package::PublicationContext,
     ) -> Result<Vec<super::super::packages::PackageContribution>, PluginError> {
         unreachable!("shared observation supplies packages")
     }
@@ -119,7 +119,7 @@ impl PackageProvider for Provider {
     async fn hold(
         &self,
         _: &lash_core_store::artifact_referrer::ReferrerClaim,
-        _: &[&lash_vocabulary::package::PackageAdvertisement],
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         self.calls.holds.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -255,8 +255,8 @@ fn replacement_collision_preserves_the_published_candidate() {
     let before = assemble(None, initial.clone()).unwrap();
     let frontier = frontier(&initial);
     a.definition.lock_recover().manifest.operation =
-        lash_vocabulary::names::QualifiedOperation::from_effect(
-            &lash_vocabulary::EffectName::new("b.work").unwrap(),
+        lash_kernel_value::names::QualifiedOperation::from_effect(
+            &lash_kernel_value::EffectName::new("b.work").unwrap(),
         )
         .unwrap();
     let delta = sources

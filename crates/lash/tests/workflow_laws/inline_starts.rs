@@ -432,7 +432,7 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
         )
         .expect("tool schema")
         // The contract the spawner's kernel text pins.
-        .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
+        .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120))
         .with_declaration(
             lash_vocabulary::tool_declaration::ToolDeclaration::default()
@@ -443,7 +443,7 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
     };
     vec![
         launch("launch").with_execution_policy(
-            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                 std::num::NonZeroU32::new(4).unwrap(),
                 1,
                 1,

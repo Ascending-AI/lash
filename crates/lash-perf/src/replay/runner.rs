@@ -358,7 +358,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     meter.attach_workers(pool);
     let mut lanes = Vec::with_capacity(workload.sessions);
     for (index, inputs) in scripted.into_iter().enumerate() {
-        let id = lash_vocabulary::identity::SessionId::try_from(format!(
+        let id = lash_kernel_value::identity::SessionId::try_from(format!(
             "replay-{}-{index}",
             workload.name
         ))

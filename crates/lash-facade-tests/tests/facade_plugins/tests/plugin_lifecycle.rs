@@ -112,7 +112,7 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
         .build(lash_facade_tests::runtime_lease_owner())
     };
     let core = deploy(true)?;
-    let session_id = lash_vocabulary::identity::SessionId::from("finalized-identity");
+    let session_id = lash_kernel_value::identity::SessionId::from("finalized-identity");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;

@@ -12,7 +12,7 @@ use lash_kernel_dialect::{
     check_document_depth,
 };
 use lash_kernel_doc as k;
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -69,7 +69,8 @@ pub(crate) fn print_regions(
     let signatures = r.typed_dicts(document, &regions.authored);
     let mut written = BTreeMap::new();
     let main = document.main.as_deref().unwrap_or_default();
-    r.out.begin_node(Some(&lash_vocabulary::sites::Unit::Main));
+    r.out
+        .begin_node(Some(&lash_kernel_value::sites::Unit::Main));
     let body_start = r.out.len();
     for part in &regions.whole {
         use lash_kernel_dialect::regions::ModulePart;
@@ -117,7 +118,7 @@ struct Renderer<'a> {
     sync: BTreeSet<Name>,
     asynchronous: BTreeSet<Name>,
     substitutions: BTreeMap<Name, k::Expr>,
-    direct: BTreeMap<Name, (Name, lash_vocabulary::FunctionId)>,
+    direct: BTreeMap<Name, (Name, lash_kernel_value::FunctionId)>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
     expression_depth: usize,
     max_depth: usize,
@@ -148,8 +149,11 @@ impl Renderer<'_> {
             .map(|p| p.name.clone())
             .collect::<Vec<_>>();
         let start = self.out.len();
-        let unit = lash_vocabulary::sites::Unit::Library(export.function);
-        self.caption_of(lash_vocabulary::sites::Site::new(unit.clone(), Vec::new()));
+        let unit = lash_kernel_value::sites::Unit::Library(export.function);
+        self.caption_of(lash_kernel_value::sites::Site::new(
+            unit.clone(),
+            Vec::new(),
+        ));
         if !export.asynchronous {
             self.sync.insert(name.clone());
         } else {
@@ -168,11 +172,11 @@ impl Renderer<'_> {
         for param in &export.signature.params {
             use lash_kernel_dialect::source_types::Kind;
             let kind = match &param.ty {
-                lash_vocabulary::Type::Text => Kind::Text,
-                lash_vocabulary::Type::Int
-                | lash_vocabulary::Type::Float
-                | lash_vocabulary::Type::Number => Kind::Number,
-                lash_vocabulary::Type::Bool => Kind::Bool,
+                lash_kernel_value::Type::Text => Kind::Text,
+                lash_kernel_value::Type::Int
+                | lash_kernel_value::Type::Float
+                | lash_kernel_value::Type::Number => Kind::Number,
+                lash_kernel_value::Type::Bool => Kind::Bool,
                 _ => Kind::Unknown,
             };
             local.types.0.insert(param.name.clone(), kind);
@@ -196,7 +200,7 @@ impl Renderer<'_> {
             self.spell(&caption);
         }
     }
-    fn caption_of(&mut self, site: lash_vocabulary::sites::Site) {
+    fn caption_of(&mut self, site: lash_kernel_value::sites::Site) {
         if let Some(caption) = self.out.take_caption(site) {
             self.spell(&caption);
         }
@@ -223,7 +227,7 @@ impl Renderer<'_> {
         }
         self.out.write(")");
     }
-    fn root_block(&mut self, block: &k::Block, root: Option<&lash_vocabulary::sites::Unit>) {
+    fn root_block(&mut self, block: &k::Block, root: Option<&lash_kernel_value::sites::Unit>) {
         let sync = self.sync.clone();
         let asynchronous = self.asynchronous.clone();
         self.out.begin_node(root);
@@ -231,7 +235,7 @@ impl Renderer<'_> {
         if block.is_empty() {
             self.empty();
         }
-        if let Some(lash_vocabulary::sites::Unit::Library(id)) = root {
+        if let Some(lash_kernel_value::sites::Unit::Library(id)) = root {
             let params = self.document.functions[id]
                 .signature
                 .params
@@ -303,7 +307,7 @@ impl Renderer<'_> {
         self.padding();
         self.out.write("pass\n");
     }
-    fn node(&mut self, node: k::Node<'_>, root: Option<&lash_vocabulary::sites::Unit>) {
+    fn node(&mut self, node: k::Node<'_>, root: Option<&lash_kernel_value::sites::Unit>) {
         if matches!(node, k::Node::Stmt(_) | k::Node::Block(_)) {
             self.caption_next();
         }

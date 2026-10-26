@@ -3,7 +3,7 @@
 
 use lash_kernel_doc::{self as k};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Expr, Part};
@@ -98,7 +98,7 @@ impl Lifter<'_> {
         Ok(Expr::Ident(self.binding(name)?))
     }
 
-    fn native(&mut self, function: &lash_vocabulary::FunctionId, args: &[k::Expr]) -> Lift<Expr> {
+    fn native(&mut self, function: &lash_kernel_value::FunctionId, args: &[k::Expr]) -> Lift<Expr> {
         let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
@@ -377,13 +377,13 @@ impl Lifter<'_> {
     }
 
     /// The dotted path a call of `effect` is written as.
-    fn operation(&self, slot: &lash_vocabulary::ImportSlot) -> Lift<Expr> {
+    fn operation(&self, slot: &lash_kernel_value::ImportSlot) -> Lift<Expr> {
         let name = &self
             .imports
             .get(slot)
             .ok_or_else(|| "missing operation import".to_owned())?
             .name;
-        let operation = lash_vocabulary::QualifiedOperation {
+        let operation = lash_kernel_value::QualifiedOperation {
             package: name.package.clone(),
             name: name.member.clone(),
         };
@@ -539,7 +539,11 @@ fn builtin_value(parts: &[k::Expr]) -> Option<Expr> {
     else {
         return None;
     };
-    if tag != "ts.function" || crate::builtins::table().builtin(path).is_none() {
+    if tag != "ts.function"
+        || lash_ext_ts_helpers::builtins::table()
+            .builtin(path)
+            .is_none()
+    {
         return None;
     }
     let mut segments = path.split('.');

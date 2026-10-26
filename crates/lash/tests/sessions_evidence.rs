@@ -779,7 +779,7 @@ fn drain_area_witnesses() {
         let _ = &value.journaled_bytes_estimate;
     });
     // W0289: lash::process::SessionId [type_alias] (rehomed)
-    type_witness::<lash_vocabulary::identity::SessionId>();
+    type_witness::<lash_kernel_value::identity::SessionId>();
     // W0290: lash::plugins::TurnDriverPreamble [type_alias]
     type_witness::<lash::plugins::TurnDriverPreamble>();
     // W0291: lash::persistence::TurnInputAdmissionMode [enum]

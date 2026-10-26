@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 pub enum ToolFailureCause {
     /// A workflow entry's supplied input or settled result violates its contract.
     EntryTypeMismatch {
-        source: lash_vocabulary::EntryTypeMismatch,
+        source: lash_kernel_value::EntryTypeMismatch,
     },
     /// An effect answer violates its declared result type.
     TypeMismatch {
-        source: lash_vocabulary::TypeMismatch,
+        source: lash_kernel_value::TypeMismatch,
     },
     /// A host-configured aggregate callback deadline passed without an answer.
     ControlPhaseExpired {
@@ -47,10 +47,10 @@ pub enum ToolFailureCause {
         source: Box<lash_vocabulary::ToolCatalogBuildError>,
     },
     SchemaAdmission {
-        source: lash_vocabulary::json_schema::SchemaAdmissionError,
+        source: lash_kernel_value::json_schema::SchemaAdmissionError,
     },
     ValueMismatch {
-        source: lash_vocabulary::json_schema::ValueMismatch,
+        source: lash_kernel_value::json_schema::ValueMismatch,
     },
     /// The body's outcome is one its recorded declaration does not admit: a
     /// Deferred without `may_defer`, an undeclared intent kind, or an
@@ -77,8 +77,8 @@ pub enum ToolFailureCause {
     OperationContractChanged {
         effect: String,
         tool: lash_vocabulary::tool_contract::ToolId,
-        pinned: lash_vocabulary::operations::ContractId,
-        live: lash_vocabulary::operations::ContractId,
+        pinned: lash_kernel_value::operations::ContractId,
+        live: lash_kernel_value::operations::ContractId,
     },
     /// A granted tool's transform refused the tool's input: it names no
     /// call. Nothing was resolved.
@@ -152,6 +152,6 @@ pub enum ToolFailureCause {
         /// cleanup held it (a Python entry that started tasks), or no
         /// document statement was left to name it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_vocabulary::sites::Site>,
+        site: Option<lash_kernel_value::sites::Site>,
     },
 }

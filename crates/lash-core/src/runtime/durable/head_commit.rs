@@ -79,7 +79,7 @@ impl HeadCommitError {
 /// candidate ([`super::session_publication`]).
 pub(crate) fn write_session_commit(
     tx: &mut lash_durable::ActorTx,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     expected_head: u64,
     commit: crate::store::EncodedSessionCommit,
 ) {

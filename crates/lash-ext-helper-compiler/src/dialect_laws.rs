@@ -9,14 +9,17 @@ use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
-use lash_vocabulary::package::{Fill, Link};
-use lash_vocabulary::{ImportKind, Name, OperationMode, OperationUse};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     rc::Rc,
     sync::Arc,
 };
+use {
+    lash_kernel_value::ImportKind, lash_kernel_value::Name, lash_kernel_value::OperationMode,
+    lash_kernel_value::OperationUse,
+};
+use {lash_kernel_value::package::Fill, lash_kernel_value::package::Link};
 #[derive(Clone, Default)]
 struct Pages(Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
 impl PageSource for Pages {
@@ -102,9 +105,9 @@ impl Fixture {
                 (
                     *slot,
                     Fill::Operation(
-                        lash_dialect_python::helper_operations()
+                        lash_ext_py_helpers::package::helper_operations()
                             .iter()
-                            .chain(lash_dialect_typescript::helper_operations())
+                            .chain(lash_ext_ts_helpers::package::helper_operations())
                             .find(|operation| operation.name == import.name)
                             .map(|operation| operation.requirement.clone())
                             .expect("service"),
@@ -138,8 +141,8 @@ impl Host for Script {
         &mut self,
         use_: &OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
         Ok(Ok(match self.uses[use_].as_str() {
             "typescript.random" => Datum::Bytes(lash_kernel_doc::Bytes::new(
@@ -360,7 +363,7 @@ fn deferred_aliases_lower_to_signature_only_operation_imports() {
         let fixture = Fixture::new(dialect);
         let names = Namespaces::new(
             BTreeMap::new(),
-            BTreeSet::from([lash_vocabulary::PackagePath::parse("wip").unwrap()]),
+            BTreeSet::from([lash_kernel_value::PackagePath::parse("wip").unwrap()]),
             &|_| false,
         )
         .unwrap();

@@ -8,7 +8,7 @@ use lash_core_store::store::Retention;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::Target;
 use lash_core_store::store::TurnInputStore as _;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// A body large enough that keeping it is a real cost.
 fn large(tag: &str) -> String {

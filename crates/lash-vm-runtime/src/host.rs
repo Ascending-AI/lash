@@ -16,10 +16,10 @@ pub trait EffectReads: Send + Sync {
     /// `perform`. `Err` is the parent's own failure, and stops the run.
     async fn perform(
         &self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 }
 
@@ -27,9 +27,9 @@ pub trait EffectReads: Send + Sync {
 /// source, the run's reads, and where
 /// prints go.
 pub struct ParentHost {
-    pub observation: lash_vocabulary::observation::RunObservation,
+    pub observation: lash_kernel_value::observation::RunObservation,
     /// Takes exact deltas from worker frames, outside checkpoint state.
-    pub ran: Arc<dyn Fn(&lash_vocabulary::observation::SiteCounts) + Send + Sync>,
+    pub ran: Arc<dyn Fn(&lash_kernel_value::observation::SiteCounts) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
     /// Answers the run's read-bound `perform`s.
@@ -40,20 +40,20 @@ pub struct ParentHost {
 
 #[async_trait::async_trait]
 impl RunHost for ParentHost {
-    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
+    fn observe(&self) -> lash_kernel_value::observation::RunObservation {
         self.observation
     }
 
-    fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
+    fn ran(&self, delta: &lash_kernel_value::observation::SiteCounts) {
         (self.ran)(delta);
     }
 
     async fn perform(
         &self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         self.reads.perform(use_, args, site, origin).await
     }

@@ -1,6 +1,6 @@
 //! Reduce a document to one entry using the checker's reference derivation.
 
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 use std::collections::BTreeSet;
 
 use lash_kernel_check::{Environment, entry_reachability};

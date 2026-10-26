@@ -33,21 +33,21 @@ use lash_kernel_exec::Weight;
 
 use crate::compile::{CodeId, LibId, StmtId};
 
-pub use lash_vocabulary::observation::RunObservation as ObservationMode;
+pub use lash_kernel_value::observation::RunObservation as ObservationMode;
 
 /// Document statement starts and empty-block entries in the order they
 /// happened: each entry is one task's consecutive starts, by the block
 /// sites they started at. Library code is never on it.
 pub(crate) type StatementPath = Vec<(
-    lash_vocabulary::sites::TaskIdentity,
-    Vec<lash_vocabulary::sites::Site>,
+    lash_kernel_value::sites::TaskIdentity,
+    Vec<lash_kernel_value::sites::Site>,
 )>;
 
 /// What [`crate::KernelMachine::trace_path`] records until it is taken.
 #[derive(Default)]
 pub(crate) struct PathRecorder {
     last: Option<TaskId>,
-    ordinals: std::collections::BTreeMap<lash_vocabulary::sites::Site, u32>,
+    ordinals: std::collections::BTreeMap<lash_kernel_value::sites::Site, u32>,
     path: StatementPath,
     /// The heap fault that kept a task's identity off the path: the path
     /// is then not answered at all, never answered short.
@@ -56,7 +56,7 @@ pub(crate) struct PathRecorder {
 
 impl PathRecorder {
     pub(crate) fn new(
-        ordinals: std::collections::BTreeMap<lash_vocabulary::sites::Site, u32>,
+        ordinals: std::collections::BTreeMap<lash_kernel_value::sites::Site, u32>,
     ) -> Self {
         Self {
             ordinals,
@@ -67,10 +67,10 @@ impl PathRecorder {
         &mut self,
         task: TaskId,
         identity: impl FnOnce() -> Result<
-            lash_vocabulary::sites::TaskIdentity,
+            lash_kernel_value::sites::TaskIdentity,
             lash_kernel_doc::heap::HeapFault,
         >,
-        site: lash_vocabulary::sites::Site,
+        site: lash_kernel_value::sites::Site,
     ) {
         if self.fault.is_some() {
             return;
@@ -89,7 +89,8 @@ impl PathRecorder {
 
     pub(crate) fn take(
         &mut self,
-    ) -> Result<lash_vocabulary::observation::ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+    ) -> Result<lash_kernel_value::observation::ExecutionPath, lash_kernel_doc::heap::HeapFault>
+    {
         self.last = None;
         let path = std::mem::take(&mut self.path);
         match self.fault.take() {
@@ -111,7 +112,7 @@ impl PathRecorder {
                         Ok((task, starts))
                     })
                     .collect::<Result<Vec<_>, lash_kernel_doc::heap::HeapFault>>()?;
-                Ok(lash_kernel_doc::kernel_internals::execution_path(rows))
+                Ok(lash_kernel_value::kernel_internals::execution_path(rows))
             }
         }
     }

@@ -5,8 +5,11 @@ use crate::{
     ActorKey, ClaimPurpose, ClaimRequirements, CommitLabel, DurableError, DurableStore, FormatSet,
     MailKind, MailTx, NodeCapabilities, NodeId, NodeLease, NodeSpec, Release,
 };
-use lash_vocabulary::claims::NodeRequirements;
-use lash_vocabulary::providers::{FormatVersion, ToolProviderHandle, ToolProviderKey};
+use lash_kernel_value::claims::NodeRequirements;
+use {
+    lash_kernel_value::providers::FormatVersion, lash_vocabulary::providers::ToolProviderHandle,
+    lash_vocabulary::providers::ToolProviderKey,
+};
 fn provider() -> ToolProviderHandle {
     ToolProviderHandle::new(
         lash_vocabulary::claims::RegistryKind::Process,
@@ -18,8 +21,8 @@ fn provider() -> ToolProviderHandle {
 fn format_two() -> FormatVersion {
     FormatVersion::new(2).unwrap_or_else(|| unreachable!("nonzero literal"))
 }
-fn function(n: u8) -> lash_vocabulary::names::FunctionId {
-    lash_vocabulary::names::FunctionId::from_bytes([n; 32])
+fn function(n: u8) -> lash_kernel_value::names::FunctionId {
+    lash_kernel_value::names::FunctionId::from_bytes([n; 32])
 }
 
 async fn node(
@@ -350,12 +353,13 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     use crate::resolutions::*;
     use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
     use lash_core_store::tool_surface::{OperationRoute, RouteSource};
-    use lash_vocabulary::{
-        ToolDefinition,
-        claims::{ClaimRequirements, RegistryKind},
-        names::{ImportSlot, OperationUse, QualifiedName},
-        package::{LinkId, OperationMode},
-        providers::{ToolProviderHandle, ToolProviderKey},
+    use {
+        lash_kernel_value::names::ImportSlot, lash_kernel_value::names::OperationUse,
+        lash_kernel_value::names::QualifiedName, lash_kernel_value::package::LinkId,
+        lash_kernel_value::package::OperationMode, lash_vocabulary::ToolDefinition,
+        lash_vocabulary::claims::ClaimRequirements, lash_vocabulary::claims::RegistryKind,
+        lash_vocabulary::providers::ToolProviderHandle,
+        lash_vocabulary::providers::ToolProviderKey,
     };
     let writer = node(store, "resolution-owner", NodeCapabilities::default()).await?;
     let actor =
@@ -372,9 +376,9 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         slot: ImportSlot(3),
     };
     let requested = QualifiedName {
-        package: lash_vocabulary::names::PackagePath::parse("wip")
+        package: lash_kernel_value::names::PackagePath::parse("wip")
             .map_err(|error| LawBroken(format!("{error}")))?,
-        member: lash_vocabulary::names::Segment::new("lookup")
+        member: lash_kernel_value::names::Segment::new("lookup")
             .map_err(|error| LawBroken(format!("{error}")))?,
         type_member: None,
     };
@@ -771,7 +775,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
 pub async fn a_publication_retains_its_complete_content_dag(
     packages: &dyn crate::packages::PackageStore,
     storage: &dyn crate::packages::PackageStorage,
-    document: lash_vocabulary::names::DocumentId,
+    document: lash_kernel_value::names::DocumentId,
     configured: lash_core_store::artifact_referrer::ReferrerClaim,
     child: lash_core_store::artifact_referrer::ReferrerClaim,
     catalog: &dyn lash_core_store::store::SessionCatalogStore,
@@ -781,7 +785,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
         ResolvedArtifactCleanup,
     };
     use lash_core_store::packages::*;
-    use lash_vocabulary::{names::*, package::*};
+    use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
     let missing = storage
         .hold_package_batch(
             &configured,
@@ -826,12 +830,12 @@ pub async fn a_publication_retains_its_complete_content_dag(
         link,
     };
     packages.put_link(&configured, &link, &[]).await?;
-    let path: PackagePath = lash_vocabulary::names::PackagePath::parse("law")
+    let path: PackagePath = lash_kernel_value::names::PackagePath::parse("law")
         .map_err(|error| LawBroken(format!("{error}")))?;
-    let name: Segment = lash_vocabulary::names::Segment::new("run")
+    let name: Segment = lash_kernel_value::names::Segment::new("run")
         .map_err(|error| LawBroken(format!("{error}")))?;
     let inner_package = Package {
-        path: lash_vocabulary::names::PackagePath::parse("law.inner")
+        path: lash_kernel_value::names::PackagePath::parse("law.inner")
             .map_err(|error| LawBroken(format!("{error}")))?,
         members: [(
             name.clone(),
@@ -858,7 +862,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
             domain: PublicationDomain("law".into()),
             scope: PublicationScope::Host,
             publisher: PublisherInstance("configured".into()),
-            root: lash_vocabulary::names::Segment::new("law")
+            root: lash_kernel_value::names::Segment::new("law")
                 .map_err(|error| LawBroken(format!("{error}")))?,
         },
         path: inner_package.package.path.clone(),
@@ -929,7 +933,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
             domain: PublicationDomain("law".into()),
             scope: PublicationScope::Host,
             publisher: PublisherInstance("configured".into()),
-            root: lash_vocabulary::names::Segment::new("law")
+            root: lash_kernel_value::names::Segment::new("law")
                 .map_err(|error| LawBroken(format!("{error}")))?,
         },
         path,

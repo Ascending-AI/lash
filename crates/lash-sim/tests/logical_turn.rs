@@ -1,5 +1,5 @@
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -88,7 +88,7 @@ fn switch_tool_definition() -> ToolDefinition {
         "tools.switch_frame",
         "Switch to the seeded follow-on frame.",
         ToolDefinition::default_input_schema(),
-        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+        lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
@@ -355,7 +355,7 @@ impl BoundedSwitchTools {
             format!("terminal.tool{index}"),
             "Switch to the next frame in the bounded chain.",
             ToolDefinition::default_input_schema(),
-            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
+            lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
@@ -837,7 +837,7 @@ await local_actions.continueAs({
 /// that verb to report.
 async fn created_session(
     core: &lash::LashCore,
-    session_id: impl Into<lash_vocabulary::identity::SessionId>,
+    session_id: impl Into<lash_kernel_value::identity::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core

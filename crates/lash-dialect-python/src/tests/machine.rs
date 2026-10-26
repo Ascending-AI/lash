@@ -11,13 +11,16 @@ use std::sync::{Arc, OnceLock};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum};
 
-use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
+use lash_kernel_state::semantic::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
     RunError, Step, WaitId,
 };
-use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
+use {
+    lash_kernel_value::EffectName, lash_kernel_value::Name, lash_kernel_value::Param,
+    lash_kernel_value::Signature, lash_kernel_value::Type,
+};
 
 use super::pages::{self, Session};
 
@@ -31,10 +34,9 @@ pub(super) struct Installed {
 pub(super) fn installed() -> &'static Installed {
     static INSTALLED: OnceLock<Installed> = OnceLock::new();
     INSTALLED.get_or_init(|| {
-        let embedding =
-            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
-        let registry = Arc::clone(embedding.registry().expect("installed natives"));
-        let roots = lash_vm_releases::helper_release()
+        let registry =
+            Arc::new(lash_kernel_conformance::installed_functions().expect("installed natives"));
+        let roots = lash_kernel_releases::helper_release()
             .expect("helper release")
             .resolver_roots();
         let library =
@@ -43,7 +45,7 @@ pub(super) fn installed() -> &'static Installed {
             prepared: PreparedLibrary::with_helpers(
                 registry,
                 Arc::clone(
-                    &lash_vm_releases::helper_release()
+                    &lash_kernel_releases::helper_release()
                         .expect("build helpers")
                         .helpers,
                 ),
@@ -100,18 +102,18 @@ fn lower_with(
 /// The laws' turn-ending tool: `control.finish(x)` ends the turn with `x`,
 /// where a law's host offers it.
 pub(crate) fn controls() -> &'static std::collections::BTreeMap<
-    lash_vocabulary::EffectName,
+    lash_kernel_value::EffectName,
     std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
 > {
     static CONTROLS: std::sync::OnceLock<
         std::collections::BTreeMap<
-            lash_vocabulary::EffectName,
+            lash_kernel_value::EffectName,
             std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
         >,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         std::collections::BTreeMap::from([(
-            lash_vocabulary::EffectName::new("control.finish").expect("a tool's name"),
+            lash_kernel_value::EffectName::new("control.finish").expect("a tool's name"),
             std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )])
     })
@@ -174,10 +176,10 @@ pub(crate) fn calls_helper(source: &str, helper: &str) -> bool {
     let mut pending = document
         .units()
         .filter(|(unit, _)| match unit {
-            lash_vocabulary::sites::Unit::Library(id) => {
+            lash_kernel_value::sites::Unit::Library(id) => {
                 lash_kernel_doc::FunctionCatalog::header(library(), id).is_none()
             }
-            lash_vocabulary::sites::Unit::Main => true,
+            lash_kernel_value::sites::Unit::Main => true,
             _ => false,
         })
         .map(|(_, body)| Node::Block(body))
@@ -220,10 +222,10 @@ struct Console {
 impl Host for Console {
     fn perform(
         &mut self,
-        use_: &lash_vocabulary::OperationUse,
+        use_: &lash_kernel_value::OperationUse,
         _: &[Datum],
-        _: &lash_vocabulary::sites::PositionLabel,
-        _: &lash_vocabulary::sites::Site,
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
         crate::tests::linked::read(use_, 0)
     }
@@ -615,19 +617,19 @@ pub(super) fn callable_result(
         .imports
         .iter()
         .map(|(slot, import)| {
-            let lash_vocabulary::ImportKind::Operation { signature } = &import.kind else {
+            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
                 panic!("law operation")
             };
             (
                 *slot,
-                lash_vocabulary::Fill::Operation(lash_vocabulary::OperationRequirement::new(
+                lash_kernel_value::Fill::Operation(lash_kernel_value::OperationRequirement::new(
                     signature.clone(),
-                    lash_vocabulary::ContractId::new("fixture"),
+                    lash_kernel_value::ContractId::new("fixture"),
                 )),
             )
         })
         .collect();
-    let link = lash_vocabulary::Link {
+    let link = lash_kernel_value::Link {
         document: document.identity(),
         fills,
     };
@@ -917,10 +919,10 @@ fn execution_observation_with_layout(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
-    layout: lash_kernel_vm::kernel_internals::Layout,
+    layout: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> ExecutionObservation {
     let session = Session::default();
-    let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
+    let mut machine = lash_kernel_vm::testing::start(
         program.clone(),
         bounds,
         lash_kernel_vm::CellStart {
@@ -944,7 +946,7 @@ fn execution_observation_with_layout(
         if let Step::Ended(mut end) = step {
             let carry = match &mut end {
                 End::Finished(finished) => finished.carry.take().map(|root| {
-                    conformance::session(&root, Box::new(session.source.clone()))
+                    semantic::session(&root, Box::new(session.source.clone()))
                         .expect("the carried graph is readable")
                 }),
                 _ => None,
@@ -959,10 +961,10 @@ fn execution_observation_with_layout(
         }
         if rebuild {
             let sealed = machine.checkpoint().unwrap();
-            machine = lash_kernel_vm::kernel_internals::open_with_layout(
+            machine = lash_kernel_vm::testing::open(
                 program.clone(),
                 bounds,
-                lash_kernel_state::kernel_internals::checkpoint_root(&sealed.checkpoint()),
+                &sealed.checkpoint(),
                 Box::new(session.source.clone()),
                 layout,
             )
@@ -992,7 +994,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         .iter()
         .map(|name| library().resolve(name).unwrap())
         .collect();
-    let roots = lash_vm_releases::helper_release()
+    let roots = lash_kernel_releases::helper_release()
         .expect("helper release")
         .resolver_roots();
     let mut previous =
@@ -1803,7 +1805,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 /// every bound.
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
-    use lash_kernel_vm::kernel_internals::{Layout, in_layout};
+    use lash_kernel_vm::testing::{ExecutionStrategy, library};
     let source = r#"
 async def build():
     parts = []
@@ -1820,18 +1822,23 @@ await build()
     let program = |layout| {
         crate::tests::linked::program(
             Arc::clone(lowered.document.shared()),
-            in_layout(&installed().prepared, layout),
+            library(&installed().prepared, layout),
         )
     };
-    let on = program(Layout(0));
-    let bodies = program(Layout(3));
-    let reference = execution_observation_with_layout(bodies.clone(), BOUNDS, false, Layout(3));
+    let on = program(ExecutionStrategy::Optimized);
+    let bodies = program(ExecutionStrategy::Interpreted);
+    let reference = execution_observation_with_layout(
+        bodies.clone(),
+        BOUNDS,
+        false,
+        ExecutionStrategy::Interpreted,
+    );
     assert_eq!(
-        execution_observation_with_layout(on.clone(), BOUNDS, false, Layout(0)),
+        execution_observation_with_layout(on.clone(), BOUNDS, false, ExecutionStrategy::Optimized),
         reference
     );
     assert_eq!(
-        execution_observation_with_layout(on.clone(), BOUNDS, true, Layout(0)),
+        execution_observation_with_layout(on.clone(), BOUNDS, true, ExecutionStrategy::Optimized),
         reference
     );
     for charge_limit in 0..=reference.charged {
@@ -1840,8 +1847,18 @@ await build()
             ..BOUNDS
         };
         assert_eq!(
-            execution_observation_with_layout(on.clone(), bounds, false, Layout(0)),
-            execution_observation_with_layout(bodies.clone(), bounds, false, Layout(3)),
+            execution_observation_with_layout(
+                on.clone(),
+                bounds,
+                false,
+                ExecutionStrategy::Optimized
+            ),
+            execution_observation_with_layout(
+                bodies.clone(),
+                bounds,
+                false,
+                ExecutionStrategy::Interpreted
+            ),
             "bound {charge_limit}"
         );
     }

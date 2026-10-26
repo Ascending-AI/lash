@@ -23,17 +23,17 @@ use async_trait::async_trait;
 use crate::ToolCall;
 use crate::ToolOutcome;
 use crate::ToolProvider;
-use lash_vocabulary::json_schema::JsonSchema;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::json_schema::JsonSchema;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
+use lash_kernel_value::tool_declaration::TurnControls;
 use lash_vocabulary::tool_contract::ToolContract;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use lash_vocabulary::tool_contract::ToolManifest;
-use lash_vocabulary::tool_declaration::TurnControls;
 
 /// The id [`finish_tool`] gives the tool performed as `operation`.
 #[must_use]
 pub fn finish_tool_id(
-    operation: &lash_vocabulary::names::QualifiedOperation,
+    operation: &lash_kernel_value::names::QualifiedOperation,
 ) -> lash_vocabulary::tool_contract::ToolId {
     lash_vocabulary::tool_contract::ToolId::from(format!("tool:{}", operation.effect_name()))
 }
@@ -158,7 +158,7 @@ pub fn suppress_default_finish(
             && tool
                 .declaration()
                 .controls
-                .contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
+                .contains(lash_kernel_value::tool_declaration::TurnControlKind::Finish)
     });
     if host_finish {
         crate::plugin::ToolCatalogContribution::remove_tools([default_tool.operation.clone()])

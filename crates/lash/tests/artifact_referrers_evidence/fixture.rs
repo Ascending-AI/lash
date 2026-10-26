@@ -115,7 +115,7 @@ impl Fixture {
                 continue;
             };
             let id = id
-                .parse::<lash_vocabulary::LinkId>()
+                .parse::<lash_kernel_value::LinkId>()
                 .expect("canonical Link identity");
             let record = packages
                 .link(&id)

@@ -325,14 +325,14 @@ impl From<lash_protocol_types::EffectIdentityError> for RuntimeEffectControllerE
 
 /// Blank text offered as an identity is the store's refusal of it, with the
 /// class the store gives that refusal.
-impl From<lash_vocabulary::identity::BlankIdentity> for RuntimeError {
-    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
+impl From<lash_kernel_value::identity::BlankIdentity> for RuntimeError {
+    fn from(error: lash_kernel_value::identity::BlankIdentity) -> Self {
         crate::StoreError::from(error).runtime_error()
     }
 }
 
-impl From<lash_vocabulary::identity::BlankIdentity> for RuntimeEffectControllerError {
-    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
+impl From<lash_kernel_value::identity::BlankIdentity> for RuntimeEffectControllerError {
+    fn from(error: lash_kernel_value::identity::BlankIdentity) -> Self {
         crate::StoreError::from(error).into()
     }
 }

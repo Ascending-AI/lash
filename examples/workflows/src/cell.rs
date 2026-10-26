@@ -69,7 +69,7 @@ const BOUNDS: Bounds = Bounds {
 
 fn machine(
     content: &lash_kernel_package::LinkedContent,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     library: PreparedLibrary,
     target: Target,
     args: Vec<k::Datum>,
@@ -156,7 +156,7 @@ fn render_datum(
             value.check(
                 registry,
                 k::FunctionValueLimits::standard(),
-                lash_vocabulary::KernelDataLimits::standard(),
+                lash_kernel_value::KernelDataLimits::standard(),
             )?;
             writeln!(
                 text,
@@ -228,8 +228,8 @@ mod tests {
             .map(|definition| {
                 (
                     definition.operation().effect_name(),
-                    lash_vocabulary::OperationRequirement::new(
-                        lash_vocabulary::json_schema::tool_signature(
+                    lash_kernel_value::OperationRequirement::new(
+                        lash_kernel_value::json_schema::tool_signature(
                             &definition.contract.input_schema.canonical,
                             &definition.contract.output_schema.canonical,
                         ),

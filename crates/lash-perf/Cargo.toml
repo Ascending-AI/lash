@@ -62,6 +62,7 @@ required-features = ["default"]
 workspace = true
 
 [dependencies]
+lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-execution-contracts = { workspace = true }
@@ -73,7 +74,7 @@ lash-kernel-state.workspace = true
 lash-dialect-typescript.workspace = true
 lash-dialect-python.workspace = true
 lash-kernel-dialect.workspace = true
-lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-sansio = { workspace = true, features = ["testing"] }
 lash-protocol-types = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }

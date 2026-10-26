@@ -76,7 +76,7 @@ fn id(owner: &str, local: &str) -> PromptSectionId {
 fn cut(namespaces: BTreeMap<String, CommittedPluginNamespace>) -> PromptCut {
     PromptCut::new(PromptCutParts {
         call: PromptCall {
-            session_id: lash_vocabulary::identity::SessionId::from("prompt-laws"),
+            session_id: lash_kernel_value::identity::SessionId::from("prompt-laws"),
             frame: None,
             run: None,
             turn: None,
@@ -397,7 +397,7 @@ fn a_renderer_reads_one_namespace_generation() {
         }
     }
     let owner = lash_vocabulary::identity::RuntimeOwner::Session(
-        lash_vocabulary::identity::SessionId::from("prompt-laws"),
+        lash_kernel_value::identity::SessionId::from("prompt-laws"),
     );
     let view = crate::plugin::PluginStateView::bind(&owner, "mem", Arc::clone(&registry));
     let neighbor = crate::plugin::PluginStateView::bind(&owner, "neighbor", Arc::clone(&registry));

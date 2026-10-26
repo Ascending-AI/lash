@@ -300,7 +300,7 @@ impl RuntimeCommit {
     /// manifest: a head whose bare commit exceeds the budget refuses every
     /// write, a session command's settlement included.
     pub(super) fn validate_created_head_budget(
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
         config: crate::PersistedSessionConfig,
         commit_budget: CommitBudget,
         fleet_format: super::FleetFormat,
@@ -310,7 +310,7 @@ impl RuntimeCommit {
     }
 
     fn created_head_budget_probe(
-        session_id: &lash_vocabulary::identity::SessionId,
+        session_id: &lash_kernel_value::identity::SessionId,
         config: crate::PersistedSessionConfig,
         commit_budget: CommitBudget,
         fleet_format: super::FleetFormat,
@@ -433,7 +433,7 @@ impl RuntimeCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     #[test]
     fn adopted_intent_rows_count_against_the_node_budget() {

@@ -279,8 +279,8 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         revision: lash_core_store::environment::SourceRevision,
         config: &OwnerConfigView,
         namespace: Option<(
-            &lash_vocabulary::package::PublicationDomain,
-            &lash_vocabulary::package::PublicationScope,
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, PluginError> {
         self.counts
@@ -335,7 +335,7 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         self.counts.entered(&self.callback);
         self.inner.execute(call).await
     }
-    fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
         self.counts
             .provider_entered(&self.callback, "readable_binding_formats");
         self.inner.readable_binding_formats()
@@ -344,7 +344,10 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
         &self,
         manifest: &ToolManifest,
         config: &OwnerConfigView,
-    ) -> Option<(lash_vocabulary::providers::FormatVersion, serde_json::Value)> {
+    ) -> Option<(
+        lash_kernel_value::providers::FormatVersion,
+        serde_json::Value,
+    )> {
         self.counts.provider_entered(&self.callback, "link_payload");
         self.inner.link_payload(manifest, config)
     }
@@ -389,7 +392,7 @@ struct CountedPackageResolver {
 impl crate::plugin::packages::DeferredPackageProvider for CountedPackageResolver {
     fn validate_grant(
         &self,
-        grant: &lash_vocabulary::package::DeferredGrant,
+        grant: &lash_kernel_value::package::DeferredGrant,
         registry: RegistryKind,
     ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
         self.inner.validate_grant(grant, registry)
@@ -397,8 +400,8 @@ impl crate::plugin::packages::DeferredPackageProvider for CountedPackageResolver
     async fn resolve(
         &self,
         cx: &crate::DeferredResolveContext<'_>,
-        grant: &lash_vocabulary::package::DeferredGrant,
-        requested: &lash_vocabulary::names::QualifiedName,
+        grant: &lash_kernel_value::package::DeferredGrant,
+        requested: &lash_kernel_value::names::QualifiedName,
     ) -> Result<crate::plugin::packages::DeferredAnswer, crate::plugin::packages::ResolverFault>
     {
         *self
@@ -440,8 +443,8 @@ impl packages::PackageProvider for CountedPackageProvider {
     fn environment_snapshot(
         &self,
         config: &OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &ToolProviderHandle,
         observation: (
             lash_core_store::environment::SourceId,
@@ -480,8 +483,8 @@ impl packages::PackageProvider for CountedPackageProvider {
     fn environment_fragment(
         &self,
         config: &OwnerConfigView,
-        domain: &lash_vocabulary::package::PublicationDomain,
-        scope: &lash_vocabulary::package::PublicationScope,
+        domain: &lash_kernel_value::package::PublicationDomain,
+        scope: &lash_kernel_value::package::PublicationScope,
         key: &ToolProviderHandle,
         tools: Option<&[crate::SurfaceEntry]>,
     ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
@@ -493,14 +496,14 @@ impl packages::PackageProvider for CountedPackageProvider {
     fn roots(
         &self,
         config: &OwnerConfigView,
-    ) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
         self.counts.provider_entered(&self.callback, "roots");
         self.inner.roots(config)
     }
     fn advertise(
         &self,
         config: &OwnerConfigView,
-        context: &lash_vocabulary::package::PublicationContext,
+        context: &lash_kernel_value::package::PublicationContext,
     ) -> Result<Vec<packages::PackageContribution>, PluginError> {
         self.counts.provider_entered(&self.callback, "advertise");
         self.inner.advertise(config, context)
@@ -508,7 +511,7 @@ impl packages::PackageProvider for CountedPackageProvider {
     async fn hold(
         &self,
         claim: &lash_core_store::artifact_referrer::ReferrerClaim,
-        advertisements: &[&lash_vocabulary::package::PackageAdvertisement],
+        advertisements: &[&lash_kernel_value::package::PackageAdvertisement],
     ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
         self.counts.provider_entered(&self.callback, "hold");
         self.inner.hold(claim, advertisements).await

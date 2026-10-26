@@ -19,7 +19,7 @@ use crate::plugin::prompt::{
     PromptWrapTarget, SectionText, admission_record, load_admitted_call, load_prompt_snapshot,
 };
 use crate::testing::prompt::{ComposedPrompt, PromptCut, PromptCutParts, compose, namespace};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const SESSION: &str = "prompt-snapshot";
 

@@ -68,7 +68,7 @@ impl Constructor {
     pub fn build(
         self,
         mut args: Vec<Expr>,
-        helper: impl FnOnce(&str) -> Option<lash_vocabulary::FunctionId>,
+        helper: impl FnOnce(&str) -> Option<lash_kernel_value::FunctionId>,
     ) -> Result<Expr, String> {
         match self {
             Self::Native(name, arity) => {

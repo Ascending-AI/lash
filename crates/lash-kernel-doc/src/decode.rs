@@ -6,7 +6,7 @@ use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::{Datum, ErrorDatum, Float, Integer, NumberPolicy, NumberToken};
-use lash_vocabulary::types::Type;
+use lash_kernel_value::types::Type;
 
 /// How an inbound datum is read.
 pub struct Decoder<'a> {
@@ -15,7 +15,7 @@ pub struct Decoder<'a> {
     /// How a bare number decodes.
     pub policy: NumberPolicy,
     /// Whether the document declares a function of this name.
-    pub declared: &'a dyn Fn(&lash_vocabulary::names::CallableId) -> bool,
+    pub declared: &'a dyn Fn(&lash_kernel_value::names::CallableId) -> bool,
 }
 
 /// Decoding refuses a value mismatch separately from a configured depth limit
@@ -34,19 +34,19 @@ pub struct Decoder<'a> {
 pub enum DecodeRefusal {
     #[error("{mismatch}")]
     Type {
-        mismatch: lash_vocabulary::TypeMismatch,
+        mismatch: lash_kernel_value::TypeMismatch,
     },
     #[error("value exceeds the configured {limit}-level depth")]
     DepthLimit { limit: usize },
     #[error("the callable is not declared: {callable:?}")]
     UndeclaredFunction {
-        callable: lash_vocabulary::CallableId,
+        callable: lash_kernel_value::CallableId,
     },
 }
 impl DecodeRefusal {
     pub fn mismatch(ty: &Type, datum: &Datum) -> Self {
         Self::Type {
-            mismatch: lash_vocabulary::TypeMismatch::new(ty.clone(), datum_type(datum)),
+            mismatch: lash_kernel_value::TypeMismatch::new(ty.clone(), datum_type(datum)),
         }
     }
     pub fn within(self, segment: &str) -> Self {
@@ -79,18 +79,18 @@ pub fn datum_type(datum: &Datum) -> Type {
         Datum::Timestamp(_) => Type::Timestamp,
         Datum::Tuple(items) => Type::Tuple(vec![Type::Any; items.len().min(64)]),
         Datum::List(_) => Type::List(Box::new(Type::Any)),
-        Datum::Map(_) => Type::Map(Box::new(lash_vocabulary::MapType {
+        Datum::Map(_) => Type::Map(Box::new(lash_kernel_value::MapType {
             key: Type::Any,
             value: Type::Any,
         })),
         Datum::Set(_) => Type::Set(Box::new(Type::Any)),
-        Datum::Record(_) => Type::Record(lash_vocabulary::RecordType {
+        Datum::Record(_) => Type::Record(lash_kernel_value::RecordType {
             fields: vec![],
-            rest: lash_vocabulary::RecordRest::Keep(Box::new(Type::Any)),
+            rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Any)),
         }),
         Datum::Error(_) => Type::Error,
         Datum::Function(_) | Datum::FunctionValue(_) => {
-            Type::Function(Box::new(lash_vocabulary::Signature {
+            Type::Function(Box::new(lash_kernel_value::Signature {
                 params: vec![],
                 result: Type::Any,
             }))
@@ -306,9 +306,9 @@ impl Decoder<'_> {
                     let declared = record.fields.iter().find(|field| field.name == *name);
                     let ty = match (declared, &record.rest) {
                         (Some(field), _) => &field.ty,
-                        (None, lash_vocabulary::RecordRest::Keep(rest)) => rest.as_ref(),
-                        (None, lash_vocabulary::RecordRest::Drop) => continue,
-                        (None, lash_vocabulary::RecordRest::Closed) => {
+                        (None, lash_kernel_value::RecordRest::Keep(rest)) => rest.as_ref(),
+                        (None, lash_kernel_value::RecordRest::Drop) => continue,
+                        (None, lash_kernel_value::RecordRest::Closed) => {
                             return Err(DecodeRefusal::mismatch(&Type::Absent, value).within(name));
                         }
                     };
@@ -393,7 +393,7 @@ impl Decoder<'_> {
         }
     }
 
-    fn function(&self, name: &lash_vocabulary::names::CallableId, datum: &Datum) -> Fit {
+    fn function(&self, name: &lash_kernel_value::names::CallableId, datum: &Datum) -> Fit {
         if (self.declared)(name) {
             Ok(datum.clone())
         } else {

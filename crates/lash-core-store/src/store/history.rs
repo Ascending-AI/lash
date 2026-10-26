@@ -15,8 +15,8 @@ use crate::PersistedSessionConfig;
 use crate::SessionGraph;
 use crate::SessionNodeRecord;
 use crate::TurnFailureSettlement;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::NodeId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// Which head a window read resolves its leaf from.

@@ -12,9 +12,9 @@ use lash_core::{
     ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessSequence,
     SessionCursor, SessionObservationEvent, SessionRevision,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 
 use super::super::Meter;

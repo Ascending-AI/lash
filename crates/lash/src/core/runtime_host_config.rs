@@ -539,7 +539,7 @@ mod pacing_laws {
             .observer_pacing(pacing)
             .build(crate::tests::host::runtime_lease_owner())
             .expect("core");
-        let id = lash_vocabulary::identity::SessionId::from("pacing-binding");
+        let id = lash_kernel_value::identity::SessionId::from("pacing-binding");
         let durable = core
             .session(id.clone())
             .create(crate::SessionCreation::root(
@@ -622,7 +622,7 @@ mod pacing_laws {
             .attachment_reclamation_retry(retry)
             .build(crate::tests::host::runtime_lease_owner())
             .expect("core");
-        let id = lash_vocabulary::identity::SessionId::from("retry-fence");
+        let id = lash_kernel_value::identity::SessionId::from("retry-fence");
         core.session(id.clone())
             .create(crate::SessionCreation::root(
                 crate::tests::mock_session_spec(),

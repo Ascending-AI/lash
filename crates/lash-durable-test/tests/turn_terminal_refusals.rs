@@ -91,7 +91,7 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         // refuse partial terminals and a kind that disagrees with its cause.
         sqlx::raw_sql("ALTER TABLE lash_session_runs DROP CONSTRAINT ck_session_runs_terminal, DROP CONSTRAINT ck_session_runs_terminal_kind; DELETE FROM lash_session_runs")
             .execute(&pool).await.unwrap();
-        let session = lash_vocabulary::identity::SessionId::try_from("s".to_owned()).unwrap();
+        let session = lash_kernel_value::identity::SessionId::try_from("s".to_owned()).unwrap();
         let run = lash_vocabulary::identity::TurnId::try_from("r".to_owned()).unwrap();
         for bits in 0..8 {
             sqlx::query("DELETE FROM lash_session_runs")

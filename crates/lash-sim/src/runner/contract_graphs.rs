@@ -3,7 +3,7 @@
 //! proof states about them.
 
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// One execution a contract core observed: what it did, and the workflow
 /// document it ran when lash still answers it.
@@ -205,7 +205,7 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
 fn contract_document_effect<'a>(
     document: &'a lash::workflow::WorkflowDocument,
     site: &lash::workflow::document::PositionLabel,
-) -> Option<&'a lash_vocabulary::names::QualifiedName> {
+) -> Option<&'a lash_kernel_value::names::QualifiedName> {
     use lash::workflow::graph::{ActNode, ActionNode, ExprNode, NodeKind};
 
     match &document

@@ -89,7 +89,7 @@ async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
         .await
         .expect("open")
         .with_fleet_format_for_testing(fleet);
-    let session_id = lash_vocabulary::identity::SessionId::from("fleet-stamped-session");
+    let session_id = lash_kernel_value::identity::SessionId::from("fleet-stamped-session");
     store
         .admit_session(
             &lash_core::testing::store_fixtures::session_request_from_meta_for_test(

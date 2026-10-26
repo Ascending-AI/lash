@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lash_execution_contracts::process::{EngineEffectReads, EngineReadError};
-use lash_vocabulary::names::OperationUse;
+use lash_kernel_value::names::OperationUse;
 use tokio_util::sync::CancellationToken;
 
 use super::{OwnerConfigView, PluginError, ProcessComposition, ProcessEnv};

@@ -5,13 +5,13 @@ use crate::SourceLanguage;
 use crate::SourceMap;
 use crate::SourceSite;
 use crate::Survivor;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::tokens::CodecVariant;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::tokens::CodecVariant;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 
 impl TokenCodec for SourceLanguage {
     fn encode(&self, out: &mut TokenWriter) {
@@ -40,7 +40,7 @@ impl TokenCodec for SourceSite {
             site: Site::decode(input)?,
             ranges: Vec::decode(input)?,
             implicit: Option::<u64>::decode(input)?
-                .map(lash_vocabulary::tokens::checked_usize)
+                .map(lash_kernel_value::tokens::checked_usize)
                 .transpose()?,
         })
     }

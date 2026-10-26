@@ -81,14 +81,14 @@ pub(super) struct InFlight {
     pub(super) request: StepRequest,
     pub(super) target: Option<crate::runtime::process::steps::InvocationTarget>,
     /// The operation name its admission captured, independent of live providers.
-    pub(super) operation: Option<lash_vocabulary::names::QualifiedOperation>,
+    pub(super) operation: Option<lash_kernel_value::names::QualifiedOperation>,
     /// Whether it is the resolution of a granted tool's call (P6): its
     /// committed outcome is the match lash consumes, never the engine's
     /// answer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) resolves: bool,
     /// The policy its admission pinned.
-    pub(super) policy: lash_vocabulary::tool_contract::ExecutionPolicy,
+    pub(super) policy: lash_kernel_value::tool_contract::ExecutionPolicy,
     /// Its limit's expiry, as admitted: never refreshed.
     pub(super) limit_expires_at: u64,
     /// Its limit's longest slice in milliseconds, as admitted.
@@ -127,7 +127,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// Another process's terminal.
     Process {
@@ -137,7 +137,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// A durable instant.
     Sleep {
@@ -145,7 +145,7 @@ pub(super) enum Blocked {
         until: i64,
         /// The node that sleeps, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_vocabulary::sites::EffectId>,
+        site: Option<lash_kernel_value::sites::EffectId>,
     },
     /// Nothing but its mailbox.
     Idle,

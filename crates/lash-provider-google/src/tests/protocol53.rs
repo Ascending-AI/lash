@@ -14,7 +14,7 @@ fn projected_contract() -> SchemaContract {
         .expect("valid declared schema")
         .with_override(
             SchemaDialect::GoogleSchema,
-            lash_vocabulary::json_schema::JsonSchema::admit(
+            lash_kernel_value::json_schema::JsonSchema::admit(
                 json!({"type":"object","properties":{"projected":{"type":"string"}}}),
             )
             .expect("valid declared projection schema"),

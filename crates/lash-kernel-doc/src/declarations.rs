@@ -14,8 +14,8 @@ use crate::Document;
 use crate::FunctionCatalog;
 use crate::FunctionDeclarations;
 use crate::FunctionDefinition;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::FunctionName;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::FunctionName;
 
 /// Why a set of declarations is not the one a document uses.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -189,7 +189,7 @@ impl CheckedDeclarations {
                 },
                 None => CheckedDeclaration {
                     definition: Arc::new(definition.clone()),
-                    image: Arc::from(lash_vocabulary::tokens::encode_body(definition)),
+                    image: Arc::from(lash_kernel_value::tokens::encode_body(definition)),
                 },
             };
             held.insert(function, declaration);
@@ -216,8 +216,8 @@ impl CheckedDeclarations {
     /// A document lists every function it reaches, so these are its
     /// closure's.
     #[must_use]
-    pub fn requirements(&self, document: &Document) -> lash_vocabulary::claims::NodeRequirements {
-        lash_vocabulary::claims::NodeRequirements {
+    pub fn requirements(&self, document: &Document) -> lash_kernel_value::claims::NodeRequirements {
+        lash_kernel_value::claims::NodeRequirements {
             libraries: Default::default(),
             natives: self
                 .held

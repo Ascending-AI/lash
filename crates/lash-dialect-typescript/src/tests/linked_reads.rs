@@ -1,6 +1,6 @@
 //! Scripted Read modes and answers for linked machine fixtures.
 use super::linked::operation;
-use lash_vocabulary::OperationUse;
+use lash_kernel_value::OperationUse;
 pub(super) fn read(
     use_: &OperationUse,
     bits: u64,

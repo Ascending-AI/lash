@@ -4,7 +4,7 @@
 
 use super::*;
 use lash_kernel_doc::plan::{Collection, FormCharge, Table, TemplateHeap, TemplateMeter};
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 struct Write<'a> {
     arena: &'a Arena,

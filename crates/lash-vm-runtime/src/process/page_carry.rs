@@ -98,7 +98,7 @@ fn refused(detail: impl Into<String>) -> CarryFault {
 /// A carry cold-loads its exact pinned Link DAG.
 pub async fn carry_snapshot(
     documents: &super::KernelDocuments,
-    link: lash_vocabulary::package::LinkId,
+    link: lash_kernel_value::LinkId,
 ) -> Result<lash_kernel_package::LinkedContent, CarryFault> {
     documents
         .load_linked(link)
@@ -115,12 +115,12 @@ impl KernelProcessEngine {
         state: &mut KernelEngineState,
         rewritten: &Rewritten,
         successor: &super::InlineRequest,
-        retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
+        retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
         uses: &lash_execution_contracts::process::UseCorrespondence,
     ) -> Result<
         (
             Vec<EncodedNode>,
-            std::collections::BTreeSet<lash_vocabulary::CallableId>,
+            std::collections::BTreeSet<lash_kernel_value::CallableId>,
         ),
         CarryFault,
     > {
@@ -189,7 +189,7 @@ impl KernelProcessEngine {
         predecessor_code: &super::InlineRequest,
         successor: &super::InlineRequest,
         rewritten: &Rewritten,
-        retained: &std::collections::BTreeSet<lash_vocabulary::CallableId>,
+        retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
         uses: &lash_execution_contracts::process::UseCorrespondence,
     ) -> Result<PreparedCheckpointCarry, CarryFault> {
         let (predecessor, _) = predecessor_code
@@ -287,10 +287,10 @@ impl KernelProcessEngine {
                     if link == predecessor {
                         continue;
                     }
-                    let lash_vocabulary::sites::Unit::Library(function) = unit else {
+                    let lash_kernel_value::sites::Unit::Library(function) = unit else {
                         return Err(refused("foreign frame has no defining callable"));
                     };
-                    predecessor_code.insert(lash_vocabulary::CallableId { link, function });
+                    predecessor_code.insert(lash_kernel_value::CallableId { link, function });
                 }
                 predecessor_code
             }
@@ -459,11 +459,8 @@ pub async fn carry_parked_checkpoint(
             lash_kernel_state::paged::checkpoint_code(&checkpoint, Box::new(source.clone()))?;
         for (link, unit) in &live.frames {
             match unit {
-                lash_vocabulary::sites::Unit::Main
-                    if *link
-                        == lash_kernel_state::kernel_internals::checkpoint_root(&checkpoint)
-                            .link => {}
-                lash_vocabulary::sites::Unit::Library(function) => {
+                lash_kernel_value::sites::Unit::Main if *link == checkpoint.header().link => {}
+                lash_kernel_value::sites::Unit::Library(function) => {
                     check_origin(*link, *function, &context, &program)?;
                 }
                 _ => return Err(refused("foreign frame has no authenticated defining code")),
@@ -489,8 +486,8 @@ pub async fn carry_parked_checkpoint(
                 || !matches!(
                     old,
                     Some(
-                        lash_vocabulary::package::Fill::Operation(_)
-                            | lash_vocabulary::package::Fill::Deferred { .. }
+                        lash_kernel_value::package::Fill::Operation(_)
+                            | lash_kernel_value::package::Fill::Deferred { .. }
                     )
                 )
             {
@@ -548,7 +545,7 @@ pub async fn carry_parked_checkpoint(
         }
         let rewritten = qualify_correspondence(
             rewritten,
-            lash_kernel_state::kernel_internals::checkpoint_root(&checkpoint).link,
+            checkpoint.header().link,
             &context.links,
             &documents
                 .iter()
@@ -625,7 +622,7 @@ fn carry_helper_refusal(error: lash_kernel_state::paged::HelperCompatibilityErro
 
 fn carried_reach(
     content: &lash_kernel_package::LinkedContent,
-    callable: lash_vocabulary::CallableId,
+    callable: lash_kernel_value::CallableId,
     selection: &lash_kernel_doc::Selection,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> Result<lash_kernel_package::LinkedReach, lash_kernel_package::LinkRefusal> {
@@ -647,11 +644,11 @@ fn carried_reach(
 fn carried_selection(
     prior: &lash_kernel_doc::Selection,
     selected: &BTreeMap<
-        lash_vocabulary::LinkId,
-        std::collections::BTreeSet<lash_vocabulary::FunctionId>,
+        lash_kernel_value::LinkId,
+        std::collections::BTreeSet<lash_kernel_value::FunctionId>,
     >,
-    predecessor: lash_vocabulary::LinkId,
-    successor: lash_vocabulary::LinkId,
+    predecessor: lash_kernel_value::LinkId,
+    successor: lash_kernel_value::LinkId,
     helpers: &lash_kernel_doc::BuildHelpers,
 ) -> lash_kernel_doc::Selection {
     let lash_kernel_doc::Selection::Restored(prior) = prior else {
@@ -660,7 +657,7 @@ fn carried_selection(
     let mut restored = prior.clone();
     for (link, functions) in selected {
         for function in functions {
-            restored.live.insert(lash_vocabulary::CallableId {
+            restored.live.insert(lash_kernel_value::CallableId {
                 link: *link,
                 function: *function,
             });
@@ -676,7 +673,7 @@ fn carried_selection(
             .filter(|callable| {
                 callable.link == predecessor && prior.pins.contains(&callable.function)
             })
-            .map(|callable| lash_vocabulary::CallableId {
+            .map(|callable| lash_kernel_value::CallableId {
                 link: successor,
                 function: callable.function,
             }),
@@ -688,12 +685,12 @@ fn carried_selection(
 /// each defining document; the root rewrite alone authorizes moving its sites.
 pub fn qualify_correspondence(
     mut rewritten: Rewritten,
-    predecessor: lash_vocabulary::LinkId,
-    links: &BTreeMap<lash_vocabulary::LinkId, lash_vocabulary::package::Link>,
-    documents: &BTreeMap<lash_vocabulary::LinkId, lash_kernel_doc::Document>,
+    predecessor: lash_kernel_value::LinkId,
+    links: &BTreeMap<lash_kernel_value::LinkId, lash_kernel_value::package::Link>,
+    documents: &BTreeMap<lash_kernel_value::LinkId, lash_kernel_doc::Document>,
     code: &BTreeMap<
-        lash_vocabulary::LinkId,
-        std::collections::BTreeSet<lash_vocabulary::FunctionId>,
+        lash_kernel_value::LinkId,
+        std::collections::BTreeSet<lash_kernel_value::FunctionId>,
     >,
 ) -> Result<Rewritten, CarryFault> {
     let prior = links
@@ -722,7 +719,7 @@ pub fn qualify_correspondence(
         let identity = lash_kernel_migrate::unchanged(document, document)
             .map_err(|error| refused(error.to_string()))?;
         for entry in identity.entries() {
-            let lash_vocabulary::sites::Unit::Library(function) = &entry.from.unit else {
+            let lash_kernel_value::sites::Unit::Library(function) = &entry.from.unit else {
                 continue;
             };
             if !code[link].contains(function) {
@@ -747,8 +744,8 @@ pub fn qualify_correspondence(
 }
 
 fn check_origin(
-    link: lash_vocabulary::LinkId,
-    function: lash_vocabulary::FunctionId,
+    link: lash_kernel_value::LinkId,
+    function: lash_kernel_value::FunctionId,
     context: &lash_kernel_migrate::CarryContext,
     program: &lash_kernel_vm::Program,
 ) -> Result<(), CarryFault> {
@@ -766,7 +763,7 @@ fn check_origin(
     {
         return Ok(());
     }
-    let callable = lash_vocabulary::CallableId { link, function };
+    let callable = lash_kernel_value::CallableId { link, function };
     if context
         .selection
         .admits_helper(&callable, &document.library, program.helpers())
@@ -780,8 +777,8 @@ fn check_origin(
 pub struct PreparedCheckpointCarry {
     pub root: NodeId,
     pub nodes: Vec<EncodedNode>,
-    pub retained: std::collections::BTreeSet<lash_vocabulary::CallableId>,
-    pub machine: lash_vocabulary::claims::NodeRequirements,
+    pub retained: std::collections::BTreeSet<lash_kernel_value::CallableId>,
+    pub machine: lash_kernel_value::claims::NodeRequirements,
 }
 
 #[cfg(test)]
@@ -795,7 +792,9 @@ mod tests {
         use lash_kernel_doc::{
             BuildHelpers, Document, FunctionRegistry, NumberPolicy, RestoreSelection, Selection,
         };
-        use lash_vocabulary::{CallableId, FunctionId, Link};
+        use {
+            lash_kernel_value::CallableId, lash_kernel_value::FunctionId, lash_kernel_value::Link,
+        };
         let mut registry = FunctionRegistry::new();
         let member = registry
             .register(

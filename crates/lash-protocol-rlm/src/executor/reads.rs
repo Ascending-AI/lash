@@ -24,11 +24,11 @@ use std::time::{Duration, Instant};
 
 use lash_kernel_doc::{Datum, ErrorDatum};
 
+use lash_kernel_value::names::OperationUse;
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_TIMED_OUT, datum_from_json};
 use lash_vm_runtime::EffectReads;
-use lash_vocabulary::names::OperationUse;
 
 use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refused, tool_failed};
 
@@ -131,7 +131,7 @@ impl CellReads {
             data: datum_from_json(&error.data.to_string()).unwrap_or(Datum::Null),
         })?;
         let text = value.to_string();
-        let signature = lash_vocabulary::json_schema::tool_signature(
+        let signature = lash_kernel_value::json_schema::tool_signature(
             &route.definition.contract.input_schema.canonical,
             &route.definition.contract.output_schema.canonical,
         );
@@ -151,8 +151,8 @@ impl EffectReads for CellReads {
         &self,
         effect: &OperationUse,
         args: &[Datum],
-        site: &lash_vocabulary::sites::PositionLabel,
-        origin: &lash_vocabulary::sites::Site,
+        site: &lash_kernel_value::sites::PositionLabel,
+        origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         // The plan names every effect the machine binds as a read, and the
         // activation routed each before the run started.

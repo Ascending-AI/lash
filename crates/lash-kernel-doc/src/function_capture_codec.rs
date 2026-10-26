@@ -1,6 +1,9 @@
 //! Baseline token encoding for callable capture graphs.
 use crate::{CaptureValue, Datum, FunctionValue};
-use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use {
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+};
 
 impl TokenCodec for CaptureValue {
     fn encode(&self, out: &mut TokenWriter) {

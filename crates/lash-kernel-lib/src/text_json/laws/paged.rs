@@ -64,7 +64,7 @@ fn program(operation: &str) -> Program {
         .find(|(_, f)| f.name.as_str() == "f")
         .unwrap();
     document.exports.insert(
-        lash_vocabulary::Name::new("f"),
+        lash_kernel_value::Name::new("f"),
         lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
             function: *id,
             signature: definition.signature.clone(),

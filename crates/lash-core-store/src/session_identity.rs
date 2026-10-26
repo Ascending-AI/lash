@@ -9,7 +9,7 @@ use crate::ProtocolTurnOptions;
 use crate::SessionAppendNode;
 use crate::SessionPolicy;
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// One durable, not-yet-settled process-observer edge.

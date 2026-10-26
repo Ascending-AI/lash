@@ -291,7 +291,7 @@ impl ActorContext {
                 dues: Dues::new(),
                 obligations: (owned.actor().kind() == lash_durable::ActorKind::Session)
                     .then(|| {
-                        lash_vocabulary::identity::SessionId::try_from(
+                        lash_kernel_value::identity::SessionId::try_from(
                             owned.actor().id().to_owned(),
                         )
                         .ok()

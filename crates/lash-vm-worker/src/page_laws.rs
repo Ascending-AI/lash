@@ -14,12 +14,12 @@
     reason = "a law fails on a broken fixture assumption"
 )]
 
-use lash_vocabulary::tokens::{TokenReader, TokenWriter};
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use {lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter};
 
 use lash_core_store::checkpoint_graph::node::frame_direct;
 use lash_core_store::checkpoint_graph::stage::StageLeaseId;
@@ -599,7 +599,7 @@ fn a_worker_reads_back_what_it_sealed_through_its_stage_capability() {
             tokens.seq(children.len() as u64 + 1);
             tokens.text(label);
             for child in &children {
-                tokens.child(lash_vocabulary::tokens::ChildRef(child.id.0));
+                tokens.child(lash_kernel_value::tokens::ChildRef(child.id.0));
             }
             PageBody {
                 kind: PageKind::SEQUENCE_LEAF,
@@ -626,7 +626,7 @@ fn a_worker_reads_back_what_it_sealed_through_its_stage_capability() {
                 kind: PageKind::SEQUENCE_LEAF,
                 tokens: {
                     let mut tokens = TokenWriter::new();
-                    tokens.child(lash_vocabulary::tokens::ChildRef(ungranted.id.0));
+                    tokens.child(lash_kernel_value::tokens::ChildRef(ungranted.id.0));
                     tokens.into_bytes()
                 },
                 children: Vec::new(),
@@ -709,7 +709,7 @@ fn a_committed_child_resealed_after_its_namer_keeps_its_grant() {
         let mut tokens = TokenWriter::new();
         tokens.seq(2);
         tokens.text("namer");
-        tokens.child(lash_vocabulary::tokens::ChildRef(child.id.0));
+        tokens.child(lash_kernel_value::tokens::ChildRef(child.id.0));
         let namer = source
             .seal(PageBody {
                 kind: PageKind::SEQUENCE_LEAF,
@@ -769,7 +769,7 @@ fn sealed_pages_cross_in_one_batch() {
             tokens.seq(below.len() as u64 + 1);
             tokens.text(&format!("link {link}"));
             for child in &below {
-                tokens.child(lash_vocabulary::tokens::ChildRef(child.id.0));
+                tokens.child(lash_kernel_value::tokens::ChildRef(child.id.0));
             }
             let page = source
                 .seal(PageBody {
@@ -816,7 +816,7 @@ fn version_churn_keeps_grants_for_live_pages_only() {
             tokens.seq(children.len() as u64 + 1);
             tokens.text(&label);
             for child in &children {
-                tokens.child(lash_vocabulary::tokens::ChildRef(child.id.0));
+                tokens.child(lash_kernel_value::tokens::ChildRef(child.id.0));
             }
             source
                 .seal(PageBody {

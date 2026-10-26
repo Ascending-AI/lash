@@ -609,7 +609,7 @@ pub enum Body {
     Timestamp(Integer),
     Tuple(Sequence),
     Error(ErrorBody),
-    Function(Box<lash_vocabulary::names::CallableId>),
+    Function(Box<lash_kernel_value::names::CallableId>),
     Handle(crate::Handle),
     List(Sequence),
     Map(Table),
@@ -636,8 +636,8 @@ const _: () = assert!(std::mem::size_of::<Body>() == 56);
 #[derive(Clone, Debug)]
 pub struct ClosureIdentity {
     /// Exact lexical capture shape of the compiled body.
-    pub capture_names: Vec<lash_vocabulary::Name>,
-    pub callable: lash_vocabulary::names::CallableId,
+    pub capture_names: Vec<lash_kernel_value::Name>,
+    pub callable: lash_kernel_value::names::CallableId,
     pub site: crate::linked_site::LinkedSite,
 }
 

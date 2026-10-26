@@ -164,8 +164,8 @@ fn a_tree_built_from_its_rows_seals_as_one_written_row_by_row() {
             assert!(written.seal_nested(access, &mut full_work()).unwrap());
             assert!(built.seal_nested(access, &mut full_work()).unwrap());
             assert_eq!(
-                lash_vocabulary::tokens::encode_body(&built),
-                lash_vocabulary::tokens::encode_body(&written),
+                lash_kernel_value::tokens::encode_body(&built),
+                lash_kernel_value::tokens::encode_body(&written),
                 "{sequence} {n}"
             );
         }

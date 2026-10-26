@@ -40,8 +40,8 @@ use lash_kernel_state::paged::{
     FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord, NameRef,
     PendingRecord, PhaseRecord, RoleRecord, SiteRef, TableCursor, TaskStateRecord,
 };
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 use std::sync::Arc;
 
 mod resident;
@@ -1113,7 +1113,7 @@ impl Frames {
     /// resident frame's from its control, a cold one's from its row.
     pub(super) fn loop_coordinates(
         &self,
-    ) -> Result<Vec<lash_vocabulary::sites::LoopIteration>, HeapFault> {
+    ) -> Result<Vec<lash_kernel_value::sites::LoopIteration>, HeapFault> {
         let mut loops = Vec::new();
         let mut resident = self.cache.iter().peekable();
         for index in 0..self.len {
@@ -1130,7 +1130,7 @@ impl Frames {
                     else {
                         return Err(malformed("a loop stands at another form"));
                     };
-                    loops.push(lash_vocabulary::sites::LoopIteration {
+                    loops.push(lash_kernel_value::sites::LoopIteration {
                         site: site.clone(),
                         iteration: started.saturating_sub(1),
                     });
@@ -1140,7 +1140,7 @@ impl Frames {
             let frame = row(&self.rows, index, &self.access)?;
             for at in 0..frame.loops.len() {
                 let record = row(&frame.loops, at, &self.access)?;
-                loops.push(lash_vocabulary::sites::LoopIteration {
+                loops.push(lash_kernel_value::sites::LoopIteration {
                     site: record.site.resolve(&self.access)?.as_ref().clone(),
                     iteration: record.started.saturating_sub(1),
                 });

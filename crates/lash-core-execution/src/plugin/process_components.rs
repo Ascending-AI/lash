@@ -17,14 +17,14 @@ use lash_core_store::process_env::ProcessConfigKey;
 use lash_core_store::process_env::ProcessEnv;
 use lash_core_store::process_env::ProcessEnvRefusal;
 use lash_core_store::run_spec::{CapabilityRef, SlotId};
-use lash_vocabulary::providers::ProcessComponentId;
+use lash_kernel_value::providers::ProcessComponentId;
 
 use super::prompt::{PromptSection, PromptSectionSpec};
 use super::registrar::PluginContributions;
 use super::*;
 use crate::ToolProvider;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 mod declaration;
 mod reads;
@@ -365,8 +365,8 @@ impl ProcessComponentRegistry {
     pub fn validate_seed_route(
         &self,
         env: &Arc<ProcessEnv>,
-        grant: &lash_vocabulary::package::DeferredGrant,
-        name: &lash_vocabulary::names::QualifiedName,
+        grant: &lash_kernel_value::package::DeferredGrant,
+        name: &lash_kernel_value::names::QualifiedName,
         definition: &crate::ToolDefinition,
         route: &crate::OperationRoute,
         registry: crate::RegistryKind,
@@ -1027,7 +1027,7 @@ impl ProcessComposition {
     pub fn step_link(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
     ) -> StepLink {
         let Some(fixed) = env.execution().fixed(effect) else {
             return StepLink::Unlinked;
@@ -1162,7 +1162,7 @@ impl ProcessComposition {
     fn dispatch_target(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DispatchTarget, crate::DispatchRefusal>, PluginError> {
         let link = env
@@ -1205,7 +1205,7 @@ impl ProcessComposition {
         &self,
         env: &Arc<crate::ProcessEnv>,
         owner: &crate::ExecutionOwner,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError> {
         let path = match self.dispatch_target(env, effect, input)? {
@@ -1281,7 +1281,7 @@ impl ProcessComposition {
     pub fn dispatch_args(
         &self,
         env: &Arc<crate::ProcessEnv>,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError> {

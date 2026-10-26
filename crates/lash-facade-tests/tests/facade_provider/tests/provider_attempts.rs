@@ -40,7 +40,7 @@ fn core_over(
 }
 
 async fn created(core: &LashCore, id: &'static str) -> lash::DurableSession {
-    core.session(lash_vocabulary::identity::SessionId::from(id))
+    core.session(lash_kernel_value::identity::SessionId::from(id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
@@ -466,7 +466,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
         );
     }
 
-    let session_id = lash_vocabulary::identity::SessionId::from("paid-output-retry");
+    let session_id = lash_kernel_value::identity::SessionId::from("paid-output-retry");
     let view = lash_execution_contracts::deployment::live_session_view(
         &backend.session_store_factory(),
         &session_id,
@@ -1422,7 +1422,7 @@ async fn provider_stop_cause_survives_owner_replacement() {
         );
         let reopened = core_over(backend, model);
         let report = reopened
-            .session(lash_vocabulary::identity::SessionId::from(
+            .session(lash_kernel_value::identity::SessionId::from(
                 "provider-stop-cause",
             ))
             .open()

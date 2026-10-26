@@ -29,10 +29,13 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
 
+use lash_kernel_value::names::FunctionId;
 use lash_protocol_types::engine_fault::KernelRestoreRefusal;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::tokens::{
-    ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
+use {
+    lash_kernel_value::tokens::ChildRef, lash_kernel_value::tokens::TokenCodec,
+    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter, lash_kernel_value::tokens::check_ascending,
+    lash_kernel_value::tokens::encode_body,
 };
 
 /// One function a closure holds.

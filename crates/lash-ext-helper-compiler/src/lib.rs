@@ -99,7 +99,7 @@ pub fn generate(dialect: Dialect) -> Result<Generated, String> {
              /// point order: what `ts.builtin_name` searches.\n\
              pub const BUILTIN_NAMES: &[&str] = &[\n",
         );
-        for name in lash_dialect_typescript::builtin_names() {
+        for name in lash_ext_ts_helpers::package::builtin_names() {
             let _ = writeln!(generated.rust, "    {name:?},");
         }
         generated.rust.push_str("];\n");
@@ -122,11 +122,11 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     let mut taken = BTreeSet::new();
     // Include closed kernel bodies used by helpers: their natives may decline.
     fn order(
-        function: lash_vocabulary::names::FunctionId,
+        function: lash_kernel_value::names::FunctionId,
         library: &Library,
         analysis: &Analysis,
-        seen: &mut BTreeSet<lash_vocabulary::names::FunctionId>,
-        functions: &mut Vec<lash_vocabulary::names::FunctionId>,
+        seen: &mut BTreeSet<lash_kernel_value::names::FunctionId>,
+        functions: &mut Vec<lash_kernel_value::names::FunctionId>,
     ) {
         if !seen.insert(function) {
             return;

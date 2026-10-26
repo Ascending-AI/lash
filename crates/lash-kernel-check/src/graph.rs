@@ -8,17 +8,17 @@
 //! view is rebuilt on every change.
 
 use lash_kernel_doc::FunctionTarget;
-use lash_vocabulary::names::ImportSlot;
+use lash_kernel_value::names::ImportSlot;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{AssignOrder, JoinMode, Literal, Protocol};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::names::Name;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
-use lash_vocabulary::types::Signature;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
+use lash_kernel_value::types::Signature;
+use lash_kernel_value::types::Type;
 
 macro_rules! dense_id {
     ($(#[$meta:meta])* $name:ident) => {

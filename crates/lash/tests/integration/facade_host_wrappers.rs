@@ -332,7 +332,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
 
     match core
         .session(
-            lash_vocabulary::identity::SessionId::parse("facade-host-wrappers")
+            lash_kernel_value::identity::SessionId::parse("facade-host-wrappers")
                 .expect("nonblank host identity"),
         )
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -348,7 +348,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
     }
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("facade-host-wrappers")
+            lash_kernel_value::identity::SessionId::parse("facade-host-wrappers")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -447,7 +447,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         ))
         .expect("core");
     let id = format!("replay-bounds-{tag}");
-    core.session(lash_vocabulary::identity::SessionId::fixture(&id))
+    core.session(lash_kernel_value::identity::SessionId::fixture(&id))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             "live-replay-bounds",
             lash::TurnBudget::Unbounded,
@@ -457,7 +457,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .await
         .expect("create");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::fixture(&id))
+        .session(lash_kernel_value::identity::SessionId::fixture(&id))
         .open()
         .await
         .expect("open");
@@ -483,7 +483,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     );
 
     replay.current_cursor(
-        &lash_vocabulary::identity::SessionId::fixture(format!("pressure-{tag}")),
+        &lash_kernel_value::identity::SessionId::fixture(format!("pressure-{tag}")),
         lash::observe::SessionRevision::new(0),
     );
     let SessionResume::Gap { observation, gap } = session

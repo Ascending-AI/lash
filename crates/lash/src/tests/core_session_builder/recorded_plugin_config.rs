@@ -261,7 +261,7 @@ fn stating(cap: u64) -> Result<lash_core::PluginOptions> {
 
 /// The session's recorded state, read from its store.
 async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeSessionState> {
-    let id = lash_vocabulary::identity::SessionId::fixture(id);
+    let id = lash_kernel_value::identity::SessionId::fixture(id);
     let store = crate::session::resolve_existing_session(&core.store_factory, &id).await?;
     Ok(lash_core::store::load_session_window_state(
         &store,
@@ -276,7 +276,7 @@ async fn recorded_state(core: &LashCore, id: &str) -> Result<lash_core::RuntimeS
 async fn recorded_turn_budget(core: &LashCore, id: &str) -> Result<crate::TurnBudget> {
     Ok(lash_core::SessionCommitStore::load_session_head_meta(
         core.store_factory.as_ref(),
-        &lash_vocabulary::identity::SessionId::fixture(id),
+        &lash_kernel_value::identity::SessionId::fixture(id),
     )
     .await?
     .expect("persisted head")
@@ -317,7 +317,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let core = probe_core(sqlite_memory_store_backend().await, &probe).await?;
     let Err(error) = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-unknown-create")
+            lash_kernel_value::identity::SessionId::parse("probe-unknown-create")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(
@@ -345,7 +345,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
 
     drop(
         core.session(
-            lash_vocabulary::identity::SessionId::parse("probe-unknown-command")
+            lash_kernel_value::identity::SessionId::parse("probe-unknown-command")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(mock_session_spec()))
@@ -354,7 +354,7 @@ async fn unknown_owner_is_refused_at_create_and_submit() -> Result<()> {
     let before = recorded_state(&core, "probe-unknown-command").await?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-unknown-command")
+            lash_kernel_value::identity::SessionId::parse("probe-unknown-command")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -399,7 +399,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     let core = probe_core(lash_conformance::backend_over(stores.clone()), &probe).await?;
     drop(
         core.session(
-            lash_vocabulary::identity::SessionId::parse("probe-command")
+            lash_kernel_value::identity::SessionId::parse("probe-command")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(
@@ -410,7 +410,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     let created = recorded_state(&core, "probe-command").await?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-command")
+            lash_kernel_value::identity::SessionId::parse("probe-command")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -464,7 +464,7 @@ async fn a_command_is_owner_reduced_and_revision_checked() -> Result<()> {
     probe.builds.lock_recover().clear();
     reopened
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-command")
+            lash_kernel_value::identity::SessionId::parse("probe-command")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -493,7 +493,7 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     let core = probe_core(sqlite_memory_store_backend().await, &probe).await?;
     drop(
         core.session(
-            lash_vocabulary::identity::SessionId::parse("probe-atomic")
+            lash_kernel_value::identity::SessionId::parse("probe-atomic")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(
@@ -505,7 +505,7 @@ async fn a_transaction_across_owners_is_all_or_none() -> Result<()> {
     let created_budget = recorded_turn_budget(&core, "probe-atomic").await?;
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-atomic")
+            lash_kernel_value::identity::SessionId::parse("probe-atomic")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -589,7 +589,7 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     let core = probe_core(sqlite_memory_store_backend().await, &probe).await?;
     drop(
         core.session(
-            lash_vocabulary::identity::SessionId::parse("probe-stale")
+            lash_kernel_value::identity::SessionId::parse("probe-stale")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(
@@ -599,7 +599,7 @@ async fn a_stale_transaction_publishes_nothing() -> Result<()> {
     );
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-stale")
+            lash_kernel_value::identity::SessionId::parse("probe-stale")
                 .expect("nonblank host identity"),
         )
         .open()
@@ -630,7 +630,7 @@ async fn redriven_runs_see_their_admitted_revision() -> Result<()> {
     let core = probe_core(backend, &probe).await?;
     drop(
         core.session(
-            lash_vocabulary::identity::SessionId::parse("probe-admitted")
+            lash_kernel_value::identity::SessionId::parse("probe-admitted")
                 .expect("nonblank host identity"),
         )
         .create(crate::SessionCreation::root(
@@ -640,7 +640,7 @@ async fn redriven_runs_see_their_admitted_revision() -> Result<()> {
     );
     let session = core
         .session(
-            lash_vocabulary::identity::SessionId::parse("probe-admitted")
+            lash_kernel_value::identity::SessionId::parse("probe-admitted")
                 .expect("nonblank host identity"),
         )
         .open()

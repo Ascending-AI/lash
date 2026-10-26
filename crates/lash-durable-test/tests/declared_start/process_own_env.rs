@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::identity::SessionId;
 
 const SESSION_MODEL: &str = "own-env-session-model";
 const RUN_MODEL: &str = "own-env-run-model";
@@ -25,7 +25,7 @@ const SESSION: &str = "own-env-session";
 
 const PROBE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     SESSION_TOOLS,
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 /// Holds the process's first step on the first worker.
 const WAIT: &str = "probe_wait";
@@ -88,7 +88,7 @@ fn probe_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinitio
     .with_execution(Duration::from_secs(120));
     if name == WAIT {
         definition.with_execution_policy(
-            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+            lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
                 std::num::NonZeroU32::new(4).unwrap(),
                 1,
                 1,

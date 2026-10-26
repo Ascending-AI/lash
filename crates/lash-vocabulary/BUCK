@@ -101,7 +101,7 @@ load(
 )
 
 lash_rust_feature_library(
-    name = "lash-vocabulary__fv_283e75c4",
+    name = "lash-vocabulary__fv_00a6ea0a",
     build_script = None,
     crate_features = [
         "default",
@@ -121,12 +121,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_1601ddab", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_9db32a34"},
+    variant_deps = {"//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_92211019", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_8c676a53"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-vocabulary__fv_3b7b0a55",
+    name = "lash-vocabulary__fv_66a75022",
     build_script = None,
     crate_features = [
         "default",
@@ -146,12 +146,12 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_b01291d9", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_d10a21a4"},
+    variant_deps = {"//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0af6dc40", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_832b5a60"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-vocabulary__fv_79452c6e",
+    name = "lash-vocabulary__fv_eb1d5497",
     build_script = None,
     crate_features = [
         "default",
@@ -170,6 +170,6 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_890d0bad", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_1bc0ee31"},
+    variant_deps = {"//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_82400803", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_647d830b"},
     version = "0.0.0-dev",
 )

@@ -125,7 +125,7 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
     for context in [KEEP, DROP, RECORD] {
         first
             .session(
-                lash_vocabulary::identity::SessionId::parse(format!("l16-{context:x}").as_str())
+                lash_kernel_value::identity::SessionId::parse(format!("l16-{context:x}").as_str())
                     .expect("an id"),
             )
             .create(lash::SessionCreation::root(mock_session_spec()))

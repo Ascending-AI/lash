@@ -626,7 +626,7 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
 
     let core = witness_core_over(stores, false).await;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "removed-prompt-session",
         ))
         .open()
@@ -753,7 +753,7 @@ async fn diagnostics_executes_no_plugin() {
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .build(lash_core::testing::runtime_lease_owner())
     .unwrap();
-    let session_id = lash_vocabulary::identity::SessionId::from("diagnostics-observer");
+    let session_id = lash_kernel_value::identity::SessionId::from("diagnostics-observer");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             MODEL,

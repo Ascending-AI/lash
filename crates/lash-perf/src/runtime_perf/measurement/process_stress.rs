@@ -181,7 +181,7 @@ pub(super) async fn run_once_process_list_stress(
                     const STRESS: lash_core::ProcessConfigKey<serde_json::Value> =
                         lash_core::ProcessConfigKey::new(
                             "stress",
-                            lash_vocabulary::providers::FormatVersion::ONE,
+                            lash_kernel_value::providers::FormatVersion::ONE,
                         );
                     let spec = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
                         .component(

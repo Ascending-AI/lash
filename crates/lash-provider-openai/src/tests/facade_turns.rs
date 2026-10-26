@@ -66,7 +66,7 @@ pub(super) async fn session(
     model: &str,
     session_id: &str,
 ) -> lash::DurableSession {
-    core.session(lash_vocabulary::identity::SessionId::fixture(
+    core.session(lash_kernel_value::identity::SessionId::fixture(
         session_id.to_owned(),
     ))
     .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -394,7 +394,7 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             ))
             .expect("core");
         let session = core
-            .session(lash_vocabulary::identity::SessionId::fixture(format!(
+            .session(lash_kernel_value::identity::SessionId::fixture(format!(
                 "mixed-recovery-{max_attempts}"
             )))
             .create(lash::SessionCreation::root(

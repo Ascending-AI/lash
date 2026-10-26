@@ -144,8 +144,8 @@ use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
 
+use lash_kernel_value::identity::SessionId;
 use lash_sansio::sansio::ExecutionEnvironmentSync;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use dialect::Dialect;

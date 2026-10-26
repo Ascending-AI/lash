@@ -19,7 +19,7 @@ pub(super) fn frame(
         Unit::Main if document.main.is_some() => {}
         Unit::Library(function)
             if document.functions.contains_key(function)
-                || exe.admits_callable(&lash_vocabulary::CallableId {
+                || exe.admits_callable(&lash_kernel_value::CallableId {
                     link: record.link,
                     function: *function,
                 }) => {}

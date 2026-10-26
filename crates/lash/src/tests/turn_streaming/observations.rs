@@ -17,7 +17,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     Box::pin(
         created_session(
             &bootstrap_core,
-            lash_vocabulary::identity::SessionId::parse(session_id)
+            lash_kernel_value::identity::SessionId::parse(session_id)
                 .expect("nonblank host identity"),
         )
         .await
@@ -38,7 +38,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
         .build(crate::tests::host::runtime_lease_owner())?;
     let first_session = created_session(
         &first_core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -85,7 +85,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
         .build(crate::tests::host::runtime_lease_owner())?;
     let second_session = created_session(
         &second_core,
-        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_kernel_value::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -188,7 +188,7 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash_vocabulary::identity::SessionId::parse("subscriber-lag-trimmed-recovery")
+        lash_kernel_value::identity::SessionId::parse("subscriber-lag-trimmed-recovery")
             .expect("nonblank host identity"),
     )
     .await

@@ -2,7 +2,7 @@ use super::LashCore;
 use crate::EmbedError;
 use crate::Result;
 use lash_core::store::SessionLookup;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// Where a state-based wait for a requested session deletion ended.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

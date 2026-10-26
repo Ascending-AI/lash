@@ -25,7 +25,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
 
     // Precondition: a turn with no attachment fits the budget.
     core.session(
-        lash_vocabulary::identity::SessionId::parse("commit-graph-only-budget-surface")
+        lash_kernel_value::identity::SessionId::parse("commit-graph-only-budget-surface")
             .expect("id"),
     )
     .create(lash::SessionCreation::root(mock_session_spec()))
@@ -37,14 +37,14 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
     .expect("a graph-only turn fits the node budget");
 
     core.session(
-        lash_vocabulary::identity::SessionId::parse("commit-adoption-row-budget-surface")
+        lash_kernel_value::identity::SessionId::parse("commit-adoption-row-budget-surface")
             .expect("id"),
     )
     .create(lash::SessionCreation::root(mock_session_spec()))
     .await
     .expect("created");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "commit-adoption-row-budget-surface",
         ))
         .open()
@@ -124,14 +124,14 @@ async fn attachment_put_reports_its_configured_byte_delivery_budget() {
     )
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("core");
-    core.session(lash_vocabulary::identity::SessionId::from(
+    core.session(lash_kernel_value::identity::SessionId::from(
         "put-budget-receipt",
     ))
     .create(lash::SessionCreation::root(mock_session_spec()))
     .await
     .expect("session");
     let session = core
-        .session(lash_vocabulary::identity::SessionId::from(
+        .session(lash_kernel_value::identity::SessionId::from(
             "put-budget-receipt",
         ))
         .open()

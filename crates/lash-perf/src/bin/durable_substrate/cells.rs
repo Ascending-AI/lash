@@ -25,8 +25,8 @@ use lash_core::llm::types::{
 };
 use lash_core::runtime::durable::session::TurnServices;
 use lash_execution_contracts::backend::Backend;
-use lash_vocabulary::identity::SessionId;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 
 use crate::recorder::Recorder;
 use crate::turn::{ANSWER, Scripts, session_of_admission};

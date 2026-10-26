@@ -41,8 +41,8 @@ use crate::ScopeId;
 use crate::store::{ObligationKey, ObligationKind, ObligationState, SessionLookup};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 /// The format set the laws' session actors are written in.
@@ -92,7 +92,7 @@ impl CutStore {
 impl DurableReads for CutStore {
     async fn model_call_pins(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -100,7 +100,7 @@ impl DurableReads for CutStore {
 
     async fn model_calls(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -155,14 +155,14 @@ impl DurableReads for CutStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_vocabulary::identity::SessionId,
+        session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
@@ -1280,7 +1280,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
 
     async fn inspect_link(
         &self,
-        link: lash_vocabulary::LinkId,
+        link: lash_kernel_value::LinkId,
         selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -1288,7 +1288,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
             link,
-            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            document: lash_kernel_value::DocumentId::from_bytes([0; 32]),
             selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
@@ -1309,7 +1309,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -1550,7 +1550,7 @@ impl ProcessSteps for HangingSteps {
         let long = Duration::from_secs(60);
         Ok(StepAdmission::new(
             lash_core_execution::testing::step_tool(_step, "law"),
-            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            lash_kernel_value::tool_contract::ExecutionPolicy::Once,
             lash_protocol_types::ExecutionLimit::starting_at(now_ms, long, long),
             None,
         ))

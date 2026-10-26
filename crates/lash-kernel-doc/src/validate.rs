@@ -6,11 +6,11 @@
 //! type. Scopes, linking against an environment and derived facts belong to
 //! `lash-kernel-check`.
 
-use lash_vocabulary::types::{Signature, Type};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use {lash_kernel_value::types::Signature, lash_kernel_value::types::Type};
 
 use crate::ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Closure, Expr, Literal, Member,
@@ -23,10 +23,16 @@ use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
 use crate::native::FunctionCatalog;
 use crate::version::KernelVersion;
 use crate::{Export, FunctionExport, FunctionTarget};
-use lash_vocabulary::names::{FunctionId, FunctionName, Name};
+use {
+    lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName,
+    lash_kernel_value::names::Name,
+};
 
-use lash_vocabulary::names::{Import, ImportKind, ImportSlot};
-use lash_vocabulary::sites::{Site, Unit};
+use {
+    lash_kernel_value::names::Import, lash_kernel_value::names::ImportKind,
+    lash_kernel_value::names::ImportSlot,
+};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 /// Why a document or a definition is refused, and the node at fault.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -247,14 +253,14 @@ pub fn validate_document(
     validate_document_with_limits(
         document,
         catalog,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_document_with_limits(
     document: &Document,
     catalog: &dyn FunctionCatalog,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     validate_document_in(document, catalog, limits, false)
 }
@@ -264,19 +270,19 @@ pub fn validate_document_with_limits(
 pub fn validate_document_structure(document: &Document) -> Result<(), Invalid> {
     validate_document_structure_with_limits(
         document,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 pub fn validate_document_structure_with_limits(
     document: &Document,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     validate_document_in(document, &document.functions, limits, true)
 }
 fn validate_document_in(
     document: &Document,
     catalog: &dyn FunctionCatalog,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
     structural: bool,
 ) -> Result<(), Invalid> {
     if document.requires.kernels.len() != 1 {
@@ -569,14 +575,14 @@ pub fn validate_definition(
     validate_definition_with_limits(
         definition,
         catalog,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
     )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_definition_with_limits(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     validate_identified_definition(definition, catalog, limits).map(|_| ())
 }
@@ -585,14 +591,14 @@ pub fn validate_definition_with_limits(
 pub(crate) fn validate_identified_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
-) -> Result<Option<lash_vocabulary::names::FunctionId>, Invalid> {
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
+) -> Result<Option<lash_kernel_value::names::FunctionId>, Invalid> {
     validate_definition_in(definition, catalog, limits, None)
 }
 fn validate_definition_in(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
     deferred: Option<&std::collections::BTreeSet<FunctionId>>,
 ) -> Result<Option<FunctionId>, Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
@@ -734,7 +740,7 @@ fn native_call(function: &FunctionId, catalog: &dyn FunctionCatalog) -> Result<(
 }
 
 struct Scope<'a> {
-    limits: lash_vocabulary::data_limits::KernelDataLimits,
+    limits: lash_kernel_value::data_limits::KernelDataLimits,
     /// The document being validated, or `None` inside a library body.
     document: Option<&'a Document>,
     /// The library functions this code may name.

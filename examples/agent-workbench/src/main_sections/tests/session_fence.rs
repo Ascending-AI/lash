@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 // Session fencing (FIG-2358): a delete and a turn submit order through one
 // fence, and a delete settles the turn it finds running.

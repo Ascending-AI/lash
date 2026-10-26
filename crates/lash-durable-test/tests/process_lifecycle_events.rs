@@ -223,7 +223,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
 
     async fn inspect_link(
         &self,
-        _link: lash_vocabulary::LinkId,
+        _link: lash_kernel_value::LinkId,
         _selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -248,7 +248,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 
@@ -430,7 +430,7 @@ impl lash::tools::StaticToolExecute for Write {
 /// The component that serves the write tool to a process.
 const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "lifecycle-events-write",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
@@ -455,7 +455,7 @@ fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
         )),
     )
     .expect("a deferring tool declares its park bound")
-    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
 }
 
 fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
@@ -479,7 +479,7 @@ fn write(
             use_: operations::use_for(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
-                Box::new(lash_vocabulary::sites::EffectLocation::authored(
+                Box::new(lash_kernel_value::sites::EffectLocation::authored(
                     lash_protocol_types::effect_identity_fixture(node_id, occurrence),
                 ))
             }),
@@ -608,7 +608,7 @@ static EFFECT_LAW_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 /// The identity of the `n`-th write of [`NODE`], from 0: the one site of
 /// the node, at its `n`-th occurrence.
-fn node_site(n: u64) -> lash_vocabulary::sites::EffectId {
+fn node_site(n: u64) -> lash_kernel_value::sites::EffectId {
     lash_protocol_types::effect_identity_fixture(NODE, n)
 }
 
@@ -635,9 +635,9 @@ fn effects_advance_to(
             && let Some(lash_execution_contracts::process::StepRequest::Tool { site, .. }) =
                 steps.first_mut()
         {
-            *site = Some(Box::new(lash_vocabulary::sites::EffectLocation::authored(
-                node_site(n),
-            )));
+            *site = Some(Box::new(
+                lash_kernel_value::sites::EffectLocation::authored(node_site(n)),
+            ));
         }
         action
     };
@@ -689,7 +689,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         .expect("an effect outcome decodes")
     })
     .collect();
-    let recorded: Vec<lash_vocabulary::sites::EffectId> =
+    let recorded: Vec<lash_kernel_value::sites::EffectId> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..64).map(node_site).collect();
     assert_eq!(

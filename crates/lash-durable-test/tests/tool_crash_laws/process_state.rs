@@ -83,7 +83,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
 
     async fn inspect_link(
         &self,
-        _link: lash_vocabulary::LinkId,
+        _link: lash_kernel_value::LinkId,
         _selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
@@ -108,7 +108,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
             },
         )
     }
-    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+    fn capabilities(&self) -> lash_kernel_value::claims::NodeRequirements {
         Default::default()
     }
 

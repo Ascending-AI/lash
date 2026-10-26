@@ -27,7 +27,7 @@ use crate::testing::{CommitFault, IsolatedDatabase, LostCommit};
 const LABEL: CommitLabel = CommitLabel::new("law.write");
 
 /// Admit session `session` and its idle actor to the catalog.
-async fn admit(storage: &PostgresStorage, session: &lash_vocabulary::identity::SessionId) {
+async fn admit(storage: &PostgresStorage, session: &lash_kernel_value::identity::SessionId) {
     use lash_core_store::session_identity::SessionRelation;
     use lash_core_store::session_store_factory_types::SessionCreationHead;
     use lash_core_store::session_store_factory_types::SessionStoreCreateRequest;
@@ -55,7 +55,7 @@ async fn admit(storage: &PostgresStorage, session: &lash_vocabulary::identity::S
 }
 
 /// The advisory key of session `session`'s artifact referrer lock.
-fn referrer_key(session: &lash_vocabulary::identity::SessionId) -> String {
+fn referrer_key(session: &lash_kernel_value::identity::SessionId) -> String {
     let referrer = lash_core_store::artifact_referrer::ArtifactReferrer::Session(session.clone());
     format!(
         "lash-artifact-referrer:{}:{}",
@@ -100,7 +100,7 @@ async fn backend_pid(tx: &mut sqlx::PgConnection) -> i32 {
 type Admission = Box<
     dyn FnOnce(
             PostgresStorage,
-            lash_vocabulary::identity::SessionId,
+            lash_kernel_value::identity::SessionId,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send,
 >;
@@ -119,7 +119,7 @@ async fn a_waiting_admission_holds_no_history_or_referrer_lock(
     let (_database, storage) = storage(name, &PostgresHostConfig::default())
         .await
         .expect("hermetic PostgreSQL is available");
-    let session = lash_vocabulary::identity::SessionId::from(name);
+    let session = lash_kernel_value::identity::SessionId::from(name);
     admit(&storage, &session).await;
     let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
         .await
@@ -778,7 +778,7 @@ async fn a_read_on_a_connection_the_server_closed_answers_from_a_live_one() {
         !store.pools.work.options().get_test_before_acquire(),
         "the work pool does not ping every checkout"
     );
-    let session = lash_vocabulary::identity::SessionId::from("closed-under-a-read");
+    let session = lash_kernel_value::identity::SessionId::from("closed-under-a-read");
     let warm = store.turn(&session).await.expect("the warm read answers");
     assert_eq!(warm, None);
     let mut server = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())

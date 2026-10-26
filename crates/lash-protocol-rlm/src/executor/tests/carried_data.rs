@@ -151,11 +151,11 @@ async fn data_holding_a_task_or_a_library_made_function_is_not_carried_and_says_
     assert_eq!(made.bindings.not_carried, ["bound", "tasks"]);
     let not_carried = session.state.not_carried();
     assert_eq!(
-        not_carried[&lash_vocabulary::names::Name::new("tasks")],
+        not_carried[&lash_kernel_value::names::Name::new("tasks")],
         lash_kernel_dialect::NotSaved::Task.to_string()
     );
     assert_eq!(
-        not_carried[&lash_vocabulary::names::Name::new("bound")],
+        not_carried[&lash_kernel_value::names::Name::new("bound")],
         lash_kernel_dialect::NotSaved::MadeByLibrary.to_string()
     );
     assert_eq!(

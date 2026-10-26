@@ -1,75 +1,15 @@
-pub use crate::names::QualifiedOperation;
-use crate::{
-    JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
-    ToolCatalogBuildError, ToolDeclaration,
+use lash_kernel_value::names::QualifiedOperation;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
+
+use {
+    crate::SchemaContract, crate::SchemaDialect, crate::SchemaProjectionOverride,
+    crate::SchemaPurpose, crate::ToolCatalogBuildError, crate::ToolDeclaration,
+    lash_kernel_value::JsonSchema,
 };
 
 mod output;
+
 pub use output::ToolOutputSchema;
-
-/// The contract for executing one logical call, pinned before its first attempt.
-///
-/// Recovery never re-executes an effect whose outcome committed. These rules
-/// require acknowledged database commits to survive the failure; exactly-once
-/// external behaviour requires host deduplication on `call_id`. See
-/// [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ExecutionPolicy {
-    /// One application attempt, even after a reported pre-effect failure.
-    /// A crash after its start commits but before its outcome commits settles
-    /// `Interrupted` without re-entering the body. Its external action may have
-    /// happened; this policy does not promise successful completion.
-    #[default]
-    Once,
-    /// Repeated execution is part of the tool's declared contract.
-    /// An interrupted attempt may re-enter its same ordinal; reported failures
-    /// retry within the recorded bounds and current declaration. `max_attempts`
-    /// counts admitted ordinals, not body entries across repeated crashes.
-    Repeatable { retry: BoundedRetry },
-    /// A read: the answer is not recorded; after a crash before the next
-    /// save it is fetched again and may differ.
-    ///
-    /// A code cell runs the call inside the statement that performs it,
-    /// through the provider's registered reader, and keeps the answer only
-    /// as part of the cell's saved state. No admission, attempt or outcome
-    /// is recorded for it, and its provider stays owed until the cell ends.
-    /// A call that is recorded anyway (a model round's, or one a cell
-    /// cannot plan) runs again from its start when its attempt was
-    /// interrupted, and is never retried after a reported failure. A read
-    /// changes nothing outside: it defers, isolates, declares intents and
-    /// ends turns never.
-    Read,
-}
-
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct BoundedRetry {
-    /// Counts admitted application ordinals, including the first attempt.
-    pub max_attempts: std::num::NonZeroU32,
-    pub backoff: Backoff,
-}
-
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct Backoff {
-    pub base_delay_ms: u64,
-    pub max_delay_ms: u64,
-}
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -79,58 +19,6 @@ pub enum LimitCause {
     ExecutionSlice,
     ExecutionTotal,
     WaitDeadline,
-}
-
-impl ExecutionPolicy {
-    pub fn repeatable(
-        max_attempts: std::num::NonZeroU32,
-        base_delay_ms: u64,
-        max_delay_ms: u64,
-    ) -> Self {
-        Self::Repeatable {
-            retry: BoundedRetry {
-                max_attempts,
-                backoff: Backoff {
-                    base_delay_ms,
-                    max_delay_ms,
-                },
-            },
-        }
-    }
-
-    /// The bounded retry a `Repeatable` call is admitted with; `None` for a
-    /// policy that never retries a reported failure.
-    pub fn retry(self) -> Option<BoundedRetry> {
-        match self {
-            Self::Repeatable { retry } => Some(retry),
-            Self::Once | Self::Read => None,
-        }
-    }
-
-    /// A current declaration may veto a repeat; it cannot upgrade admission.
-    pub fn permits_repeat(self, current: Self, failed_ordinal: u32) -> bool {
-        matches!((self, current), (Self::Repeatable { retry }, Self::Repeatable { .. }) if failed_ordinal < retry.max_attempts.get())
-    }
-
-    /// Whether an admitted attempt that started and never settled runs
-    /// again at its ordinal, rather than settling `Interrupted`: a
-    /// `Repeatable` call, whose contract permits repeats, and a recorded
-    /// `Read`, which changes nothing outside.
-    pub fn reruns_interrupted(self) -> bool {
-        matches!(self, Self::Repeatable { .. } | Self::Read)
-    }
-}
-
-impl BoundedRetry {
-    /// The delay before retry `retry_index` (0 for the first retry): the
-    /// failure's suggested delay, or the doubling backoff from its base,
-    /// capped at its maximum.
-    pub fn delay_ms(self, retry_index: u32, suggested_delay_ms: Option<u64>) -> u64 {
-        let multiplier = 1_u64.checked_shl(retry_index).unwrap_or(u64::MAX);
-        suggested_delay_ms
-            .unwrap_or_else(|| self.backoff.base_delay_ms.saturating_mul(multiplier))
-            .min(self.backoff.max_delay_ms)
-    }
 }
 
 /// How long a deferring tool's call may stay parked, waiting for its
@@ -373,6 +261,7 @@ pub struct ToolDiscovery {
 fn inline_default() -> bool {
     true
 }
+
 fn is_inline(value: &bool) -> bool {
     *value
 }
@@ -422,7 +311,7 @@ impl HostTag {
 pub enum ContractSource {
     /// A package operation's declared id (`contract 3`): required on a path
     /// a package owns, and authoritative there.
-    Declared { id: crate::ContractId },
+    Declared { id: lash_kernel_value::ContractId },
     /// Derived from the tool's semantic facts and `tag`: a tool on a path no
     /// package owns.
     Derived {
@@ -444,6 +333,7 @@ impl ContractSource {
         *self == Self::default()
     }
 }
+
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
 /// there is no per-manifest tier. Its schemas stay in [`ToolContract`]; how
@@ -461,7 +351,7 @@ pub struct ToolManifest {
     /// a catalog and a recorded surface. Its model-facing name is derived
     /// ([`Self::standard_name`]).
     #[schemars(with = "String")]
-    #[serde(with = "crate::operation_text")]
+    #[serde(with = "lash_kernel_value::operation_text")]
     pub operation: QualifiedOperation,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
@@ -504,7 +394,7 @@ struct ManifestRecord {
     #[serde(default = "inline_default")]
     inline: bool,
     id: ToolId,
-    #[serde(with = "crate::operation_text")]
+    #[serde(with = "lash_kernel_value::operation_text")]
     operation: QualifiedOperation,
     #[serde(default)]
     description: String,
@@ -569,7 +459,7 @@ impl ToolManifest {
     /// from nothing else. Computed from the current fields on each read,
     /// never stored.
     #[must_use]
-    pub fn contract_id(&self, contract: &ToolContract) -> crate::ContractId {
+    pub fn contract_id(&self, contract: &ToolContract) -> lash_kernel_value::ContractId {
         match &self.contract {
             ContractSource::Declared { id } => id.clone(),
             ContractSource::Derived { tag } => {
@@ -589,7 +479,7 @@ impl ToolManifest {
                     tag,
                 };
                 let bytes = serde_json::to_vec(&facts).unwrap_or_default();
-                crate::ContractId::new(crate::blake3_domain_hash_hex(
+                lash_kernel_value::ContractId::new(crate::blake3_domain_hash_hex(
                     DERIVED_CONTRACT_DOMAIN,
                     bytes,
                 ))
@@ -882,7 +772,7 @@ pub struct ToolDraft {
     /// Where the tool's contract id comes from.
     source: ContractSource,
     /// The turn controls a [`ToolDefinition::control`] draft declares.
-    controls: crate::TurnControls,
+    controls: lash_kernel_value::TurnControls,
 }
 
 impl ToolDraft {
@@ -922,7 +812,7 @@ impl ToolDraft {
     /// States the tool's contract id: a package operation's declared id,
     /// which a tool served on the package's path must carry.
     #[must_use]
-    pub fn declared_contract(mut self, id: crate::ContractId) -> Self {
+    pub fn declared_contract(mut self, id: lash_kernel_value::ContractId) -> Self {
         self.source = ContractSource::Declared { id };
         self
     }
@@ -981,7 +871,7 @@ impl IntoOperation for &QualifiedOperation {
 
 impl IntoOperation for &str {
     fn into_operation(self) -> Result<QualifiedOperation, String> {
-        crate::operation_text::parse(self)
+        lash_kernel_value::operation_text::parse(self)
     }
 }
 
@@ -1044,7 +934,7 @@ impl ToolDefinition {
         let description = description.into();
         Ok(ToolDraft {
             description,
-            controls: crate::TurnControls::none(),
+            controls: lash_kernel_value::TurnControls::none(),
             source: ContractSource::default(),
             bindings: std::collections::BTreeMap::new(),
             contract: ToolContract {
@@ -1073,7 +963,7 @@ impl ToolDefinition {
         operation: impl IntoOperation,
         description: impl Into<String>,
         input_schema: serde_json::Value,
-        controls: crate::TurnControls,
+        controls: lash_kernel_value::TurnControls,
     ) -> Result<ToolDraft, ToolCatalogBuildError> {
         let mut draft = Self::raw(
             id,
@@ -1152,7 +1042,7 @@ impl ToolDefinition {
                 .controls
                 .with_finish(finish.value_schema.clone());
         }
-        if defined.contains(crate::TurnControlKind::SwitchAgentFrame) {
+        if defined.contains(lash_kernel_value::TurnControlKind::SwitchAgentFrame) {
             declaration.controls = declaration.controls.with_switch_agent_frame();
         }
         self.manifest = self.manifest.declared(declaration, park, None)?;
@@ -1256,7 +1146,7 @@ impl ToolDefinition {
 
     /// The contract id this tool serves ([`ToolManifest::contract_id`]).
     #[must_use]
-    pub fn contract_id(&self) -> crate::ContractId {
+    pub fn contract_id(&self) -> lash_kernel_value::ContractId {
         self.manifest.contract_id(&self.contract)
     }
 
@@ -1307,6 +1197,7 @@ impl ToolDefinition {
 /// version_surface = "coexist"
 /// version_guard(items(DERIVED_CONTRACT_DOMAIN, contract_id))
 const DERIVED_CONTRACT_DOMAIN: &str = "lash-derived-tool-contract/v1";
+
 /// The JSON Schema of `T`, as schemars generates it.
 pub fn schema_for<T>() -> serde_json::Value
 where
@@ -1317,6 +1208,7 @@ where
 
 #[cfg(feature = "schema-validation")]
 mod schema_validation;
+
 #[cfg(feature = "schema-validation")]
 pub use schema_validation::validate_tool_input;
 

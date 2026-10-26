@@ -6,8 +6,8 @@
 //! ingress (a webhook, an operator control) uses. The engine then executes
 //! what the act recorded: a cancel request is the process's mail.
 use super::*;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 
 impl AppState {
     /// A context for one runtime operation of this host, `operation`.

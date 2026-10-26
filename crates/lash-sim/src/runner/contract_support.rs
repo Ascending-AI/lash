@@ -1,6 +1,6 @@
 use super::*;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 pub(super) async fn append_contract_execution_boundaries(

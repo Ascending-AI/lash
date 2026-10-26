@@ -62,7 +62,7 @@ fn hooked_core(
 async fn transcript(core: &LashCore, id: &str) -> Result<Vec<(String, String)>> {
     let store = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
-        &lash_vocabulary::identity::SessionId::fixture(id.to_string()),
+        &lash_kernel_value::identity::SessionId::fixture(id.to_string()),
     )
     .await?
     .expect("the session's store");
@@ -108,7 +108,7 @@ async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it()
         sqlite_memory_store_backend().await,
     )?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let output = tokio::time::timeout(
@@ -170,7 +170,7 @@ async fn a_deterministic_assistant_hook_failure_is_the_steps_recorded_outcome() 
         sqlite_memory_store_backend().await,
     )?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let answered = tokio::time::timeout(
@@ -263,7 +263,7 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
         .plugin(Arc::new(hook))
         .build(crate::tests::host::runtime_lease_owner())?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("hello")).await?;

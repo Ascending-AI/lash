@@ -25,8 +25,8 @@ use lash_core::{
     SessionObservationEvent, SessionObservationEventPayload, SessionRevision, TurnActivity,
     TurnActivityId, TurnEvent,
 };
+use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
-use lash_vocabulary::identity::SessionId;
 
 #[path = "live_replay/bench.rs"]
 mod bench;

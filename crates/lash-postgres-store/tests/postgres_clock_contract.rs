@@ -1,6 +1,6 @@
 //! Behavioral laws and lexical fences for PostgreSQL clock provenance.
 
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::sync::Arc;
 
 use lash_core_ids::clock::Clock;

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 pub(crate) fn reviewed_bounds() -> Result<BTreeMap<FunctionId, String>, String> {
     let mut bounds = BTreeMap::new();

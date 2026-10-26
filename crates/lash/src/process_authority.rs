@@ -6,8 +6,8 @@ pub use crate::plugins::ToolCatalog;
 use crate::process::ProcessEnv;
 pub use crate::tools::ToolId;
 pub use crate::{CapabilityRef, SlotId};
-pub use lash_vocabulary::identity::SessionId;
-use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::providers::ProcessComponentId;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One linked effect whose tool `offered` does not offer as the process
@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExcessLink {
     /// The effect path the process performs.
-    pub operation: lash_vocabulary::names::OperationUse,
+    pub operation: lash_kernel_value::names::OperationUse,
     /// The tool the effect is linked to.
     pub tool: ToolId,
 }

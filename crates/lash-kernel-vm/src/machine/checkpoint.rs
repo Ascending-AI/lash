@@ -7,7 +7,7 @@ use lash_kernel_state::paged::{
     AllocationCensus, CheckpointRoot, EditEpoch, PageKind, PageSource, RootStatus, SavedMeters,
     SealBudget, SequenceRoot,
 };
-use lash_vocabulary::tokens::encode_body;
+use lash_kernel_value::tokens::encode_body;
 
 impl Machine for KernelMachine {
     fn start(
@@ -119,7 +119,7 @@ impl Machine for KernelMachine {
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let exe = std::sync::Arc::clone(&self.exe);
         let declared =
-            |callable: &lash_vocabulary::names::CallableId| exe.admits_callable(callable);
+            |callable: &lash_kernel_value::names::CallableId| exe.admits_callable(callable);
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),
             policy: self.program.document.numbers,
@@ -138,7 +138,7 @@ impl Machine for KernelMachine {
             Outcome::Failed(error) => {
                 match decoder.decode(
                     &Datum::Error(Box::new(error)),
-                    &lash_vocabulary::types::Type::Any,
+                    &lash_kernel_value::types::Type::Any,
                 ) {
                     Ok(datum) => CommittedOutcomeRecord::Failed(
                         self.heap.freeze_datum(&datum).map_err(delivery_error)?,
@@ -257,7 +257,7 @@ impl KernelMachine {
         census: Option<Box<dyn AllocationCensus>>,
         layout: Layout,
     ) -> Result<Self, OpenError> {
-        let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
+        let limits = lash_kernel_value::data_limits::KernelDataLimits::standard();
         // The checkpoint owns its policies and its limits, as its limiters
         // grew them, even on a worker configured otherwise (FIG-6768).
         let bounds = Bounds {
@@ -425,7 +425,7 @@ impl KernelMachine {
     pub(crate) fn task_identity(
         &self,
         identity: lash_kernel_state::paged::TaskIdentityRef,
-    ) -> Result<lash_vocabulary::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+    ) -> Result<lash_kernel_value::sites::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
         identity.resolve(self.heap.pages())
     }
 }

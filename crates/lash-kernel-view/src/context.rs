@@ -1,9 +1,12 @@
 //! Sidecar facts for one retained linked document. Nothing here enters identity.
-use lash_helper_labels::MemberDisplay;
 use lash_kernel_doc::{Document, FunctionDefinition};
+use lash_kernel_labels::MemberDisplay;
 use lash_kernel_package::{LinkRefusal, LinkedContent};
-use lash_vocabulary::{CallableId, Fill, ImportSlot, LinkId};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::CallableId, lash_kernel_value::Fill, lash_kernel_value::ImportSlot,
+    lash_kernel_value::LinkId,
+};
 
 /// The immutable Link graph and its separately retained display facts.
 /// The caller projects labels only from the publications retained by this execution.
@@ -13,9 +16,9 @@ pub struct ViewContext {
     helpers: std::sync::Arc<lash_kernel_doc::BuildHelpers>,
     content: LinkedContent,
     /// Closure derived once from each immutable Link's document manifest.
-    admitted_helpers: BTreeMap<LinkId, BTreeSet<lash_vocabulary::FunctionId>>,
-    duration_helpers: BTreeMap<lash_vocabulary::FunctionId, DurationConversion>,
-    timers: std::collections::BTreeSet<(lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
+    admitted_helpers: BTreeMap<LinkId, BTreeSet<lash_kernel_value::FunctionId>>,
+    duration_helpers: BTreeMap<lash_kernel_value::FunctionId, DurationConversion>,
+    timers: std::collections::BTreeSet<(lash_kernel_value::PackageId, lash_kernel_value::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
 }
 impl ViewContext {
@@ -48,23 +51,23 @@ impl ViewContext {
     /// admitted library reach. Labels confer no code or operation authority.
     pub fn add_helper_labels(
         &mut self,
-        labels: &BTreeMap<lash_vocabulary::FunctionId, String>,
-    ) -> Result<(), lash_helper_labels::LabelError> {
+        labels: &BTreeMap<lash_kernel_value::FunctionId, String>,
+    ) -> Result<(), lash_kernel_labels::LabelError> {
         for (function, json) in labels {
             if !self.helpers.contains(function) {
-                return Err(lash_helper_labels::LabelError::at(
+                return Err(lash_kernel_labels::LabelError::at(
                     "/definitions",
                     &function.to_string(),
                     "helper is not installed",
                 ));
             }
-            let label = lash_helper_labels::read_json(&format!(
+            let label = lash_kernel_labels::read_json(&format!(
                 "{{\"definitions\":{{\"helper\":{json}}}}}"
             ))?
             .definitions
             .remove("helper")
             .ok_or_else(|| {
-                lash_helper_labels::LabelError::at(
+                lash_kernel_labels::LabelError::at(
                     "/definitions",
                     "helper",
                     "missing helper display",
@@ -187,13 +190,13 @@ impl ViewContext {
     /// Join one independently retained sidecar by its immutable Package id.
     pub fn add_labels(
         &mut self,
-        id: lash_vocabulary::PackageId,
+        id: lash_kernel_value::PackageId,
         json: &str,
-    ) -> Result<(), lash_helper_labels::LabelError> {
+    ) -> Result<(), lash_kernel_labels::LabelError> {
         use lash_kernel_package::MemberKind;
-        use lash_vocabulary::{ExportName, Segment};
+        use {lash_kernel_value::ExportName, lash_kernel_value::Segment};
         let missing =
-            || lash_helper_labels::LabelError::at("", "package", "sidecar Package is not retained");
+            || lash_kernel_labels::LabelError::at("", "package", "sidecar Package is not retained");
         let package = self.content.packages.get(&id).ok_or_else(missing)?;
         let labels = lash_kernel_package::read_labels(&self.content, package, json)?;
         for (name, display) in labels.members {
@@ -256,12 +259,12 @@ impl ViewContext {
     /// The runtime supplies its well-known timer symbols as neutral immutable identities.
     pub fn with_timer_operations(
         mut self,
-        timers: impl IntoIterator<Item = (lash_vocabulary::PackageId, lash_vocabulary::Segment)>,
+        timers: impl IntoIterator<Item = (lash_kernel_value::PackageId, lash_kernel_value::Segment)>,
     ) -> Self {
         self.timers.extend(timers);
         self
     }
-    pub(crate) fn is_timer(&self, use_: lash_vocabulary::OperationUse) -> bool {
+    pub(crate) fn is_timer(&self, use_: lash_kernel_value::OperationUse) -> bool {
         let Some(link) = self.content.links.get(&use_.link) else {
             return false;
         };
@@ -271,15 +274,18 @@ impl ViewContext {
         let Some(import) = document.imports.get(&use_.slot) else {
             return false;
         };
-        let Some(lash_vocabulary::Fill::Operation(required)) = link.fills.get(&use_.slot) else {
+        let Some(lash_kernel_value::Fill::Operation(required)) = link.fills.get(&use_.slot) else {
             return false;
         };
         self.content.packages.iter().any(|(id, package)| {
             self.timers.contains(&(*id, import.name.member.clone())) && package.path == import.name.package
-                && package.members.get(&import.name.member).is_some_and(|member| matches!(&member.kind, lash_vocabulary::MemberKind::Operation(offer) if offer.requirement == *required))
+                && package.members.get(&import.name.member).is_some_and(|member| matches!(&member.kind, lash_kernel_value::MemberKind::Operation(offer) if offer.requirement == *required))
         })
     }
-    pub(crate) fn only_timer(&self, callable: CallableId) -> Option<lash_vocabulary::OperationUse> {
+    pub(crate) fn only_timer(
+        &self,
+        callable: CallableId,
+    ) -> Option<lash_kernel_value::OperationUse> {
         let reach = self
             .content
             .inspect(
@@ -298,7 +304,7 @@ impl ViewContext {
     pub(crate) fn reached(
         &self,
         callable: CallableId,
-    ) -> std::collections::BTreeSet<lash_vocabulary::OperationUse> {
+    ) -> std::collections::BTreeSet<lash_kernel_value::OperationUse> {
         self.content
             .inspect(
                 callable.link,
@@ -327,7 +333,7 @@ impl ViewContext {
     /// A document's spelling or display label never selects a conversion.
     pub fn with_duration_helpers(
         mut self,
-        helpers: impl IntoIterator<Item = (lash_vocabulary::FunctionId, DurationConversion)>,
+        helpers: impl IntoIterator<Item = (lash_kernel_value::FunctionId, DurationConversion)>,
     ) -> Self {
         self.duration_helpers.extend(helpers);
         self

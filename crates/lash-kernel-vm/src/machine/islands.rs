@@ -47,7 +47,7 @@ use lash_kernel_doc::{PreparedAnswer, Value};
 
 use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
-use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_kernel_value::data_limits::KernelDataLimits;
 
 use super::frames::Role;
 use super::session::Session;
@@ -147,7 +147,7 @@ pub(super) enum Stands {
 pub(super) struct Level {
     /// The original library completion owner, including its ordered arguments.
     library: Option<super::LibraryCall>,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     code: CodeId,
     slots: Vec<SlotState>,
     /// Its control, outermost first.
@@ -179,7 +179,7 @@ pub(super) struct Exit {
 /// its captured values start.
 #[derive(Clone, Copy)]
 struct Callee<'e> {
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     plan: &'e IslandPlan,
     stream: &'e Stream,
     compiled: &'e Compiled,
@@ -190,7 +190,7 @@ struct Callee<'e> {
 /// ([`Scratch::open`]).
 #[derive(Clone, Copy)]
 struct Cached {
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     epoch: u32,
     handle: ArenaHandle,
     /// Index of the plan whose compiled form resolution admitted.
@@ -261,7 +261,7 @@ impl Scratch {
 struct Island<'a, const OBSERVING: bool> {
     /// The already resident root returns through a host data boundary.
     public_return: bool,
-    link: lash_vocabulary::LinkId,
+    link: lash_kernel_value::LinkId,
     exe: &'a Executable,
     stream: &'a Stream,
     /// The run's arena: a closure whose code a call finds keeps it there.

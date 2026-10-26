@@ -1,7 +1,7 @@
 use crate::session_sql::session_sql;
 use crate::*;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 use lash_core_store::store_backend_support::CausalColumns;

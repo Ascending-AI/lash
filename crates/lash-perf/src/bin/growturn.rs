@@ -242,8 +242,8 @@ fn park_identity(call: &lash::admin::ParkedCall) -> serde_json::Value {
         "call":call.call_id.as_str(), "tool":call.tool_id.as_str(), "deadline_ms":call.deadline.map(|d| d.0)})
 }
 
-fn session_id() -> Result<lash_vocabulary::identity::SessionId> {
-    Ok(lash_vocabulary::identity::SessionId::try_from(
+fn session_id() -> Result<lash_kernel_value::identity::SessionId> {
+    Ok(lash_kernel_value::identity::SessionId::try_from(
         SESSION.to_owned(),
     )?)
 }
@@ -287,7 +287,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
         Phase::Sessions => {
             for ordinal in 1..=args.sessions {
                 meter.opened();
-                let id = lash_vocabulary::identity::SessionId::try_from(format!(
+                let id = lash_kernel_value::identity::SessionId::try_from(format!(
                     "growturn-session-{ordinal}"
                 ))?;
                 let session = core

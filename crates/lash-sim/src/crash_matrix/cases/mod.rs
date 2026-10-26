@@ -36,8 +36,8 @@ use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::ScopeGrant;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use serde_json::Value;
 

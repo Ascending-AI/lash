@@ -1,11 +1,11 @@
 use super::*;
 use crate::tool_surface::ProviderKey;
-use lash_vocabulary::names::{PackagePath, Segment};
-use lash_vocabulary::package::*;
-use lash_vocabulary::providers::{ExecutionBinding, FormatVersion};
 use lash_vocabulary::tool_contract::ToolDefinition;
 use serde_json::json;
 use std::time::Duration;
+use {lash_kernel_value::names::PackagePath, lash_kernel_value::names::Segment};
+use {lash_kernel_value::package::*, lash_vocabulary::package::*};
+use {lash_kernel_value::providers::FormatVersion, lash_vocabulary::providers::ExecutionBinding};
 
 fn source(name: &str) -> SourceId {
     SourceId(name.into())
@@ -80,7 +80,7 @@ fn package(path: &str, publisher: &str, deferred: bool) -> AcceptedAdvertisement
                 value: json!({}),
                 payload: None,
             },
-            resolution_policy: lash_vocabulary::providers::DeferredResolutionPolicy::default(),
+            resolution_policy: lash_kernel_value::providers::DeferredResolutionPolicy::default(),
         }))
     } else {
         PackageAdvertisement::Enumerated(Package {
@@ -133,9 +133,9 @@ fn env_identity() {
         context: context("one"),
         path: deferred.path.clone(),
         visibility: deferred.visibility,
-        signature: lash_vocabulary::types::Signature {
+        signature: lash_kernel_value::types::Signature {
             params: vec![],
-            result: lash_vocabulary::types::Type::Json,
+            result: lash_kernel_value::types::Type::Json,
         },
         config: deferred.config.clone(),
         resolution_policy: deferred.resolution_policy,
@@ -177,7 +177,7 @@ fn env_identity() {
                     .insert(RegistryKind::Session, ClaimRequirements::default());
             }
             4 => {
-                let policy = lash_vocabulary::ExecutionPolicy::repeatable(
+                let policy = lash_kernel_value::ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::MIN,
                     100,
                     1_000,
@@ -444,12 +444,12 @@ fn env_package_only_delta_preserves_model_tools() {
         Member {
             visibility: Visibility::Internal,
             kind: MemberKind::Operation(OperationOffer {
-                requirement: lash_vocabulary::OperationRequirement {
-                    signature: lash_vocabulary::Signature {
+                requirement: lash_kernel_value::OperationRequirement {
+                    signature: lash_kernel_value::Signature {
                         params: vec![],
-                        result: lash_vocabulary::Type::Null,
+                        result: lash_kernel_value::Type::Null,
                     },
-                    contract: lash_vocabulary::ContractId::new("service.read"),
+                    contract: lash_kernel_value::ContractId::new("service.read"),
                 },
                 intents: Default::default(),
                 controls: Default::default(),

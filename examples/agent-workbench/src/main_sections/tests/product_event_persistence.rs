@@ -1,5 +1,5 @@
 use super::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[test]
 fn product_event_log_rejects_future_format_with_expected_and_found_versions() {

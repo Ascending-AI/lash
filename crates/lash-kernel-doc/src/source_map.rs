@@ -6,11 +6,11 @@ use sha2::{Digest, Sha256};
 
 use crate::Correspondence;
 use crate::Document;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::names::SourceMapId;
-use lash_vocabulary::sites::Site;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::names::SourceMapId;
+use lash_kernel_value::sites::Site;
 
-pub use lash_vocabulary::sites::Span;
+pub use lash_kernel_value::sites::Span;
 
 /// The language of source, independent of a generated-source format version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -212,13 +212,13 @@ impl SourceMap {
     /// which a store holds and the identity is the digest of.
     #[must_use]
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        lash_vocabulary::tokens::encode_body(self)
+        lash_kernel_value::tokens::encode_body(self)
     }
 
     /// The map's identity: the logical digest of [`Self::canonical_bytes`].
     #[must_use]
     pub fn identity(&self) -> SourceMapId {
-        SourceMapId::from_bytes(lash_vocabulary::tokens::logical_digest(
+        SourceMapId::from_bytes(lash_kernel_value::tokens::logical_digest(
             &self.canonical_bytes(),
         ))
     }
@@ -230,7 +230,7 @@ impl SourceMap {
     /// The decoder's refusal: bytes that are not the one canonical body of a
     /// well-formed map.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        lash_vocabulary::tokens::decode_body(bytes).map_err(|error| error.to_string())
+        lash_kernel_value::tokens::decode_body(bytes).map_err(|error| error.to_string())
     }
 }
 
@@ -264,7 +264,7 @@ impl<'de> Deserialize<'de> for SourceMap {
     }
 }
 
-impl lash_vocabulary::sites::SourceLocations for SourceMap {
+impl lash_kernel_value::sites::SourceLocations for SourceMap {
     fn source_start(&self, site: &Site) -> Option<usize> {
         self.sites
             .iter()

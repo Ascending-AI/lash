@@ -252,7 +252,7 @@ pub(super) async fn a_parked_members_recorded_presentation_plan_is_required_unti
     let session = world
         .core
         .session(
-            lash_vocabulary::identity::SessionId::try_from("obligation-session".to_owned())
+            lash_kernel_value::identity::SessionId::try_from("obligation-session".to_owned())
                 .expect("an id"),
         )
         .durable()

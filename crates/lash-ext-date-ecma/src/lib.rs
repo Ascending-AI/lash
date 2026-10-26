@@ -17,10 +17,10 @@ use lash_kernel_doc::RegistryError;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::parse_definition;
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::types::RecordType;
-use lash_vocabulary::types::RecordTypeField;
-use lash_vocabulary::types::Type;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::types::RecordType;
+use lash_kernel_value::types::RecordTypeField;
+use lash_kernel_value::types::Type;
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -110,7 +110,7 @@ fn date_type() -> Type {
                     optional: false,
                 },
             ],
-            rest: lash_vocabulary::RecordRest::Closed,
+            rest: lash_kernel_value::RecordRest::Closed,
         }),
     ])
 }

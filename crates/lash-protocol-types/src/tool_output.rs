@@ -148,7 +148,7 @@ impl ToolCallOutput {
     }
 
     /// End the caller's turn with `value`. The tool must declare
-    /// [`TurnControlKind::Finish`](lash_vocabulary::tool_declaration::TurnControlKind::Finish).
+    /// [`TurnControlKind::Finish`](lash_kernel_value::tool_declaration::TurnControlKind::Finish).
     pub fn finish(value: impl Into<ToolValue>) -> Self {
         Self::turn_control(TurnControl::Finish {
             value: value.into(),
@@ -158,7 +158,7 @@ impl ToolCallOutput {
 
     /// Switch the caller to a fresh agent frame whose follow-on runs under
     /// `next_run`. The tool must declare
-    /// [`TurnControlKind::SwitchAgentFrame`](lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame).
+    /// [`TurnControlKind::SwitchAgentFrame`](lash_kernel_value::tool_declaration::TurnControlKind::SwitchAgentFrame).
     pub fn switch_agent_frame(
         frame_key: crate::FrameKey,
         task: impl Into<String>,
@@ -175,7 +175,9 @@ impl ToolCallOutput {
 
     /// The kind of turn control this result is, when it is one: what its
     /// tool's declaration must name.
-    pub fn turn_control_kind(&self) -> Option<lash_vocabulary::tool_declaration::TurnControlKind> {
+    pub fn turn_control_kind(
+        &self,
+    ) -> Option<lash_kernel_value::tool_declaration::TurnControlKind> {
         self.as_turn_control().map(TurnControl::kind)
     }
 
@@ -207,7 +209,7 @@ impl ToolCallOutput {
     pub fn settled(
         mut self,
         declaration: &lash_vocabulary::tool_declaration::ToolDeclaration,
-        output_schema: &lash_vocabulary::json_schema::JsonSchema,
+        output_schema: &lash_kernel_value::json_schema::JsonSchema,
     ) -> Result<Self, lash_vocabulary::tool_declaration::DeclarationRefusal> {
         let ToolCallOutcome::Success(value) = &self.outcome else {
             if self.as_turn_control().is_some() {
@@ -956,13 +958,13 @@ pub enum TurnControl {
         #[serde(serialize_with = "crate::durable_serde::serialize")]
         value: ToolValue,
         /// The schema `value` was checked against when its call settled: the
-        /// admitted declaration's ([`FinishDeclaration`](lash_vocabulary::tool_declaration::FinishDeclaration)).
+        /// admitted declaration's ([`FinishDeclaration`](lash_kernel_value::tool_declaration::FinishDeclaration)).
         /// A body's own Finish states none; settlement stamps it, and every
         /// later reader — a completion candidate, a replay, a batch that
         /// folds the call — keeps the schema the value settled under rather
         /// than reading a live one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
+        value_schema: Option<lash_kernel_value::json_schema::JsonSchema>,
     },
     /// End the turn by switching to a fresh agent frame that starts on
     /// `task` with `initial_nodes`, its follow-on running under `next_run`.
@@ -999,11 +1001,11 @@ impl NextRun {
 }
 
 impl TurnControl {
-    pub fn kind(&self) -> lash_vocabulary::tool_declaration::TurnControlKind {
+    pub fn kind(&self) -> lash_kernel_value::tool_declaration::TurnControlKind {
         match self {
-            Self::Finish { .. } => lash_vocabulary::tool_declaration::TurnControlKind::Finish,
+            Self::Finish { .. } => lash_kernel_value::tool_declaration::TurnControlKind::Finish,
             Self::SwitchAgentFrame { .. } => {
-                lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame
+                lash_kernel_value::tool_declaration::TurnControlKind::SwitchAgentFrame
             }
         }
     }
@@ -1014,7 +1016,7 @@ impl TurnControl {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolControl {
     /// A turn-ending control the tool declared
-    /// ([`TurnControls`](lash_vocabulary::tool_declaration::TurnControls)): the call's whole result.
+    /// ([`TurnControls`](lash_kernel_value::tool_declaration::TurnControls)): the call's whole result.
     Turn {
         #[serde(serialize_with = "crate::durable_serde::serialize")]
         control: TurnControl,

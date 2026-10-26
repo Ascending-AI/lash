@@ -90,8 +90,8 @@ pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     /// The occurrence of the execution site the effect ran at: two calls of
     /// one node stay apart after the live window.
-    pub at: lash_vocabulary::sites::EffectId,
-    pub origin: lash_vocabulary::sites::Site,
+    pub at: lash_kernel_value::sites::EffectId,
+    pub origin: lash_kernel_value::sites::Site,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,8 +105,8 @@ pub struct ProcessEffectOccurrence {
 #[serde(deny_unknown_fields)]
 struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
-    at: lash_vocabulary::sites::EffectId,
-    origin: lash_vocabulary::sites::Site,
+    at: lash_kernel_value::sites::EffectId,
+    origin: lash_kernel_value::sites::Site,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
@@ -161,7 +161,7 @@ fn nonempty_identifier(
 
 impl ProcessEffectOccurrence {
     pub fn new(
-        location: lash_vocabulary::sites::EffectLocation,
+        location: lash_kernel_value::sites::EffectLocation,
         operation: impl Into<String>,
         outcome_class: ProcessEffectOutcomeClass,
         code: Option<lash_protocol_types::FailureCode>,
@@ -552,8 +552,8 @@ pub(super) fn occurrence_schema() -> serde_json::Value {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(super) fn effect_outcome_payload_schema() -> lash_vocabulary::json_schema::JsonSchema {
-    lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
+pub(super) fn effect_outcome_payload_schema() -> lash_kernel_value::json_schema::JsonSchema {
+    lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -568,7 +568,7 @@ pub(super) fn effect_outcome_payload_schema() -> lash_vocabulary::json_schema::J
             "origin": schemars::generate::SchemaSettings::default()
                 .with(|settings| settings.inline_subschemas = true)
                 .into_generator()
-                .into_root_schema_for::<lash_vocabulary::sites::Site>(),
+                .into_root_schema_for::<lash_kernel_value::sites::Site>(),
             "operation": { "type": "string", "minLength": 1 },
             "outcome_class": {
                 "type": "string",
@@ -586,9 +586,9 @@ pub(super) fn effect_outcome_payload_schema() -> lash_vocabulary::json_schema::J
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(super) fn effect_omissions_payload_schema() -> lash_vocabulary::json_schema::JsonSchema {
+pub(super) fn effect_omissions_payload_schema() -> lash_kernel_value::json_schema::JsonSchema {
     let count = serde_json::json!({ "type": "integer", "minimum": 0, "maximum": u64::MAX });
-    lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
+    lash_kernel_value::json_schema::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["vocabulary_version", "occurrence_cap", "nodes"],

@@ -17,7 +17,7 @@ use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EDGE_RECORD_BYTES, EdgeLog, ManifestEntry, ManifestSummary, StageFault,
 };
 use lash_core_store::store_failure::StoreFailureKind;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::tokens::TokenWriter;
 
 use super::super::{LawBroken, LawOutcome, ensure};
 use super::{

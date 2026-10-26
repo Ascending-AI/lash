@@ -1,4 +1,4 @@
-use lash_vocabulary::json_schema::resolve_schema_draft;
+use lash_kernel_value::json_schema::resolve_schema_draft;
 use serde_json::{Value, json};
 
 pub(super) fn mcp_result_schema(

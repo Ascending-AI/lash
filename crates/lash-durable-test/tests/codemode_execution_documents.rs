@@ -57,7 +57,7 @@ impl RecordingSink {
 /// The component that serves the law's tools to a process body.
 const TOOLS_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
     "codemode-document-tools",
-    lash_vocabulary::providers::FormatVersion::ONE,
+    lash_kernel_value::providers::FormatVersion::ONE,
 );
 
 /// A core running RLM turns on `workers`, with the session process
@@ -299,7 +299,9 @@ await control.finish(fetched.url);
     );
     let output_tool_calls = world
         .core
-        .session(lash_vocabulary::identity::SessionId::from("cell-document"))
+        .session(lash_kernel_value::identity::SessionId::from(
+            "cell-document",
+        ))
         .durable()
         .await
         .unwrap()

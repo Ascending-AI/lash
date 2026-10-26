@@ -1,5 +1,5 @@
 use crate::support::SessionError;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
@@ -18,9 +18,9 @@ pub enum EmbedError {
         "operation {operation:?} uses {first:?} and {second:?} select different providers or tools"
     )]
     ConflictingOperationRoutes {
-        operation: Box<lash_vocabulary::names::QualifiedOperation>,
-        first: lash_vocabulary::names::OperationUse,
-        second: lash_vocabulary::names::OperationUse,
+        operation: Box<lash_kernel_value::names::QualifiedOperation>,
+        first: lash_kernel_value::names::OperationUse,
+        second: lash_kernel_value::names::OperationUse,
     },
 
     /// Opaque workflow bytes failed receipt validation before publication.
@@ -249,8 +249,8 @@ pub enum RetiredConfigObserverRefusal {
 }
 
 /// Blank text a host offers as an identity is the store's refusal of it.
-impl From<lash_vocabulary::identity::BlankIdentity> for EmbedError {
-    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
+impl From<lash_kernel_value::identity::BlankIdentity> for EmbedError {
+    fn from(error: lash_kernel_value::identity::BlankIdentity) -> Self {
         Self::Store(error.into())
     }
 }
@@ -752,7 +752,7 @@ mod tests {
     use lash_core::SessionError;
     use lash_core::StoreError;
     use lash_execution_contracts::plugin_error::PluginError;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     /// FIG-6549: exhaustion stays typed through runtime, plugin and session wrappers.
     #[cfg(feature = "codemode")]

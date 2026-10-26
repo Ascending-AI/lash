@@ -50,7 +50,7 @@ fn closed_helpers_have_generated_plans() {
 /// and its element reads, each a probe of a table.
 #[derive(Default)]
 struct Probes {
-    callees: &'static [lash_vocabulary::names::FunctionId],
+    callees: &'static [lash_kernel_value::names::FunctionId],
     lookups: Vec<String>,
     reads: usize,
     /// What a user-key lookup finds: `None` where the table holds no key.
@@ -64,10 +64,10 @@ impl lash_kernel_doc::plan::TemplateMeter for Probes {
         0
     }
     fn rewind(&mut self, _: usize) {}
-    fn form(&mut self, _: lash_vocabulary::FunctionId, _: lash_kernel_doc::plan::FormCharge) {}
+    fn form(&mut self, _: lash_kernel_value::FunctionId, _: lash_kernel_doc::plan::FormCharge) {}
     fn bill(
         &mut self,
-        _: lash_vocabulary::FunctionId,
+        _: lash_kernel_value::FunctionId,
         _: &[lash_kernel_doc::Value],
         _: lash_kernel_doc::Value,
     ) {

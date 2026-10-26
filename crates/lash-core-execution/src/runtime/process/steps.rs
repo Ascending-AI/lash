@@ -33,9 +33,9 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
 use lash_core_store::tool_run::StateResolution;
+use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
@@ -61,7 +61,7 @@ pub struct StepAdmission {
     pub target: Option<InvocationTarget>,
     /// The qualified operation captured from the tool's admission manifest.
     /// Engine steps carry none. A located tool step must state this name.
-    pub operation: Option<lash_vocabulary::names::QualifiedOperation>,
+    pub operation: Option<lash_kernel_value::names::QualifiedOperation>,
     /// The tool its admission records: the linked tool, or an engine step's
     /// [`EngineStepKind::admitted_tool`](lash_execution_contracts::process::EngineStepKind::admitted_tool).
     pub tool: ToolId,
@@ -180,7 +180,7 @@ pub struct ProcessStepTools {
     pub resolutions: Arc<
         Mutex<
             std::collections::BTreeMap<
-                lash_vocabulary::names::OperationUse,
+                lash_kernel_value::names::OperationUse,
                 lash_core_store::resolutions::ResolutionEntry,
             >,
         >,
@@ -205,13 +205,13 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime cannot answer the binding.
     fn step_link(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
     ) -> Result<crate::plugin::StepLink, PluginError>;
     async fn resolve_use(
         &self,
         cx: &ActorContext,
         process: &ProcessRecord,
-        use_: lash_vocabulary::names::OperationUse,
+        use_: lash_kernel_value::names::OperationUse,
     ) -> Result<
         crate::runtime::actor::resolutions::CommittedUse,
         crate::runtime::actor::resolutions::ResolutionError,
@@ -241,7 +241,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// asked here.
     async fn resolve_dispatch(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError>;
     /// The arguments the call of the tool `matched` resolved runs with: the
@@ -252,7 +252,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The env grants no dispatch at `effect`.
     fn dispatch_args(
         &self,
-        effect: &lash_vocabulary::names::OperationUse,
+        effect: &lash_kernel_value::names::OperationUse,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError>;
@@ -960,7 +960,7 @@ pub async fn read_process_steps(
 #[serde(deny_unknown_fields)]
 pub struct InvocationTarget {
     pub route: crate::OperationRoute,
-    pub contract: lash_vocabulary::operations::ContractId,
+    pub contract: lash_kernel_value::operations::ContractId,
     pub args: serde_json::Value,
     pub dispatch_requested: Option<String>,
 }
@@ -990,7 +990,7 @@ impl InvocationTarget {
 impl ProcessStepTools {
     pub fn route(
         &self,
-        use_: &lash_vocabulary::names::OperationUse,
+        use_: &lash_kernel_value::names::OperationUse,
     ) -> Option<crate::OperationRoute> {
         if let Some(fixed) = self.environment.fixed(use_) {
             return Some(fixed.route.clone());

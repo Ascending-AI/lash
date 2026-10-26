@@ -19,8 +19,8 @@ use lash_core::sync::MutexExt as _;
 use lash_core_execution::ScopeId;
 use lash_durable::ActorState;
 use lash_durable_test::{Cut, SimNodes};
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
-use lash_vocabulary::identity::SessionId;
 use serde_json::json;
 
 use super::{

@@ -16,8 +16,8 @@ mod tests {
     use lash_execution_contracts::process::ProcessRegistry;
     use lash_execution_contracts::process::ProcessWorkObserver;
     use lash_execution_contracts::process::SessionScope;
+    use lash_kernel_value::identity::SessionId;
     use lash_vocabulary::identity::ProcessId;
-    use lash_vocabulary::identity::SessionId;
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
         crate::support::sqlite_memory_process_store_set()

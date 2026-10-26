@@ -459,7 +459,7 @@ impl LashRuntime {
 /// The frame an administrative compaction opens: the session, the
 /// compaction's scope and the frame it leaves.
 fn compaction_frame_key(
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
     boundary_id: &str,
     previous_frame_node_id: &str,
 ) -> crate::FrameKey {
@@ -469,7 +469,7 @@ fn compaction_frame_key(
 #[cfg(test)]
 mod tests {
     use super::compaction_frame_key;
-    use lash_vocabulary::identity::SessionId;
+    use lash_kernel_value::identity::SessionId;
 
     #[test]
     fn compaction_frame_identity_is_replay_stable() {

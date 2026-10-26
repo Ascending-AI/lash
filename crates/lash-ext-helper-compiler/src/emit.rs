@@ -23,7 +23,7 @@ use lash_kernel_doc::{
     ActKind, Action, AssignOrder, Atom, Callee, Expr, Literal, Member, Place, Rhs, Stmt,
 };
 
-use lash_vocabulary::{FunctionId, Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::library::Library;
 

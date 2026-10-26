@@ -16,7 +16,7 @@ use lash_trace::{
     TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject,
 };
 
-use lash_vocabulary::sites::EffectId;
+use lash_kernel_value::sites::EffectId;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -84,7 +84,7 @@ pub(super) struct CellTrace {
     /// it: nothing of the cell is traced before a commit holds it
     /// (FIG-6000).
     held: Option<lash_core::HeldResponse>,
-    observation: lash_vocabulary::observation::RunObservation,
+    observation: lash_kernel_value::observation::RunObservation,
     segment: String,
     counts: Arc<Mutex<CellCounts>>,
 }
@@ -100,7 +100,7 @@ impl CellTrace {
     /// execution and the cell runs under a recorded effect.
     pub(super) fn new(
         ctx: &RuntimeExecutionContext<'_>,
-        link: lash_vocabulary::package::LinkId,
+        link: lash_kernel_value::package::LinkId,
         language: &str,
         segment: String,
     ) -> Option<Self> {
@@ -112,11 +112,10 @@ impl CellTrace {
         let effect_id = invocation.effect_id()?;
         let address = invocation.effect_address()?.clone();
         Some(Self {
-            observation: ctx
-                .run_spec()
-                .map_or(lash_vocabulary::observation::RunObservation::Off, |spec| {
-                    spec.observe
-                }),
+            observation: ctx.run_spec().map_or(
+                lash_kernel_value::observation::RunObservation::Off,
+                |spec| spec.observe,
+            ),
             segment,
             counts: Arc::default(),
             tracing,
@@ -131,9 +130,9 @@ impl CellTrace {
                     protocol_iteration: invocation.attribution.protocol_iteration,
                 },
                 document: lash_trace::TraceExecutionCode::Start(
-                    lash_vocabulary::names::LinkedStart {
+                    lash_kernel_value::names::LinkedStart {
                         link,
-                        selector: lash_vocabulary::names::StartSelector::Main,
+                        selector: lash_kernel_value::names::StartSelector::Main,
                     },
                 ),
                 entry_name: "main".to_owned(),
@@ -155,7 +154,7 @@ impl CellTrace {
 
     /// A cell reports cumulative counts within its stable activation segment.
     /// The fold uses maxima, so recovery, duplicates and reordering add nothing.
-    pub(super) fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
+    pub(super) fn ran(&self, delta: &lash_kernel_value::observation::SiteCounts) {
         let mut counts = self.counts.lock_recover();
         for (ordinal, count) in delta {
             let total = counts.ran.entry(*ordinal).or_default();
@@ -226,7 +225,7 @@ impl CellTrace {
         self.node(at, fact);
     }
 
-    pub(super) fn origin(&self, at: &EffectId, origin: &lash_vocabulary::sites::Site) {
+    pub(super) fn origin(&self, at: &EffectId, origin: &lash_kernel_value::sites::Site) {
         self.node(
             at,
             TraceNodeFact::Origin {

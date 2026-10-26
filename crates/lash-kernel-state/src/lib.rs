@@ -4,6 +4,8 @@ pub mod arena;
 pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub(crate) mod perf_witness;
+/// Semantic state readers for carry and continuation equality.
+pub mod semantic;
 
 /// The paged heap's implementation, for the other kernel crates only: the
 /// machine executes on it and kernel laws inspect it. Nothing outside
@@ -62,17 +64,17 @@ pub mod kernel_internals {
     };
 }
 use lash_kernel_doc::Datum;
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
-use lash_vocabulary::tokens::TokenCodec;
-use lash_vocabulary::tokens::TokenError;
-use lash_vocabulary::tokens::TokenReader;
-use lash_vocabulary::tokens::TokenWriter;
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
+use lash_kernel_value::tokens::TokenCodec;
+use lash_kernel_value::tokens::TokenError;
+use lash_kernel_value::tokens::TokenReader;
+use lash_kernel_value::tokens::TokenWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-pub use lash_vocabulary::sites::WaitId;
+pub use lash_kernel_value::sites::WaitId;
 /// A sleep's length.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -116,10 +118,10 @@ pub struct AdmittedWait {
 
 impl AdmittedWait {
     pub fn encode(&self) -> Vec<u8> {
-        lash_vocabulary::tokens::encode_body(self)
+        lash_kernel_value::tokens::encode_body(self)
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, TokenError> {
-        lash_vocabulary::tokens::decode_body(bytes)
+        lash_kernel_value::tokens::decode_body(bytes)
     }
 }
 
@@ -212,9 +214,9 @@ pub mod testkit {
     pub fn checkpoint_with_kernel(
         bytes: &[u8],
         kernel: u32,
-    ) -> Result<Vec<u8>, lash_vocabulary::tokens::TokenError> {
-        let mut root: crate::paged::CheckpointRoot = lash_vocabulary::tokens::decode_body(bytes)?;
+    ) -> Result<Vec<u8>, lash_kernel_value::tokens::TokenError> {
+        let mut root: crate::paged::CheckpointRoot = lash_kernel_value::tokens::decode_body(bytes)?;
         root.kernel = kernel;
-        Ok(lash_vocabulary::tokens::encode_body(&root))
+        Ok(lash_kernel_value::tokens::encode_body(&root))
     }
 }

@@ -1,7 +1,7 @@
 //! Deterministic source aliases, projected from the authored document.
 use lash_kernel_doc as k;
-use lash_vocabulary::{FunctionId, Name};
 use std::collections::{BTreeMap, BTreeSet};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 #[derive(Clone, Debug)]
 pub struct NamePlan {
     pub names: BTreeMap<Name, String>,

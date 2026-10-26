@@ -91,12 +91,12 @@ pub enum RecordLocator {
         ordinal: Ordinal,
     },
     TurnPhase {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
         run: lash_vocabulary::identity::TurnId,
     },
     /// The session's head: the config change it has not delivered.
     SessionHead {
-        session: lash_vocabulary::identity::SessionId,
+        session: lash_kernel_value::identity::SessionId,
     },
     Prompt(PromptCallKey),
 }

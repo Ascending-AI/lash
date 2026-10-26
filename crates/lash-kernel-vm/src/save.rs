@@ -9,7 +9,7 @@ use lash_kernel_dialect::{Left, Saved, SavedFunction};
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FunctionRecord, NameRef};
-use lash_vocabulary::names::Name;
+use lash_kernel_value::names::Name;
 
 /// A session cell's end, as its [`crate::CellSave`] saves functions on it.
 pub struct CellSaveContext<'a> {

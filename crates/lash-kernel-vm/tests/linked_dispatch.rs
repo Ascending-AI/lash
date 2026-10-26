@@ -11,17 +11,21 @@ use lash_kernel_vm::{
     Bounds, CellStart, Charge, End, Host, KernelMachine, Machine, MemoryMeter, Outcome,
     PreparedLibrary, Program, Request, Step, Target,
 };
-use lash_vocabulary::package::{Fill, Link};
-use lash_vocabulary::{
-    ContractId, Convention, ExportName, FunctionId, FunctionName, Import, ImportKind, ImportSlot,
-    Name, OperationRequirement, OperationUse, Param, QualifiedName, Signature, Type,
-};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
     sync::Arc,
 };
+use {
+    lash_kernel_value::ContractId, lash_kernel_value::Convention, lash_kernel_value::ExportName,
+    lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Import,
+    lash_kernel_value::ImportKind, lash_kernel_value::ImportSlot, lash_kernel_value::Name,
+    lash_kernel_value::OperationRequirement, lash_kernel_value::OperationUse,
+    lash_kernel_value::Param, lash_kernel_value::QualifiedName, lash_kernel_value::Signature,
+    lash_kernel_value::Type,
+};
+use {lash_kernel_value::package::Fill, lash_kernel_value::package::Link};
 
 #[derive(Clone, Default)]
 struct Pages(Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
@@ -118,7 +122,7 @@ fn document(
         functions,
         main,
         exports: BTreeMap::new(),
-        requires: lash_vocabulary::claims::NodeRequirements {
+        requires: lash_kernel_value::claims::NodeRequirements {
             kernels: BTreeSet::from([lash_kernel_doc::KERNEL_VERSION]),
             ..Default::default()
         },
@@ -162,11 +166,11 @@ fn request(machine: &mut KernelMachine) -> lash_kernel_vm::EffectRequest {
 fn imported_body_and_callback_keep_their_links_after_cold_restore() {
     let operation = Import {
         name: QualifiedName {
-            package: lash_vocabulary::Vec1::new(
-                lash_vocabulary::Segment::new("service")
+            package: lash_kernel_value::Vec1::new(
+                lash_kernel_value::Segment::new("service")
                     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             ),
-            member: lash_vocabulary::Segment::new("read")
+            member: lash_kernel_value::Segment::new("read")
                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             type_member: None,
         },
@@ -224,11 +228,11 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         ImportSlot(1),
         Import {
             name: QualifiedName {
-                package: lash_vocabulary::Vec1::new(
-                    lash_vocabulary::Segment::new("library")
+                package: lash_kernel_value::Vec1::new(
+                    lash_kernel_value::Segment::new("library")
                         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 ),
-                member: lash_vocabulary::Segment::new("run")
+                member: lash_kernel_value::Segment::new("run")
                     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 type_member: None,
             },
@@ -364,9 +368,9 @@ fn callable_start_installs_the_captured_environment() {
         ImportSlot(0),
         Import {
             name: QualifiedName {
-                package: lash_vocabulary::PackagePath::parse("service")
+                package: lash_kernel_value::PackagePath::parse("service")
                     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
-                member: lash_vocabulary::Segment::new("read")
+                member: lash_kernel_value::Segment::new("read")
                     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                 type_member: None,
             },
@@ -422,7 +426,7 @@ fn callable_start_installs_the_captured_environment() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
-        callable: lash_vocabulary::CallableId {
+        callable: lash_kernel_value::CallableId {
             link: link_id,
             function,
         },
@@ -483,9 +487,9 @@ fn callable_start_installs_the_captured_environment() {
 fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
     let operation = Import {
         name: QualifiedName {
-            package: lash_vocabulary::PackagePath::parse("service")
+            package: lash_kernel_value::PackagePath::parse("service")
                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
-            member: lash_vocabulary::Segment::new("read")
+            member: lash_kernel_value::Segment::new("read")
                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
             type_member: None,
         },
@@ -574,9 +578,9 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
             ImportSlot(0),
             Import {
                 name: QualifiedName {
-                    package: lash_vocabulary::PackagePath::parse("library")
+                    package: lash_kernel_value::PackagePath::parse("library")
                         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
-                    member: lash_vocabulary::Segment::new("packed")
+                    member: lash_kernel_value::Segment::new("packed")
                         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     type_member: None,
                 },
@@ -752,8 +756,8 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
                 ImportSlot(0),
                 Import {
                     name: QualifiedName {
-                        package: lash_vocabulary::PackagePath::parse("worker").unwrap(),
-                        member: lash_vocabulary::Segment::new("child").unwrap(),
+                        package: lash_kernel_value::PackagePath::parse("worker").unwrap(),
+                        member: lash_kernel_value::Segment::new("child").unwrap(),
                         type_member: None,
                     },
                     kind: ImportKind::Code {
@@ -847,12 +851,12 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
                     assert_eq!(error.kind, "entry_type_mismatch");
                     assert_eq!(
                         error.data,
-                        lash_kernel_doc::diagnostic_datum(&lash_vocabulary::EntryTypeMismatch {
-                            callable: lash_vocabulary::CallableId {
+                        lash_kernel_doc::diagnostic_datum(&lash_kernel_value::EntryTypeMismatch {
+                            callable: lash_kernel_value::CallableId {
                                 link: child_link_id,
                                 function
                             },
-                            mismatch: lash_vocabulary::TypeMismatch::new(Type::Bool, Type::Null)
+                            mismatch: lash_kernel_value::TypeMismatch::new(Type::Bool, Type::Null)
                                 .within("output"),
                         })
                         .expect("typed child mismatch")
@@ -1000,11 +1004,11 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             ImportSlot(0),
             Import {
                 name: QualifiedName {
-                    package: lash_vocabulary::Vec1::new(
-                        lash_vocabulary::Segment::new("service")
+                    package: lash_kernel_value::Vec1::new(
+                        lash_kernel_value::Segment::new("service")
                             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     ),
-                    member: lash_vocabulary::Segment::new("settle")
+                    member: lash_kernel_value::Segment::new("settle")
                         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                     type_member: None,
                 },
@@ -1161,9 +1165,9 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
                         ImportSlot(0),
                         Import {
                             name: QualifiedName {
-                                package: lash_vocabulary::PackagePath::parse("worker")
+                                package: lash_kernel_value::PackagePath::parse("worker")
                                     .expect("package"),
-                                member: lash_vocabulary::Segment::new("answer").expect("member"),
+                                member: lash_kernel_value::Segment::new("answer").expect("member"),
                                 type_member: None,
                             },
                             kind: ImportKind::Code {
@@ -1436,9 +1440,9 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                     ImportSlot(0),
                     Import {
                         name: QualifiedName {
-                            package: lash_vocabulary::PackagePath::parse("library")
+                            package: lash_kernel_value::PackagePath::parse("library")
                                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
-                            member: lash_vocabulary::Segment::new("public")
+                            member: lash_kernel_value::Segment::new("public")
                                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
                             type_member: None,
                         },
@@ -1639,7 +1643,7 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
 /// FIG-7143: nested result mismatches retain callable identity and RFC 6901 paths.
 #[test]
 fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
-    use lash_vocabulary::types::{RecordType, RecordTypeField};
+    use {lash_kernel_value::types::RecordType, lash_kernel_value::types::RecordTypeField};
     for suspended in [false, true] {
         let signature = Signature {
             params: vec![],
@@ -1649,7 +1653,7 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
                     ty: Type::List(Box::new(Type::Text)),
                     optional: false,
                 }],
-                rest: lash_vocabulary::RecordRest::Closed,
+                rest: lash_kernel_value::RecordRest::Closed,
             }),
         };
         let imports = if suspended {
@@ -1657,8 +1661,8 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
                 ImportSlot(0),
                 Import {
                     name: QualifiedName {
-                        package: lash_vocabulary::PackagePath::parse("service").expect("package"),
-                        member: lash_vocabulary::Segment::new("read").expect("member"),
+                        package: lash_kernel_value::PackagePath::parse("service").expect("package"),
+                        member: lash_kernel_value::Segment::new("read").expect("member"),
                         type_member: None,
                     },
                     kind: ImportKind::Operation {
@@ -1749,12 +1753,12 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
                     assert_eq!(error.kind, "entry_type_mismatch");
                     assert_eq!(
                         error.data,
-                        lash_kernel_doc::diagnostic_datum(&lash_vocabulary::EntryTypeMismatch {
-                            callable: lash_vocabulary::CallableId {
+                        lash_kernel_doc::diagnostic_datum(&lash_kernel_value::EntryTypeMismatch {
+                            callable: lash_kernel_value::CallableId {
                                 link: link_id,
                                 function
                             },
-                            mismatch: lash_vocabulary::TypeMismatch::new(Type::Text, Type::Bool)
+                            mismatch: lash_kernel_value::TypeMismatch::new(Type::Text, Type::Bool)
                                 .within("0")
                                 .within("a/b~c")
                                 .within("output"),
@@ -1834,12 +1838,12 @@ fn entry_wrong_input_is_refused_before_body_execution() {
     };
     assert_eq!(
         error,
-        lash_kernel_vm::StartError::TypeMismatch(Box::new(lash_vocabulary::EntryTypeMismatch {
-            callable: lash_vocabulary::CallableId {
+        lash_kernel_vm::StartError::TypeMismatch(Box::new(lash_kernel_value::EntryTypeMismatch {
+            callable: lash_kernel_value::CallableId {
                 link: link_id,
                 function
             },
-            mismatch: lash_vocabulary::TypeMismatch::new(Type::Text, Type::Bool)
+            mismatch: lash_kernel_value::TypeMismatch::new(Type::Text, Type::Bool)
                 .within("0")
                 .within("event")
                 .within("input"),

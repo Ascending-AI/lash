@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 

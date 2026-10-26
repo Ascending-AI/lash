@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
 
 use lash_kernel_state::paged::{IncomingRecord, PhaseRecord, TaskStateRecord};
-use lash_vocabulary::names::FunctionId;
+use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, answer, label, wait_of};
 use crate::{End, Layout, Machine, Step};

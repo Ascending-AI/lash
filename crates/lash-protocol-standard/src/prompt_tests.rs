@@ -27,7 +27,7 @@ async fn compose(
 ) -> ComposedPrompt {
     let cut = lash_core::testing::prompt::cut(PromptCutParts {
         call: PromptCall {
-            session_id: lash_vocabulary::identity::SessionId::from("standard-prompt"),
+            session_id: lash_kernel_value::identity::SessionId::from("standard-prompt"),
             frame: None,
             run: None,
             turn: None,

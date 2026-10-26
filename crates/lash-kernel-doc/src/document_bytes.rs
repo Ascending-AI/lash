@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use crate::Document;
 use crate::IdentifiedDocument;
-use lash_vocabulary::data_limits::KernelDataLimits;
-use lash_vocabulary::names::DocumentId;
-use lash_vocabulary::tokens::TokenError;
+use lash_kernel_value::data_limits::KernelDataLimits;
+use lash_kernel_value::names::DocumentId;
+use lash_kernel_value::tokens::TokenError;
 
 /// The one host token grammar this build accepts. No migration or fallback
 /// decoder is provided for opaque host blobs.

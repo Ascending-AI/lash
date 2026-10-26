@@ -416,7 +416,7 @@ impl PageTier for Tier {
 
     async fn delete_session(&self, session: &str) -> u64 {
         let store = self._set.open_store().await.expect("the session store");
-        let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
+        let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
             .expect("a law session id");
         let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
             "pages.session-delete",
@@ -612,7 +612,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     use lash_core_store::checkpoint_graph::NodeKind;
     use lash_core_store::checkpoint_graph::TypedBody;
     use lash_durable::{ActorKey, CommitLabel, Epoch};
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -747,7 +747,7 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
     use lash_core_store::checkpoint_graph::NodeKind;
     use lash_core_store::checkpoint_graph::TypedBody;
     use lash_durable::{ActorKey, CommitLabel, Epoch};
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -821,7 +821,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
     use lash_core_store::checkpoint_graph::NodeKind;
     use lash_core_store::checkpoint_graph::TypedBody;
     use lash_durable::{ActorKey, CommitLabel, Epoch};
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -978,7 +978,7 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
     use lash_durable::domain::{CellId, DomainWrite, EffectKey, ExecKey};
     use lash_durable::{ActorKey, CommitLabel, Epoch};
-    use lash_vocabulary::tokens::TokenWriter;
+    use lash_kernel_value::tokens::TokenWriter;
 
     /// A page of `kind` naming `tag` and `children`.
     fn encode(kind: NodeKind, tag: &str, children: &[NodeId]) -> EncodedNode {
@@ -1088,7 +1088,7 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
     let actor = ActorKey::session("sql-work-owner").expect("actor");
     let exec = ExecKey::Cell(
-        lash_vocabulary::identity::SessionId::parse("counted-park").expect("a session id"),
+        lash_kernel_value::identity::SessionId::parse("counted-park").expect("a session id"),
         lash_vocabulary::identity::TurnId::try_from("counted-turn".to_owned()).expect("a turn id"),
         CellId::new("counted-cell"),
     );
@@ -1178,7 +1178,7 @@ mod turn_and_owned_model_calls_survive_an_idempotent_outcome_commit {
 /// admission of a cell of a session no test owns.
 fn pin_exec(key: &str) -> lash_durable::domain::ExecKey {
     lash_durable::domain::ExecKey::Cell(
-        lash_vocabulary::identity::SessionId::parse("test-pins").expect("a session id"),
+        lash_kernel_value::identity::SessionId::parse("test-pins").expect("a session id"),
         lash_vocabulary::identity::TurnId::try_from("pins".to_owned()).expect("a turn id"),
         lash_durable::domain::CellId::new(key),
     )

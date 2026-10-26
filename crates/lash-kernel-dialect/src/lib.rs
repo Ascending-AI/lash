@@ -51,10 +51,10 @@ pub use exports::{
 };
 pub use lash_kernel_doc::ImplicitTextConversion;
 pub use lash_kernel_state::WaitId;
-pub use lash_vocabulary::{NamespaceCollision, NamespaceShadowing};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
+pub use {lash_kernel_value::NamespaceCollision, lash_kernel_value::NamespaceShadowing};
 
 pub use namespaces::{
     Misspelled, NamespaceRefusal, Namespaces, Resolution, deferred_signature, operation_keys,

@@ -22,7 +22,7 @@ mod tests;
 /// the commit's `NodeIdCollision` stays the authority.
 pub(crate) async fn refuse_historical_frame_switch(
     store: Option<&crate::store::SessionStore>,
-    session_id: &lash_vocabulary::identity::SessionId,
+    session_id: &lash_kernel_value::identity::SessionId,
     current_frame_node_id: Option<&str>,
     session_graph: &crate::SessionGraph,
     frame_key: &crate::FrameKey,

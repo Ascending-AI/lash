@@ -31,6 +31,8 @@ use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_core_store::tool_surface::UseBinding;
 use lash_kernel_doc::{Datum, ErrorDatum};
 
+use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::sites::EffectId;
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
@@ -39,8 +41,6 @@ use lash_vm_broker::kernel::{
     datum_to_json, outcome_of,
 };
 use lash_vm_broker::{MemberDraft, ParentFault};
-use lash_vocabulary::names::OperationUse;
-use lash_vocabulary::sites::EffectId;
 
 use super::envelope::CellEnvelope;
 use super::host_graph::{HostState, PrintEvent, ProcessEvent};
@@ -232,7 +232,7 @@ pub(super) struct CellHost<'run> {
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
     /// terminal fact is published.
-    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>>,
+    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_value::sites::EffectId>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.
@@ -311,7 +311,7 @@ impl CellHost<'_> {
         Result<
             (
                 lash_core::OperationRoute,
-                lash_vocabulary::operations::ContractId,
+                lash_kernel_value::operations::ContractId,
                 lash_core::TurnControls,
             ),
             ErrorDatum,
@@ -465,7 +465,7 @@ impl CellHost<'_> {
         request: &EffectRequest,
         call: lash_core::ToolCallId,
         route: &lash_core::OperationRoute,
-        contract: lash_vocabulary::operations::ContractId,
+        contract: lash_kernel_value::operations::ContractId,
         grant: lash_core::ToolExecutionGrant,
     ) -> Result<(ToolInvocation, CellCall, FrozenRequest), ErrorDatum> {
         let projection = if matches!(
@@ -615,7 +615,7 @@ impl KernelEffects for CellHost<'_> {
         }
         if control {
             let cause =
-                if !lash_vocabulary::sites::ObservationReader::is_root_task(&request.identity) {
+                if !lash_kernel_value::sites::ObservationReader::is_root_task(&request.identity) {
                     Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
                 } else if outstanding > 0 || live > 0 {
                     Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)

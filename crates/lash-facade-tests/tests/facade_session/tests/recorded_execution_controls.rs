@@ -2,7 +2,7 @@ use super::*;
 use lash::TurnInput;
 use lash::TurnOutcome;
 use lash_facade_tests::controls::*;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 const CHAT: &str = "recorded-controls-chat";
 const PULSAR: &str = "recorded-controls-pulsar";
@@ -74,7 +74,7 @@ async fn a_commanded_turn_budget_bounds_the_next_run() -> Result<()> {
     )?;
     create_with_budget(&core, ID, lash::TurnBudget::Unbounded).await?;
     let session = core
-        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_kernel_value::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await?;
     let before = session

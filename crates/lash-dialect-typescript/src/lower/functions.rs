@@ -228,7 +228,7 @@ impl Lowerer<'_> {
     pub(super) fn entry_body(
         &mut self,
         function: &ast::Function,
-    ) -> Lowering<(Vec<lash_vocabulary::names::Name>, Buf, bool)> {
+    ) -> Lowering<(Vec<lash_kernel_value::names::Name>, Buf, bool)> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let arguments = self.fresh("arguments");
@@ -462,7 +462,7 @@ impl Lowerer<'_> {
     fn parameters(
         &mut self,
         params: &[ast::Pattern],
-        args: &lash_vocabulary::names::Name,
+        args: &lash_kernel_value::names::Name,
     ) -> Lowering<()> {
         let positional = params
             .iter()
@@ -487,7 +487,7 @@ impl Lowerer<'_> {
     fn supplied_arguments(
         &mut self,
         positional: usize,
-        args: &lash_vocabulary::names::Name,
+        args: &lash_kernel_value::names::Name,
     ) -> Lowering<Operand> {
         let args = Operand::variable(args.clone(), Ty::Unknown);
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
@@ -511,7 +511,7 @@ impl Lowerer<'_> {
 
     /// The enclosing function's `this`, which an arrow shares with the
     /// function around it.
-    pub(super) fn this_binding(&mut self) -> Option<lash_vocabulary::names::Name> {
+    pub(super) fn this_binding(&mut self) -> Option<lash_kernel_value::names::Name> {
         let binding = self
             .functions
             .iter_mut()
@@ -526,7 +526,7 @@ impl Lowerer<'_> {
     }
 
     /// The enclosing function's argument list, which is its `arguments`.
-    pub(super) fn arguments_binding(&mut self) -> Option<lash_vocabulary::names::Name> {
+    pub(super) fn arguments_binding(&mut self) -> Option<lash_kernel_value::names::Name> {
         let binding = self
             .functions
             .iter_mut()

@@ -2,7 +2,7 @@
 
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Place, Stmt};
 
-use lash_vocabulary::Name;
+use lash_kernel_value::Name;
 
 use super::patterns::Mode;
 use super::{

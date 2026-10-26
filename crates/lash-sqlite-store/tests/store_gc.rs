@@ -19,8 +19,8 @@ use lash_core_store::store::StoreError;
 use lash_core_store::store::StoreMaintenance;
 use lash_core_store::store::TurnInputStore;
 use lash_core_store::store::WindowSelector;
+use lash_kernel_value::identity::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
-use lash_vocabulary::identity::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

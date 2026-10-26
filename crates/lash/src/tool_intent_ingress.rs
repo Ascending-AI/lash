@@ -1,7 +1,7 @@
 //! Host front-door admission for durable tool intents.
 
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use lash_vocabulary::identity::SessionId;
 use tracing::Instrument;
 
 /// Typed idempotency key for one host-submitted tool intent.

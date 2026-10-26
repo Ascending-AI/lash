@@ -40,11 +40,12 @@ pub fn embed<M: Machine>(
     mut answers: Vec<Answer>,
 ) -> Result<Report, String> {
     let document = parse_document(text).map_err(|e| e.to_string())?;
-    use lash_vocabulary::{
-        ContractId, ImportKind, OperationRequirement,
-        package::{Fill, Link},
-    };
     use std::collections::BTreeMap;
+    use {
+        lash_kernel_value::ContractId, lash_kernel_value::ImportKind,
+        lash_kernel_value::OperationRequirement, lash_kernel_value::package::Fill,
+        lash_kernel_value::package::Link,
+    };
     let fills = document
         .imports
         .iter()

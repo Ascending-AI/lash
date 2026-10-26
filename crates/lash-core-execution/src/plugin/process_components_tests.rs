@@ -65,9 +65,9 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
             serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
         lash_vocabulary::ToolDefinition::any_output(),
         ).unwrap().with_execution(std::time::Duration::from_secs(30));
-    let effect = lash_vocabulary::OperationUse {
-        link: lash_vocabulary::LinkId::from_bytes([5; 32]),
-        slot: lash_vocabulary::ImportSlot(0),
+    let effect = lash_kernel_value::OperationUse {
+        link: lash_kernel_value::LinkId::from_bytes([5; 32]),
+        slot: lash_kernel_value::ImportSlot(0),
     };
     let registration = crate::DeferredToolProviderRegistration::new(resolver.clone())
         .with_dispatch_grant(crate::DispatchGrant::new(granted.clone(), |input| {
@@ -99,7 +99,7 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
         crate::ProcessEnv::builder(crate::MaxToolCalls::new(10))
             .component(KEY, &())
             .execution({
-                use lash_vocabulary::package::*;
+                use {lash_kernel_value::package::*, lash_vocabulary::package::*};
                 let route = registration.dispatch_link(handle, granted.id()).unwrap();
                 let mut execution = crate::testing::operation_environment(
                     lash_vocabulary::claims::RegistryKind::Process,
@@ -111,10 +111,10 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
                         domain: PublicationDomain("fixture".into()),
                         scope: PublicationScope::Host,
                         publisher: PublisherInstance("fixture".into()),
-                        root: lash_vocabulary::Segment::new("dataframe").unwrap(),
+                        root: lash_kernel_value::Segment::new("dataframe").unwrap(),
                     },
-                    path: lash_vocabulary::PackagePath::parse("dataframe").unwrap(),
-                    content: PublishedContent::Package(lash_vocabulary::PackageId::from_bytes(
+                    path: lash_kernel_value::PackagePath::parse("dataframe").unwrap(),
+                    content: PublishedContent::Package(lash_kernel_value::PackageId::from_bytes(
                         [4; 32],
                     )),
                     code_links: Default::default(),

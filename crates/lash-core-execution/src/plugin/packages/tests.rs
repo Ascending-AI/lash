@@ -51,9 +51,9 @@ fn a_pinned_target_needs_its_executor_without_rediscovery() {
         },
         path: PackagePath::parse("service").unwrap(),
         visibility: Visibility::Public,
-        signature: lash_vocabulary::Signature {
+        signature: lash_kernel_value::Signature {
             params: Vec::new(),
-            result: lash_vocabulary::Type::Json,
+            result: lash_kernel_value::Type::Json,
         },
         config: ProviderConfig {
             component: None,

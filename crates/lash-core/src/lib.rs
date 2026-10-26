@@ -493,9 +493,9 @@ pub use lash_core_execution::{
     DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
     TransformRefusal,
 };
+pub use lash_kernel_value::names::EffectName;
+pub use lash_kernel_value::providers::DeferredResolutionPolicy;
 pub use lash_vocabulary::claims::ObligationToken;
-pub use lash_vocabulary::names::EffectName;
-pub use lash_vocabulary::providers::DeferredResolutionPolicy;
 pub use lash_vocabulary::providers::ExecutionBinding;
 pub use lash_vocabulary::providers::ExecutionBindingUnreadable;
 
@@ -591,6 +591,18 @@ pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
 pub(crate) use lash_protocol_types::{BaseRenderCache, visible_response_parts};
 
+pub use lash_kernel_value::json_schema::JsonSchema;
+pub use lash_kernel_value::json_schema::SchemaAdmissionError;
+pub use lash_kernel_value::json_schema::ValueMismatch;
+pub use lash_kernel_value::names::QualifiedOperation;
+/// What pins an operation's meaning: the id a tool serves and code requires.
+pub use lash_kernel_value::operations::ContractId;
+pub use lash_kernel_value::tool_contract::Backoff;
+pub use lash_kernel_value::tool_contract::BoundedRetry;
+pub use lash_kernel_value::tool_contract::ExecutionPolicy;
+pub use lash_kernel_value::tool_declaration::FinishDeclaration;
+pub use lash_kernel_value::tool_declaration::TurnControlKind;
+pub use lash_kernel_value::tool_declaration::TurnControls;
 pub use lash_protocol_types::{
     llm::types::AttemptOutcome, llm::types::AttemptRecord, llm::types::AttemptUsageOutcome,
     llm::types::ChargeSafetyDecision, llm::types::ChargeSafetyDenialReason,
@@ -618,21 +630,12 @@ pub use lash_vocabulary::identity::InputId;
 pub use lash_vocabulary::identity::NodeId;
 pub use lash_vocabulary::identity::RunId;
 pub use lash_vocabulary::identity::TurnId;
-pub use lash_vocabulary::json_schema::JsonSchema;
-pub use lash_vocabulary::json_schema::SchemaAdmissionError;
-pub use lash_vocabulary::json_schema::ValueMismatch;
-pub use lash_vocabulary::names::QualifiedOperation;
-/// What pins an operation's meaning: the id a tool serves and code requires.
-pub use lash_vocabulary::operations::ContractId;
 pub use lash_vocabulary::schema_contract::ProjectionMode;
 pub use lash_vocabulary::schema_contract::SchemaContract;
 pub use lash_vocabulary::schema_contract::SchemaDialect;
 pub use lash_vocabulary::schema_contract::SchemaProjectionOverride;
 pub use lash_vocabulary::schema_contract::SchemaProjectionPolicy;
-pub use lash_vocabulary::tool_contract::Backoff;
-pub use lash_vocabulary::tool_contract::BoundedRetry;
 pub use lash_vocabulary::tool_contract::ContractSource;
-pub use lash_vocabulary::tool_contract::ExecutionPolicy;
 pub use lash_vocabulary::tool_contract::HostTag;
 pub use lash_vocabulary::tool_contract::IntoOperation;
 pub use lash_vocabulary::tool_contract::LimitCause;
@@ -651,11 +654,8 @@ pub use lash_vocabulary::tool_contract::ToolOutputContract;
 pub use lash_vocabulary::tool_contract::ToolOutputSchema;
 pub use lash_vocabulary::tool_contract::standard_name;
 pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
-pub use lash_vocabulary::tool_declaration::FinishDeclaration;
 pub use lash_vocabulary::tool_declaration::OutcomeShape;
 pub use lash_vocabulary::tool_declaration::ToolDeclaration;
-pub use lash_vocabulary::tool_declaration::TurnControlKind;
-pub use lash_vocabulary::tool_declaration::TurnControls;
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 pub use tool_registry::ToolRegistry;
@@ -903,8 +903,8 @@ pub use runtime::PendingTurnInputSuffixCancelOutcome;
 
 pub use runtime::ProcessCommand;
 
-pub use lash_vocabulary::providers::ProcessComponentId;
-pub use lash_vocabulary::providers::ProcessComponentIdError;
+pub use lash_kernel_value::providers::ProcessComponentId;
+pub use lash_kernel_value::providers::ProcessComponentIdError;
 pub use runtime::ProcessComponentConfig;
 pub use runtime::ProcessComponentEntry;
 pub use runtime::ProcessConfigKey;
@@ -1011,7 +1011,7 @@ pub use runtime::{OwnerRevisionConflict, RuntimeErrorCause};
 
 pub use runtime::ScopeId;
 
-pub use lash_vocabulary::identity::SessionId;
+pub use lash_kernel_value::identity::SessionId;
 pub use runtime::ScopeStorageError;
 pub use runtime::SegmentProgress;
 pub use runtime::ServedOnly;
@@ -1090,7 +1090,7 @@ pub(crate) use runtime::QueuedWorkBatchDraft;
 pub(crate) use runtime::QueuedWorkCompletion;
 pub(crate) use runtime::QueuedWorkEnqueueOutcome;
 
-pub use lash_vocabulary::observation::RunObservation;
+pub use lash_kernel_value::observation::RunObservation;
 /// Process observation: the snapshot, cursor, stream events and bounded
 /// live replay of one process (D-PROCOBS).
 pub use runtime::InMemoryProcessReplayStore;
@@ -1234,7 +1234,7 @@ pub use lash_core_execution::tool_live::{
 pub use lash_core_execution::tool_live;
 
 /// Common statement counts supplied to the workflow coverage helper.
-pub use lash_vocabulary::observation::RanCounts;
+pub use lash_kernel_value::observation::RanCounts;
 
 pub use lash_core_store::model_calls;
 

@@ -8,7 +8,7 @@ use crate::StoreError;
 use crate::session_store_factory_types::Target;
 use crate::store::RunTerminal;
 use crate::turn_input_vocabulary::TurnInputStateKind;
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 
 /// What the rows a target resolves through say about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

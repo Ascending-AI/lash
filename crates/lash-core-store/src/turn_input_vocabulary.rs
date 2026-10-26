@@ -24,7 +24,7 @@ pub use crate::run_spec::{
     RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides,
     RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
 };
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 use std::any::Any;
 use std::fmt;

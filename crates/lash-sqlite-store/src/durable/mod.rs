@@ -74,7 +74,7 @@ mod prompts;
 /// tool-intent payloads whose owning run's revision is released (FIG-6612).
 pub(crate) fn release_material_batch(
     tx: &Connection,
-    session: Option<&lash_vocabulary::identity::SessionId>,
+    session: Option<&lash_kernel_value::identity::SessionId>,
 ) -> rusqlite::Result<usize> {
     let mut released = prompts::release_unretained(tx, session)?;
     let limit = i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH);
@@ -87,7 +87,7 @@ pub(crate) fn release_material_batch(
             tx,
             statement.sql(),
             rusqlite::params![
-                session.map(lash_vocabulary::identity::SessionId::as_str),
+                session.map(lash_kernel_value::identity::SessionId::as_str),
                 limit
             ],
         )?;
@@ -98,7 +98,7 @@ pub(crate) fn release_material_batch(
         cached_execute(
             tx,
             statement.sql(),
-            rusqlite::params![session.map(lash_vocabulary::identity::SessionId::as_str)],
+            rusqlite::params![session.map(lash_kernel_value::identity::SessionId::as_str)],
         )?;
     }
     released += crate::turn_ingress::release_settled_tool_intent_payloads(tx, session)?;
@@ -154,7 +154,7 @@ pub(crate) use waits::TABLES as WAITS_TABLES;
 /// those rows held: the delete's to retire.
 pub(crate) fn retire_session_rows(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -188,7 +188,7 @@ pub(crate) fn retire_process_rows(
     )?;
     facts.extend(model_calls::delete_session(
         tx,
-        &lash_vocabulary::identity::SessionId::prefixed("process:", process.as_str()),
+        &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
     )?);
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
@@ -668,7 +668,7 @@ pub(crate) fn wake_within(
 /// Guard and advance a fresh direct session mutation in its writer transaction.
 pub(crate) fn bump_unclaimed_session(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     at_ms: u64,
 ) -> Result<(), lash_core_store::store::StoreError> {
     use lash_core_store::store::{HeadOwnershipFacts, StoreError, require_unclaimed_actor};
@@ -718,7 +718,7 @@ pub(crate) fn bump_unclaimed_session(
 /// belongs to a live one. `control` marks a cancel.
 pub(crate) fn wake_session_within(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Answer<Woken> {
@@ -748,7 +748,7 @@ pub(crate) fn wake_session_within(
 /// refuses such a session itself.
 pub(crate) fn wake_session_tx(
     tx: &Connection,
-    session: &lash_vocabulary::identity::SessionId,
+    session: &lash_kernel_value::identity::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, lash_core_store::store::StoreError> {
@@ -1213,7 +1213,7 @@ impl DurableStore for SqliteDurableStore {
         let at = self.instant()?;
         let session = match actor.kind() {
             lash_durable::ActorKind::Session => Some(
-                lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned())
+                lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
                     .map_err(|_| corrupt("session id", actor.id()))?,
             ),
             lash_durable::ActorKind::Process => None,
@@ -1228,7 +1228,7 @@ impl DurableStore for SqliteDurableStore {
                     actor.as_str(),
                     session
                         .as_ref()
-                        .map(lash_vocabulary::identity::SessionId::as_str)
+                        .map(lash_kernel_value::identity::SessionId::as_str)
                 ])?;
                 let mut opened: Option<(OpenedActor, Option<_>)> = None;
                 while let Some(row) = rows.next()? {
@@ -1343,7 +1343,7 @@ impl DurableStore for SqliteDurableStore {
                             }));
                         }
                         let turn_cancel = if let Some(run) = row.get::<_, Option<String>>(11)? {
-                            let session = lash_vocabulary::identity::SessionId::try_from(
+                            let session = lash_kernel_value::identity::SessionId::try_from(
                                 actor.id().to_owned(),
                             )
                             .map_err(|error| {

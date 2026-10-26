@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_vocabulary::{EffectName, Signature, Type};
+use {lash_kernel_value::EffectName, lash_kernel_value::Signature, lash_kernel_value::Type};
 
 use super::{lower_against, main_text};
 
@@ -39,7 +39,7 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
     let mut nodes = document
         .units()
         .filter(|(unit, _)| match unit {
-            lash_vocabulary::sites::Unit::Library(id) => {
+            lash_kernel_value::sites::Unit::Library(id) => {
                 lash_kernel_doc::FunctionCatalog::header(super::library(), id).is_none()
                     && matches!(
                         document.functions[id].implementation,
@@ -49,7 +49,7 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
                         }
                     )
             }
-            lash_vocabulary::sites::Unit::Main => true,
+            lash_kernel_value::sites::Unit::Main => true,
             _ => false,
         })
         .map(|(_, block)| lash_kernel_doc::Node::Block(block))
@@ -533,7 +533,7 @@ fn plain_record_fresh_literal_field_aliases_keep_admission() {
 #[test]
 fn plain_record_restored_brand_markers_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_vocabulary::Name::new("marker"),
+        lash_kernel_value::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -600,7 +600,7 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
 #[test]
 fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_vocabulary::Name::new("marker"),
+        lash_kernel_value::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -705,7 +705,7 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
 #[test]
 fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_vocabulary::Name::new("marker"),
+        lash_kernel_value::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -798,7 +798,7 @@ fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
 fn computed_reads_of_plain_records_answer_misses_as_the_rows_do() {
     // A static read of a name the dialect refuses to reach, as
     // `r.prototype`, has no answer to compare with.
-    let names: Vec<&str> = crate::builtin_names()
+    let names: Vec<&str> = lash_ext_ts_helpers::package::builtin_names()
         .into_iter()
         .filter(|name| {
             super::lower_with_effects(&format!(
@@ -934,7 +934,7 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
 #[test]
 fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
     use lash_kernel_doc::Datum;
-    use lash_vocabulary::Name;
+    use lash_kernel_value::Name;
     let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await control.finish(sum);";
     let bindings = super::pages::Session::seeded([(
         Name::new("r"),

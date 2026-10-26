@@ -1,11 +1,12 @@
 //! Adoption carries explicit OperationUse identities and immutable outcomes.
 //! No global function-name replacement and no resolver is available on this path.
 use lash_kernel_doc::Document;
-use lash_vocabulary::{
-    names::{ImportKind, ImportSlot, OperationUse},
-    package::{Fill, Link},
-};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::names::ImportKind, lash_kernel_value::names::ImportSlot,
+    lash_kernel_value::names::OperationUse, lash_kernel_value::package::Fill,
+    lash_kernel_value::package::Link,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AdoptionRefusal {
@@ -107,12 +108,14 @@ mod laws {
     use super::*;
     use lash_kernel_doc::NumberPolicy;
 
-    use lash_vocabulary::names::Name;
-    use lash_vocabulary::types::Signature;
-    use lash_vocabulary::types::Type;
-    use lash_vocabulary::{
-        names::{Import, PackagePath, QualifiedName, Segment},
-        operations::{ContractId, OperationRequirement},
+    use lash_kernel_value::names::Name;
+    use lash_kernel_value::types::Signature;
+    use lash_kernel_value::types::Type;
+    use {
+        lash_kernel_value::names::Import, lash_kernel_value::names::PackagePath,
+        lash_kernel_value::names::QualifiedName, lash_kernel_value::names::Segment,
+        lash_kernel_value::operations::ContractId,
+        lash_kernel_value::operations::OperationRequirement,
     };
     fn pair(slots: &[u32], contract: &str) -> (Document, Link) {
         let mut doc = Document::new(NumberPolicy::Float, vec![]);

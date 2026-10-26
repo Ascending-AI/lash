@@ -8,10 +8,13 @@ use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition, FunctionRep
 
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapWriteError, SemanticHeap};
-use lash_vocabulary::sites::{Site, Unit};
-use lash_vocabulary::{CallableId, EffectName, LinkId, Name};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use {
+    lash_kernel_value::CallableId, lash_kernel_value::EffectName, lash_kernel_value::LinkId,
+    lash_kernel_value::Name,
+};
+use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 mod carry;
 mod graph;
 mod relink;
@@ -142,7 +145,7 @@ pub struct Left<'a> {
     pub documents: &'a BTreeMap<LinkId, Document>,
     pub bindings: &'a BTreeMap<Name, PageValue>,
     pub not_carried: &'a [Name],
-    pub controls: &'a BTreeMap<lash_vocabulary::OperationUse, BTreeSet<crate::EffectControl>>,
+    pub controls: &'a BTreeMap<lash_kernel_value::OperationUse, BTreeSet<crate::EffectControl>>,
     /// What the source wrote of each function the document makes, by the
     /// site of its closure ([`crate::Lowered::written`]).
     pub written: &'a BTreeMap<Site, Written>,
@@ -330,7 +333,7 @@ fn check_controls(
         if let Some(body) = definition.body() {
             pending.extend(lash_kernel_doc::Node::Block(&body.block).functions_within());
             for slot in crate::authoring::used_imports(&body.block) {
-                let use_ = lash_vocabulary::OperationUse {
+                let use_ = lash_kernel_value::OperationUse {
                     link: callable.link,
                     slot,
                 };
@@ -345,9 +348,10 @@ fn check_controls(
                         .or_else(|| body.imports.get(&slot))
                         .ok_or_else(|| unreadable("the saved operation import is not declared"))?;
                     return Err(NotSaved::PerformsControl {
-                        effect: lash_vocabulary::EffectName::new(import.name.to_string()).map_err(
-                            |_| unreadable("control operation has invalid diagnostic name"),
-                        )?,
+                        effect: lash_kernel_value::EffectName::new(import.name.to_string())
+                            .map_err(|_| {
+                                unreadable("control operation has invalid diagnostic name")
+                            })?,
                     }
                     .into());
                 }

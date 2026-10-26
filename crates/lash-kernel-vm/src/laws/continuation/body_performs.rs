@@ -16,9 +16,9 @@ use std::collections::BTreeMap;
 use lash_kernel_dialect::{NamedLibrary, define_functions};
 use lash_kernel_doc::{Datum, FunctionRegistry};
 
-use lash_vocabulary::names::FunctionId;
-use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
+use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::sites::Site;
+use lash_kernel_value::sites::Unit;
 
 use super::embedder::{Embedder, Setup, wait_of};
 use super::{Drive, Trace, bodies, everywhere, int, list, text};

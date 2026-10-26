@@ -1,7 +1,7 @@
 //! Fresh cell fulfilment replaces only the saved function's defining Link.
 //! Function bodies, FunctionIds and frozen values are immutable.
 use super::{SavedFunction, Unusable};
-use lash_vocabulary::package::Link;
+use lash_kernel_value::package::Link;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RelinkGap {

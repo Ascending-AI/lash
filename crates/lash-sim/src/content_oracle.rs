@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_kernel_value::identity::SessionId;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
-use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 use serde_json::Value;
 

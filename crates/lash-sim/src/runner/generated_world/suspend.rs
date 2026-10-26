@@ -70,7 +70,7 @@ impl FinishedSuspend {
     ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
         let durable = self
             .core
-            .session(lash_vocabulary::identity::SessionId::fixture(
+            .session(lash_kernel_value::identity::SessionId::fixture(
                 self.session.clone(),
             ))
             .durable()

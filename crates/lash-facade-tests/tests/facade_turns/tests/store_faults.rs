@@ -38,7 +38,7 @@ use super::*;
 use lash::TurnInput;
 use lash_core::testing::runtime_helpers::LayeredStores;
 use lash_core::testing::{Call, Op, Phase, Script, StoreOp};
-use lash_vocabulary::identity::SessionId;
+use lash_kernel_value::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

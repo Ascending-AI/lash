@@ -271,7 +271,7 @@ fn clean_model_code(code: &str) -> String {
 /// holds of it.
 struct LinkedCell {
     /// Certifiable invocations, derived from the envelope's immutable Link.
-    invoked: std::collections::BTreeSet<lash_vocabulary::OperationUse>,
+    invoked: std::collections::BTreeSet<lash_kernel_value::OperationUse>,
     envelope: CellEnvelope,
     document: IdentifiedDocument,
     ledgers: CellHostLedgers,
@@ -279,7 +279,7 @@ struct LinkedCell {
     graph: host::HostGraph,
     /// The effect identity each call a resumed cell holds open was
     /// performed at.
-    open_sites: BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>,
+    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_value::sites::EffectId>,
     resumed: bool,
 }
 
@@ -527,11 +527,10 @@ async fn run_linked_cell(
             );
         }
     };
-    let observation = ctx
-        .run_spec()
-        .map_or(lash_vocabulary::observation::RunObservation::Off, |spec| {
-            spec.observe
-        });
+    let observation = ctx.run_spec().map_or(
+        lash_kernel_value::observation::RunObservation::Off,
+        |spec| spec.observe,
+    );
     let trace = trace::CellTrace::new(&ctx, envelope.link, &envelope.dialect, segment);
     if let Some(trace) = &trace {
         trace.started();
@@ -540,7 +539,7 @@ async fn run_linked_cell(
     for (use_, binding) in &envelope.environment.uses {
         if invoked.contains(use_)
             && let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
-            && operation.offer.mode == lash_vocabulary::package::OperationMode::Read
+            && operation.offer.mode == lash_kernel_value::package::OperationMode::Read
         {
             match ctx.operation_read_route(operation) {
                 Ok(route) => {
@@ -569,9 +568,9 @@ async fn run_linked_cell(
                     envelope
                         .environment
                         .mode(use_)
-                        .unwrap_or(lash_vocabulary::package::OperationMode::Waited)
+                        .unwrap_or(lash_kernel_value::package::OperationMode::Waited)
                 } else {
-                    lash_vocabulary::package::OperationMode::Waited
+                    lash_kernel_value::package::OperationMode::Waited
                 },
             )
         })
@@ -642,9 +641,9 @@ async fn run_linked_cell(
     // function's record names it: a capture stages it with them.
     // A resumed cell runs the definitions it was written against, the
     // store's where this node lacks them (FIG-6985).
-    let start = lash_vocabulary::names::LinkedStart {
+    let start = lash_kernel_value::names::LinkedStart {
         link: host.envelope.link,
-        selector: lash_vocabulary::names::StartSelector::Main,
+        selector: lash_kernel_value::names::StartSelector::Main,
     };
     let helpers = match services.workers.config().worker_library() {
         Ok(library) => Arc::clone(library.helpers()),
@@ -1126,7 +1125,7 @@ async fn end_cell(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_vocabulary::names::DocumentId,
+    document: lash_kernel_value::names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
@@ -1167,7 +1166,7 @@ async fn record_end(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_vocabulary::names::DocumentId,
+    document: lash_kernel_value::names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
