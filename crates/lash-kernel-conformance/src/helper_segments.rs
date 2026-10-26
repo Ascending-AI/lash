@@ -9,7 +9,7 @@
 )]
 
 use crate::helper_plans::{World, runner};
-use crate::projection::{Image, Plan, Projector};
+use crate::projection::{Image, Plan};
 use lash_kernel_doc::Datum;
 use lash_kernel_vm::kernel_internals::conformance::checkpoint;
 use lash_kernel_vm::kernel_internals::{Layout, in_layout};
@@ -114,11 +114,18 @@ struct Rest {
     charged: u64,
 }
 
-/// A run cut after every statement: its images, how much it had printed
-/// and requested at each and what it owed there, and what it did in all.
+/// One statement boundary and the observations already delivered there.
+struct CutPoint {
+    image: Image,
+    memory: u64,
+    printed: usize,
+    requested: usize,
+    owed: Vec<Request>,
+}
+
+/// A run cut after every statement and what it did in all.
 struct Cut {
-    images: Vec<Image>,
-    marks: Vec<(usize, usize, Vec<Request>)>,
+    points: Vec<CutPoint>,
     whole: Rest,
 }
 
@@ -126,17 +133,17 @@ fn world() -> World {
     World::default()
 }
 
-/// Runs `machine` to its end statement by statement, answering each park
-/// at once; `cut` sees each statement's end and each park with what it
-/// owes.
+/// Runs `machine` in slices, answering each park at once; `cut` sees each
+/// slice's end and each park with what it owes.
 fn finish<M: Machine>(
     machine: &mut M,
     world: &mut World,
     requests: &mut Vec<Request>,
+    slice: u64,
     mut cut: impl FnMut(&mut M, &World, &[Request], &[Request]),
 ) -> crate::ExpectedEnd {
     loop {
-        match machine.run(world, 0).unwrap() {
+        match machine.run(world, slice).unwrap() {
             Step::Slice => cut(machine, world, requests, &[]),
             Step::Parked(park) => {
                 cut(machine, world, requests, &park.requests);
@@ -175,27 +182,30 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
         Box::new(source.clone()),
     )
     .unwrap();
-    let mut projector = Projector {
-        layout: Layout(L),
-        library: Some(program.library.clone()),
-        ..Projector::default()
-    };
-    let mut marks = Vec::new();
+    let mut points = Vec::new();
     let mut world = world();
     let mut requests = Vec::new();
     let end = finish(
         &mut machine,
         &mut world,
         &mut requests,
+        0,
         |machine, world, requests, owed| {
-            projector.at(machine, program, BOUNDS, &source).unwrap();
-            marks.push((world.prints.len(), requests.len(), owed.to_vec()));
+            let sealed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
+            points.push(CutPoint {
+                image: Image {
+                    root: lash_kernel_vm::kernel_internals::sealed_root(&sealed).clone(),
+                    source: source.clone(),
+                },
+                memory: machine.meters().memory,
+                printed: world.prints.len(),
+                requested: requests.len(),
+                owed: owed.to_vec(),
+            });
         },
     );
-    projector.check_memory().unwrap();
     Cut {
-        images: projector.images,
-        marks,
+        points,
         whole: Rest {
             end,
             prints: world.prints,
@@ -210,12 +220,18 @@ fn cut_all<const L: u64>(program: &Program) -> Cut {
 fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLibrary, cut: &Cut) {
     let mut program = program.clone();
     program.library = library.clone();
-    for (index, (image, (printed, requested, owed))) in
-        cut.images.iter().zip(&cut.marks).enumerate()
-    {
+    for (index, point) in cut.points.iter().enumerate() {
+        let image = &point.image;
         let mut machine =
             crate::pages::open::<Plan<L>>(program.clone(), BOUNDS, &image.root, &image.source)
                 .unwrap();
+        // This is already a cold accounting witness for the saved state.
+        // Check it here instead of opening a second, unused machine at the cut.
+        assert_eq!(
+            point.memory,
+            machine.meters().memory,
+            "{name}: memory at cut {index} reopened under layout {L}"
+        );
         let resealed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
         assert!(
             checkpoint(
@@ -229,14 +245,22 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
         // A cut at a park still owes its delivery: the rest begins there.
         let mut world = world();
         let mut requests = Vec::new();
-        for request in owed {
+        for request in &point.owed {
             let (wait, outcome) = match request {
                 Request::Effect(effect) => (effect.wait, Outcome::Completed(Datum::Null)),
             };
             requests.push(request.clone());
             machine.deliver(wait, outcome).unwrap();
         }
-        let end = finish(&mut machine, &mut world, &mut requests, |_, _, _, _| {});
+        // Every source statement was already cut above. A suffix has no more
+        // checkpoints to take, so let it run to its next park or end.
+        let end = finish(
+            &mut machine,
+            &mut world,
+            &mut requests,
+            u64::MAX,
+            |_, _, _, _| {},
+        );
         let rest = Rest {
             end,
             prints: world.prints,
@@ -245,8 +269,8 @@ fn reopen_all<const L: u64>(name: &str, program: &Program, library: &PreparedLib
         };
         let expected = Rest {
             end: cut.whole.end.clone(),
-            prints: cut.whole.prints[*printed..].to_vec(),
-            requests: cut.whole.requests[*requested..].to_vec(),
+            prints: cut.whole.prints[point.printed..].to_vec(),
+            requests: cut.whole.requests[point.requested..].to_vec(),
             charged: cut.whole.charged,
         };
         assert_eq!(rest, expected, "{name}: cut {index} under layout {L}");
@@ -291,22 +315,22 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
         // Segments run natively: the helpers' own statements are no
         // statements of the run.
         assert!(
-            by_plan.images.len() < by_body.images.len(),
+            by_plan.points.len() < by_body.points.len(),
             "{}: {} cuts under plans, {} under bodies",
             case.id,
-            by_plan.images.len(),
-            by_body.images.len()
+            by_plan.points.len(),
+            by_body.points.len()
         );
         reopen_all::<3>(&case.id, &program, bodies, &by_plan);
         reopen_all::<0>(&case.id, &program, plans, &by_body);
         println!(
             "{}: cuts plan={} body={} after {:?}",
             case.id,
-            by_plan.images.len(),
-            by_body.images.len(),
+            by_plan.points.len(),
+            by_body.points.len(),
             started.elapsed()
         );
-        cuts += by_plan.images.len() + by_body.images.len();
+        cuts += by_plan.points.len() + by_body.points.len();
         observed.push(by_plan.whole);
     }
     assert!(cuts > 0);
