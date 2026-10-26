@@ -1269,8 +1269,9 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
     let database = storage.database(Arc::clone(&clock)).await;
     let measuring = Arc::new(AtomicBool::new(false));
     let staged = Arc::new(Mutex::new(Vec::new()));
-    // Every node a commit has staged: a PhaseRoot's body and the chunks it
-    // names may be held from an earlier commit.
+    // Every node a commit stages or carries as an exact reference: a
+    // PhaseRoot may name configuration its head already stored, and chunks
+    // an earlier phase staged.
     let known = Arc::new(Mutex::new(BTreeMap::new()));
     let script = lash_durable_test::Script::new();
     script.observe_commits({
@@ -1279,6 +1280,15 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
         Arc::new(move |label, tx| {
             let mut known = known.lock_recover();
             known.extend(tx.graph().iter().map(|(id, node)| (*id, node.clone())));
+            known.extend(tx.exact_reads().iter().map(|(id, node)| {
+                (
+                    *id,
+                    lash_core_store::checkpoint_graph::EncodedNode {
+                        id: *id,
+                        bytes: Arc::clone(&node.bytes),
+                    },
+                )
+            }));
             if measuring.load(Ordering::SeqCst) {
                 staged
                     .lock_recover()
@@ -1327,11 +1337,16 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
         }
     }
     let staged = staged.lock_recover().clone();
-    Some(staged)
+    Some(
+        staged
+            .into_iter()
+            .collect::<Result<_, _>>()
+            .expect("every observed phase decodes"),
+    )
 }
 
 /// What `tx` stages of the turn's checkpoint content, its PhaseRoot read
-/// over `known`, every node staged so far.
+/// over `known`, the staged nodes and acknowledged references seen so far.
 fn staged_content(
     label: CommitLabel,
     tx: &lash_durable::ActorTx,
@@ -1339,7 +1354,7 @@ fn staged_content(
         lash_core_store::checkpoint_graph::NodeId,
         lash_core_store::checkpoint_graph::EncodedNode,
     >,
-) -> StagedContent {
+) -> Result<StagedContent, lash_core_store::checkpoint_graph::GraphRefusal> {
     use lash_core_store::checkpoint_graph::NodeKind;
     let graph = tx.graph();
     let mut seen = std::collections::BTreeSet::new();
@@ -1384,17 +1399,16 @@ fn staged_content(
                     root.id,
                     NodeKind::PHASE_ROOT,
                 )
-                .expect("a staged PhaseRoot decodes")
-                .content
-                .len()
-        });
-    StagedContent {
+                .map(|root| root.content.len())
+        })
+        .transpose()?;
+    Ok(StagedContent {
         label,
         nodes: seen.len(),
         bytes,
         named,
         required: tx.reads().len(),
-    }
+    })
 }
 
 /// The bytes any one phase of [`DEPTH_TURN`] may stage of its checkpoint
