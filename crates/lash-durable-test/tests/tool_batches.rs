@@ -814,7 +814,18 @@ async fn tool_group_members_start_before_any_finishes(tier: Tier) {
             assert_eq!(
                 replies(producer, &concurrent, &producers.world.read(&gated).await),
                 replies(producer, &serial_safe, &producers.world.read(&free).await),
-                "{label}: the rendezvous changes the schedule, not the answers"
+                // A failed cell can be followed by the script's successful
+                // prose fallback. Preserve the outcome and the requests that
+                // prompted that fallback, including the cell's failure.
+                "{label}: the rendezvous changes the schedule, not the answers\n\
+                 gated outcome: {:?}\nfree outcome: {:?}\n\
+                 gated requests: {:#?}\nfree requests: {:#?}\n\
+                 gated leaf events: {:?}",
+                concurrent.outcome,
+                serial_safe.outcome,
+                producers.world.requests(&gated),
+                producers.world.requests(&free),
+                scenario.events(),
             );
         }
         producers.world.shutdown().await;
