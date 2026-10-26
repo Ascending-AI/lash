@@ -372,10 +372,7 @@ fn provider_cells_stream_to_the_sampled_latency() {
         assert!(!retry.retryable);
         assert_eq!(first.operation_id, retry.operation_id);
         assert_eq!(first.text, retry.text);
-        let cell = format!(
-            "<typescript>\n{}\n</typescript>",
-            first.cell_source.as_deref().unwrap()
-        );
+        let cell = first.cell_source.as_deref().unwrap().to_string();
         if cell.len() < plan.provider_output_bytes as usize {
             assert_eq!(first.text.len(), plan.provider_output_bytes as usize);
             witnessed.insert("padded");
@@ -459,10 +456,7 @@ fn provider_cells_stream_to_the_sampled_latency() {
         let source = response.cell_source.as_ref().unwrap();
         // The worst cell overflows the smallest bucket: it is served whole.
         assert!(response.text.len() > 1024);
-        assert_eq!(
-            response.text,
-            format!("<typescript>\n{source}\n</typescript>")
-        );
+        assert_eq!(response.text, source.to_string());
     }
     assert_eq!(
         witnessed,
@@ -610,39 +604,6 @@ fn mix_fixture_covers_all_distributions_overlaps_and_auxiliary_rates() {
         shares.len(),
         gap_total / samples as f64
     );
-}
-
-#[test]
-fn primary_turn_cells_have_standalone_delimiters_even_without_tools_or_processes() {
-    let workload = Workload::v1().unwrap();
-    let generator = Generator::new(&workload, "framing").unwrap();
-    let mut plan = (0..100)
-        .map(|ordinal| generator.plan(0, ordinal).unwrap())
-        .find(|plan| !plan.tool_batches.is_empty())
-        .expect("tool fixture");
-    let response = generator.provider_response(&plan, 1).unwrap();
-    assert!(
-        response
-            .text
-            .lines()
-            .any(|line| line.trim() == "<typescript>"),
-        "RLM only executes a cell when its opening delimiter occupies its own line"
-    );
-    assert_eq!(response.text.lines().last(), Some("</typescript>"));
-    plan.tool_batches.clear();
-    plan.child_processes.clear();
-    let response = generator.provider_response(&plan, 1).unwrap();
-    assert!(
-        response.cell_source.is_some(),
-        "every primary turn uses RLM"
-    );
-    assert!(
-        response
-            .text
-            .lines()
-            .any(|line| line.trim() == "<typescript>")
-    );
-    assert_eq!(response.text.len(), plan.provider_output_bytes as usize);
 }
 
 #[test]

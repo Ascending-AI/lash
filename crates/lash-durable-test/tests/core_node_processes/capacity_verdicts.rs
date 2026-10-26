@@ -400,7 +400,6 @@ async fn a_kernel_run_waits_for_a_full_worker_pool(tier: Tier) {
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
                     .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                     .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                     .build(),

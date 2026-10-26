@@ -123,7 +123,10 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
                     serde_json::to_string(&request.messages).expect("serialize request messages"),
                 );
                 let text = cells.lock().await.pop_front().expect("scripted cell");
-                Ok(text_response(&text))
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
             }
         })
         .build()

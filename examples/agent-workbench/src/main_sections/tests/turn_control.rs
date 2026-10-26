@@ -385,15 +385,13 @@ async fn a_pending_cancel_terminal_retains_the_turns_routing() {
 /// and the awaited process settles as cancelled after it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_over_real_process_await_commits_cancelled_terminal() {
-    let workbench = Workbench::replying(
-        r#"<typescript>
-const hold_for_stop = async (): Promise<string> => {
+    let workbench = Workbench::executing(
+        r#"const hold_for_stop = async (): Promise<string> => {
   await sleep(600000);
   return "unreachable";
 };
 const handle = await processes.start({ definition: hold_for_stop });
-await chat.reply(String(await handle));
-</typescript>"#,
+await chat.reply(String(await handle));"#,
     )
     .await;
     let state = &workbench.state;
@@ -540,8 +538,8 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     // The first step runs a cell that does not finish, so the turn has a
     // step boundary to stop at; every later turn finishes.
     let mut gate = GatedProvider::replying(|call| match call {
-        0 => "<typescript>\nconst step = 1;\n</typescript>".to_string(),
-        call => super::tests::finish_cell(&format!("answer {call}")),
+        0 => crate::tests::code_response("const step = 1;"),
+        call => crate::tests::code_response(&super::tests::finish_cell(&format!("answer {call}"))),
     });
     let workbench = Workbench::builder(gate.provider.clone()).build().await;
     let state = &workbench.state;

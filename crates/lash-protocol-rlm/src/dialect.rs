@@ -214,20 +214,11 @@ impl std::error::Error for DialectRefusal {
     }
 }
 
-/// The lines that open and close one cell on the cell channel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CellTags {
-    pub open: &'static str,
-    pub close: &'static str,
-}
-
 /// What shared code hands a dialect to render its execution section. The
 /// dialect owns every word of the section.
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct ExecutionSectionRequest<'a> {
-    /// The transport programs arrive on.
-    pub channel: crate::plugin::RlmChannel,
     /// The callable tools' docs, as the session's tool presenter showed
     /// them; empty when there are none.
     pub tools: &'a str,
@@ -246,8 +237,6 @@ pub struct DialectPromptVocabulary {
     pub language_name: &'static str,
     /// The heading of the prompt template's execution section.
     pub execution_title: &'static str,
-    /// The cell channel's tag lines.
-    pub cell_tags: CellTags,
     /// What the prompt calls one unit of code.
     pub cell_noun: &'static str,
     /// The call that shows a value for inspection.
@@ -283,7 +272,7 @@ impl DialectPromptVocabulary {
 }
 
 /// Everything one execution session needs from the host that opened it:
-/// workers, resolvers, bounds and transport. Source semantics belong to the
+/// workers, resolvers and bounds. Source semantics belong to the
 /// dialect's kernel package.
 #[derive(Clone)]
 pub(crate) struct CodeModeDialectServices {
@@ -294,10 +283,6 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
-    /// The session-pinned transport programs arrive on. Carried with the
-    /// services because the executor needs it to decide whether cell-delimiter
-    /// advice is true of the source the model actually wrote (FIG-2769).
-    pub(crate) channel: crate::plugin::RlmChannel,
     /// What a stored kernel definition is carried forward with.
     pub(crate) kernel: crate::executor::KernelCarry,
 }
@@ -330,15 +315,6 @@ pub(crate) fn catalogue_label(
             catalogue.omitted.len(),
         )
     }
-}
-
-/// Shared cell transport teaching; native transport replaces this whole section.
-pub(crate) fn cell_response_shape(tags: CellTags) -> String {
-    format!(
-        "### Response shape\n\nPut one program after any commentary, between standalone `{open}` and `{close}` lines. Markdown fences do not execute. A line starting with `{close}` after whitespace ends the first program even inside a multiline string; keep that line out of string contents. Everything after that closing tag is discarded; wait for real results before continuing.\n",
-        open = tags.open,
-        close = tags.close
-    )
 }
 
 /// The session's dialect with the host resources it runs against: what
@@ -432,7 +408,7 @@ impl SessionDialect {
                 workers: lash_vm_client::service::Service::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
+
                 presentation: crate::RlmPresentationConfig::standard(),
                 tool_presentation,
                 kernel: crate::executor::KernelCarry::default(),
@@ -484,10 +460,6 @@ impl SessionDialect {
         self.language().prompt_vocabulary()
     }
 
-    pub(crate) fn cell_tags(&self) -> CellTags {
-        self.prompt_vocabulary().cell_tags
-    }
-
     /// A catalog tool's call path in the selected dialect: its operation,
     /// spelled by the dialect.
     pub(crate) fn tool_call_path(
@@ -515,10 +487,10 @@ impl SessionDialect {
         &self,
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
-        channel: crate::plugin::RlmChannel,
+
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<String, SessionError> {
-        self.execution_section(features, tool_catalog, channel, discovery)
+        self.execution_section(features, tool_catalog, discovery)
             .map(|section| section.joined())
     }
 
@@ -526,7 +498,7 @@ impl SessionDialect {
         &self,
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
-        channel: crate::plugin::RlmChannel,
+
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<ExecutionSection, SessionError> {
         let listing = crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery)
@@ -539,7 +511,6 @@ impl SessionDialect {
         Ok(self
             .language()
             .render_execution_section(ExecutionSectionRequest {
-                channel,
                 tools: &listing.docs,
                 tool_catalog,
                 catalogue: listing.disclosure.as_ref(),
@@ -599,17 +570,12 @@ impl SessionDialect {
         &self,
         termination: lash_core::TerminationMode,
         finishing: &[String],
-        channel: crate::plugin::RlmChannel,
     ) -> String {
         match termination {
             lash_core::TerminationMode::TerminalRequired => {
-                self.finish_required_finalization(finishing, channel)
+                self.finish_required_finalization(finishing)
             }
             lash_core::TerminationMode::Natural => {
-                let step = match channel {
-                    crate::plugin::RlmChannel::Cell => "in a block",
-                    crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
-                };
                 let finish = self.finish_calls(finishing);
                 // A model that reads "return a value" as "return what the
                 // tool gave back" ends a chat turn with a record nobody can
@@ -618,78 +584,17 @@ impl SessionDialect {
                 // A finish tool whose input is typed refuses any other value
                 // as an ordinary failed call, which the catalog documents.
                 format!(
-                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}. Prefer prose for the final answer. Call {finish} inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
+                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step in an `execute_code` call. Prefer prose for the final answer. Call {finish} inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
                 )
             }
         }
     }
 
-    pub(crate) fn cell_error_message(&self, error: crate::protocol::CellExtractionError) -> String {
-        let tags = self.cell_tags();
-        match error {
-            crate::protocol::CellExtractionError::UnclosedCell => format!(
-                "Model response started a `{open}` block but did not close it. Retry with one complete paired block. A line whose trimmed content is exactly `{close}` closes the cell.",
-                open = tags.open,
-                close = tags.close,
-            ),
-        }
-    }
-
-    pub(crate) fn finish_required_copy(
-        &self,
-        finishing: &[String],
-        channel: crate::plugin::RlmChannel,
-    ) -> String {
-        let tags = self.prompt_vocabulary().cell_tags;
-        let place = match channel {
-            crate::plugin::RlmChannel::Cell => {
-                format!("inside a paired `{}...{}` block", tags.open, tags.close)
-            }
-            crate::plugin::RlmChannel::NativeTool => {
-                "inside the `code` argument of an `execute_code` call".to_string()
-            }
-        };
+    pub(crate) fn finish_required_copy(&self, finishing: &[String]) -> String {
         let finish = self.finish_calls(finishing);
         format!(
-            "Call {finish} {place} when the task is complete. It ends the turn: make it the last thing the program does."
+            "Call {finish} inside the `code` argument of an `execute_code` call when the task is complete. It ends the turn: make it the last thing the program does."
         )
-    }
-
-    pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
-        let tags = self.cell_tags();
-        format!(
-            "{error_text}\n\nReply again using exactly one paired `{}...{}` block.",
-            tags.open, tags.close
-        )
-    }
-
-    /// What to tell a model whose reply carried a provider tool call on a
-    /// channel that declared no tools.
-    ///
-    /// The call is malformed provider output, not a protocol violation — the
-    /// request showed no tool surface — so the copy names what happened and
-    /// sends the work back inside the cell (FIG-2777).
-    pub(crate) fn native_tool_call_copy(&self, tool_name: &str) -> String {
-        format!(
-            "The model response carried a provider tool call `{tool_name}`, but this channel's request declares no tools, so nothing was executed. Express that work inside the program instead."
-        )
-    }
-
-    pub(crate) fn output_limit_cell_copy(&self, output_token_cap: Option<usize>) -> String {
-        let tags = self.cell_tags();
-        let cap = output_token_cap
-            .map(|cap| format!(" The request cap was {cap} tokens."))
-            .unwrap_or_default();
-        format!(
-            "Model output truncated the `{}` block before `{}`.{cap} Retry with a shorter block.",
-            tags.open, tags.close
-        )
-    }
-
-    /// The diagnostic name of one program execution: derived from the
-    /// session's language id, so it names the dialect that ran.
-    pub(crate) fn execution_diagnostic_name(&self) -> String {
-        format!("execute_{}", self.language_id())
     }
 
     pub(crate) fn stream_cell_start_event_name(&self) -> String {
@@ -700,64 +605,10 @@ impl SessionDialect {
         format!("rlm_{}_cell_end", self.language_id())
     }
 
-    pub(crate) fn render_history_cell(&self, prose: &str, code: &str) -> String {
-        crate::cell_scan::render_cell_text(self.cell_tags(), prose, code)
-    }
-
-    pub(crate) fn finish_required_finalization(
-        &self,
-        finishing: &[String],
-        channel: crate::plugin::RlmChannel,
-    ) -> String {
-        let tags = self.prompt_vocabulary().cell_tags;
+    pub(crate) fn finish_required_finalization(&self, finishing: &[String]) -> String {
         let finish = self.finish_calls(finishing);
-        match channel {
-            crate::plugin::RlmChannel::Cell => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call {finish} until the answer is in hand; the final response's block calls it as its last statement. Never announce an action without the block that performs it.",
-                open = tags.open,
-                close = tags.close,
-            ),
-            crate::plugin::RlmChannel::NativeTool => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call {finish} until the answer is in hand; the final response's `execute_code` call runs it as its last statement. Never announce an action without the `execute_code` call that performs it."
-            ),
-        }
-    }
-
-    /// What to tell a model that opened a line with the cell tag in a position
-    /// the cell grammar refuses.
-    ///
-    /// The rule itself is the whole content, because the failure this replaces
-    /// was a reply that got no rule at all: a misplaced fence was read as prose,
-    /// the driver answered "please finish", and the model — correctly seeing
-    /// nothing wrong with its own code — re-sent it until the turn's budget died
-    /// (FIG-1475).
-    ///
-    /// It names the *canonical* shape only, and deliberately says nothing about
-    /// the one-line shape the scanner also reads. Every prompt fragment teaches
-    /// standalone tag lines; a correction that advertised a second accepted
-    /// shape would contradict them, and this copy exists to remove a
-    /// contradiction rather than add one. A reply already in the one-line shape
-    /// never reaches this copy — it executes.
-    pub(crate) fn malformed_cell_fence_retry_copy(&self) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = vocabulary.cell_tags;
         format!(
-            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must start a later line after any whitespace. Everything after that close is discarded. To mention a tag in prose instead, wrap it in backticks.",
-            noun = vocabulary.cell_noun,
-            open = tags.open,
-            close = tags.close,
-        )
-    }
-
-    /// What to tell a native-tool-channel model that wrote a cell in its reply
-    /// text. That channel runs code only through `execute_code` and its prompt
-    /// teaches no cell tags, so a text cell is never executed there — well
-    /// formed or not — and is never the answer either (FIG-5302).
-    pub(crate) fn native_text_cell_copy(&self) -> String {
-        format!(
-            "No code executed: a `{open}` block in reply text is not executed in this session. Resend the program as the `code` argument of an `{tool}` call. To mention a tag in prose instead, wrap it in backticks.",
-            open = self.cell_tags().open,
-            tool = crate::native::NATIVE_EXECUTE_TOOL_NAME,
+            "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call {finish} until the answer is in hand; the final response's `execute_code` call runs it as its last statement. Never announce an action without the `execute_code` call that performs it."
         )
     }
 }
@@ -836,7 +687,7 @@ impl DialectSession {
                 documents: self.services.documents.clone(),
                 workers: self.services.workers.clone(),
                 execution_bounds: self.services.execution_bounds,
-                channel: self.services.channel,
+
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
                 kernel: self.services.kernel.clone(),
@@ -1018,10 +869,6 @@ mod tests {
         fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
             DialectPromptVocabulary {
                 language_name: "Extension fixture",
-                cell_tags: CellTags {
-                    open: "<fixture>",
-                    close: "</fixture>",
-                },
                 ..TypescriptPrompts.prompt_vocabulary()
             }
         }
@@ -1081,100 +928,7 @@ mod tests {
             .render()
             .expect("presentable bindings");
         assert!(prompt.contains("bound in Extension fixture"), "{prompt}");
-        assert!(prompt.contains("`<fixture>`"), "{prompt}");
         assert!(!prompt.contains("TypeScript"), "{prompt}");
-    }
-    #[tokio::test]
-    async fn the_session_channel_decides_the_cell_delimiter_hint() {
-        async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
-            let mut services = test_dialect_services();
-            services.channel = channel;
-            let mut session =
-                DialectSession::new(crate::dialect::CellDialect::typescript(), services);
-            let handler =
-                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-            let ctx = crate::testing::recorded_cell_context(
-                &handler,
-                "test-session",
-                "test-turn",
-                "exec-code:0",
-                Arc::new(crate::testing::NoTools),
-            )
-            .await;
-            session.shows_packages(ctx.recorded_packages().clone());
-            let response = Box::pin(session.execute(
-                ctx,
-                ExecRequest {
-                    code: "const payload = `".to_string(),
-                },
-            ))
-            .await
-            .expect("the cell runs and reports its own failure");
-            response
-                .error()
-                .expect("an unterminated template literal fails to parse")
-                .message
-                .clone()
-        }
-
-        let native = Box::pin(parse_failure_feedback(
-            crate::plugin::RlmChannel::NativeTool,
-        ))
-        .await;
-        assert!(!native.contains("</typescript>"), "{native}");
-
-        let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
-        assert!(
-            cell.contains("line starting with `</typescript>`"),
-            "{cell}"
-        );
-    }
-
-    #[tokio::test]
-    async fn extension_session_parse_feedback_uses_its_cell_delimiter() {
-        for channel in [
-            crate::plugin::RlmChannel::Cell,
-            crate::plugin::RlmChannel::NativeTool,
-        ] {
-            let mut services = test_dialect_services();
-            services.channel = channel;
-            let mut session = DialectSession::new(extension_fixture(), services);
-            let handler =
-                crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-            let ctx = crate::testing::recorded_cell_context(
-                &handler,
-                "test-session",
-                "test-turn",
-                "exec-code:0",
-                Arc::new(crate::testing::NoTools),
-            )
-            .await;
-            session.shows_packages(ctx.recorded_packages().clone());
-            let response = Box::pin(session.execute(
-                ctx,
-                ExecRequest {
-                    code: "const payload = `".to_string(),
-                },
-            ))
-            .await
-            .expect("report the extension's parse failure");
-            let feedback = response
-                .error()
-                .expect("the fixture refuses the source")
-                .message
-                .clone();
-            assert!(!feedback.contains("</typescript>"), "{feedback}");
-            match channel {
-                crate::plugin::RlmChannel::Cell => assert!(
-                    feedback.contains("line starting with `</fixture>`"),
-                    "{feedback}"
-                ),
-                crate::plugin::RlmChannel::NativeTool => assert!(
-                    !feedback.contains("standalone delimiter line"),
-                    "{feedback}"
-                ),
-            }
-        }
     }
 }
 
@@ -1192,7 +946,6 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
         workers: lash_vm_client::service::Service::default(),
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
-        channel: crate::plugin::RlmChannel::Cell,
     }
 }
 

@@ -2,19 +2,13 @@
 
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
-## Context
+## Status
 
-Cell transport and provider-native code calls execute against the same persistent
-heap, catalog, checkpoints, and finish contract. Their model histories need
-different projection and response-admission rules.
+The cell-channel and channel-selection decisions are superseded by
+[ADR 0148](0148-rlm-uses-one-provider-native-code-channel.md).
+The native call/result and reasoning-replay contract below remains in force.
 
 ## Decision
-
-`RlmProtocolPluginConfig.channel` explicitly selects `Cell` or `NativeTool`.
-Materialization records that channel in durable protocol options. Rebuilding
-requires the pin: substitution returns `RecordedSessionConfigConflict`, and
-absence returns `MissingRecordedSessionConfig`. Channel selection does not infer
-compatibility or translate one transport's history into another.
 
 Native transport advertises one `execute_code` tool with exactly one required,
 nonempty string property `code` and no additional properties. Tool choice is
@@ -25,15 +19,13 @@ JSON, missing code, and extra properties receive their own repair decisions.
 Shared response assembly normalizes provider call ids under ADR 0117 before
 native admission checks arity and arguments.
 
-Both channels share execution, finish-value settlement, semantic trajectory,
-control tools, bindings, and checkpoint identity. Drivers, projectors, response
-normalization, and transport prompt copy are channel-specific. Native results
-use the common observation renderer.
+Execution, finish-value settlement, semantic trajectory, control tools, bindings
+and checkpoint identity share one native protocol. Results use the observation renderer.
 
 Ordered assistant parts and opaque replay metadata are ordinary committed
 history (FIG-5527): the reply that ran a cell is an assistant message whose
 `MessageOrigin::TurnOutput` names the cell in `cell_id`, the `CellRecord::id` of
-its trajectory entry, as the cell channel's assistant message does. A reply
+its trajectory entry. A reply
 whose calls ran nothing is an assistant message followed by one tool result per
 call carrying the correction. The projector retains complete call/result
 exchanges. Terminal suppression and failure scrubbing remove complete exchanges;
@@ -54,7 +46,7 @@ cell-end observations.
 A turn's final value has the type of the finish tool that ended it
 (FIG-5823). Each tool that declares `Finish` states its value schema on the
 declaration, and settlement checks every Finish value against the schema
-the call was admitted under, on both channels. A mismatch fails the call
+the call was admitted under, on the native channel. A mismatch fails the call
 with no completion candidate and is never repeated; the model reads it and
 the loop continues. A host that wants a typed answer offers its own finish
 tool, which takes the place of `control.finish`; a send that offers it
@@ -71,14 +63,13 @@ execution response contract; one code program can express the work explicitly.
 
 ## Consequences and non-goals
 
-Both channels are selectable and durable. Native admission enforces one call
+Native admission enforces one call
 independently of the provider's parallel-call setting, which follows ADR 0121.
 Live code streaming and serial multi-call execution are outside this contract.
-Transport-specific history remains distinct from common execution state.
+Provider exchange history remains distinct from common execution state.
 
 ## Code references
 
-- `crates/lash-protocol-rlm/src/plugin/channel.rs:36-78` records and validates the pin.
 - `crates/lash-protocol-rlm/src/native/tool.rs:5-118` defines and admits the native ABI.
 - `crates/lash-protocol-rlm/src/native/driver.rs` adjudicates responses and executions.
 - `crates/lash-protocol-rlm/src/native/projector.rs` projects complete exchanges.

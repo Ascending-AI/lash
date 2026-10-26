@@ -116,19 +116,16 @@ Search issues.
 
 `tracker.open({ query: string }): Promise<string>`
 Open an issue."##;
-/// The TypeScript dialect's built-in execution prose on the cell channel.
-const EXECUTION_PROSE: &str = r##"Use prose for conversation; use a paired `<typescript>` block for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**.
+/// The TypeScript dialect's built-in execution prose through the native code tool.
+const EXECUTION_PROSE: &str = r##"Use prose for conversation; use the `execute_code` program for action or computation. Call tools as `await module.operation({ ... })`, only those listed under **Tools**.
 
-### Response shape
+### Tool transport
 
-Put one program after any commentary, between standalone `<typescript>` and `</typescript>` lines. Markdown fences do not execute. A line starting with `</typescript>` after whitespace ends the first program even inside a multiline string; keep that line out of string contents. Everything after that closing tag is discarded; wait for real results before continuing.
+For action or computation, make one `execute_code` call with `{"code": "<complete program>"}`. Call tools, including `control.finish`, inside the program; prose before the call is commentary.
 
-### Example cell
+### Example execute_code call
 
-<typescript>
-const total = 1 + 2;
-await control.finish(total);
-</typescript>
+execute_code({"code":"const total = 1 + 2;\nawait control.finish(total);"})
 
 Lexical and top-level bindings may shadow built-in names; top-level shadows persist across executions. Only an offered control capability ends the turn, never a user binding with the same name. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `await control.finish(value)`; do not finish with an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
@@ -230,7 +227,6 @@ fn the_native_channel_renders_the_same_declarations_without_cells() {
     let catalog = catalog();
     let composed = compose_rlm(
         RlmSections {
-            channel: RlmChannel::NativeTool,
             ..sections(&catalog)
         },
         turn(catalog),
@@ -238,11 +234,7 @@ fn the_native_channel_renders_the_same_declarations_without_cells() {
     let rendered = initial(&composed);
     assert!(rendered.contains("### Tool transport"));
     assert!(rendered.contains(DECLARATIONS));
-    assert!(
-        rendered
-            .lines()
-            .all(|line| !["<typescript>", "</typescript>"].contains(&line.trim()))
-    );
+    assert!(rendered.contains("execute_code("));
 }
 
 /// A section with nothing to say is omitted: no heading, no separator.
@@ -260,7 +252,7 @@ fn a_section_with_nothing_to_say_renders_nothing() {
             "\n=== FINALIZATION ===\n\n{}",
             sections(&lash_core::ToolCatalog::default())
                 .dialect
-                .finalization_copy(lash_core::TerminationMode::default(), &[], RlmChannel::Cell)
+                .finalization_copy(lash_core::TerminationMode::default(), &[])
         )
     );
 }
@@ -477,25 +469,22 @@ fn a_section_renders_the_same_text_wherever_the_host_places_it() {
 /// no transcript surface (ADR 0147).
 #[test]
 fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
-    for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
+    {
         for (structured, images) in [(false, true), (true, true), (true, false)] {
             let sections = RlmSections {
-                channel,
                 ..RlmSections::typescript()
             };
             let options = RlmCreateExtras::default();
-            let finalization = sections.dialect.finalization_copy(
-                options.termination.unwrap_or_default(),
-                &[],
-                channel,
-            );
+            let finalization = sections
+                .dialect
+                .finalization_copy(options.termination.unwrap_or_default(), &[]);
             let optional = if images {
                 String::new()
             } else {
                 "\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).".to_owned()
             };
             let (mut request, facts) =
-                crate::driver::tests::projected_request_with_facts(channel, structured);
+                crate::driver::tests::projected_request_with_facts(structured);
             let history_messages = request.messages.len() - 1;
             let composed = compose_rlm(
                 RlmSections {
@@ -551,10 +540,9 @@ fn an_ask_tool_declares_its_surface_without_interaction_policy() {
         "user.ask",
         "Collect a response.",
     )]);
-    for channel in [RlmChannel::Cell, RlmChannel::NativeTool] {
+    {
         let composed = compose_rlm(
             RlmSections {
-                channel,
                 ..sections(&catalog)
             },
             turn(catalog.clone()),

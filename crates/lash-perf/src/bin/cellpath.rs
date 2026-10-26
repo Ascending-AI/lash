@@ -65,9 +65,9 @@ fn main() -> Result<()> {
 async fn run(args: Args) -> Result<()> {
     let source = std::fs::read_to_string(&args.source)
         .with_context(|| format!("read {}", args.source.display()))?;
-    let (tag, dialect) = match args.dialect {
-        Dialect::Typescript => ("typescript", lash::rlm::CellDialect::typescript()),
-        Dialect::Python => ("python", lash::rlm::CellDialect::python()),
+    let dialect = match args.dialect {
+        Dialect::Typescript => lash::rlm::CellDialect::typescript(),
+        Dialect::Python => lash::rlm::CellDialect::python(),
     };
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
@@ -102,12 +102,11 @@ async fn run(args: Args) -> Result<()> {
     };
     workers.run_bounds.charge_limit = args.instructions;
     let feedback = Arc::new(Mutex::new(String::new()));
-    let cell = format!("<{tag}>\n{source}\n</{tag}>");
+    let cell = source;
     let core = lash::LashCore::rlm_builder(
         backend,
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(args.instructions))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(args.memory_mib))
                 .build(),
@@ -195,7 +194,14 @@ fn model(cell: String, feedback: Arc<Mutex<String>>) -> ProviderHandle {
                 } else {
                     cell
                 };
-                Ok(streamed(&request, &text))
+                Ok(if answered {
+                    streamed(&request, &text)
+                } else {
+                    LlmResponse {
+                        parts: vec![lash::testing::execute_code(text)],
+                        ..Default::default()
+                    }
+                })
             }
         })
         .build()

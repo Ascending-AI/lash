@@ -974,21 +974,17 @@ impl Deployment {
                         .messages
                         .iter()
                         .any(|message| message.role == LlmRole::Assistant);
-                    Ok(served::text(
-                        &request,
-                        if answered {
-                            "done"
-                        } else {
-                            "<typescript>\nconsole.log(await tools.surfaceHeld({}));\n</typescript>"
-                        },
-                    ))
+                    Ok(if answered {
+                        served::text(&request, "done")
+                    } else {
+                        served::cell("console.log(await tools.surfaceHeld({}));")
+                    })
                 }
             })
             .build()
             .into_handle();
         let factory = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),

@@ -101,7 +101,7 @@ impl TurnActivitySink for CompletedToolCalls {
 }
 
 fn workbench_control_cell(source: &str) -> String {
-    format!("<typescript>\n{source}\n</typescript>")
+    source.to_string()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

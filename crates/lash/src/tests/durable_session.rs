@@ -10,7 +10,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
     fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
-                text_provider(
+                part_provider(
                     "all-cell-calls",
                     typescript_block(
                         "for (let i = 0; i < 129; i++) { await tools.appLookup({}); }\n\

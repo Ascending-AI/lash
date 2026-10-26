@@ -255,10 +255,7 @@ async fn store_maintenance_vacuum_reclaims_only_settled_rows() {
 /// route hands the sweep.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn store_maintenance_reclaims_only_unreferenced_attachments() {
-    let workbench = Workbench::replying(
-        "<typescript>\nawait chat.reply(\"attachment retained\");\n</typescript>",
-    )
-    .await;
+    let workbench = Workbench::executing("await chat.reply(\"attachment retained\");").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let attachment_store = workbench.stores.attachment_store();

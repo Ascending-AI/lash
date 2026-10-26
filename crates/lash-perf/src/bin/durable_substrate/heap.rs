@@ -336,7 +336,7 @@ fn source(scenario: &str, h: usize, cell: usize) -> String {
         body.push_str("console.log(\"heap-ok\");");
         body
     };
-    format!("<typescript>\n/*heap-cell:{cell}*/\n{body}\n</typescript>")
+    format!("/*heap-cell:{cell}*/\n{body}")
 }
 fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
     let scenario = scenario.to_owned();
@@ -355,7 +355,7 @@ fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
                     if !feedback.contains("heap-ok") { eprintln!("heap feedback {scenario}/{h}: {feedback}"); }
                     "heap complete".to_owned()
                 };
-                Ok(super::cells::streamed(&request, &text))
+                Ok(if cells < total { lash::provider::LlmResponse { parts: vec![lash::testing::execute_code(text)], ..Default::default() } } else { super::cells::streamed(&request, &text) })
             }
         }).build().into_handle()
 }
@@ -454,7 +454,6 @@ async fn sample_with_stores(
         backend,
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
                 .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),

@@ -242,7 +242,7 @@ impl CellObservation {
         &self,
         source: &str,
         map: Option<&SourceMap>,
-        channel: crate::plugin::RlmChannel,
+
         prompts: &dyn DialectPrompts,
         packages: Option<&lash_vocabulary::package::NamespaceSnapshot>,
         ctx: &lash_core::RuntimeExecutionContext<'_>,
@@ -308,9 +308,9 @@ impl CellObservation {
                     .iter()
                     .flat_map(|reply| reply.repairs.iter().cloned()),
             );
-            Self::Refused(refusal).failure(source, map, channel, prompts)
+            Self::Refused(refusal).failure(source, map, prompts)
         } else {
-            let mut failure = self.failure(source, map, channel, prompts);
+            let mut failure = self.failure(source, map, prompts);
             for repair in feedback.iter().flat_map(|reply| &reply.repairs) {
                 failure.message.push_str(&format!("\nInstead: {repair}"));
             }
@@ -380,7 +380,7 @@ impl CellObservation {
         &self,
         source: &str,
         map: Option<&SourceMap>,
-        channel: crate::plugin::RlmChannel,
+
         prompts: &dyn DialectPrompts,
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
@@ -408,16 +408,6 @@ impl CellObservation {
                 }
                 for repair in &refusal.repairs {
                     message.push_str(&format!("\nInstead: {repair}"));
-                }
-                // A closing delimiter line inside multiline source closes
-                // the cell early, so the dialect receives a program that
-                // stops mid-literal. A native tool call carries the program
-                // as an argument, where no delimiter can truncate it.
-                if !refusal.unsupported && channel == crate::plugin::RlmChannel::Cell {
-                    message.push_str(&format!(
-                        "\n\nA line starting with `{}` after whitespace terminates the outer {} even inside multiline source text; construct that content without a line-leading closing delimiter. Everything after that closing tag is discarded; wait for real results before continuing.",
-                        vocabulary.cell_tags.close, vocabulary.cell_noun,
-                    ));
                 }
                 let mut failure = CellFailure::new(
                     if refusal.unsupported {
@@ -665,8 +655,7 @@ mod tests {
                     lash_vocabulary::names::FunctionName::new(name).expect("function name")
                 }),
             });
-            let failure =
-                observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
+            let failure = observation.failure("", None, prompts.as_ref());
             let context = function
                 .map(|name| format!(" in library function `{name}`"))
                 .unwrap_or_default();
@@ -835,8 +824,7 @@ mod tests {
             };
             let observation = CellObservation::of_run_error(error, &BTreeMap::new());
             let prompts = crate::CellDialect::typescript().prompts();
-            let failure =
-                observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
+            let failure = observation.failure("", None, prompts.as_ref());
             let text = render(&failure, "cell");
             assert!(text.contains("work.spin"), "{text}");
             assert!(!text.contains(&function.to_string()), "{text}");

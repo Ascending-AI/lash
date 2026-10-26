@@ -539,7 +539,6 @@ fn facade_catalogue_preview_honors_host_vocabulary_and_limits() {
 async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let mut config = lash::rlm::RlmProtocolPluginConfig::standard()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build();
@@ -560,15 +559,18 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
             .with_worker_service(untimed_fixture_workers());
     let (provider, requests) =
         super::standard_compaction_persistence::standard_compaction_provider_recorded(vec![
-            text_response(&typescript_block(
-                r#"const mapped = new Map([["a", 1], ["b", 2], ["c", 3]]);
+            lash_facade_tests::control_cell_response(
+                0,
+                (r#"const mapped = new Map([["a", 1], ["b", 2], ["c", 3]]);
 const object = { first: 1, second: 2 };
 await tools.appLookup({});
-console.log("abcdefghijklmnopqrstuvwxyz");"#,
-            )),
-            text_response(&typescript_block(
-                r#"await control.finish("complete-value");"#,
-            )),
+console.log("abcdefghijklmnopqrstuvwxyz");"#)
+                    .to_string(),
+            ),
+            lash_facade_tests::control_cell_response(
+                0,
+                (r#"await control.finish("complete-value");"#).to_string(),
+            ),
         ]);
     let cuts = lash::RuntimeOutputCuts {
         value_reply_max_chars: 3,
@@ -708,7 +710,6 @@ fn facade_recorded_render_refuses_omitted_base_choices() {
     #[cfg(feature = "rlm")]
     {
         let recorded = lash::rlm::RlmProtocolPluginConfig::standard()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::unbounded())
             .memory_limit(lash::rlm::MemoryBound::unbounded())
             .build()

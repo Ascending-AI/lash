@@ -68,8 +68,7 @@ async fn agent_tuple_json_array_execution() -> Result<Value, FixedScriptRunnerEr
         "lash_runtime agent tuple final value",
         &SessionId::from("sim-agent-tuple-json-array-contract"),
         "Use tuple values and finish the derived result.",
-        r#"<typescript>
-const pair = ["left", "right"];
+        r#"const pair = ["left", "right"];
 const tail = pair.slice(1);
 const seen = [];
 for (const item of pair) {
@@ -81,8 +80,7 @@ await control.finish({
   seen: seen,
   tuple: pair,
   nested: { pair: pair }
-});
-</typescript>"#,
+});"#,
         &expected,
     )
     .await?;
@@ -294,10 +292,8 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         &SessionId::from("sim-agent-foreground-tool-contract"),
         "Call the app lookup tool and finish its value.",
         vec![
-            r#"<typescript>
-const value = await tools.appLookup({});
-await control.finish(value);
-</typescript>"#,
+            r#"const value = await tools.appLookup({});
+await control.finish(value);"#,
         ],
         &expected,
         Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
@@ -333,20 +329,14 @@ async fn agent_failed_child_preserves_failure_graph_execution()
     let (core, graph_store, engine) = agent_process_contract_core_with_options(
         "lash_runtime agent failed child graph",
         vec![
-            r#"<typescript>
-const result = await agents.spawn({
+            r#"const result = await agents.spawn({
   task: "Fail with reason child boom.",
   seed: {},
   output: { reason: "str" }
 });
-await control.finish(result);
-</typescript>"#,
-            r#"<typescript>
-await task.fail({ reason: "child boom" });
-</typescript>"#,
-            r#"<typescript>
-await task.fail({ reason: "parent observed child failure" });
-</typescript>"#,
+await control.finish(result);"#,
+            r#"await task.fail({ reason: "child boom" });"#,
+            r#"await task.fail({ reason: "parent observed child failure" });"#,
         ],
         None,
         true,
@@ -492,7 +482,6 @@ async fn facade_final_value_execution_inner(
     let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -504,7 +493,7 @@ async fn facade_final_value_execution_inner(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
-            fixed_texts_provider(provider_kind, provider_responses),
+            fixed_code_provider(provider_kind, provider_responses),
             lash_core::LlmProfileMetadata::builder(provider_kind)
                 .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
@@ -709,18 +698,14 @@ async fn facade_agent_durable_input_execution_with(
     let (core, graph_store, engine) = agent_process_contract_core_with_tools(
         "lash_runtime agent durable input",
         vec![
-            r#"<typescript>
-const requestAnswer = async (): Promise<{ request_id: string; answer: string }> => {
+            r#"const requestAnswer = async (): Promise<{ request_id: string; answer: string }> => {
   const result = await tools.mockInputRequest({ question: "Need input?" });
   return result;
 };
 const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
-await control.finish(result.answer);
-</typescript>"#,
-            r#"<typescript>
-await control.finish({ recovered: true });
-</typescript>"#,
+await control.finish(result.answer);"#,
+            r#"await control.finish({ recovered: true });"#,
         ],
         Some(registered_tools),
     )
@@ -857,7 +842,6 @@ async fn agent_process_contract_core_with_options(
     let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -875,7 +859,7 @@ async fn agent_process_contract_core_with_options(
 
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
-        .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind).cache_retention(lash_core::provider::CacheRetention::Short)
+        .serve_test_llm_profile(fixed_code_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind).cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);

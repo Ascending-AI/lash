@@ -10,8 +10,6 @@ pub(crate) struct RlmReasoningPart {
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RlmDriverState {
-    #[serde(default)]
-    pub(crate) reasoning: Vec<RlmReasoningPart>,
     pub(crate) assistant_parts: Vec<lash_core::Part>,
     pub(crate) code: String,
 }
@@ -105,7 +103,7 @@ pub(crate) fn decode_rlm_driver_state(
 }
 
 /// Whether this build decodes the driver state a restored checkpoint parked
-/// in `work`: what both channels' drivers answer
+/// in `work`: what the driver answers
 /// `ProtocolDriverHandle::check_parked_state` with. A model call and a cell
 /// each park one; no other work does.
 pub(crate) fn check_parked_rlm_state(
@@ -151,7 +149,7 @@ pub(crate) fn handed_back_rlm_state(
 mod tests {
     use super::*;
     #[test]
-    fn both_channels_refuse_unstamped_and_foreign_driver_state() {
+    fn the_driver_refuses_unstamped_and_foreign_driver_state() {
         for parts in [
             Vec::new(),
             vec![lash_core::Part::text(

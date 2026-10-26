@@ -251,10 +251,7 @@ fn response(
                 }
                 _ => return Err(anyhow!("scenario needs a Standard channel")),
             };
-            vec![LlmOutputPart::Text {
-                text: format!("<typescript>\n{code}\n</typescript>"),
-                response_meta: None,
-            }]
+            vec![lash::testing::execute_code(code.to_string())]
         }
     };
     let mut record = serde_json::to_vec(

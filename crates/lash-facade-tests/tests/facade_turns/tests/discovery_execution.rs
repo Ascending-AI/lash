@@ -71,9 +71,10 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
         let backend = sqlite_memory_store_backend().await;
         let calls = Arc::new(StdMutex::new(Vec::new()));
         let first = if mode == "rlm" {
-            text_response(&typescript_block(
-                "await control.finish(await tools.hidden({}));",
-            ))
+            lash_facade_tests::control_cell_response(
+                0,
+                ("await control.finish(await tools.hidden({}));").to_string(),
+            )
         } else {
             LlmResponse {
                 parts: vec![LlmOutputPart::ToolCall {
@@ -128,7 +129,6 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 backend.clone(),
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash_protocol_rlm::RlmChannel::Cell)
                         .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
                             1_000_000,
                         ))

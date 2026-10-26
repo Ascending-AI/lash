@@ -377,10 +377,7 @@ fn worker(
                 .unwrap_or_else(|| "await control.finish(\"idle\");".to_owned());
             async move {
                 Ok(lash_core::llm::types::LlmResponse {
-                    parts: vec![lash_core::LlmOutputPart::Text {
-                        text: format!("<typescript>\n{code}\n</typescript>"),
-                        response_meta: None,
-                    }],
+                    parts: vec![lash::testing::execute_code(code.to_string())],
                     ..Default::default()
                 })
             }
@@ -389,7 +386,6 @@ fn worker(
         .into_handle();
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

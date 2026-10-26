@@ -5,24 +5,7 @@ use lash_vocabulary::identity::TurnId;
 
 use crate::driver_state::RlmReasoningPart;
 
-#[cfg(feature = "testing")]
-pub(super) fn internal_assistant_prose_message(
-    message_id: String,
-    content: String,
-    reasoning: &[RlmReasoningPart],
-) -> Message {
-    prose_message(
-        message_id,
-        content,
-        reasoning,
-        Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-    )
-}
-
-pub(super) fn internal_assistant_prose_message_for_turn(
+pub(crate) fn internal_assistant_prose_message_for_turn(
     turn_id: &TurnId,
     message_id: String,
     content: String,
@@ -38,29 +21,6 @@ pub(super) fn internal_assistant_prose_message_for_turn(
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             },
             cell_id: None,
-        }),
-    )
-}
-
-/// The assistant message of a reply whose cell ran as `cell_id`: the reply's
-/// reasoning and the prose around the cell, naming the cell in its origin.
-pub(super) fn cell_context_message(
-    turn_id: &TurnId,
-    message_id: String,
-    cell_id: String,
-    content: String,
-    reasoning: &[RlmReasoningPart],
-) -> Message {
-    prose_message(
-        message_id,
-        content,
-        reasoning,
-        Some(lash_core::MessageOrigin::TurnOutput {
-            turn_id: turn_id.clone(),
-            source: lash_core::TurnOutputSource::Plugin {
-                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            },
-            cell_id: Some(cell_id),
         }),
     )
 }
@@ -90,22 +50,19 @@ fn prose_message(
 
 /// The reminder a reply that ended a finish-required turn with no control
 /// call reads, naming the finish calls `finishing` its surface offers.
-pub(super) fn finish_required_reminder_message(
+pub(crate) fn finish_required_reminder_message(
     dialect: &SessionDialect,
     id: String,
     finishing: &[String],
 ) -> Message {
-    let tags = dialect.cell_tags();
-    let repair = format!(
-        "No code from that response executed. Markdown code fences do not execute here. Resend the needed program between `{}` and `{}` on their own lines, without backticks. {}",
-        tags.open,
-        tags.close,
-        dialect.finish_required_copy(finishing, crate::plugin::RlmChannel::Cell),
-    );
     Message {
         id: id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(format!("{id}.p0"), repair, None)]),
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            dialect.finish_required_copy(finishing),
+            None,
+        )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
@@ -143,62 +100,19 @@ pub(crate) fn completion_superseded_message(
     }
 }
 
-pub(super) fn invalid_cell_message(
-    dialect: &SessionDialect,
-    id: String,
-    error_text: &str,
+#[cfg(feature = "testing")]
+pub(crate) fn internal_assistant_prose_message(
+    message_id: String,
+    content: String,
+    reasoning: &[RlmReasoningPart],
 ) -> Message {
-    Message {
-        id: id.clone(),
-        role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(
-            format!("{id}.p0"),
-            dialect.invalid_cell_retry_copy(error_text),
-            None,
-        )]),
-        origin: Some(lash_core::MessageOrigin::Plugin {
+    prose_message(
+        message_id,
+        content,
+        reasoning,
+        Some(lash_core::MessageOrigin::Plugin {
             plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
             transient: false,
         }),
-        reply_marker: None,
-    }
-}
-
-/// The retry copy a model reads after the output limit truncated its answer.
-///
-/// Vocabulary-taking so the walker can render it in both dialects: "per cell"
-/// is TypeScript's noun for a unit of code, and a Lash VM reader has only ever
-/// been shown blocks.
-pub(crate) fn output_limit_retry_copy(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    output_token_cap: Option<usize>,
-) -> String {
-    let cap = output_token_cap
-        .map(|cap| format!(" (the request cap was {cap} tokens)"))
-        .unwrap_or_default();
-    let noun = vocabulary.cell_noun;
-    format!(
-        "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per {noun} and continue in a later step."
     )
-}
-
-pub(super) fn output_limit_retry_message(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    id: String,
-    output_token_cap: Option<usize>,
-) -> Message {
-    Message {
-        id: id.clone(),
-        role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(
-            format!("{id}.p0"),
-            output_limit_retry_copy(vocabulary, output_token_cap),
-            None,
-        )]),
-        origin: Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-        reply_marker: None,
-    }
 }

@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 /// The assistant message of a reply whose `execute_code` call ran as the cell
 /// `cell_id`: the reply's parts, unchanged, so provider replay material
 /// survives.
-pub(super) fn cell_context_message(
+pub(crate) fn cell_context_message(
     turn_id: &TurnId,
     message_id: String,
     cell_id: String,
@@ -39,7 +39,7 @@ pub(super) fn cell_context_message(
 /// correction the model reads. The results pair with their calls by
 /// `call_id` and speak in the user role, where every tool result does,
 /// under the protocol's own origin.
-pub(super) fn refused_call_messages(
+pub(crate) fn refused_call_messages(
     turn_id: &TurnId,
     call_message_id: String,
     result_message_id: String,
@@ -125,7 +125,7 @@ pub(crate) fn is_exchange_message(origin: Option<&MessageOrigin>, parts: &[Part]
 
 /// One render's native exchanges, shared by execution lookup, chronological
 /// refusal rendering and failure scrubbing.
-pub(super) struct NativeExchangeIndex<'a> {
+pub(crate) struct NativeExchangeIndex<'a> {
     /// Every exchange message, by chronological index.
     messages: HashSet<usize>,
     /// The reply parts of each executed cell, by cell id.
@@ -136,7 +136,7 @@ pub(super) struct NativeExchangeIndex<'a> {
 }
 
 impl<'a> NativeExchangeIndex<'a> {
-    pub(super) fn new(
+    pub(crate) fn new(
         chronological: &'a lash_core::facade_support::ChronologicalProjection,
     ) -> Self {
         let mut index = Self {
@@ -177,21 +177,21 @@ impl<'a> NativeExchangeIndex<'a> {
     }
 
     /// Whether the entry is an exchange message, rendered only as its pair.
-    pub(super) fn contains(&self, entry: usize) -> bool {
+    pub(crate) fn contains(&self, entry: usize) -> bool {
         self.messages.contains(&entry)
     }
 
-    pub(super) fn execution_parts(&self, cell_id: &str) -> Option<&'a [Part]> {
+    pub(crate) fn execution_parts(&self, cell_id: &str) -> Option<&'a [Part]> {
         self.cells.get(cell_id).copied()
     }
 
     /// The refused call whose assistant message is `entry`.
-    pub(super) fn refusal(&self, entry: usize) -> Option<(&'a [Part], &'a str)> {
+    pub(crate) fn refusal(&self, entry: usize) -> Option<(&'a [Part], &'a str)> {
         self.refusals.get(&entry).copied()
     }
 }
 
-pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output: &str) {
+pub(crate) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output: &str) {
     let mut assistant = Vec::new();
     let mut results = Vec::new();
     let mut ids = std::collections::HashSet::new();
@@ -236,6 +236,13 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
     }
     if !results.is_empty() {
         messages.push(LlmMessage::new(LlmRole::Assistant, assistant));
+        // A permanent text boundary gives every provider the same stable cache cut
+        // after the complete tool result, including after later iterations.
+        results.push(LlmContentBlock::Text {
+            text: "Execution result.".into(),
+            response_meta: None,
+            cache_breakpoint: false,
+        });
         messages.push(LlmMessage::new(LlmRole::User, results));
     }
 }

@@ -13,7 +13,7 @@
       },
       "stop": {
         "equals": [
-          "</typescript>"
+          "STOP_HERE"
         ]
       }
     },
@@ -41,7 +41,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"id\":\"matrix-response-1\",\"model\":\"matrix-served-model\",\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nawait control.finish(\\\"settled\\\");\\n\"}}]}"
+      "data": "{\"id\":\"matrix-response-1\",\"model\":\"matrix-served-model\",\"choices\":[{\"delta\":{\"content\":\"START_HERE\\nawait control.finish(\\\"settled\\\");\\n\"}}]}"
     },
     {
       "at": 21,

@@ -38,12 +38,7 @@ fn declarations(
     catalog: &ToolCatalog,
 ) -> Result<String, lash_core::SessionError> {
     SessionDialect::prompt_only(dialect)
-        .execution_section(
-            Default::default(),
-            catalog,
-            crate::plugin::RlmChannel::Cell,
-            None,
-        )
+        .execution_section(Default::default(), catalog, None)
         .map(|section| section.declarations)
 }
 

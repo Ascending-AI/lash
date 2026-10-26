@@ -107,7 +107,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
    successful `tool_call_started` / `tool_call_completed` records for the same call id. Pick a
    read-only tool from the session's advertised catalog: prefer the Parallel web-search MCP
    tool when it is present, otherwise use any other advertised read-only tool. A
-   `<typescript>` cell without a tool call does not satisfy this gate.
+   `execute_code` program without a tool call does not satisfy this gate.
 8. **Try the organic lever once, then guide explicitly.** After the RLM warning appears,
    first ask the agent to continue the marker-retention task without naming the tool and
    inspect the trace. If it switches, record `pressure/organic`. If it does not, submit one

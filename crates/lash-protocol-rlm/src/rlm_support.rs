@@ -347,8 +347,8 @@ pub(crate) fn render_bound_variables(
 
     let mut lines = vec![
         format!(
-            "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
-            vocabulary.language_name, vocabulary.cell_tags.open, vocabulary.cell_noun
+            "These variables are already bound in {}. Access them directly in `execute_code` {}s; do not recreate them manually.",
+            vocabulary.language_name, vocabulary.cell_noun
         ),
         // Every key of every value below is written out — in the row itself
         // where the record is small enough, in the `Schema:` block otherwise —

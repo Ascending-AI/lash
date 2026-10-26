@@ -25,7 +25,7 @@ fn answer_tool(value_schema: serde_json::Value) -> lash_vocabulary::tool_contrac
 #[cfg(feature = "rlm")]
 fn scripted_cells(
     kind: &'static str,
-    cells: Vec<String>,
+    cells: Vec<LlmOutputPart>,
     requests: Arc<StdMutex<Vec<String>>>,
 ) -> lash_core::facade_support::ProviderHandle {
     let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(cells)));
@@ -36,7 +36,12 @@ fn scripted_cells(
                 serde_json::to_string(&request.messages).expect("serialize request messages"),
             );
             let text = cells.lock_recover().pop_front().expect("scripted cell");
-            async move { Ok(text_response(&text)) }
+            async move {
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
+            }
         })
         .build()
         .into_handle()

@@ -1,9 +1,7 @@
 use lash_tool_presenter_python::render_shape;
 use lash_vocabulary::tool_shape::SchemaShape;
 
-use super::{
-    CellTags, DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest,
-};
+use super::{DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest};
 
 /// The name `lash-dialect-python` is installed under.
 pub(crate) const LANGUAGE_ID: &str = "python";
@@ -12,11 +10,6 @@ pub(crate) const LANGUAGE_ID: &str = "python";
 /// names. Its types are the Python tool presenter's spelling.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PythonPrompts;
-
-const PYTHON_CELL_TAGS: CellTags = CellTags {
-    open: "<python>",
-    close: "</python>",
-};
 
 impl DialectPrompts for PythonPrompts {
     fn spelling(&self) -> lash_kernel_dialect::Spelling {
@@ -44,10 +37,7 @@ impl DialectPrompts for PythonPrompts {
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         let ExecutionSectionRequest {
-            channel,
-            tools,
-            catalogue,
-            ..
+            tools, catalogue, ..
         } = request;
         let label = catalogue.map(|catalogue| {
             super::catalogue_label(
@@ -71,29 +61,12 @@ impl DialectPrompts for PythonPrompts {
             format!("### Tools\n\n{}", tools.join("\n\n"))
         };
         let example_program = "total = 1 + 2\nprint(total)";
-        let (action, response_shape, example) = match channel {
-            crate::plugin::RlmChannel::Cell => (
-                format!("a paired `{}` block", PYTHON_CELL_TAGS.open),
-                super::cell_response_shape(PYTHON_CELL_TAGS),
-                format!(
-                    "### Example cell\n\n{}\n{example_program}\n{}",
-                    PYTHON_CELL_TAGS.open, PYTHON_CELL_TAGS.close
-                ),
-            ),
-            crate::plugin::RlmChannel::NativeTool => (
-                "the `execute_code` program".to_string(),
-                concat!(
-                    "### Tool transport\n\nEach response makes one `execute_code` call with ",
-                    "`{\"code\": \"<complete program>\"}`. Tool calls, `control.finish` included, run inside ",
-                    "the program.\n"
-                )
-                .to_string(),
-                format!(
-                    "### Example execute_code call\n\nexecute_code({})",
-                    serde_json::json!({"code": example_program})
-                ),
-            ),
-        };
+        let action = "the `execute_code` program";
+        let response_shape = "### Tool transport\n\nFor action or computation, make one `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools, including `control.finish`, inside the program.\n";
+        let example = format!(
+            "### Example execute_code call\n\nexecute_code({})",
+            serde_json::json!({"code": example_program})
+        );
         ExecutionSection {
             prose: format!(
                 r#"Use prose for conversation; use {action} for action or computation. Call tools by their dotted path, as `await package.tool_name({{ ... }})`, with one dict of arguments, only those listed under **Tools**.
@@ -123,7 +96,7 @@ Tool declarations describe values and calls. `TypedDict`, aliases and the typing
 const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabulary {
     language_name: "Python",
     execution_title: "Python execution",
-    cell_tags: PYTHON_CELL_TAGS,
+
     cell_noun: "cell",
 
     print_call: "print",

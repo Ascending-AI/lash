@@ -39,7 +39,6 @@ async fn finished_under(
 ) -> Result<serde_json::Value> {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(instructions)
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

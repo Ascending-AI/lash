@@ -944,10 +944,7 @@ mod named_component_laws {
                     .unwrap_or_else(|| "await control.finish(\"idle\");".to_owned());
                 async move {
                     Ok(lash::provider::LlmResponse {
-                        parts: vec![lash::direct::LlmOutputPart::Text {
-                            text: format!("<typescript>\n{code}\n</typescript>"),
-                            response_meta: None,
-                        }],
+                        parts: vec![lash::testing::execute_code(code.to_string())],
                         ..Default::default()
                     })
                 }
@@ -956,7 +953,6 @@ mod named_component_laws {
             .into_handle();
         let rlm = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),

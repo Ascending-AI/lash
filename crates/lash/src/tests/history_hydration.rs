@@ -58,7 +58,7 @@ mod tool_call_reads {
             .map_durable_store(move |_| counted)
             .into_store_set();
         let core = explicit_ephemeral_facets(rlm_core_builder_over(lash_conformance::backend_over(stores)))
-        .serve_test_llm_profile(text_provider("tool-read-cost", typescript_block("await tools.appLookup({}); await tools.appLookup({}); await control.finish(\"done\");")), mock_llm_profile_spec())
+        .serve_test_llm_profile(part_provider("tool-read-cost", typescript_block("await tools.appLookup({}); await tools.appLookup({}); await control.finish(\"done\");")), mock_llm_profile_spec())
         .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .build(crate::tests::host::runtime_lease_owner())?;
         let session = created_session(

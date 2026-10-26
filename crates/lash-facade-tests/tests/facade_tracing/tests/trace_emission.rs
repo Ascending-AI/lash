@@ -275,8 +275,6 @@ async fn a_control_finished_turn_exports_its_value_only_with_output_consent() ->
     ] {
         for capture in [lash_trace::Capture::Omitted, lash_trace::Capture::Captured] {
             let response = lash_facade_tests::control_cell_response(
-                &lash::rlm::CellDialect::typescript(),
-                lash::rlm::RlmChannel::Cell,
                 0,
                 format!("await control.finish({value});"),
             );

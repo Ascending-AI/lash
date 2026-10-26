@@ -756,7 +756,6 @@ fn preview(value: &str, max_chars: usize) -> String {
 fn benchmark_rlm_protocol_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::standard())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

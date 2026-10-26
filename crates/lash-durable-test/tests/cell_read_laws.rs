@@ -121,7 +121,7 @@ impl Cell {
                  console.log(a.v);"
             ),
         };
-        format!("<typescript>\n{body}\n</typescript>")
+        body.to_string()
     }
 }
 
@@ -267,9 +267,13 @@ fn model(cell: Cell) -> ProviderHandle {
                 cell.source()
             };
             Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: answer,
-                    response_meta: None,
+                parts: vec![if answered {
+                    LlmOutputPart::Text {
+                        text: answer,
+                        response_meta: None,
+                    }
+                } else {
+                    lash::testing::execute_code(answer)
                 }],
                 ..LlmResponse::default()
             })
@@ -392,7 +396,6 @@ impl ReadTurn {
             .get_or_insert_with(|| {
                 let factory = lash::rlm::RlmProtocolPluginFactory::new(
                     lash::rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash::rlm::RlmChannel::Cell)
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),

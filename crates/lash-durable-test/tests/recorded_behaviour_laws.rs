@@ -20,7 +20,7 @@ mod sim;
 
 use std::sync::{Arc, Mutex};
 
-use lash_core::llm::types::LlmRequest;
+use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
@@ -53,7 +53,7 @@ impl Requests {
 /// The model: `answer` reads the rendered request and says what to reply.
 fn model(
     requests: &Arc<Requests>,
-    answer: fn(&str) -> String,
+    answer: fn(&str) -> LlmResponse,
 ) -> lash_core::facade_support::ProviderHandle {
     let requests = Arc::clone(requests);
     lash_core::testing::TestProvider::builder()
@@ -65,30 +65,39 @@ fn model(
                 let rendered = serde_json::to_string(&request).expect("a request encodes");
                 let reply = answer(&rendered);
                 requests.0.lock_recover().push(rendered);
-                Ok(served::text(&request, &reply))
+                Ok(reply)
             }
         })
         .build()
         .into_handle()
 }
 
-fn standard_answer(rendered: &str) -> String {
+fn standard_answer(rendered: &str) -> LlmResponse {
     if rendered.contains(&format!("at most {RECORDED_MAX_MEMBERS} per batch")) {
-        RECORDED_ANSWER.to_owned()
+        served::response(vec![LlmOutputPart::Text {
+            text: RECORDED_ANSWER.to_owned(),
+            response_meta: None,
+        }])
     } else {
-        LOST_ANSWER.to_owned()
+        served::response(vec![LlmOutputPart::Text {
+            text: LOST_ANSWER.to_owned(),
+            response_meta: None,
+        }])
     }
 }
 
 /// The looping cell when the prompt offers `continue_as` (the recorded
 /// decomposition feature), prose otherwise.
-fn rlm_answer(rendered: &str) -> String {
+fn rlm_answer(rendered: &str) -> LlmResponse {
     if rendered.contains("continueAs") {
-        format!(
-            "<typescript>\nlet i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nawait control.finish(\"ran \" + String(i));\n</typescript>"
-        )
+        served::cell(&format!(
+            "let i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nawait control.finish(\"ran \" + String(i));"
+        ))
     } else {
-        LOST_ANSWER.to_owned()
+        served::response(vec![LlmOutputPart::Text {
+            text: LOST_ANSWER.to_owned(),
+            response_meta: None,
+        }])
     }
 }
 
@@ -109,7 +118,6 @@ fn standard_redeploying() -> lash::plugins::StandardProtocolConfig {
 /// bound and decomposition offered.
 fn rlm_creating() -> lash::rlm::RlmProtocolPluginConfig {
     lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build()
@@ -120,7 +128,6 @@ fn rlm_creating() -> lash::rlm::RlmProtocolPluginConfig {
 /// no soft warning.
 fn rlm_redeploying() -> lash::rlm::RlmProtocolPluginConfig {
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(50))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(1))
         .build();
@@ -149,7 +156,7 @@ impl Deployment {
 
     /// A core of this deployment over `backend`, served by the law's model.
     fn core(self, backend: &lash::Backend, requests: &Arc<Requests>) -> lash::LashCore {
-        let (builder, answer): (lash::LashCoreBuilder, fn(&str) -> String) = match self {
+        let (builder, answer): (lash::LashCoreBuilder, fn(&str) -> LlmResponse) = match self {
             Self::StandardCreating | Self::StandardRedeploying => {
                 let config = match self {
                     Self::StandardCreating => standard_creating(),

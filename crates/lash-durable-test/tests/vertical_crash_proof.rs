@@ -105,10 +105,10 @@ const MODEL: &str = "v0-model";
 
 /// The cell the model writes: one `Once` host operation, then a printout of
 /// what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\n</typescript>";
+const CELL: &str = "const written = await tools.extWrite({ x: 7 });\nconsole.log(written);";
 /// The cell [`Protocol::Archived`]'s model writes: [`CELL`]'s operation and
 /// printout, then prints past [`ARCHIVE_RETENTION`]'s inline limit.
-const ARCHIVED_CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\nfor (let i = 0; i < 64; i++) { console.log('archived print ' + i + ' of the cell output'); }\n</typescript>";
+const ARCHIVED_CELL: &str = "const written = await tools.extWrite({ x: 7 });\nconsole.log(written);\nfor (let i = 0; i < 64; i++) { console.log('archived print ' + i + ' of the cell output'); }";
 /// The output retention [`Protocol::Archived`]'s deployment runs under: its
 /// cell's prints exceed the inline limit, and the witness keeps the
 /// operation's answer.
@@ -177,17 +177,16 @@ fn carried() -> String {
 
 /// Cell A: binds [`carried`] and a function, then calls the operation,
 /// whatever its answer.
-const WORKING_FIRST_CELL: &str = "<typescript>\nlet carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.extWrite({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);\n</typescript>";
+const WORKING_FIRST_CELL: &str = "let carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.extWrite({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);";
 
 /// The session global the host binds before [`Protocol::Defaults`]' turns
 /// (FIG-6418 L3).
 const HOST_DEFAULT: &str = "fig6418_default";
 /// [`Protocol::Defaults`]' first turn's cell: binds the host's default.
-const DEFAULTS_FIRST_CELL: &str =
-    "<typescript>\nconst bound_first = fig6418_default;\nconsole.log(bound_first);\n</typescript>";
+const DEFAULTS_FIRST_CELL: &str = "const bound_first = fig6418_default;\nconsole.log(bound_first);";
 /// Its second turn's cell: writes the default to the outside world and
 /// finishes with it.
-const DEFAULTS_SECOND_CELL: &str = "<typescript>\nconst seen = fig6418_default;\nawait tools.extWrite({ x: seen });\nawait control.finish(seen);\n</typescript>";
+const DEFAULTS_SECOND_CELL: &str = "const seen = fig6418_default;\nawait tools.extWrite({ x: seen });\nawait control.finish(seen);";
 /// The turn [`RUN_TWO`] is sent under.
 const RUN_TWO: &str = "v0-turn-2";
 
@@ -195,10 +194,10 @@ const RUN_TWO: &str = "v0-turn-2";
 fn working_second_cell(second: Second) -> &'static str {
     match second {
         Second::Succeeds => {
-            "<typescript>\nlet second_total = twice_of(carried_text.length);\nconsole.log('second total ' + second_total);\n</typescript>"
+            "let second_total = twice_of(carried_text.length);\nconsole.log('second total ' + second_total);"
         }
         Second::Fails => {
-            "<typescript>\nlet second_partial = twice_of(carried_text.length);\nthrow new Error('the second cell fails at ' + second_partial);\n</typescript>"
+            "let second_partial = twice_of(carried_text.length);\nthrow new Error('the second cell fails at ' + second_partial);"
         }
     }
 }
@@ -302,8 +301,8 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                 let response = match (protocol, called) {
                     // Turn one's cell binds the host's default; the second
                     // send's cell reads it back after the armed cut lands.
-                    (Protocol::Defaults, 0) => text(&request, DEFAULTS_FIRST_CELL),
-                    (Protocol::Defaults, 2) => text(&request, DEFAULTS_SECOND_CELL),
+                    (Protocol::Defaults, 0) => code(&request, DEFAULTS_FIRST_CELL),
+                    (Protocol::Defaults, 2) => code(&request, DEFAULTS_SECOND_CELL),
                     (Protocol::Defaults, _) => text(&request, "the session answered"),
                     _ => match (called >= protocol.rounds(), protocol) {
                         (true, _) => {
@@ -314,11 +313,11 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                             };
                             text(&request, &format!("{FINAL}{told}"))
                         }
-                        (false, Protocol::Code) => text(&request, CELL),
-                        (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
+                        (false, Protocol::Code) => code(&request, CELL),
+                        (false, Protocol::Archived) => code(&request, ARCHIVED_CELL),
                         (false, Protocol::Working(second)) => match called {
-                            0 => text(&request, WORKING_FIRST_CELL),
-                            _ => text(&request, working_second_cell(second)),
+                            0 => code(&request, WORKING_FIRST_CELL),
+                            _ => code(&request, working_second_cell(second)),
                         },
                         (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
                             LlmResponse {
@@ -387,7 +386,6 @@ fn core(
                 backend.clone(),
                 lash::rlm::RlmProtocolPluginFactory::new(
                     lash::rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash::rlm::RlmChannel::Cell)
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
@@ -1804,4 +1802,11 @@ async fn lo_recovery_on_sqlite_file() {
 async fn lo_recovery_on_postgres_when_configured() {
     let url = lash_postgres_store::testing::required_database_url();
     lo_recovery(Dialect::Postgres, Some(url)).await;
+}
+
+fn code(_request: &LlmRequest, source: &str) -> LlmResponse {
+    LlmResponse {
+        parts: vec![lash::testing::execute_code(source)],
+        ..Default::default()
+    }
 }

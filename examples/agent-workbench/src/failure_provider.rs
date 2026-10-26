@@ -161,23 +161,17 @@ impl DevProviderScenario {
                 finish_cell("\"UNSAFE second generation was purchased\"")
             }
             (Self::RetryResetPartial, _) => finish_cell("\"FIG-1350 retry replacement\""),
-            (Self::FailedProcess, _) => cell(
-                r#"const FIG425_deterministic_failure = async (request: unknown) => {
+            (Self::FailedProcess, _) => (r#"const FIG425_deterministic_failure = async (request: unknown) => {
   throw "deterministic durable process failure";
 };
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
-await chat.reply("started deterministic failing process");"#,
-            ),
-            (Self::CrashResume, _) => cell(crate::crash_fixture::CELL),
-            (Self::MigrationSweep, _) => cell(crate::crash_fixture::MIGRATION_SEED),
-            (Self::ExecBlocked, 0) => cell(
-                "await sleep(600000);\nawait chat.reply(\"exec block unexpectedly returned\");",
-            ),
+await chat.reply("started deterministic failing process");"#).to_owned(),
+            (Self::CrashResume, _) => crate::crash_fixture::CELL.to_owned(),
+            (Self::MigrationSweep, _) => crate::crash_fixture::MIGRATION_SEED.to_owned(),
+            (Self::ExecBlocked, 0) => "await sleep(600000);\nawait chat.reply(\"exec block unexpectedly returned\");".to_owned(),
             (Self::ExecBlocked, _) => finish_cell("\"session recovered after break glass\""),
-            (Self::ToolValue, _) => cell("await workbench_surface.terminal({});"),
-            (Self::TranscriptProjection, 0) => cell(
-                "await control.continueAs({task: \"canonical follow-frame task\", seed: {marker: \"hidden-seed\"}});",
-            ),
+            (Self::ToolValue, _) => "await workbench_surface.terminal({});".to_owned(),
+            (Self::TranscriptProjection, 0) => "await control.continueAs({task: \"canonical follow-frame task\", seed: {marker: \"hidden-seed\"}});".to_owned(),
             (Self::TranscriptProjection, _) => finish_cell("\"canonical follow-frame reply\""),
             (Self::RenderedSurface, _) => finish_cell(
                 "{ event_class: \"final_value\", marker: \"FIG-1350 deterministic final value\" }",
@@ -186,7 +180,7 @@ await chat.reply("started deterministic failing process");"#,
             // a model actually fails, so the retry terminates instead of the
             // unbounded workbench turn budget re-asking the provider forever
             // (FIG-1407 owns the budget).
-            (Self::CodeFailure, 0) => cell("throw \"FIG-1350 deterministic code failure\";"),
+            (Self::CodeFailure, 0) => "throw \"FIG-1350 deterministic code failure\";".to_owned(),
             (Self::CodeFailure, _) => finish_cell("\"session recovered after code failure\""),
             // Turn-numbered, because the replay-route scenario asserts a
             // distinct answer per turn; `call` is that turn.
@@ -309,14 +303,15 @@ impl Provider for DevFailureProvider {
             DevProviderScenario::MigrationSweep => {
                 let seeded = request.messages.iter().any(|message| {
                     message.role == LlmRole::Assistant && message.blocks.iter().any(|block| {
-                        matches!(block, LlmContentBlock::Text { text, .. } if text.contains("migration-sweep seeded"))
+                        matches!(block, LlmContentBlock::ToolCall { input_json: text, .. } if text.contains("migration-sweep seeded"))
                     })
                 });
-                let text = cell(if seeded {
+                let text = (if seeded {
                     crate::crash_fixture::MIGRATION_READ
                 } else {
                     crate::crash_fixture::MIGRATION_SEED
-                });
+                })
+                .to_owned();
                 Ok(streamed_response(&request, &text))
             }
             DevProviderScenario::AuthFailureOnce if call == 0 => {
@@ -328,7 +323,7 @@ impl Provider for DevFailureProvider {
                 )
             }
             DevProviderScenario::AuthFailureOnce => {
-                Ok(streamed_response(&request, &self.cell(call)))
+                Ok(streamed_response(&request, &self.program(call)))
             }
             DevProviderScenario::RateLimitOnce if call == 0 => {
                 let retry_verdict = TransportRetryVerdict::RetryableThrottle {
@@ -343,10 +338,19 @@ impl Provider for DevFailureProvider {
                         .with_code(FailureCode::provider("dev_rate_limited")),
                 )
             }
-            DevProviderScenario::RateLimitOnce => Ok(streamed_response(
-                &request,
-                &format!("retry observer single-copy marker\n{}", self.cell(call)),
-            )),
+            DevProviderScenario::RateLimitOnce => {
+                let mut response = streamed_response(&request, &self.program(call));
+                let prose = "retry observer single-copy marker\n";
+                send_delta(&request, prose);
+                response.parts.insert(
+                    0,
+                    LlmOutputPart::Text {
+                        text: prose.to_owned(),
+                        response_meta: None,
+                    },
+                );
+                Ok(response)
+            }
             DevProviderScenario::PartialOutputFailure if call == 0 => {
                 let partial = "paid partial output marker";
                 send_delta(&request, partial);
@@ -372,16 +376,18 @@ impl Provider for DevFailureProvider {
                 )
             }
             DevProviderScenario::PartialOutputFailure => {
-                Ok(streamed_response(&request, &self.cell(call)))
+                Ok(streamed_response(&request, &self.program(call)))
             }
             DevProviderScenario::FailedProcess
             | DevProviderScenario::ExecBlocked
             | DevProviderScenario::CrashResume
             | DevProviderScenario::ToolValue
-            | DevProviderScenario::CodeFailure => Ok(streamed_response(&request, &self.cell(call))),
+            | DevProviderScenario::CodeFailure => {
+                Ok(streamed_response(&request, &self.program(call)))
+            }
             DevProviderScenario::RenderedSurface | DevProviderScenario::TranscriptProjection => {
                 send_reasoning(&request, "FIG-1350 deterministic reasoning");
-                Ok(streamed_response(&request, &self.cell(call)))
+                Ok(streamed_response(&request, &self.program(call)))
             }
             DevProviderScenario::RetryResetPartial if call == 0 => {
                 let partial = "FIG-1350 superseded partial text";
@@ -402,7 +408,7 @@ impl Provider for DevFailureProvider {
                 )
             }
             DevProviderScenario::RetryResetPartial => {
-                Ok(streamed_response(&request, &self.cell(call)))
+                Ok(streamed_response(&request, &self.program(call)))
             }
             DevProviderScenario::ReplayRouteChange => Ok(replay_route_response(&request)),
             #[cfg(feature = "provider-wire-fixtures")]
@@ -420,34 +426,27 @@ impl Provider for DevFailureProvider {
 impl DevFailureProvider {
     #[expect(
         clippy::expect_used,
-        reason = "each DevProviderScenario scripts a cell for every response-producing call \
-                  (see scripted_cell's match)"
+        reason = "each response-producing scenario scripts a program"
     )]
-    fn cell(&self, call: usize) -> String {
+    fn program(&self, call: usize) -> String {
         self.scenario
             .scripted_cell(call)
-            .expect("every response-producing branch scripts a cell")
+            .expect("every response-producing branch scripts a program")
     }
-}
-
-/// These dev scenarios script TypeScript cells (ADR 0139).
-fn cell(body: &str) -> String {
-    let tag = "typescript";
-    format!("<{tag}>\n{body}\n</{tag}>")
 }
 
 /// The common shape: one cell that finishes with `value`.
 fn finish_cell(value: &str) -> String {
-    cell(&format!("await chat.reply({value});"))
+    format!("await chat.reply({value});")
 }
 
 fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
-    send_delta(request, text);
+    let part = native_program(text);
+    if let Some(events) = &request.stream_events {
+        events.send(LlmStreamEvent::Part(part.clone()));
+    }
     LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: text.to_string(),
-            response_meta: None,
-        }],
+        parts: vec![part],
         response_metadata: Default::default(),
         ..LlmResponse::default()
     }
@@ -466,7 +465,6 @@ fn replay_route_response(request: &LlmRequest) -> LlmResponse {
         .expect("the replay-route scenario scripts every call");
     let reasoning = format!("FIG-1374 portable reasoning {turn}");
     send_reasoning(request, &reasoning);
-    send_delta(request, &text);
     LlmResponse {
         parts: vec![
             LlmOutputPart::Reasoning {
@@ -481,10 +479,7 @@ fn replay_route_response(request: &LlmRequest) -> LlmResponse {
                     ..ProviderReasoningReplay::default()
                 }),
             },
-            LlmOutputPart::Text {
-                text,
-                response_meta: None,
-            },
+            native_program(&text),
         ],
         response_metadata: Default::default(),
         ..LlmResponse::default()
@@ -542,7 +537,13 @@ fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
     }
     // Sampling is a real nested provider request under its own host profile.
     if request.model.key().as_str() == "mcp-sampling" {
-        return streamed_response(request, "Host-generated summary.");
+        return LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: "Host-generated summary.".to_owned(),
+                response_meta: None,
+            }],
+            ..Default::default()
+        };
     }
     let prompt_index = request.messages.iter().rposition(|message| message.role == LlmRole::User
         && message.blocks.iter().any(|block| matches!(block, LlmContentBlock::Text { text, .. } if text.contains("MCP-"))));
@@ -577,7 +578,16 @@ await chat.reply(summary.summary);"#
     } else {
         "const badge = await workspace_http.workspaceBadge({}); await chat.reply(\"workspace badge came back\");"
     };
-    streamed_response(request, &cell(body))
+    streamed_response(request, body)
+}
+
+fn native_program(source: &str) -> LlmOutputPart {
+    LlmOutputPart::ToolCall {
+        call_id: "execute-code".to_owned(),
+        tool_name: "execute_code".to_owned(),
+        input_json: serde_json::json!({"code":source}).to_string(),
+        replay: None,
+    }
 }
 
 #[cfg(test)]

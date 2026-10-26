@@ -373,8 +373,8 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     let (gate, entered_rx) = TurnAdmissionGate::new("agent_workbench.api.turn.admission_committed");
-    let workbench = Workbench::builder(replying_provider(
-        "<typescript>\nawait chat.reply(\"request completed\");\n</typescript>",
+    let workbench = Workbench::builder(replying_code_provider(
+        "await chat.reply(\"request completed\");",
     ))
     .trace_sink(Arc::clone(&gate) as Arc<dyn TraceSink>)
     .build()

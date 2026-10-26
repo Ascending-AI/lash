@@ -53,7 +53,7 @@ impl Generator<'_> {
         ensure!(attempt > 0, "attempts start at one");
         let id = &plan.operation;
         let source = cell_source(plan, self.tool_word(id.actor, id.ordinal))?;
-        let response = format!("<typescript>\n{source}\n</typescript>");
+        let response = source.to_string();
         let text = match (plan.provider_output_bytes as usize).checked_sub(response.len()) {
             Some(padding_bytes) if padding_bytes > 0 => {
                 let padding = self.text(
@@ -139,7 +139,7 @@ impl Generator<'_> {
             serde_json::to_string(operation)?,
             serde_json::to_string(keys)?
         ));
-        let text = format!("<typescript>\n{source}\n</typescript>");
+        let text = source.to_string();
         Ok(ProviderResponse {
             operation_id: operation.clone(),
             retryable,
@@ -168,7 +168,7 @@ impl Generator<'_> {
             "await control.finish({{synthetic:true,operation:{}}});",
             serde_json::to_string(&queued.idempotency_key)?
         );
-        let text = format!("<typescript>\n{source}\n</typescript>");
+        let text = source.to_string();
         Ok(ProviderResponse {
             operation_id: queued.idempotency_key.clone(),
             retryable: false,

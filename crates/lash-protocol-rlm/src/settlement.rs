@@ -1,5 +1,5 @@
-//! Settlement and continuation policy shared by both RLM channels.
-//! Response admission and committed assistant history belong to each channel.
+//! Settlement and continuation policy for RLM execution.
+//! Response admission and committed assistant history belong to the native driver.
 
 use lash_core::sansio::{CheckpointResumeAction, PendingWork};
 use lash_core::session_model::{
@@ -19,8 +19,8 @@ use crate::projection::rlm_protocol_event;
 use crate::protocol::actions::invalid_turn_options_actions;
 use crate::protocol::stall::{NO_PROGRESS_BUDGET_PHASE, stalled_attempts_in_phase};
 
-/// Adjudicate the executor's answer before the channel assembles its history.
-/// The commit callback preserves the channel's assistant envelope and trajectory.
+/// Adjudicate the executor's answer before the driver assembles its history.
+/// The commit callback preserves the driver's assistant envelope and trajectory.
 pub(crate) fn settle_execution(
     ctx: &DriverContextView<'_>,
     dialect: &SessionDialect,

@@ -6,7 +6,7 @@
 //! `no_diagnostic_from_a_prompt_primitive_names_a_lash_vm_identifier` reads
 //! the diagnostics its primitives emit. Neither looks at the *rest* of the
 //! prompt, and the rest of the prompt is where the leak was: a TypeScript
-//! session was told to write `<typescript>` cells by its execution section and,
+//! session was told to write `execute_code` programs by its execution section and,
 //! a few hundred tokens later, that its variables were "already bound in
 //! lash_vm" and should be accessed "in `<lash_vm>` blocks". The judged
 //! battery caught a model spending reasoning tokens trying to reconcile the
@@ -256,7 +256,6 @@ async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, Str
             .render_execution_section(
                 crate::protocol::RlmPromptFeatures::default(),
                 &catalog,
-                crate::plugin::RlmChannel::Cell,
                 None,
             )
             .expect("render execution section"),
@@ -379,37 +378,12 @@ async fn assembled_fragments(dialect: &SessionDialect) -> Vec<(&'static str, Str
             &host_finish[..],
         ),
     ] {
-        fragments.push((
-            name,
-            dialect.finalization_copy(termination, finishing, crate::plugin::RlmChannel::Cell),
-        ));
+        fragments.push((name, dialect.finalization_copy(termination, finishing)));
     }
-    fragments.push((
-        "finish required",
-        dialect.finish_required_copy(&[], crate::plugin::RlmChannel::Cell),
-    ));
+    fragments.push(("finish required", dialect.finish_required_copy(&[])));
     fragments.push((
         "finish required (host finish)",
-        dialect.finish_required_copy(&host_finish, crate::plugin::RlmChannel::Cell),
-    ));
-    fragments.push((
-        "invalid cell retry",
-        dialect.invalid_cell_retry_copy("no closing tag"),
-    ));
-    fragments.push(("output limit", dialect.output_limit_cell_copy(Some(2_048))));
-    fragments.push((
-        "malformed cell fence retry",
-        dialect.malformed_cell_fence_retry_copy(),
-    ));
-    // `foreign_cell_retry_copy` is deliberately absent: its whole job is to name
-    // the *other* dialect's tag, which is the marker this walker hunts.
-
-    // Copy the *driver* assembles around the dialect's own fragments. These
-    // reach the model on ordinary turns — an output-limit retry is not an
-    // edge case — and were written when Lash VM was the only dialect.
-    fragments.push((
-        "output limit retry",
-        crate::protocol::finish::output_limit_retry_copy(vocabulary, Some(2_048)),
+        dialect.finish_required_copy(&host_finish),
     ));
     fragments
 }

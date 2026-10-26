@@ -57,12 +57,7 @@ fn doc_bytes(tool: &lash_vocabulary::tool_contract::ToolDefinition) -> usize {
 
 fn declarations(catalog: &lash_core::ToolCatalog, discovery: Option<&RlmDiscovery>) -> String {
     typescript_test_dialect()
-        .execution_section(
-            Default::default(),
-            catalog,
-            crate::plugin::RlmChannel::Cell,
-            discovery,
-        )
+        .execution_section(Default::default(), catalog, discovery)
         .expect("validated catalog")
         .declarations
 }
@@ -352,12 +347,7 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         }
         assert!(doc.lines().any(|line| line == signature_line));
         let prompt = crate::dialect::SessionDialect::prompt_only(dialect)
-            .render_execution_section(
-                Default::default(),
-                &catalog(vec![tool.clone()]),
-                crate::plugin::RlmChannel::Cell,
-                None,
-            )
+            .render_execution_section(Default::default(), &catalog(vec![tool.clone()]), None)
             .expect("the tool can be listed");
         assert!(
             prompt.lines().any(|line| line == signature_line),

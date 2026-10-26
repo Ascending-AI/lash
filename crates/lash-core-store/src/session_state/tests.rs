@@ -244,7 +244,7 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         initial_frame_protocol_turn_options(&fresh),
         crate::ProtocolTurnOptions::default()
     );
-    let settled = protocol_config(serde_json::json!({ "channel": "cell" }));
+    let settled = protocol_config(serde_json::json!({ "dialect": "typescript" }));
     fresh.authority.plugin_config = settled.clone();
     fresh.open_unpersisted_initial_frame_under_current_assignment();
     assert_eq!(
@@ -279,7 +279,7 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
         .map(|node| node.node_id.clone())
         .collect::<Vec<_>>();
     state.mark_node_ids_persisted(persisted);
-    state.authority.plugin_config = protocol_config(serde_json::json!({ "channel": "cell" }));
+    state.authority.plugin_config = protocol_config(serde_json::json!({ "dialect": "typescript" }));
     state.open_unpersisted_initial_frame_under_current_assignment();
     assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
 }

@@ -173,7 +173,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
     ensure!(args.n > 0, "N must be positive");
     let workload = workload(args.n, args.leg);
     let turn = workload.expand(0, None).remove(0);
-    let mut book = ScriptBook::new(workload.protocol);
+    let mut book = ScriptBook::new();
     let input = book.register(0, &turn);
     let book = Arc::new(book);
     let observation = Arc::new(Observation::new(args, Arc::clone(&book))?);

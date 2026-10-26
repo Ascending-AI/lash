@@ -123,9 +123,9 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
 
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
-        "<typescript>\nlet value = 1;\nconsole.log(value);\n</typescript>".to_string(),
-        "<typescript>\nvalue = value + 1;\nconsole.log(value);\n</typescript>".to_string(),
-        "<typescript>\nawait control.finish(value);\n</typescript>".to_string(),
+        "let value = 1;\nconsole.log(value);".to_string(),
+        "value = value + 1;\nconsole.log(value);".to_string(),
+        "await control.finish(value);".to_string(),
     ])));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("cache-regression-rlm")
@@ -142,10 +142,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
                         .pop_front()
                         .expect("RLM response script");
                     Ok(lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text,
-                            response_meta: None,
-                        }],
+                        parts: vec![lash_protocol_rlm::test_support::execute_code(text)],
                         response_metadata: Default::default(),
                         ..lash_core::LlmResponse::default()
                     })
@@ -160,7 +157,6 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

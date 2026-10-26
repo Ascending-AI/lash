@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmUsage};
-use lash_core::{LlmOutputPart, PluginRuntimeEvent, TurnEvent};
+use lash_core::{PluginRuntimeEvent, TurnEvent};
 use served::{Tier, WATCHDOG, World};
 
 const OLD_INPUT: &str = "OLD-ONLY-4042";
@@ -28,10 +28,7 @@ const WARN_AT: usize = 100;
 /// A cell of `source`, reporting `input_tokens` of prompt.
 fn cell(source: &str, input_tokens: i64) -> LlmResponse {
     LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: format!("<typescript>\n{source}\n</typescript>"),
-            response_meta: None,
-        }],
+        parts: vec![lash::testing::execute_code(source.to_string())],
         usage: LlmUsage {
             input_tokens,
             ..LlmUsage::default()
@@ -73,7 +70,6 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
 /// An RLM core whose protocol warns past [`WARN_AT`] prompt tokens.
 fn core(backend: &lash::Backend) -> lash::LashCoreBuilder {
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build();

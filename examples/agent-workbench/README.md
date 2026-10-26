@@ -460,20 +460,21 @@ Each account is projected into the RLM host environment as a typed module
 authority of type `Inbox` at `inbox.<slug>`, exposing three operations — a
 message is just a title and text, with no recipient address:
 
-```text
-<typescript>
+The `code` argument of `execute_code`:
+
+```typescript
 await inbox.work.send({ title: "Standup", text: "Notes attached." });
 const listed = await inbox.work.list({});      // { account, messages: [{ id, title, text }] }
 await inbox.work.delete({ id: listed.messages[0].id });
-</typescript>
 ```
 
 Because every account shares the `Inbox` authority type, one account-parametric
 process can be started against any account, which is the point of the
 multi-account showcase:
 
-```text
-<typescript>
+The `code` argument of `execute_code`:
+
+```typescript
 const triage = async (box: Inbox) => {
   const items = await box.list({});
   return { account: items.account, count: items.messages.length };
@@ -482,7 +483,6 @@ const triage = async (box: Inbox) => {
 const work = await processes.start({ definition: triage, args: { box: inbox.work } });
 const personal = await processes.start({ definition: triage, args: { box: inbox.personal } });
 await chat.reply(await Promise.all([work, personal]));
-</typescript>
 ```
 
 Adding or removing an account enqueues a durable tool-catalog refresh that the
@@ -559,8 +559,9 @@ its call, so a repeated firing records nothing new. The triggers page lists
 the chat's registrations and deletes one; deleting a session deletes its
 registrations.
 
-```text
-<typescript>
+The `code` argument of `execute_code`:
+
+```typescript
 const on_mail = async (event: unknown) => {
   return { arrived_in: event.account, title: event.title };
 };
@@ -571,7 +572,6 @@ await workbench.register_trigger({
   name: "inbox concierge"
 });
 await chat.reply("Inbox concierge is watching every delivery.");
-</typescript>
 ```
 
 ## Conformance and projection gates

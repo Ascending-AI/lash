@@ -48,7 +48,6 @@ deterministic_only = { emits = false, referent = "runbook" }
 workbench-python-session = { tier = "frontier", model = "openai/gpt-6.1-sol", dialects = ["python"] }
 workbench-crash-resume = { tier = "deterministic", model = "scripted-provider", stores = ["sqlite", "postgres"] }
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
-rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash", dialects = ["typescript", "python"] }
 workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro", dialects = ["typescript", "python"] }
 workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "only Phase 2 calls a provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Phase 2 mail delivery is host-driven; composer and registration turns call the live provider" }

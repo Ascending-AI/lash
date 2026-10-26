@@ -8,14 +8,6 @@ use serde_json::{Value, json};
 use crate::support;
 use crate::workbench;
 
-/// A code mode cell that finishes with `value`, as the provider's text deltas.
-fn cell(value: &str) -> Vec<String> {
-    vec![
-        "<typescript>\n".to_owned(),
-        format!("await control.finish('{value}');\n</typescript>"),
-    ]
-}
-
 fn recorded_rlm(case: &Case) -> NodeOptions {
     NodeOptions {
         env: vec![
@@ -97,7 +89,12 @@ async fn transcript(case: &Case, node: &str) -> Result<Value> {
 async fn s37(case: &mut Case) -> Result<()> {
     let reply = |value: &str| ProviderReply {
         status: 200,
-        text: cell(value),
+        text: vec!["Running ".to_owned(), "the program.".to_owned()],
+        calls: vec![(
+            "execute-code".to_owned(),
+            "execute_code".to_owned(),
+            json!({"code":format!("await control.finish(\"{value}\");")}),
+        )],
         usage: (11, 2),
         ..ProviderReply::default()
     };

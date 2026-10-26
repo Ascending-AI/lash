@@ -1,6 +1,5 @@
 use super::support::*;
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use lash_vocabulary::identity::TurnId;
 
@@ -78,258 +77,6 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         find_checkpoint(&effects).is_none(),
         "opaque reasoning without renderable text must not finish through a checkpoint"
     );
-}
-
-/// FIG-2777: a provider tool call on the tool-less cell channel is malformed
-/// provider output. The offending response is still emitted, but the turn
-/// repairs instead of stopping on a protocol violation.
-#[test]
-fn native_tool_call_preserves_the_offending_llm_response_event_and_repairs() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
-            call_id: "native-call".to_string(),
-            tool_name: "native_lookup".to_string(),
-            input_json: "{}".to_string(),
-            replay: None,
-        }])),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::LlmResponse { .. })))
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-        "a stray tool call must never reach execution: {effects:?}"
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::Done { .. })),
-        "a repairable extraction failure must not finish the turn: {effects:?}"
-    );
-    let checkpoint_id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        })
-        .expect("a repair round checkpoints before the next request");
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: Default::default(),
-    });
-    let effects = drain_effects(&mut machine);
-    let repair =
-        find_llm_request(&effects).expect("a repair round issues another provider request");
-    let repair_text = repair
-        .messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        repair_text.contains("native_lookup"),
-        "the repair copy names the stray call: {repair_text}"
-    );
-    assert!(
-        repair_text.contains("paired `<typescript>...</typescript>` block"),
-        "{repair_text}"
-    );
-}
-
-#[test]
-fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Before\n<typescript>\nconsole.log(\"hi\");";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            execution_evidence: Some(lash_core::ExecutionEvidence {
-                provider_finish_reason: Some("stop_sequence".to_string()),
-                ..Default::default()
-            }),
-            generation_disposition: Some(lash_core::GenerationReceipt {
-                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
-                ..Default::default()
-            }),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-            if content == "Before"
-    )));
-    assert!(!machine.messages().iter().any(|message| {
-        message
-            .parts
-            .iter()
-            .any(|part| part.content().contains("inside multiline source text"))
-    }));
-}
-
-#[test]
-fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = concat!(
-        "<typescript>\n",
-        "console.log(\"kept\")\n",
-        "</typescript>\n",
-        "console.log(\"discarded\")\n",
-        "finish \"also discarded\"",
-    );
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::Stop,
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(effects.iter().any(
-        |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "console.log(\"kept\")")
-    ));
-    assert!(!effects.iter().any(|effect| {
-        matches!(effect, Effect::ExecCode { code, .. } if code.contains("discarded"))
-    }));
-}
-
-#[test]
-fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
-    let mut config = test_config();
-    config.generation.output_token_cap = std::num::NonZeroUsize::new(4096);
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("respond")], Default::default(), 0);
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "<typescript>\nconsole.log(\"too long\")";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(find_checkpoint(&effects).is_some());
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    assert!(
-        machine
-            .messages()
-            .iter()
-            .any(|message| message.parts.iter().any(|part| {
-                // The TypeScript copy of the same diagnostic: it names the
-                // truncation, the tag it stopped inside, the request cap and
-                // the remedy. The retired surface's wording ("output limit
-                // truncated", "do less per block") went with it (ADR 0096);
-                // the three facts asserted are the same ones.
-                part.content().contains("truncated")
-                    && part.content().contains("</typescript>")
-                    && part.content().contains("4096")
-                    && part.content().contains("shorter block")
-            }))
-    );
-    assert!(assistant_visible_texts(&machine).is_empty());
-    assert!(!effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-            if content.contains("<typescript>")
-    )));
-}
-
-#[test]
-fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Visible plan.\n<typescript>\nconsole.log(1)\n</typescript>\n<typescript>\nconsole.log(2)\n</typescript>";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(text)])),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(
-        effects.iter().any(
-            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "console.log(1)")
-        )
-    );
-    assert!(!effects.iter().any(
-        |effect| matches!(effect, Effect::ExecCode { code, .. } if code.contains("console.log(2)"))
-    ));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-            if content == "Visible plan."
-    )));
-    assert!(!machine.messages().iter().any(|message| {
-        message.role == MessageRole::Assistant
-            && message
-                .parts
-                .iter()
-                .any(|part| part.content().contains("<typescript>"))
-    }));
 }
 
 #[test]
@@ -451,89 +198,6 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
     );
 }
 
-#[test]
-fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("what closes a cell?")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "A cell is closed by ";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![text_part(text)],
-            terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
-            generation_disposition: Some(lash_core::GenerationReceipt {
-                stop_sequences: lash_core::GenerationOptionOutcome::Applied,
-                ..Default::default()
-            }),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert_eq!(
-        single_llm_extraction_payload(&machine)["decision"],
-        "retry_output_limit_prose"
-    );
-    assert!(!effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Checkpoint { checkpoint, .. }
-            if *checkpoint == CheckpointKind::BeforeCompletion
-    )));
-}
-
-#[test]
-fn terminal_provider_paths_emit_only_visible_prose() {
-    for terminal_reason in [
-        lash_core::LlmTerminalReason::ContentFilter,
-        lash_core::LlmTerminalReason::ContextOverflow,
-        lash_core::LlmTerminalReason::ProviderError,
-    ] {
-        let mut machine = TurnMachine::new(
-            test_config(),
-            vec![user_message("respond")],
-            Default::default(),
-            0,
-        );
-        let effects = drain_effects(&mut machine);
-        let llm_id = *find_llm_call(&effects).expect("llm call");
-        let text = "Visible plan.\n<typescript>\nfiles.delete \"old\"";
-        machine.handle_response(Response::LlmComplete {
-            id: llm_id,
-            text_streamed: false,
-            result: Ok(LlmResponse {
-                parts: vec![text_part(text)],
-                terminal_reason,
-                ..LlmResponse::default()
-            }),
-        });
-
-        let effects = drain_effects(&mut machine);
-        assert!(effects.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: content, .. }))
-                if content == "Visible plan."
-        )));
-        assert!(effects.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-                if content == "Visible plan."
-        )));
-        assert!(!effects.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(SessionStreamEvent::StreamBlock(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,text: content, .. }))
-                | Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-                if content.contains("<typescript>")
-        )));
-    }
-}
-
 /// FIG-5592, FIG-5601: a checkpoint that parks driver state this build does
 /// not decode is refused when it is restored, with the driver's typed
 /// refusal: no machine exists to re-deliver its model call or run its cell.
@@ -576,10 +240,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: typescript_block_with_prose("Reason first.", "console.log(\"hi\");"),
-                response_meta: None,
-            }],
+            parts: typescript_block_with_prose("Reason first.", "console.log(\"hi\");"),
             response_metadata: Default::default(),
             ..LlmResponse::default()
         }),
@@ -724,11 +385,13 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
 
                 let effects = drain_effects(&mut machine);
                 let llm_id = *find_llm_call(&effects).expect("initial model call");
-                let source = "<typescript>\nconst value = 1;\n</typescript>".to_string();
+                let source = "const value = 1;".to_string();
                 machine.handle_response(Response::LlmComplete {
                     id: llm_id,
                     text_streamed: false,
-                    result: Ok(rlm_response(vec![text_part(&source)])),
+                    result: Ok(rlm_response(vec![
+                        lash_protocol_rlm::test_support::execute_code(&source),
+                    ])),
                 });
 
                 let mut effects = drain_effects(&mut machine);
@@ -842,9 +505,9 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(
-            "<typescript>\nvalue = 1\n</typescript>",
-        )])),
+        result: Ok(rlm_response(vec![
+            lash_protocol_rlm::test_support::execute_code("value = 1"),
+        ])),
     });
     let effects = drain_effects(&mut machine);
     let exec_id = effects
@@ -897,9 +560,9 @@ fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() 
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(
-            "<typescript>\nfinish healthy\n</typescript>",
-        )])),
+        result: Ok(rlm_response(vec![
+            lash_protocol_rlm::test_support::execute_code("finish healthy"),
+        ])),
     });
     let effects = drain_effects(&mut machine);
     let exec_id = effects
@@ -954,10 +617,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: typescript_block("const ok = await tools.ok({});\nconst fail = await tools.fail({});\nconst stop = await tools.stop({});\nconst results = { a: ok, b: fail, c: stop };"),
-                response_meta: None,
-            }],
+            parts: vec![typescript_block("const ok = await tools.ok({});\nconst fail = await tools.fail({});\nconst stop = await tools.stop({});\nconst results = { a: ok, b: fail, c: stop };")],
             response_metadata: Default::default(),
             ..LlmResponse::default()
         }),
@@ -1177,7 +837,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
 )]
 fn drive_stalling_turn(
     machine: &mut TurnMachine,
-    reply: &str,
+    reply: &LlmOutputPart,
     exec_result: Option<lash_protocol_types::ExecResponse>,
     max_llm_calls: usize,
 ) -> StalledTurn {
@@ -1205,7 +865,7 @@ fn drive_stalling_turn(
             machine.handle_response(Response::LlmComplete {
                 id: llm_id,
                 text_streamed: false,
-                result: Ok(rlm_response(vec![text_part(reply)])),
+                result: Ok(rlm_response(vec![reply.clone()])),
             });
         } else if let Some(exec_id) = effects.iter().find_map(|effect| match effect {
             Effect::ExecCode { id, .. } => Some(*id),
@@ -1308,7 +968,7 @@ fn an_error_free_execution_resets_the_no_progress_count() {
         Default::default(),
         0,
     );
-    let unclosed = "<typescript>\nfinish \"ok\"";
+    let unclosed = "{\"code\":";
     let mut effects = drain_effects(&mut machine);
 
     // Two stalls, one short of the bound.
@@ -1317,7 +977,12 @@ fn an_error_free_execution_resets_the_no_progress_count() {
         machine.handle_response(Response::LlmComplete {
             id: llm_id,
             text_streamed: false,
-            result: Ok(rlm_response(vec![text_part(unclosed)])),
+            result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
+                call_id: "invalid".into(),
+                tool_name: "execute_code".into(),
+                input_json: unclosed.into(),
+                replay: None,
+            }])),
         });
         effects = drain_effects(&mut machine);
         let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
@@ -1337,9 +1002,9 @@ fn an_error_free_execution_resets_the_no_progress_count() {
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(&typescript_block(
+        result: Ok(rlm_response(vec![typescript_block(
             "console.log(\"working\")",
-        ))])),
+        )])),
     });
     effects = drain_effects(&mut machine);
     let exec_id = effects
@@ -1369,7 +1034,12 @@ fn an_error_free_execution_resets_the_no_progress_count() {
         machine.handle_response(Response::LlmComplete {
             id: llm_id,
             text_streamed: false,
-            result: Ok(rlm_response(vec![text_part(unclosed)])),
+            result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
+                call_id: "invalid".into(),
+                tool_name: "execute_code".into(),
+                input_json: unclosed.into(),
+                replay: None,
+            }])),
         });
         effects = drain_effects(&mut machine);
         let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
@@ -1388,7 +1058,12 @@ fn an_error_free_execution_resets_the_no_progress_count() {
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(unclosed)])),
+        result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
+            call_id: "invalid".into(),
+            tool_name: "execute_code".into(),
+            input_json: unclosed.into(),
+            replay: None,
+        }])),
     });
     effects = drain_effects(&mut machine);
     assert!(find_done(&effects).is_some(), "the third stall exhausts it");
@@ -1411,14 +1086,19 @@ fn an_unbounded_no_progress_budget_keeps_re_asking() {
         Default::default(),
         0,
     );
-    let unclosed = "<typescript>\nfinish \"ok\"";
+    let unclosed = "{\"code\":";
     let mut effects = drain_effects(&mut machine);
     for _ in 0..20 {
         let llm_id = *find_llm_call(&effects).expect("llm call");
         machine.handle_response(Response::LlmComplete {
             id: llm_id,
             text_streamed: false,
-            result: Ok(rlm_response(vec![text_part(unclosed)])),
+            result: Ok(rlm_response(vec![LlmOutputPart::ToolCall {
+                call_id: "invalid".into(),
+                tool_name: "execute_code".into(),
+                input_json: unclosed.into(),
+                replay: None,
+            }])),
         });
         effects = drain_effects(&mut machine);
         let (checkpoint_id, _) = find_checkpoint(&effects).expect("checkpoint");
@@ -1449,7 +1129,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
         Default::default(),
         0,
     );
-    let stalled = drive_stalling_turn(&mut first, "<typescript>\nfinish \"ok\"", None, 32);
+    let stalled = drive_stalling_turn(&mut first, &invalid_code_call(), None, 32);
     assert_eq!(stalled.llm_calls, 3, "the first turn spends its own budget");
     let carried = stalled.events;
     assert!(
@@ -1466,7 +1146,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
         lash_protocol_types::AppendVec::from(carried),
         0,
     );
-    let stalled = drive_stalling_turn(&mut second, "<typescript>\nfinish \"ok\"", None, 32);
+    let stalled = drive_stalling_turn(&mut second, &invalid_code_call(), None, 32);
 
     assert_eq!(
         stalled.llm_calls, 3,
@@ -1515,7 +1195,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
             lash_core::SessionHistoryRecord::Protocol(event) => matches!(
                 recorded_rlm_event(event),
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                    if diagnostic.phase == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction
+                    if diagnostic.phase == lash_rlm_types::RlmDiagnosticPhase::NativeExtraction
             ),
             _ => false,
         })
@@ -1538,7 +1218,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part("<typescript>\nfinish \"ok\"")])),
+        result: Ok(rlm_response(vec![invalid_code_call()])),
     });
     effects = drain_effects(&mut machine);
 
@@ -1551,196 +1231,6 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
         find_checkpoint(&effects).is_some(),
         "the turn asks the model again instead of stopping"
     );
-}
-
-// === FIG-1475: one-line cells, named fence rules, and repeated replies ===
-//
-// The measured shape (finale3 row `workbench-continue-as/typescript`,
-// reproduced twice): a reply that was a single `<typescript>…</typescript>`
-// line. Extraction refused it, the whole reply counted as prose, the
-// `FinishRequired` driver answered "please finish" — which corrects nothing —
-// and a frontier model re-sent the identical reply until the turn's no-progress
-// budget died. Twelve billed provider calls, one dead turn, no signal.
-
-/// Answer the completion checkpoint a finishing turn asks for, and return the
-/// effects that follow it — where `Done` lives.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: find_checkpoint above proves the effects carry the completion checkpoint this fn answers"
-)]
-fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) -> Vec<Effect> {
-    let (checkpoint_id, _) = find_checkpoint(effects).expect("completion checkpoint");
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: sansio::CheckpointDelivery::default(),
-    });
-    drain_effects(machine)
-}
-
-fn finish_required_options() -> lash_core::ProtocolTurnOptions {
-    recorded_namespace(RlmCreateExtras {
-        finish_value_schema: None,
-        termination: Some(lash_core::TerminationMode::TerminalRequired),
-        render: None,
-    })
-}
-
-/// A one-line cell executes.
-///
-/// Red before the fix: `first_cell_span` required the open tag to be alone on
-/// its line, so this reply yielded no cell and nothing ran.
-#[test]
-fn a_one_line_cell_executes() {
-    {
-        let (reply, code) = (
-            "<typescript>await control.finish(\"ok\");</typescript>",
-            "await control.finish(\"ok\");",
-        );
-        let mut machine = TurnMachine::new(
-            test_config(),
-            vec![user_message("respond")],
-            Default::default(),
-            0,
-        );
-        let effects = drain_effects(&mut machine);
-        let llm_id = *find_llm_call(&effects).expect("llm call");
-        machine.handle_response(Response::LlmComplete {
-            id: llm_id,
-            text_streamed: false,
-            result: Ok(rlm_response(vec![text_part(reply)])),
-        });
-
-        let effects = drain_effects(&mut machine);
-        let executed = effects.iter().find_map(|effect| match effect {
-            Effect::ExecCode { code, .. } => Some(code.clone()),
-            _ => None,
-        });
-        assert_eq!(
-            executed.as_deref(),
-            Some(code),
-            "a one-line cell must execute its source"
-        );
-    }
-}
-
-/// Prose that only *mentions* both tags on one line is still prose.
-///
-/// The widened grammar must not turn a sentence about cells into a cell: the
-/// line has to start with the open tag and end with the close tag.
-#[test]
-fn a_one_line_tag_mention_still_finishes_as_prose() {
-    let mut machine = TurnMachine::new(
-        test_config(),
-        vec![user_message("respond")],
-        Default::default(),
-        0,
-    );
-    let effects = drain_effects(&mut machine);
-    let llm_id = *find_llm_call(&effects).expect("llm call");
-    let reply = "Write code between <typescript> and </typescript> tags, like this one did.";
-    machine.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(reply)])),
-    });
-
-    let effects = drain_effects(&mut machine);
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-        "a tag mention is not executable source"
-    );
-    assert!(
-        effects.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
-                if content == reply
-        )),
-        "the whole line is delivered as the answer: {effects:#?}"
-    );
-    let effects = complete_through_checkpoint(&mut machine, &effects);
-    assert!(
-        find_done(&effects).is_some(),
-        "and the turn finishes on it rather than asking again"
-    );
-}
-
-/// A fence the grammar refuses is answered by naming the rule.
-///
-/// Red before the fix: this reply produced no cell, so it fell through to the
-/// finish reminder, which says nothing about fences. The model has no way to
-/// learn what to change, which is what made the loop repeat.
-#[test]
-fn a_malformed_fence_is_answered_by_naming_the_rule() {
-    {
-        let (reply, open, close) = (
-            "<typescript >\nawait control.finish(\"ok\");\n</typescript>",
-            "<typescript>",
-            "</typescript>",
-        );
-        let mut config = test_config();
-        config.termination = finish_required_options();
-        let mut machine =
-            TurnMachine::new(config, vec![user_message("respond")], Default::default(), 0);
-        let effects = drain_effects(&mut machine);
-        let llm_id = *find_llm_call(&effects).expect("llm call");
-        machine.handle_response(Response::LlmComplete {
-            id: llm_id,
-            text_streamed: false,
-            result: Ok(rlm_response(vec![text_part(reply)])),
-        });
-
-        let effects = drain_effects(&mut machine);
-        assert!(
-            !effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-            "a refused fence executes nothing"
-        );
-        let told = machine.messages().iter().any(|message| {
-            message.parts.iter().any(|part| {
-                part.content().contains("grammar could not read")
-                    && part.content().contains("stand alone on its own line")
-                    && part
-                        .content()
-                        .contains("must start a later line after any whitespace")
-                    && part
-                        .content()
-                        .contains("Everything after that close is discarded")
-                    && part.content().contains(open)
-                    && part.content().contains(close)
-            })
-        });
-        assert!(
-            told,
-            "the retry must name the fence rule: {:#?}",
-            machine.messages()
-        );
-        let decision = machine
-            .events()
-            .iter()
-            .filter_map(|record| match record {
-                lash_core::SessionHistoryRecord::Protocol(event) => {
-                    match recorded_rlm_event(event) {
-                        Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                            if diagnostic.phase
-                                == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction =>
-                        {
-                            diagnostic.payload["decision"].as_str().map(str::to_string)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .next_back();
-        assert_eq!(
-            decision.as_deref(),
-            Some("retry_malformed_cell_fence"),
-            "the diagnostic names the fence, not a finish request"
-        );
-    }
 }
 
 /// An identical reply is *evidence*, not a stop condition.
@@ -1759,7 +1249,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
         0,
     );
 
-    let stalled = drive_stalling_turn(&mut machine, "<typescript>\nfinish \"ok\"", None, 32);
+    let stalled = drive_stalling_turn(&mut machine, &invalid_code_call(), None, 32);
 
     assert_eq!(
         stalled.llm_calls, 6,
@@ -1776,7 +1266,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
         .filter_map(|record| match record {
             lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                    if diagnostic.phase == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction =>
+                    if diagnostic.phase == lash_rlm_types::RlmDiagnosticPhase::NativeExtraction =>
                 {
                     diagnostic.payload["reply_fingerprint"]
                         .as_str()
@@ -1827,12 +1317,12 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
                 effects = drain_effects(machine);
             }
             let llm_id = *find_llm_call(&effects).expect("an llm call opens the iteration");
-            let text = format!("<typescript>\n{code}\n</typescript>");
+            let text = code.to_string();
             machine.handle_response(Response::LlmComplete {
                 id: llm_id,
                 text_streamed: false,
                 result: Ok(LlmResponse {
-                    parts: vec![text_part(&text)],
+                    parts: vec![lash_protocol_rlm::test_support::execute_code(&text)],
                     terminal_reason: lash_core::LlmTerminalReason::Stop,
                     ..LlmResponse::default()
                 }),
@@ -1959,9 +1449,7 @@ fn drive_rlm_to_second_llm_request(
                 machine.handle_response(Response::LlmComplete {
                     id,
                     text_streamed: false,
-                    result: Ok(rlm_response(vec![text_part(&typescript_block(
-                        "step_total = 41;",
-                    ))])),
+                    result: Ok(rlm_response(vec![typescript_block("step_total = 41;")])),
                 });
             }
             Effect::ExecCode { id, .. } => {
@@ -2022,7 +1510,7 @@ fn answer_one_cell(
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
-        result: Ok(rlm_response(vec![text_part(&typescript_block(code))])),
+        result: Ok(rlm_response(vec![typescript_block(code)])),
     });
     let effects = drain_effects(&mut machine);
     let exec_id = effects

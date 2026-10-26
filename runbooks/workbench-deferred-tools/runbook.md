@@ -30,7 +30,7 @@ the model's surrounding prose.
 
 1. **Two cells are the contract.** The first turn must contain a completed
    `tools.search` call whose observation names `strings.sha256`, followed by a distinct
-   `<typescript>` execution cell that calls `strings.sha256`. A single cell containing both
+   `execute_code` program that calls `strings.sha256`. A single cell containing both
    is a link failure, not a passing shortcut.
 2. **The search observation is evidence.** Prompt text containing `strings.sha256` proves
    nothing. Require the completed search tool result to contain `call_path:

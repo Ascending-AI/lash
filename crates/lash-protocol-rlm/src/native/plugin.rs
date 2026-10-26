@@ -12,7 +12,7 @@ pub(crate) fn register_native_plugin(
     crate::prompt_sections::register_sections(reg, |owner| {
         crate::prompt_sections::RlmSectionBehaviour {
             dialect: Arc::clone(&owner.dialect),
-            channel: owner.config.channel,
+
             prompt_features: owner.config.prompt_features,
             discovery: owner.config.discovery.clone(),
             budget_tokens: owner.config.continue_as_soft_warn_tokens,

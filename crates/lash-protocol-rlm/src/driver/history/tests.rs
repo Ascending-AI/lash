@@ -77,7 +77,22 @@ fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
         .blocks
         .iter()
         .filter_map(|block| match block {
-            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            LlmContentBlock::Text { text, .. }
+                if !message
+                    .blocks
+                    .iter()
+                    .any(|block| matches!(block, LlmContentBlock::ToolResult { .. })) =>
+            {
+                Some(text.as_ref())
+            }
+            LlmContentBlock::ToolResult { content, .. } => {
+                content.iter().find_map(|part| match part {
+                    lash_core::facade_support::ModelToolReturnPart::Text { text } => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+            }
             _ => None,
         })
         .collect::<Vec<_>>()
@@ -218,43 +233,6 @@ fn ordered_reasoning_replay_round_trips_through_standalone_history_message() {
 }
 
 #[test]
-fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
-    let first = replay("fold_1", "fold-replay-1");
-    let second = replay("fold_2", "fold-replay-2");
-    let messages = render(&[
-        assistant_reasoning_event(
-            &[
-                ("first folded reasoning", first.clone()),
-                ("second folded reasoning", second.clone()),
-            ],
-            "Working.",
-        ),
-        step_event("value = inspect()"),
-    ]);
-
-    assert!(matches!(
-        messages[0].blocks.as_slice(),
-        [
-            LlmContentBlock::Reasoning { text: first_text, replay: Some(first_actual) },
-            LlmContentBlock::Reasoning { text: second_text, replay: Some(second_actual) },
-            LlmContentBlock::Text { text: cell, .. }
-        ] if first_text == "first folded reasoning"
-            && first_actual == &first
-            && second_text == "second folded reasoning"
-            && second_actual == &second
-            && cell.as_ref()
-                == crate::cell_scan::render_cell_text(
-                    crate::dialect::CellTags {
-                        open: "<typescript>",
-                        close: "</typescript>",
-                    },
-                    "Working.",
-                    "value = inspect()",
-                )
-    ));
-}
-
-#[test]
 fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
@@ -299,7 +277,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
         )),
     ));
 
-    let messages = render(&[event]);
+    let messages = render(&[crate::driver::tests::native_context(&event), event]);
     let observation = observation_text(&messages[1]);
 
     let id =

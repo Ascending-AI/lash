@@ -184,9 +184,15 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
                 let text = if response == 0 {
                     typescript_block("await tools.search({});")
                 } else {
-                    "done".to_string()
+                    LlmOutputPart::Text {
+                        text: "done".to_string(),
+                        response_meta: None,
+                    }
                 };
-                Ok(text_response(&text))
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
             }
         })
         .build()

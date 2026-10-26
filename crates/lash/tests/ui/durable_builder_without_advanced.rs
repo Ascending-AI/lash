@@ -23,7 +23,6 @@ async fn durable_core_without_advanced(
     // The RLM factory keeps its Lash VM artifacts in that same backend.
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

@@ -233,7 +233,6 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100),
             ..RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
@@ -287,7 +286,6 @@ mod tests {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
             ..RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
@@ -399,7 +397,6 @@ mod tests {
         let creating = RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
             ..RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()
@@ -412,7 +409,7 @@ mod tests {
                 finish_value_schema: None,
                 render: None,
                 termination: None,
-                channel: Some(crate::RlmChannel::Cell),
+
                 dialect: Some("typescript".to_string()),
                 behaviour: creating
                     .recorded_behaviour(&crate::CellDialect::typescript())
@@ -425,7 +422,6 @@ mod tests {
         let resumed = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: None,
             ..RlmProtocolPluginConfig::builder()
-                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(crate::plugin::InstructionBound::unbounded())
                 .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
                 .build()

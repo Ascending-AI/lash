@@ -36,7 +36,7 @@
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"response\":{\"responseId\":\"matrix-response-1\",\"modelVersion\":\"matrix-served-model\",\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":7,\"thoughtsTokenCount\":0},\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<typescript>\\nawait control.finish(\\\"settled\\\");\\n</typescript>\\n\"}]}}]}}"
+      "data": "{\"response\":{\"responseId\":\"matrix-response-1\",\"modelVersion\":\"matrix-served-model\",\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":7,\"thoughtsTokenCount\":0},\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"START_HERE\\nawait control.finish(\\\"settled\\\");\\nSTOP_HERE\\n\"}]}}]}}"
     },
     {
       "at": 21,

@@ -52,12 +52,7 @@ fn dialect() -> SessionDialect {
     crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
 }
 
-fn system_with(
-    dialect: &SessionDialect,
-    native: bool,
-    enabled: bool,
-    catalog: lash_core::ToolCatalog,
-) -> String {
+fn system_with(dialect: &SessionDialect, enabled: bool, catalog: lash_core::ToolCatalog) -> String {
     let features = crate::protocol::RlmPromptFeatures {
         images: enabled,
         decomposition: enabled,
@@ -65,11 +60,6 @@ fn system_with(
     crate::prompt_sections::testing::compose_rlm(
         crate::prompt_sections::testing::RlmSections {
             dialect: std::sync::Arc::new(dialect.clone()),
-            channel: if native {
-                crate::plugin::RlmChannel::NativeTool
-            } else {
-                crate::plugin::RlmChannel::Cell
-            },
             prompt_features: features,
             discovery: None,
             budget_tokens: None,
@@ -92,15 +82,10 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
     for enabled in [false, true] {
         let dialect = dialect();
         for catalog in [catalog(), process_catalog()] {
-            let prompt = system_with(&dialect, true, enabled, catalog);
+            let prompt = system_with(&dialect, enabled, catalog);
             assert!(prompt.contains("### Tool transport"), "{prompt}");
             assert!(prompt.contains("`execute_code`"), "{prompt}");
-            for needle in [
-                "<typescript>",
-                "</typescript>",
-                "### Response shape",
-                "### Example cell",
-            ] {
+            for needle in ["### Response shape", "### Example cell"] {
                 assert!(
                     !prompt.contains(needle),
                     "native prompt leaks cell syntax `{needle}`: {prompt}"
@@ -113,11 +98,11 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
 /// D-SLEEPALWAYS: every cell and native program can park on a durable timer,
 /// independently of optional prompt features and process catalog membership.
 #[test]
-fn durable_sleep_is_taught_in_every_execution_channel() {
+fn durable_sleep_is_taught_for_native_execution() {
     let dialect = dialect();
-    for native in [false, true] {
+    {
         for catalog in [catalog(), process_catalog()] {
-            let prompt = system_with(&dialect, native, false, catalog);
+            let prompt = system_with(&dialect, false, catalog);
             assert!(prompt.contains("await sleep(ms)"), "{prompt}");
         }
     }

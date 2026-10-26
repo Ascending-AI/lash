@@ -7,7 +7,6 @@
 
 mod call_feedback;
 mod catalogue_preview;
-mod cell_scan;
 mod cell_value;
 mod control_tools;
 mod deferred;
@@ -43,7 +42,6 @@ pub use session_globals::{
     GlobalsPage, GlobalsPageView, SessionGlobal, SessionGlobalKind, SessionGlobals,
     StaleGlobalsPage,
 };
-mod stream_mask;
 #[cfg(test)]
 mod testing;
 mod tool_catalog;
@@ -61,9 +59,8 @@ pub use catalogue_preview::{
 pub use control_tools::{FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition};
 pub use deferred::DeferredResolutionError;
 pub use dialect::{
-    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
-    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
-    TypescriptPrompts,
+    CellDialect, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
+    ExecutionSection, ExecutionSectionRequest, PythonPrompts, TypescriptPrompts,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::{
@@ -104,11 +101,11 @@ pub mod tool_presenters {
 }
 pub use plugin::{
     Charge, ChargeLimiter, ExecutionBounds, InstructionBound, LimitDecision, MemoryBound,
-    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmChannel,
-    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmDiscovery, RlmPresentationConfig,
+    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmConfigOwner,
+    RlmConfigRefusal, RlmCreateConfig, RlmDiscovery, RlmPresentationConfig,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions,
-    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
+    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, rlm_session_config,
 };
 pub use projection::{
     RLM_PROTOCOL_EVENT_VERSION, RlmSeed, is_rlm_protocol_output, rlm_protocol_event,
@@ -149,4 +146,18 @@ fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
         format!("{head}\n\n... ({omitted} characters omitted) ...\n\n{tail}"),
         raw_len,
     )
+}
+
+/// Scripted provider fixtures for the RLM protocol.
+#[cfg(feature = "testing")]
+pub mod test_support {
+    /// One complete program, delivered through the provider's code tool.
+    pub fn execute_code(code: impl Into<String>) -> lash_core::LlmOutputPart {
+        lash_core::LlmOutputPart::ToolCall {
+            call_id: "execute-code".to_string(),
+            tool_name: super::NATIVE_EXECUTE_TOOL_NAME.to_string(),
+            input_json: serde_json::json!({"code": code.into()}).to_string(),
+            replay: None,
+        }
+    }
 }

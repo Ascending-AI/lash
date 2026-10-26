@@ -63,7 +63,6 @@ fn echo() -> lash_vocabulary::tool_contract::ToolDefinition {
 fn builder(backend: &lash::Backend, dialect: lash::rlm::CellDialect) -> lash::LashCoreBuilder {
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

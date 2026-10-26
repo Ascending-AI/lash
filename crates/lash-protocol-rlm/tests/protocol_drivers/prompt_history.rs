@@ -29,12 +29,12 @@ const STREAMED_REASONING_TRAJECTORY: RlmPromptHistoryFocusedCheck = RlmPromptHis
 fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
     RlmProtocolScenario::new(TEXT_ONLY_CELL_TRAJECTORY.display_name)
         .termination(lash_core::TerminationMode::TerminalRequired)
-        .llm_response(vec![text_part(&typescript_block("console.log(\"hi\");"))])
+        .llm_response(vec![typescript_block("console.log(\"hi\");")])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["console.log(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
-            assistant_message_count: Some(0),
+            assistant_message_count: Some(1),
             assistant_reasoning_texts: Some(Vec::new()),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {
@@ -51,10 +51,13 @@ fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
 fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash_vm_cell() {
     RlmProtocolScenario::new(MARKDOWN_BEFORE_CELL.display_name)
         .termination(lash_core::TerminationMode::TerminalRequired)
-        .llm_response(vec![text_part(&typescript_block_with_prose(
-            "Example:\n```python\nprint('hi')\n```",
-            "console.log(\"done\")",
-        ))])
+        .llm_response(
+            [typescript_block_with_prose(
+                "Example:\n```python\nprint('hi')\n```",
+                "console.log(\"done\")",
+            )]
+            .concat(),
+        )
         .exec_result(exec_response(&["done\n"], None, None))
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["console.log(\"done\")"],
@@ -75,13 +78,13 @@ fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash
 fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
     RlmProtocolScenario::new(EXEC_ERROR_EXACT_HISTORY.display_name)
         .termination(lash_core::TerminationMode::TerminalRequired)
-        .llm_response(vec![
-            reasoning_part("find the failing call"),
-            text_part(&typescript_block_with_prose(
-                "Trying it now.",
-                "missing_name",
-            )),
-        ])
+        .llm_response(
+            [
+                vec![reasoning_part("find the failing call")],
+                typescript_block_with_prose("Trying it now.", "missing_name"),
+            ]
+            .concat(),
+        )
         .exec_result(exec_response(
             &[],
             Some("unknown binding `missing_name`"),
@@ -108,13 +111,13 @@ fn rlm_prompt_history_exec_error_keeps_reasoning_prose_and_code_exact() {
 fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() {
     RlmProtocolScenario::new(FINISH_FINAL_VALUE_EXACT_HISTORY.display_name)
         .termination(lash_core::TerminationMode::TerminalRequired)
-        .llm_response(vec![
-            reasoning_part("ready to finish"),
-            text_part(&typescript_block_with_prose(
-                "Finishting.",
-                "await control.finish(\"done\");",
-            )),
-        ])
+        .llm_response(
+            [
+                vec![reasoning_part("ready to finish")],
+                typescript_block_with_prose("Finishting.", "await control.finish(\"done\");"),
+            ]
+            .concat(),
+        )
         .exec_result(exec_response(&[], None, Some(serde_json::json!("done"))))
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["await control.finish(\"done\");"],
@@ -138,7 +141,7 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
         .termination(lash_core::TerminationMode::TerminalRequired)
         .streamed_llm_response(vec![
             reasoning_part("I'll answer directly."),
-            text_part(&typescript_block("await control.finish(\"Hi.\");")),
+            typescript_block("await control.finish(\"Hi.\");"),
         ])
         .exec_result(exec_response(&[], None, Some(serde_json::json!("Hi."))))
         .expect(RlmProtocolExpectations {

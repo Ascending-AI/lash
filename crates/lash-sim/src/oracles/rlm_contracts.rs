@@ -258,10 +258,10 @@ fn check_rlm_natural_prose_finalizes(
     require_bool(result, "/assistant_conversation_progress", false, contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     require_rlm_turn_outcome_contains(result, "finished", "AssistantMessage", contract)?;
-    require_rlm_diagnostic(result, "finish_prose", "natural", contract)?;
+    require_rlm_diagnostic(result, "prose_only", "natural", contract)?;
     Ok(json!({
         "mode": "natural",
-        "decision": "finish_prose",
+        "decision": "prose_only",
         "done": true,
         "turn_outcome": "assistant_message",
         "llm_call_count": 1,
@@ -276,7 +276,11 @@ fn check_rlm_typed_prose_requires_finish(
     require_bool(result, "/done", false, contract)?;
     require_u64(result, "/llm_call_count", 2, contract)?;
     require_checkpoint(result, "after_work", contract)?;
-    require_rlm_system_contains(result, "No code from that response executed.", contract)?;
+    require_rlm_system_contains(
+        result,
+        "inside the `code` argument of an `execute_code` call",
+        contract,
+    )?;
     require_rlm_system_contains(result, "control.finish(value)", contract)?;
     require_rlm_system_omits(result, "required output schema", contract)?;
     require_rlm_diagnostic(result, "request_finish", "terminal_required", contract)?;
@@ -284,7 +288,7 @@ fn check_rlm_typed_prose_requires_finish(
         "mode": "terminal_required",
         "decision": "request_finish",
         "done": false,
-        "repair_prompt_contains": ["No code from that response executed.", "control.finish(value)"],
+        "repair_prompt_contains": ["inside the `code` argument of an `execute_code` call", "control.finish(value)"],
         "llm_call_count": 2,
     }))
 }
@@ -296,7 +300,11 @@ fn check_rlm_finish_required_max_turn_stop(
     require_bool(result, "/done", true, contract)?;
     require_u64(result, "/llm_call_count", 1, contract)?;
     require_rlm_stopped_max_turns(result, contract)?;
-    require_rlm_system_omits(result, "No code from that response executed.", contract)?;
+    require_rlm_system_omits(
+        result,
+        "inside the `code` argument of an `execute_code` call",
+        contract,
+    )?;
     require_rlm_system_omits(result, "control.finish(value)", contract)?;
     Ok(json!({
         "mode": "terminal_required",
@@ -355,7 +363,7 @@ fn check_rlm_natural_diagnostic_counts(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {
-    let diagnostic = require_rlm_diagnostic(result, "finish_prose", "natural", contract)?;
+    let diagnostic = require_rlm_diagnostic(result, "prose_only", "natural", contract)?;
     require_rlm_count(diagnostic, "full_text_chars", 12, contract)?;
     require_rlm_count(diagnostic, "prose_chars", 12, contract)?;
     require_rlm_count(diagnostic, "code_chars", 0, contract)?;
@@ -363,7 +371,7 @@ fn check_rlm_natural_diagnostic_counts(
     require_rlm_count(diagnostic, "typescript_cell_count", 0, contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     Ok(json!({
-        "decision": "finish_prose",
+        "decision": "prose_only",
         "termination": "natural",
         "counts": diagnostic.get("counts").cloned().unwrap_or(Value::Null),
     }))

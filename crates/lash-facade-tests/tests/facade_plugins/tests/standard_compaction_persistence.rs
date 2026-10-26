@@ -889,20 +889,15 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
     let store_factory = sqlite_memory_store_set().await;
     let backend = lash_conformance::backend_over(store_factory.clone());
     let provider = standard_compaction_provider(vec![
-        response_with_usage(
-            &typescript_block(r#"await control.finish("primed");"#),
+        code_response_with_usage(
+            typescript_block(r#"await control.finish("primed");"#),
             20_000,
         ),
-        response_with_usage(
-            &typescript_block(
-                r#"await control.continueAs({ task: "finish from the new frame" });"#,
-            ),
+        code_response_with_usage(
+            typescript_block(r#"await control.continueAs({ task: "finish from the new frame" });"#),
             1,
         ),
-        response_with_usage(
-            &typescript_block(r#"await control.finish("continued");"#),
-            1,
-        ),
+        code_response_with_usage(typescript_block(r#"await control.finish("continued");"#), 1),
     ]);
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(
@@ -1047,4 +1042,10 @@ async fn facade_compaction_settings_control_pressure_and_summary() -> Result<()>
     assert!(captured[3].contains("host summary") && captured[3].contains("recent request"));
     core.shutdown().await?;
     Ok(())
+}
+
+fn code_response_with_usage(part: LlmOutputPart, input_tokens: i64) -> LlmResponse {
+    let mut response = response_with_usage("", input_tokens);
+    response.parts = vec![part];
+    response
 }

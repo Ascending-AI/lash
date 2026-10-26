@@ -2,8 +2,6 @@ use lash::{EmbedError, LashCore, Result, async_trait};
 use lash_core::ToolProvider;
 use std::sync::Arc;
 
-use lash_core::facade_support::TurnActivitySink;
-
 use lash_core::facade_support::ProviderHandle;
 
 use lash_protocol_types::sync::MutexExt;

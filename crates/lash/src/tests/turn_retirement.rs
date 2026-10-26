@@ -20,7 +20,7 @@ use crate::{TurnCancelMode, TurnInput};
 /// The cell every turn runs: a lookup that answers at once, then an
 /// approval that parks on its completion key, then, when `finishes`, the
 /// turn's finish.
-fn cell(finishes: bool) -> String {
+fn cell(finishes: bool) -> LlmOutputPart {
     let finish = if finishes {
         "\nawait control.finish(\"approved\");"
     } else {
@@ -155,7 +155,7 @@ impl World {
         let (keys, received) = tokio::sync::mpsc::unbounded_channel();
         let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
-                text_provider("turn-retirement", cell(finishes)),
+                part_provider("turn-retirement", cell(finishes)),
                 mock_llm_profile_spec(),
             )
             .plugin(ApprovalTools { keys, return_gate }.plugin())
@@ -575,7 +575,7 @@ async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> 
     let second = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .retire_session_plugin(crate::plugins::PluginId::new("tools"))
         .serve_test_llm_profile(
-            text_provider("turn-retirement", cell(true)),
+            part_provider("turn-retirement", cell(true)),
             mock_llm_profile_spec(),
         )
         .build(crate::tests::host::runtime_lease_owner())?;
@@ -676,7 +676,7 @@ async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> 
     let second = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .retire_session_plugin(crate::plugins::PluginId::new("retired-spare"))
         .serve_test_llm_profile(
-            text_provider(
+            part_provider(
                 "retired-session-unused",
                 typescript_block("await control.finish(\"resumed\");"),
             ),
@@ -928,7 +928,7 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
         let (keys, received) = tokio::sync::mpsc::unbounded_channel();
         explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .serve_test_llm_profile(
-                text_provider("turn-retirement", cell(true)),
+                part_provider("turn-retirement", cell(true)),
                 mock_llm_profile_spec(),
             )
             .plugin(

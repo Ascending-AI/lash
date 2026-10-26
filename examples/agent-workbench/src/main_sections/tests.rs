@@ -15,7 +15,6 @@ pub(crate) use harness::*;
 #[path = "tests/after_turn_note.rs"]
 mod after_turn_note_tests;
 #[cfg(test)]
-#[cfg(test)]
 #[path = "tests/continue_as_projection.rs"]
 mod continue_as_projection_tests;
 #[cfg(test)]
@@ -61,7 +60,6 @@ mod recoverable_chat_failures_tests;
 #[path = "tests/recoverable_chat.rs"]
 mod recoverable_chat_tests;
 #[cfg(test)]
-#[cfg(test)]
 #[path = "tests/session_isolation.rs"]
 mod session_isolation_tests;
 #[cfg(test)]
@@ -70,7 +68,6 @@ mod session_resume_tests;
 #[cfg(test)]
 #[path = "tests/tool_control.rs"]
 mod tool_control_tests;
-#[cfg(test)]
 #[cfg(test)]
 #[path = "tests/typescript_dialect.rs"]
 mod typescript_dialect_tests;
@@ -259,11 +256,9 @@ async fn parallel_inbox_lists_complete_in_durable_workbench_turn() {
     let mail_world = mail::MailWorld::new();
     mail_world.add_account("test").expect("add test");
     mail_world.add_account("test2").expect("add test2");
-    let workbench = Workbench::builder(replying_provider(
-        r#"<typescript>
-const boxes = await Promise.all([inbox.test.list({}), inbox.test2.list({})]);
-await chat.reply(JSON.stringify({ test: boxes[0], test2: boxes[1] }));
-</typescript>"#,
+    let workbench = Workbench::builder(replying_code_provider(
+        r#"const boxes = await Promise.all([inbox.test.list({}), inbox.test2.list({})]);
+await chat.reply(JSON.stringify({ test: boxes[0], test2: boxes[1] }));"#,
     ))
     .mail_world(mail_world)
     .build()
@@ -316,7 +311,7 @@ async fn next_call(entered: &mut mpsc::UnboundedReceiver<usize>) -> usize {
 /// such turn renders the accounts the host recorded since.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
-    const FOLLOW_ON: &str = "<typescript>\nawait control.continueAs({ task: \"observe the accounts\" });\n</typescript>";
+    const FOLLOW_ON: &str = "await control.continueAs({ task: \"observe the accounts\" });";
     let requests = Arc::new(Mutex::new(Vec::<lash::provider::LlmRequest>::new()));
     let (entered_tx, mut entered) = mpsc::unbounded_channel::<usize>();
     let release = Arc::new(tokio::sync::Semaphore::new(0));
@@ -343,13 +338,13 @@ async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
                                 .await
                                 .expect("the gate stays open")
                                 .forget();
-                            "<typescript>\nconst step = 1;\n</typescript>".to_string()
+                            "const step = 1;".to_string()
                         }
                         2 => finish_cell("observed"),
                         4 => finish_cell("observed again"),
                         other => panic!("unexpected provider call {other}"),
                     };
-                    Ok(text_response(&reply))
+                    Ok(code_response(&reply))
                 }
             }
         })
@@ -515,10 +510,8 @@ async fn next_observation(rx: &mut mpsc::Receiver<ObservationStreamItem>) -> Obs
 /// activity, and a queued input's typed application evidence.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn event_stream_forwards_session_observation_live_replay() {
-    let workbench = Workbench::replying(
-        "<typescript>\nawait chat.reply(\"observed through live replay\");\n</typescript>",
-    )
-    .await;
+    let workbench =
+        Workbench::executing("await chat.reply(\"observed through live replay\");").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state
@@ -626,17 +619,15 @@ async fn event_stream_forwards_session_observation_live_replay() {
 /// the requested cursor, the latest recoverable one, and the session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn event_stream_forwards_session_observation_replay_gap() {
-    let workbench = Workbench::builder(replying_provider(
-        "<typescript>\nawait chat.reply(\"gap source\");\n</typescript>",
-    ))
-    .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
-        lash::observe::InMemoryLiveReplayStoreConfig {
-            max_events_per_session: 1,
-            ..lash::observe::InMemoryLiveReplayStoreConfig::standard()
-        },
-    )))
-    .build()
-    .await;
+    let workbench = Workbench::builder(replying_code_provider("await chat.reply(\"gap source\");"))
+        .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+            lash::observe::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash::observe::InMemoryLiveReplayStoreConfig::standard()
+            },
+        )))
+        .build()
+        .await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state
@@ -683,9 +674,7 @@ async fn event_stream_forwards_session_observation_replay_gap() {
 /// the recovery cursor it hands back (FIG-3162).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap() {
-    let workbench =
-        Workbench::replying("<typescript>\nawait chat.reply(\"snapshot cursor\");\n</typescript>")
-            .await;
+    let workbench = Workbench::executing("await chat.reply(\"snapshot cursor\");").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state
@@ -860,9 +849,12 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
                         .to_string(),
                 );
                 async {
-                    Ok(text_response(
-                        "<typescript>await chat.reply(\"catalogue observed\");</typescript>",
-                    ))
+                    Ok(LlmResponse {
+                        parts: vec![lash::testing::execute_code(
+                            "await chat.reply(\"catalogue observed\");",
+                        )],
+                        ..Default::default()
+                    })
                 }
             }
         })
@@ -1002,9 +994,7 @@ async fn inbox_authority_resolves_for_any_account_name() {
                 call => panic!("unexpected workbench provider call {call}"),
             };
             async move {
-                Ok(text_response(&format!(
-                    "<typescript>{code}</typescript>"
-                )))
+                Ok(LlmResponse { parts: vec![lash::testing::execute_code(code)], ..Default::default() })
             }
         })
         .build()

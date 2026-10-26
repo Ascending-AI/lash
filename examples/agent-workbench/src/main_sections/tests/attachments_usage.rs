@@ -264,8 +264,12 @@ fn assert_snapshot_attachment(
 }
 
 fn usage_gate_response() -> lash::provider::LlmResponse {
-    let mut response =
-        text_response("<typescript>\nawait chat.reply(\"attachment accounted\");\n</typescript>");
+    let mut response = LlmResponse {
+        parts: vec![lash::testing::execute_code(
+            "await chat.reply(\"attachment accounted\");",
+        )],
+        ..Default::default()
+    };
     response.usage = lash::usage::LlmUsage {
         input_tokens: 21,
         output_tokens: 8,

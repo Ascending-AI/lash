@@ -388,7 +388,6 @@ async fn measure_with_stores(
     let pool = workers.pool()?; // warm before measurement, reused by all samples
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
             .memory_limit(lash::rlm::MemoryBound::mebibytes(128))
             .build(),

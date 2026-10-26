@@ -125,12 +125,16 @@ fn counted_provider(
 async fn chat_finish_requires_text_session_wide_and_prose_still_ends_a_turn() {
     use std::sync::atomic::Ordering;
 
-    let (provider, calls) = counted_provider(|call| {
-        text_response(match call {
-            0 => "<typescript>await chat.reply({temperature: 15});</typescript>",
-            1 => "<typescript>await chat.reply(\"It is 15 °C.\");</typescript>",
-            _ => "A prose follow-up.",
-        })
+    let (provider, calls) = counted_provider(|call| LlmResponse {
+        parts: vec![match call {
+            0 => lash::testing::execute_code("await chat.reply({temperature: 15});"),
+            1 => lash::testing::execute_code("await chat.reply(\"It is 15 °C.\");"),
+            _ => lash::direct::LlmOutputPart::Text {
+                text: "A prose follow-up.".to_owned(),
+                response_meta: None,
+            },
+        }],
+        ..Default::default()
     });
     let workbench = Workbench::builder(provider).build().await;
     let state = &workbench.state;
@@ -246,11 +250,20 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
     const MID_TURN_PROSE: &str = "FIG-1406 mid-turn thinking out loud";
     const FINAL_REPLY: &str = "FIG-1406 answer after a code step";
     let (provider, _) = counted_provider(|call| {
-        let text = match call {
-            0 => format!("{MID_TURN_PROSE}\n<typescript>\nprint(\"step\");\n</typescript>"),
-            _ => FINAL_REPLY.to_string(),
-        };
-        reasoned_response(&format!("FIG-1406 reasoning {call}"), &text)
+        let mut response = reasoned_response(
+            &format!("FIG-1406 reasoning {call}"),
+            if call == 0 {
+                MID_TURN_PROSE
+            } else {
+                FINAL_REPLY
+            },
+        );
+        if call == 0 {
+            response
+                .parts
+                .push(lash::testing::execute_code(r#"print("step");"#));
+        }
+        response
     });
     let workbench = Workbench::builder(provider).build().await;
     let state = &workbench.state;

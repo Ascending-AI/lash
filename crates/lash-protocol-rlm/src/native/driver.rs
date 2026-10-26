@@ -21,30 +21,34 @@ use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 use crate::settlement::{AttemptProgress, continue_or_stop_after_nonterminal, settle_execution};
 
-use super::finish::{
-    finish_required_reminder_message, internal_assistant_prose_message_for_turn,
-    text_cell_correction_message,
-};
 use super::stall::{LLM_EXTRACTION_PHASE, native_reply_fingerprint};
 use crate::driver_state::{
     RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, check_parked_rlm_state,
     handed_back_rlm_state, rlm_driver_state,
 };
 use crate::protocol::actions::invalid_turn_options_actions;
+use crate::protocol::finish::{
+    finish_required_reminder_message, internal_assistant_prose_message_for_turn,
+};
 use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
 #[derive(Clone)]
-pub struct NativeDriver {
+pub struct RlmDriver {
     dialect: Arc<SessionDialect>,
 }
 
-impl NativeDriver {
+impl RlmDriver {
+    /// An RLM driver executing provider-native code calls in `dialect`.
+    pub fn new(dialect: crate::CellDialect) -> Self {
+        Self::with_dialect(Arc::new(SessionDialect::prompt_only(dialect)))
+    }
+
     pub(crate) fn with_dialect(dialect: Arc<SessionDialect>) -> Self {
         Self { dialect }
     }
 }
 
-impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
+impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
         text.to_string()
     }
@@ -135,12 +139,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             content: prose.clone(),
         }));
         let action = super::tool::normalize(&parts);
-        // This channel runs code only through `execute_code`. A reply with no
-        // call that writes a cell in its text meant to run it: read as prose,
-        // a natural turn would commit the cell as its answer, unrun
-        // (FIG-5302), so it is corrected toward the tool instead.
-        let text_cell = matches!(action, super::tool::NativeAction::ProseOnly)
-            && crate::cell_scan::malformed_cell_fence(&prose, self.dialect.cell_tags());
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
             actions.push(DriverAction::Emit(make_error_event(
                 TurnFailureKind::LlmProvider,
@@ -252,9 +250,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 format!("execute_{}", self.dialect.language_id())
             }
             super::tool::NativeAction::Malformed { decision, .. } => decision.to_string(),
-            super::tool::NativeAction::ProseOnly => if text_cell {
-                "retry_text_cell"
-            } else if termination.prose_ends_turn() {
+            super::tool::NativeAction::ProseOnly => if termination.prose_ends_turn() {
                 "prose_only"
             } else {
                 "request_finish"
@@ -293,7 +289,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::ProseOnly => {
-                if termination.prose_ends_turn() && !text_cell {
+                if termination.prose_ends_turn() {
                     if !reasoning.is_empty() {
                         actions.push(DriverAction::AppendEvents(vec![conversation_event(
                             internal_assistant_prose_message_for_turn(
@@ -326,26 +322,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                             prose,
                             &reasoning,
                         )),
-                        conversation_event(if text_cell {
-                            text_cell_correction_message(
-                                self.dialect.as_ref(),
-                                rlm_message_id(
-                                    ctx.turn_id(),
-                                    ctx.protocol_iteration(),
-                                    "text_cell",
-                                ),
-                            )
-                        } else {
-                            finish_required_reminder_message(
-                                self.dialect.as_ref(),
-                                rlm_message_id(
-                                    ctx.turn_id(),
-                                    ctx.protocol_iteration(),
-                                    "finish_reminder",
-                                ),
-                                &self.dialect.offered_finish_calls(&ctx),
-                            )
-                        }),
+                        conversation_event(finish_required_reminder_message(
+                            self.dialect.as_ref(),
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "finish_reminder",
+                            ),
+                            &self.dialect.offered_finish_calls(&ctx),
+                        )),
                     ];
                     if let Err(error) = continue_or_stop_after_nonterminal(
                         &ctx,
@@ -365,7 +350,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
                 );
                 state.code = code.clone();
-                state.reasoning = reasoning;
                 state.assistant_parts = parts;
                 actions.push(DriverAction::Emit(SessionStreamEvent::Message {
                     text: code.clone(),

@@ -35,7 +35,7 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
    process registry (`GET /api/work`, the `#workPane` drawer) must show the concierge run, and
    `GET /api/lash-vm-graphs` must know its graph. Invisible background work is a finding.
 4. **Instruct outcomes, not code.** Ask the agent *what to do* ("register a trigger
-   that forwards…"); never paste a ready-made `<typescript>` cell into the chat. The
+   that forwards…"); never paste a ready-made `execute_code` program into the chat. The
    model authoring the process is part of what this scenario proves.
 
 ## Working material

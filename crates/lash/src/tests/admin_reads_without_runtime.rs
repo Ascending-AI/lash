@@ -48,7 +48,7 @@ fn rlm_core(
     tools: bool,
 ) -> crate::Result<LashCore> {
     let builder = explicit_ephemeral_facets(rlm_core_builder_over(backend)).serve_test_llm_profile(
-        text_provider(
+        part_provider(
             "admin-reads",
             typescript_block("const kept_global = 41;\nawait control.finish(kept_global + 1);"),
         ),

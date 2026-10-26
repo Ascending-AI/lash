@@ -78,7 +78,7 @@ pub(crate) fn session_state(
 }
 
 /// What a cell of `dialect` needs of its session, with no bounds and the
-/// builtin renderer, on the cell channel.
+/// builtin renderer, through the native code tool.
 pub(crate) fn cell_services(
     dialect: &crate::CellDialect,
     workers: lash_vm_client::service::Service,
@@ -87,7 +87,7 @@ pub(crate) fn cell_services(
         documents: None,
         workers,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-        channel: crate::plugin::RlmChannel::Cell,
+
         code_renderer: crate::render::CodeRendererSlot::default(),
         prompts: dialect.prompts(),
         kernel: crate::executor::KernelCarry::default(),

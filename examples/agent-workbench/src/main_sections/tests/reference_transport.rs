@@ -425,7 +425,23 @@ async fn drive_reference_turn(session: &lash::LashSession, turn_id: &TurnId, pro
 /// itself, so the settled view carries a canonical assistant row for the
 /// turn.
 fn prose_provider(answers: &[&str]) -> ProviderHandle {
-    scripted_cells_provider(answers.iter().map(|answer| answer.to_string()).collect())
+    let answers = Arc::new(Mutex::new(
+        answers
+            .iter()
+            .map(|answer| answer.to_string())
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    lash::testing::TestProvider::builder()
+        .kind("workbench-prose")
+        .complete(move |_| {
+            let answer = answers
+                .lock_recover()
+                .pop_front()
+                .expect("the scripted prose answer");
+            async move { Ok(text_response(&answer)) }
+        })
+        .build()
+        .into_handle()
 }
 
 /// Script `request.stream_events` the way `failure_provider` does: a delta the
@@ -585,8 +601,8 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
     const FIRST_ANSWER: &str = "trimmed first answer";
     const SECOND_ANSWER: &str = "trimmed second answer";
     let mut provider = GatedProvider::replying(|call| match call {
-        0 => FIRST_ANSWER.to_string(),
-        1 => SECOND_ANSWER.to_string(),
+        0 => text_response(FIRST_ANSWER),
+        1 => text_response(SECOND_ANSWER),
         other => panic!("unexpected provider call {other}"),
     });
     let workbench = Workbench::builder(provider.provider.clone())
@@ -799,9 +815,10 @@ async fn a_turn_resumed_by_a_new_owner_keeps_its_output_identity() {
                                 .await
                                 .expect("the gate stays open")
                                 .forget();
-                            Ok(text_response(
-                                "<typescript>\nconst marker = 1;\n</typescript>",
-                            ))
+                            Ok(LlmResponse {
+                                parts: vec![lash::testing::execute_code("const marker = 1;")],
+                                ..Default::default()
+                            })
                         }
                         1 => {
                             send_delta(&request, RESUMED_ANSWER);

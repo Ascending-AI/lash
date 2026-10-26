@@ -760,24 +760,23 @@ async fn rlm_continue_as_seed_materializes_in_the_new_frame() {
                     let text = match call_index.fetch_add(1, Ordering::SeqCst) {
                         0 => {
                             r#"
-<typescript>
 await control.continueAs({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
 });
-</typescript>
 "#
                         }
                         1 => {
                             r#"
-<typescript>
 await control.finish({ baton: baton });
-</typescript>
 "#
                         }
                         index => panic!("unexpected RLM provider call {index}"),
                     };
-                    Ok(text_response(text))
+                    Ok(LlmResponse {
+                        parts: vec![lash_protocol_rlm::test_support::execute_code(text)],
+                        ..Default::default()
+                    })
                 }
             }
         })
@@ -787,7 +786,6 @@ await control.finish({ baton: baton });
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -890,22 +888,21 @@ async fn a_persisted_data_member_stops_the_turn_without_a_final_value() {
                         .push(serde_json::to_string(&request).unwrap_or_default());
                     let text = if call_index.fetch_add(1, Ordering::SeqCst) == 0 {
                         r#"
-<typescript>
 const local_actions = { continue_as: "local data" };
 await control.finish({ bound: local_actions.continue_as });
-</typescript>
 "#
                     } else {
                         r#"
-<typescript>
 await local_actions.continueAs({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
 });
-</typescript>
 "#
                     };
-                    Ok(text_response(text))
+                    Ok(LlmResponse {
+                        parts: vec![lash_protocol_rlm::test_support::execute_code(text)],
+                        ..Default::default()
+                    })
                 }
             }
         })
@@ -915,7 +912,6 @@ await local_actions.continueAs({
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

@@ -72,6 +72,9 @@ impl RlmSessionExt for crate::LashSession {
 // `lash::process`; they are not re-exported here.
 /// How a session's turns may end.
 pub use lash_core::TerminationMode;
+/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
+/// assembled from.
+pub use lash_protocol_rlm::RlmPromptFeatures;
 pub use lash_protocol_rlm::RlmSeed;
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
@@ -87,9 +90,9 @@ pub use lash_protocol_rlm::tool_presenters::{
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, Charge, ChargeLimiter,
     CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound, LimitDecision, MemoryBound,
-    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery,
-    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
-    RlmProtocolPluginFactory, RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
+    MemoryLimiter, MemoryMeter, RLM_PROTOCOL_PLUGIN_ID, RlmDiscovery, RlmPresentationConfig,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
 };
 /// The stable codes of the typed observations a cell's failure carries, and
 /// the error kinds a cell's program catches from a tool call.
@@ -104,9 +107,9 @@ pub use lash_protocol_rlm::{
 /// [`CellDialect::typescript`] and [`CellDialect::python`] are the shipped
 /// ones.
 pub use lash_protocol_rlm::{
-    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts,
-    DialectRefusal as DialectPromptRefusal, DialectRefusalKind, ExecutionSection,
-    ExecutionSectionRequest, PythonPrompts, TypescriptPrompts,
+    CellDialect, DialectPromptVocabulary, DialectPrompts, DialectRefusal as DialectPromptRefusal,
+    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
+    TypescriptPrompts,
 };
 /// Lash's control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
@@ -134,9 +137,6 @@ pub use lash_protocol_rlm::{
 /// The code-mode prompt sections (ADR 0133): the keys the protocol
 /// registers its sections under, and its built-in intro.
 pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_section_keys};
-/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
-/// assembled from.
-pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
 /// Restore checks retained as the source of
 /// [`crate::SessionError::ExecutionStateRestore`].
 pub use lash_protocol_rlm::{SessionKernelSuccession, SessionOpenError, snapshot};

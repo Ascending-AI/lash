@@ -88,8 +88,6 @@ pub struct RlmProtocolPluginConfig {
     /// The discovery a new session records, if any.
     #[serde(skip)]
     pub discovery: Option<RlmDiscovery>,
-    /// Session-pinned transport used for model-authored programs.
-    pub channel: super::RlmChannel,
     pub charge: super::Charge,
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
@@ -151,29 +149,23 @@ pub struct RlmRecordedBehaviour {
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
-/// exists only once every execution bound and the channel have replaced their
+/// exists only once every execution bound have replaced their
 /// unset slots, so a config that forgot a required value is a compile error
 /// rather than a silent default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UnsetBound;
 
-/// A builder slot that has not been filled in yet.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UnsetChannel;
-
-/// Builder for [`RlmProtocolPluginConfig`]. Each execution bound and the
-/// channel are set by name and carry their own type, so required values cannot
+/// Builder for [`RlmProtocolPluginConfig`]. Each execution bound are set by name and carry their own type, so required values cannot
 /// be omitted or transposed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound, C = UnsetChannel> {
+pub struct RlmProtocolPluginConfigBuilder<I = UnsetBound, M = UnsetBound> {
     charge: super::Charge,
     instruction_limit: I,
     memory_limit: M,
     memory_meter: MemoryMeter,
-    channel: C,
 }
 
-impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
+impl<I, M> RlmProtocolPluginConfigBuilder<I, M> {
     /// Select exact charge metering (the default), or remove it entirely.
     pub fn charge(mut self, charge: super::Charge) -> Self {
         self.charge = charge;
@@ -186,47 +178,32 @@ impl<I, M, C> RlmProtocolPluginConfigBuilder<I, M, C> {
         self
     }
 
-    pub fn channel(
-        self,
-        channel: super::RlmChannel,
-    ) -> RlmProtocolPluginConfigBuilder<I, M, super::RlmChannel> {
-        RlmProtocolPluginConfigBuilder {
-            charge: self.charge,
-            instruction_limit: self.instruction_limit,
-            memory_limit: self.memory_limit,
-            memory_meter: self.memory_meter,
-            channel,
-        }
-    }
-
     pub fn instruction_limit(
         self,
         instruction_limit: InstructionBound,
-    ) -> RlmProtocolPluginConfigBuilder<InstructionBound, M, C> {
+    ) -> RlmProtocolPluginConfigBuilder<InstructionBound, M> {
         RlmProtocolPluginConfigBuilder {
             charge: self.charge,
             instruction_limit,
             memory_limit: self.memory_limit,
             memory_meter: self.memory_meter,
-            channel: self.channel,
         }
     }
 
     pub fn memory_limit(
         self,
         memory_limit: MemoryBound,
-    ) -> RlmProtocolPluginConfigBuilder<I, MemoryBound, C> {
+    ) -> RlmProtocolPluginConfigBuilder<I, MemoryBound> {
         RlmProtocolPluginConfigBuilder {
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit,
             memory_meter: self.memory_meter,
-            channel: self.channel,
         }
     }
 }
 
-impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmChannel> {
+impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound> {
     /// Available only once both bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
@@ -235,7 +212,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             presentation: RlmPresentationConfig::standard(),
             tool_presentation: default_tool_presentation(),
             discovery: None,
-            channel: self.channel,
+
             charge: self.charge,
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
@@ -263,14 +240,13 @@ impl RlmProtocolPluginConfig {
     /// and decomposition on, 10,000 output
     /// characters, soft warning at 100,000 tokens, no discovery, and standard
     /// presentation. The historical values have no universal workload measurement.
-    /// Execution budgets and channel are still explicit named inputs.
+    /// Execution budgets are still explicit named inputs.
     pub fn standard() -> RlmProtocolPluginConfigBuilder {
         RlmProtocolPluginConfigBuilder {
             charge: super::Charge::Exact,
             instruction_limit: UnsetBound,
             memory_limit: UnsetBound,
             memory_meter: MemoryMeter::On,
-            channel: UnsetChannel,
         }
     }
 

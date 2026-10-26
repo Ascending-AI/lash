@@ -172,7 +172,6 @@ pub(super) async fn link_cell(
             return Err(Refused::Cell(Box::new(observation.failure_with_repairs(
                 code,
                 None,
-                services.channel,
                 services.prompts.as_ref(),
                 Some(&packages.snapshot),
                 ctx,

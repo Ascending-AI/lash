@@ -2,13 +2,13 @@
 
 ## Status
 
-accepted
+accepted. The cell-channel presentation choice is superseded by [ADR 0148](0148-rlm-uses-one-provider-native-code-channel.md).
 
 ## Decision
 
 The Tool Catalog is a flat set of callable tools. Membership is the availability fact. Plugins add and remove members; host suppression policies use non-membership. Model-request presentation and discovery are separate protocol and host choices.
 
-Standard protocol presents all catalog members when discovery is absent. With discovery configured it presents inline members and, when enabled, batch dispatch. RLM presents tools according to its pinned cell or native channel under ADR 0083. Membership does not require every schema to appear inline in every request.
+Standard protocol presents all catalog members when discovery is absent. With discovery configured it presents inline members and, when enabled, batch dispatch. RLM offers the native `execute_code` tool and presents catalog tools inside its program surface under ADR 0148. Membership does not require every schema to appear inline in every request.
 
 A host advertises a Deferred Package under a scoped provider identity. Its
 members are resolved on first use at runtime, independently for each Operation

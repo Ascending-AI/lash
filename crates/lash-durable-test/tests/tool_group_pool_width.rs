@@ -130,7 +130,7 @@ fn touch(touched: Arc<Mutex<Vec<u64>>>) -> Arc<dyn lash_core::ToolProvider> {
 fn cell() -> String {
     let last = WIDTH - 1;
     format!(
-        "<typescript>\nconst pending = Array.from({{ length: {last} }}, (_, x) => tools.{TOOL}({{ x }}));\nawait Promise.race(pending);\nconst last = await tools.{TOOL}({{ x: {last} }});\nconsole.log([...(await Promise.all(pending)), last]);\n</typescript>"
+        "const pending = Array.from({{ length: {last} }}, (_, x) => tools.{TOOL}({{ x }}));\nawait Promise.race(pending);\nconst last = await tools.{TOOL}({{ x: {last} }});\nconsole.log([...(await Promise.all(pending)), last]);"
     )
 }
 
@@ -153,7 +153,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Vec<(String, bool)>>>) -> ProviderH
                     .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant);
                 Ok(match (answered, protocol) {
                     (true, _) => text(&request, FINAL),
-                    (false, Protocol::Code) => text(&request, &cell()),
+                    (false, Protocol::Code) => LlmResponse { parts: vec![lash::testing::execute_code(cell())], ..Default::default() },
                     (false, Protocol::Tools) => LlmResponse {
                         parts: (0..WIDTH)
                             .map(|x| LlmOutputPart::ToolCall {
@@ -221,7 +221,6 @@ fn core(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
                     .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
                     .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                     .build(),

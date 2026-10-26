@@ -42,7 +42,7 @@ pub const TOOL_OPERATION: &str = "tools.ext_write";
 const MODEL: &str = "workers-model";
 
 /// The cell the model writes: one `Once` tool call, and what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\n</typescript>";
+const CELL: &str = "const written = await tools.extWrite({ x: 7 });\nconsole.log(written);";
 /// What the final answer starts with.
 pub const FINAL_PREFIX: &str = "final answer from ";
 
@@ -176,7 +176,14 @@ fn model(witness: Witness, hold: Hold) -> ProviderHandle {
                 } else {
                     CELL.to_owned()
                 };
-                Ok(streamed(&request, &text))
+                Ok(if answered {
+                    streamed(&request, &text)
+                } else {
+                    LlmResponse {
+                        parts: vec![lash::testing::execute_code(text)],
+                        ..Default::default()
+                    }
+                })
             }
         })
         .build()
@@ -235,7 +242,6 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),

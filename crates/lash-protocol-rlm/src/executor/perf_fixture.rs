@@ -51,7 +51,7 @@ impl CodeModeCheckpointPerfFixture {
                 documents: None,
                 workers,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                channel: crate::plugin::RlmChannel::Cell,
+
                 code_renderer: crate::render::CodeRendererSlot::default(),
                 prompts: dialect.prompts(),
                 kernel: KernelCarry::default(),

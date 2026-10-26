@@ -228,7 +228,6 @@ impl Fleet {
                 Flavor::Workflow => {
                     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
                         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                            .channel(lash_protocol_rlm::RlmChannel::Cell)
                             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
                                 50_000_000,
                             ))

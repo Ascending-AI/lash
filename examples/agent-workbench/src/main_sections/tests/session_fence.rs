@@ -183,15 +183,13 @@ fn trace_position(trace: &RecordingTrace, name: &str) -> Option<usize> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deleting_a_session_with_a_running_turn_cancels_it_before_retiring() {
     let trace = Arc::new(RecordingTrace::default());
-    let workbench = Workbench::builder(replying_provider(
-        r#"<typescript>
-const hold_for_delete = async (): Promise<string> => {
+    let workbench = Workbench::builder(replying_code_provider(
+        r#"const hold_for_delete = async (): Promise<string> => {
   await sleep(600000);
   return "unreachable";
 };
 const handle = await processes.start({ definition: hold_for_delete });
-await chat.reply(String(await handle));
-</typescript>"#,
+await chat.reply(String(await handle));"#,
     ))
     .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)
     .build()

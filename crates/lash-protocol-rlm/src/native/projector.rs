@@ -1,6 +1,6 @@
-use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::SessionDialect;
 use crate::driver::RlmPreambleConfig;
+use crate::driver::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
@@ -16,10 +16,8 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let tool_names = tool_catalog.tool_names();
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(super::driver::NativeDriver::with_dialect(Arc::clone(
-                &dialect,
-            ))),
-            projector: Arc::new(NativeContextProjector {
+            protocol: Arc::new(super::driver::RlmDriver::with_dialect(Arc::clone(&dialect))),
+            projector: Arc::new(RlmContextProjector {
                 max_output_chars: config.max_output_chars,
                 dialect: Arc::clone(&dialect),
             }),
@@ -30,12 +28,12 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     }
 }
 
-struct NativeContextProjector {
-    max_output_chars: usize,
-    dialect: Arc<SessionDialect>,
+pub(crate) struct RlmContextProjector {
+    pub(crate) max_output_chars: usize,
+    pub(crate) dialect: Arc<SessionDialect>,
 }
 
-impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
+impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
     fn has_current_context_prefix(&self) -> bool {
         true
     }
@@ -56,8 +54,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
         )?);
 
         let mut generation = ctx.config.generation.clone();
-        // Both channels execute complete programs. A host's text stop must
-        // not truncate a program argument or change the paired sampling cohort.
+        // A host text stop must not truncate a program argument.
         generation.suppress_stop_sequences_for_protocol();
 
         Ok(Arc::new(LlmRequest {
@@ -83,14 +80,4 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
             attempt_control: Default::default(),
         }))
     }
-}
-
-#[cfg(test)]
-pub(crate) fn testing_projector(
-    dialect: Arc<SessionDialect>,
-) -> Arc<dyn ContextProjector<lash_core::HostTurnProtocol>> {
-    Arc::new(NativeContextProjector {
-        max_output_chars: 1000,
-        dialect,
-    })
 }

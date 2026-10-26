@@ -1897,7 +1897,6 @@ fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
@@ -2043,12 +2042,11 @@ fn isolated_engine() -> Arc<dyn lash_execution_contracts::process::ProcessEngine
 /// A core whose code mode cell calls the isolated tool once and finishes with its
 /// answer.
 fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::LashCoreBuilder {
-    let model = scripted(|request, _| {
-        text(
-            request,
-            "<typescript>\nconst started = await iso.run({label: \"isolated-law\"});\n\
-             await control.finish(started);\n</typescript>",
-        )
+    let model = scripted(|_request, _| LlmResponse {
+        parts: vec![lash::testing::execute_code(
+            "const started = await iso.run({label: \"isolated-law\"});\nawait control.finish(started);",
+        )],
+        ..Default::default()
     });
     rlm_core(backend)
         .serve_test_llm_profile(model, metadata())

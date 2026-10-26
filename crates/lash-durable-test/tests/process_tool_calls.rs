@@ -879,7 +879,6 @@ async fn search_world(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
                     .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
                     .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                     .build(),
@@ -943,10 +942,7 @@ async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
         let Some(world) = search_world(tier, dialect, &inputs).await else {
             return;
         };
-        let cell = served::response(vec![lash_core::llm::types::LlmOutputPart::Text {
-            text: format!("<{name}>\n{source}\n</{name}>"),
-            response_meta: None,
-        }]);
+        let cell = served::cell(source);
         let output = world
             .run(
                 &format!("omitted-input-{name}"),

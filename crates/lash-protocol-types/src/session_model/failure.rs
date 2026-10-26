@@ -129,8 +129,6 @@ pub enum TurnFailureCode {
     // ─── protocol drivers ────────────────────────────────────────────────
     /// The model returned no assistant text (or text and tool calls).
     EmptyResponse,
-    /// The model emitted a native tool call the RLM protocol does not allow.
-    NativeToolCallNotAllowed,
     /// The RLM driver was handed turn options it cannot honour.
     InvalidTurnOptions,
     /// A protocol extension's before-LLM-call hook failed.
@@ -307,7 +305,6 @@ impl TurnFailureCode {
             Self::EffortRequired => "effort_required",
             Self::MalformedCapability => "malformed_capability",
             Self::EmptyResponse => "empty_response",
-            Self::NativeToolCallNotAllowed => "native_tool_call_not_allowed",
             Self::InvalidTurnOptions => "invalid_turn_options",
             Self::BeforeLlmCallFailed => "before_llm_call_failed",
             Self::AttachmentResolutionFailed => "attachment_resolution_failed",
@@ -410,7 +407,6 @@ impl TurnFailureCode {
             "effort_required" => Self::EffortRequired,
             "malformed_capability" => Self::MalformedCapability,
             "empty_response" => Self::EmptyResponse,
-            "native_tool_call_not_allowed" => Self::NativeToolCallNotAllowed,
             "invalid_turn_options" => Self::InvalidTurnOptions,
             "before_llm_call_failed" => Self::BeforeLlmCallFailed,
             "attachment_resolution_failed" => Self::AttachmentResolutionFailed,
@@ -499,7 +495,6 @@ impl TurnFailureCode {
         Self::EffortRequired,
         Self::MalformedCapability,
         Self::EmptyResponse,
-        Self::NativeToolCallNotAllowed,
         Self::InvalidTurnOptions,
         Self::BeforeLlmCallFailed,
         Self::AttachmentResolutionFailed,

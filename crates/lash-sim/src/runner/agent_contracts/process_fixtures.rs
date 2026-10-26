@@ -11,15 +11,13 @@ pub(super) async fn agent_started_process_tool_call_graph_execution()
         &SessionId::from("sim-agent-started-process-tool-contract"),
         "Start a process that calls the app lookup tool.",
         vec![
-            r#"<typescript>
-const definition = async (): Promise<{ ok: boolean }> => {
+            r#"const definition = async (): Promise<{ ok: boolean }> => {
   const value = await tools.appLookup({});
   return value;
 };
 const handle = await processes.start({ definition });
 const result = await handle;
-await control.finish(result);
-</typescript>"#,
+await control.finish(result);"#,
         ],
         &expected,
         Some(Arc::new(ContractAppTools) as Arc<dyn lash_core::ToolProvider>),
@@ -42,8 +40,7 @@ pub(super) async fn agent_nested_process_start_await_execution()
         &SessionId::from("sim-agent-nested-process-contract"),
         "Start a parent process that starts and awaits a child process.",
         vec![
-            r#"<typescript>
-const parent = async (): Promise<{ parent: string }> => {
+            r#"const parent = async (): Promise<{ parent: string }> => {
   const handle = await processes.start({
     definition: async (): Promise<{ child: string }> => { return { child: 'done' }; }
   });
@@ -52,8 +49,7 @@ const parent = async (): Promise<{ parent: string }> => {
 };
 const handle = await processes.start({ definition: parent });
 const result = await handle;
-await control.finish(result);
-</typescript>"#,
+await control.finish(result);"#,
         ],
         &expected,
         None,
@@ -70,8 +66,7 @@ pub(super) async fn agent_started_process_child_spawn_execution()
         &SessionId::from("sim-agent-started-process-subagent-contract"),
         "Run a Lash VM process that spawns a subagent and returns its value.",
         vec![
-            r#"<typescript>
-const spawnChild = async (): Promise<{ len: number }> => {
+            r#"const spawnChild = async (): Promise<{ len: number }> => {
   const result = await agents.spawn({
     task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
     seed: { chunk: ["a", "b"] },
@@ -81,11 +76,8 @@ const spawnChild = async (): Promise<{ len: number }> => {
 };
 const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
-await control.finish(result);
-</typescript>"#,
-            r#"<typescript>
-await control.finish({ len: chunk.length });
-</typescript>"#,
+await control.finish(result);"#,
+            r#"await control.finish({ len: chunk.length });"#,
         ],
         &expected,
         None,
@@ -103,12 +95,10 @@ pub(super) async fn agent_session_turn_process_child_execution()
         "lash_runtime agent session-turn process child",
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
-        r#"<typescript>
-const child = async (): Promise<{ child: string }> => { return { child: 'done' }; };
+        r#"const child = async (): Promise<{ child: string }> => { return { child: 'done' }; };
 const handle = await processes.start({ definition: child });
 const result = await handle;
-await control.finish(result);
-</typescript>"#,
+await control.finish(result);"#,
         &expected,
     )
     .await?;
@@ -122,14 +112,12 @@ pub(super) async fn agent_parallel_spawn_and_join_execution()
         "lash_runtime agent parallel process join",
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
-        r#"<typescript>
-const child = async (value: string): Promise<string> => { return value; };
+        r#"const child = async (value: string): Promise<string> => { return value; };
 const left = await processes.start({ definition: child, args: { value: "left" } });
 const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
 const rightValue = await right;
-await control.finish({ joined: [leftValue, rightValue] });
-</typescript>"#,
+await control.finish({ joined: [leftValue, rightValue] });"#,
         &expected,
     )
     .await?;

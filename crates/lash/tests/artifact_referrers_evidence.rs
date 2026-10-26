@@ -14,7 +14,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use lash::direct::LlmOutputPart;
 use lash::provider::LlmResponse;
 use lash::{LashCore, TurnInput, TurnOutput};
 use lash_protocol_types::sync::MutexExt;
@@ -124,10 +123,7 @@ async fn send_through(session: &lash::LashSession, text: &str) -> lash::Result<T
 
 fn response(code: &str) -> LlmResponse {
     LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: format!("<typescript>\n{code}\n</typescript>"),
-            response_meta: None,
-        }],
+        parts: vec![lash::testing::execute_code(code.to_string())],
         ..Default::default()
     }
 }
@@ -198,7 +194,6 @@ fn rlm_core_in_dialect(
     let python = dialect.name() == "python";
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -471,10 +466,7 @@ await control.finish({ h, empty, byFunction, byHandle });",
     ] {
         let fixture = Fixture::new(Backend::Sqlite).await;
         let response = |code: String| LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
-                response_meta: None,
-            }],
+            parts: vec![lash::testing::execute_code(code)],
             ..Default::default()
         };
         let queue = Arc::new(Mutex::new(VecDeque::from([
@@ -907,10 +899,7 @@ await control.finish(handle);"#
         ] {
             let fixture = Fixture::new(Backend::Sqlite).await;
             let response = LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
-                    response_meta: None,
-                }],
+                parts: vec![lash::testing::execute_code(code)],
                 ..Default::default()
             };
             let core = rlm_core_in_dialect(
@@ -1039,10 +1028,7 @@ async fn saved_function_process(
 ) {
     let fixture = Fixture::new(backend).await;
     let response = |code| LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
-            response_meta: None,
-        }],
+        parts: vec![lash::testing::execute_code(code)],
         ..Default::default()
     };
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![

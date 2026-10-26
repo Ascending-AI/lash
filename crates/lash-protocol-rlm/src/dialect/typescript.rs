@@ -1,6 +1,4 @@
-use super::{
-    CellTags, DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest,
-};
+use super::{DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest};
 
 /// The name `lash-dialect-typescript` is installed under.
 pub(crate) const LANGUAGE_ID: &str = "typescript";
@@ -39,15 +37,10 @@ impl DialectPrompts for TypescriptPrompts {
     }
 }
 
-const TYPESCRIPT_CELL_TAGS: CellTags = CellTags {
-    open: "<typescript>",
-    close: "</typescript>",
-};
-
 const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabulary {
     language_name: "TypeScript",
     execution_title: "TypeScript execution",
-    cell_tags: TYPESCRIPT_CELL_TAGS,
+
     cell_noun: "cell",
 
     print_call: "console.log",
@@ -95,7 +88,6 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
 
 fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
     let ExecutionSectionRequest {
-        channel,
         tools,
         tool_catalog,
         catalogue,
@@ -125,23 +117,8 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
         format!("### Tools\n\n{}", tools.join("\n\n"))
     };
     let allowed_sections = "**Tools**";
-    // Transport prose is authored per channel, side by side, rather than
-    // derived from the cell wording by string replacement (FIG-2881).
-    let action = match channel {
-        crate::plugin::RlmChannel::Cell => {
-            format!("a paired `{}` block", TYPESCRIPT_CELL_TAGS.open)
-        }
-        crate::plugin::RlmChannel::NativeTool => "the `execute_code` program".to_string(),
-    };
-    let response_shape = match channel {
-        crate::plugin::RlmChannel::Cell => super::cell_response_shape(TYPESCRIPT_CELL_TAGS),
-        crate::plugin::RlmChannel::NativeTool => concat!(
-            "### Tool transport\n\nEach response makes one `execute_code` call with ",
-            "`{\"code\": \"<complete program>\"}`. Tool calls, `control.finish` included, run inside ",
-            "the program; prose before the call is commentary.\n"
-        )
-        .to_string(),
-    };
+    let action = "the `execute_code` program";
+    let response_shape = "### Tool transport\n\nFor action or computation, make one `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools, including `control.finish`, inside the program; prose before the call is commentary.\n";
     let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
     let durable = if durable.is_empty() {
         durable
@@ -169,19 +146,12 @@ An `async` function starts running when it is called, and async callbacks run co
 
 `console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
     );
-    // One worked program, rendered in each channel's own call shape.
+    // One worked program, rendered as a provider-native call.
     let example_program = "const total = 1 + 2;\nawait control.finish(total);";
-    let example = match channel {
-        crate::plugin::RlmChannel::Cell => format!(
-            "### Example cell\n\n{open}\n{example_program}\n{close}",
-            open = TYPESCRIPT_CELL_TAGS.open,
-            close = TYPESCRIPT_CELL_TAGS.close,
-        ),
-        crate::plugin::RlmChannel::NativeTool => format!(
-            "### Example execute_code call\n\nexecute_code({})",
-            serde_json::json!({"code": example_program})
-        ),
-    };
+    let example = format!(
+        "### Example execute_code call\n\nexecute_code({})",
+        serde_json::json!({"code": example_program})
+    );
     let declarations = tools.trim().to_string();
     ExecutionSection {
         prose: format!(

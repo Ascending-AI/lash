@@ -447,3 +447,6 @@ pub async fn tool_calls_for_activity(
         .await
         .expect("read recorded tool calls")
 }
+
+#[cfg(feature = "rlm")]
+pub use lash_protocol_rlm::test_support::execute_code;

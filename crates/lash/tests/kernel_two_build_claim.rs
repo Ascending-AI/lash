@@ -141,7 +141,7 @@ fn serving_under(
     let replies = Arc::new(std::sync::Mutex::new(
         cells
             .iter()
-            .map(|cell| format!("<typescript>\n{cell}\n</typescript>"))
+            .map(|cell| cell.to_string())
             .collect::<std::collections::VecDeque<_>>(),
     ));
     let provider = lash::testing::TestProvider::builder()
@@ -155,10 +155,7 @@ fn serving_under(
                     .pop_front()
                     .expect("the model was called more often than the law scripts");
                 Ok(lash::provider::LlmResponse {
-                    parts: vec![lash::direct::LlmOutputPart::Text {
-                        text,
-                        response_meta: None,
-                    }],
+                    parts: vec![lash::testing::execute_code(text)],
                     ..Default::default()
                 })
             }
@@ -174,7 +171,6 @@ fn serving_under(
     let backend = builder.build().expect("the backend assembles");
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

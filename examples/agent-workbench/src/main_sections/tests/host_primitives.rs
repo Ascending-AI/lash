@@ -50,8 +50,7 @@ impl lash::runtime::Clock for FrozenClock {
 }
 
 /// The turn that registers a process on the mail source.
-const MAIL_REGISTRATION: &str = r#"<typescript>
-const on_mail = async (event: { account: string; title: string; text: string }): Promise<boolean> => {
+const MAIL_REGISTRATION: &str = r#"const on_mail = async (event: { account: string; title: string; text: string }): Promise<boolean> => {
   return true;
 };
 await workbench.registerTrigger({
@@ -60,8 +59,7 @@ await workbench.registerTrigger({
   event_arg: "event",
   name: "law watcher"
 });
-await chat.reply("registered");
-</typescript>"#;
+await chat.reply("registered");"#;
 
 /// A provider whose call `n` answers `cells[n]`, and every later call
 /// `await chat.reply("noted")`.
@@ -75,7 +73,7 @@ fn cells_then_noted(cells: Vec<String>) -> ProviderHandle {
                 .get(call)
                 .cloned()
                 .unwrap_or_else(|| finish_cell("noted"));
-            async move { Ok(text_response(&cell)) }
+            async move { Ok(code_response(&cell)) }
         })
         .build()
         .into_handle()
@@ -141,7 +139,7 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
+        "const applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
@@ -478,8 +476,7 @@ async fn a_delivery_that_cannot_start_is_recorded_failed_and_not_retried() {
 }
 
 /// The turn that registers two processes on the mail source.
-const TWO_MAIL_REGISTRATIONS: &str = r#"<typescript>
-const on_mail = async (event: { account: string; title: string; text: string }): Promise<boolean> => {
+const TWO_MAIL_REGISTRATIONS: &str = r#"const on_mail = async (event: { account: string; title: string; text: string }): Promise<boolean> => {
   return true;
 };
 await workbench.registerTrigger({
@@ -494,13 +491,11 @@ await workbench.registerTrigger({
   event_arg: "event",
   name: "second watcher"
 });
-await chat.reply("registered");
-</typescript>"#;
+await chat.reply("registered");"#;
 
 /// The turn that registers a process on a cron source that ticks at every
 /// even hour.
-const CRON_REGISTRATION: &str = r#"<typescript>
-const on_tick = async (event: { fired_at: string }): Promise<boolean> => {
+const CRON_REGISTRATION: &str = r#"const on_tick = async (event: { fired_at: string }): Promise<boolean> => {
   return true;
 };
 await workbench.registerTrigger({
@@ -509,8 +504,7 @@ await workbench.registerTrigger({
   event_arg: "event",
   name: "law tick"
 });
-await chat.reply("registered");
-</typescript>"#;
+await chat.reply("registered");"#;
 
 /// The first even hour after [`START_MS`].
 const TICK_MS: u64 = 2_000_001_600_000;
@@ -1029,7 +1023,7 @@ async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_p
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);\n</typescript>".to_string(),
+        "const applied = await ops.applyChange({ target: \"db\", change: \"migrate\" });\nawait chat.reply(applied.status);".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
@@ -1090,7 +1084,7 @@ async fn a_misspelled_approval_is_refused_without_parking() {
     }
 
     let workbench = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nawait ops.apply_change({ target: \"db\", change: \"migrate\" });\n</typescript>".to_string(),
+        "await ops.apply_change({ target: \"db\", change: \"migrate\" });".to_string(),
     ]))
     .build()
     .await;

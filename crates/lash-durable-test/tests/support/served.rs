@@ -296,10 +296,7 @@ pub fn call(call_id: &str, tool: &str, args: serde_json::Value) -> LlmOutputPart
 
 /// One code mode cell of `source`.
 pub fn cell(source: &str) -> LlmResponse {
-    response(vec![LlmOutputPart::Text {
-        text: format!("<typescript>\n{source}\n</typescript>"),
-        response_meta: None,
-    }])
+    response(vec![lash::testing::execute_code(source.to_string())])
 }
 
 /// The RLM protocol factory a code law's core runs on `workers`, its cell
@@ -310,7 +307,6 @@ pub fn rlm(
 ) -> lash::rlm::RlmProtocolPluginFactory {
     lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

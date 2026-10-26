@@ -73,9 +73,7 @@ fn cell(session: &str) -> String {
             super::HORIZON.as_millis() * 2
         )
     };
-    format!(
-        "<typescript>\n{stretch}const written = await {awaited};\nconsole.log(written);\n</typescript>"
-    )
+    format!("{stretch}const written = await {awaited};\nconsole.log(written);")
 }
 
 /// The run's core for its cell sessions, built once over `world`'s backend.
@@ -181,7 +179,6 @@ fn core(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
@@ -337,7 +334,14 @@ fn model(world: Weak<World>) -> ProviderHandle {
                 } else {
                     cell(&session)
                 };
-                Ok(streamed(&request, &text))
+                Ok(if answered {
+                    streamed(&request, &text)
+                } else {
+                    LlmResponse {
+                        parts: vec![lash::testing::execute_code(text)],
+                        ..Default::default()
+                    }
+                })
             }
         })
         .build()

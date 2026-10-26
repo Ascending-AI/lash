@@ -11,7 +11,6 @@ use lash::rlm::{
 
 fn a_memory_limit_cannot_be_an_instruction_budget() {
     let _ = RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(InstructionBound::instructions(1_000_000))
         .memory_limit(InstructionBound::instructions(64 * 1024 * 1024))
         .build();
@@ -19,7 +18,6 @@ fn a_memory_limit_cannot_be_an_instruction_budget() {
 
 fn an_instruction_limit_cannot_be_a_memory_bound() {
     let _ = RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(MemoryBound::mebibytes(64))
         .memory_limit(MemoryBound::mebibytes(64))
         .build();

@@ -43,7 +43,7 @@ executable hashes, load1, peak RSS and paired instructions. Do not claim
 quiet-host wall time from a loaded host.
 
 `standard` is the default: each host input is the same `history turn`, followed
-by one fixed text answer. `rlm` uses the TypeScript cell channel. Every host turn
+by one fixed text answer. `rlm` uses the TypeScript native code tool. Every host turn
 has one provider call and one cell: await `tools.benchmarkEcho` with fixed
 `value` and `ordinal`, sum three fixed order amounts, print the checked total and
 receipt value, and `await control.finish` with the total and receipt value. The

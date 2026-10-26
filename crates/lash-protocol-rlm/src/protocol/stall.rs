@@ -19,9 +19,6 @@ use lash_vocabulary::identity::TurnId;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
-/// Diagnostic phase emitted exactly once per provider attempt.
-pub(super) const LLM_EXTRACTION_PHASE: lash_rlm_types::RlmDiagnosticPhase =
-    lash_rlm_types::RlmDiagnosticPhase::LlmExtraction;
 /// Diagnostic phase that records a turn stopped by its no-progress budget.
 pub(crate) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
     lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
@@ -159,14 +156,11 @@ pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
         .collect()
 }
 
-/// The per-attempt extraction diagnostic, in the one shape both channels emit.
+/// The per-attempt extraction diagnostic, for native program admission.
 ///
-/// Every provider attempt on either channel appends exactly one of these, and
-/// the same reader counts them (`stalled_attempts_in_phase`) and compares their
-/// fingerprints. A field that exists on one channel only is therefore a field a
-/// host cannot rely on, so the payload is a type rather than a `json!` literal
-/// per call site: adding a field is one edit that both channels satisfy or
-/// neither compiles.
+/// Every provider attempt appends exactly one typed diagnostic; the reader counts
+/// stalled attempts and compares their fingerprints. All producers supply the
+/// same fields.
 ///
 /// `turn_id` is what scopes the no-progress count. The driver's view of history
 /// is the whole active session path, not one turn, so a diagnostic that cannot
@@ -181,9 +175,6 @@ pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
 /// in the diagnostic for the same reason the count does: the driver's only
 /// durable view of the turn is what the turn committed.
 ///
-/// Which channel produced it is carried by the phase name alone
-/// (`LLM_EXTRACTION_PHASE` here, `native::stall::LLM_EXTRACTION_PHASE` there);
-/// the payload names no dialect, which ADR 0096 retired.
 #[derive(serde::Serialize)]
 pub(crate) struct ExtractionDiagnostic<'a> {
     turn_id: &'a TurnId,
@@ -191,8 +182,6 @@ pub(crate) struct ExtractionDiagnostic<'a> {
     reply_fingerprint: &'a str,
     termination: &'static str,
     counts: ExtractionCounts<'a>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    discarded_after_cell: Option<crate::cell_scan::DiscardedAfterCell>,
 }
 
 impl<'a> ExtractionDiagnostic<'a> {
@@ -209,16 +198,7 @@ impl<'a> ExtractionDiagnostic<'a> {
             reply_fingerprint,
             termination: termination_diagnostic_name(termination),
             counts,
-            discarded_after_cell: None,
         }
-    }
-
-    pub(crate) fn with_discarded_after_cell(
-        mut self,
-        note: Option<crate::cell_scan::DiscardedAfterCell>,
-    ) -> Self {
-        self.discarded_after_cell = note;
-        self
     }
 
     #[expect(

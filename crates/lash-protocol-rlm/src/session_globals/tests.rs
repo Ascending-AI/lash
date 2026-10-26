@@ -52,7 +52,7 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
     bind(&mut session, &values).await;
     let (text, globals) = listing(&mut session).await;
     insta::assert_snapshot!(text, @r"
-    These variables are already bound in TypeScript. Access them directly in `<typescript>` cells; do not recreate them manually.
+    These variables are already bound in TypeScript. Access them directly in `execute_code` cells; do not recreate them manually.
     Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.
 
     Available variables:

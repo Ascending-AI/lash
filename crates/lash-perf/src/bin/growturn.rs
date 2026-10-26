@@ -103,12 +103,12 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                 // provider counter: this survives both kinds of owner handoff.
                 let done = request.messages.iter().filter(|m| m.role == LlmRole::Assistant)
                     .flat_map(|m| m.blocks.iter()).filter_map(|b| match b {
-                        LlmContentBlock::Text { text, .. } => text.split("/*growturn:").nth(1)
+                        LlmContentBlock::ToolCall { input_json: text, .. } => text.split("/*growturn:").nth(1)
                             .and_then(|s| s.split("*/").next()).and_then(|s| s.parse::<usize>().ok()),
                         _ => None,
                     }).max().unwrap_or(0);
                 if done > 0 && !request.messages.iter().filter(|m| m.role != LlmRole::Assistant)
-                    .flat_map(|m| m.blocks.iter()).any(|b| matches!(b, LlmContentBlock::Text { text, .. } if text.contains(&format!("grow-done:{done}:")))) {
+                    .flat_map(|m| m.blocks.iter()).any(|b| matches!(b, LlmContentBlock::ToolResult { content, .. } if serde_json::to_string(content).unwrap_or_default().contains(&format!("grow-done:{done}:")))) {
                     return Err(lash_transport_failure::LlmTransportError::new("cell did not emit its successful payload receipt"));
                 }
                 meter.model_request(&request);
@@ -123,16 +123,16 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                 let text = if done == rounds { "growing turn complete".to_owned() } else {
                     let next = done + 1;
                     let park = handoffs && (next == rounds / 2 || next == rounds * 3 / 4);
-                    format!("<typescript>\n/*growturn:{next}*/\nconst payload = await tools.growPayload({{round:{next}}});\nif (payload.length !== {bytes}) throw new Error(\"wrong payload size\");\nconsole.log(\"grow-done:{next}:\");\nconsole.log(payload);\n{}\n</typescript>",
+                    format!("/*growturn:{next}*/\nconst payload = await tools.growPayload({{round:{next}}});\nif (payload.length !== {bytes}) throw new Error(\"wrong payload size\");\nconsole.log(\"grow-done:{next}:\");\nconsole.log(payload);\n{}",
                         if park { "await tools.growWait({});" } else { "" }, bytes = meter.bytes)
                 };
-                if let Some(stream) = &request.stream_events {
+                if done == rounds && let Some(stream) = &request.stream_events {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                         kind: StreamBlockKind::AssistantText,
                         block: StreamBlockIdentity::new("text:0", 0), text: text.clone(),
                     }));
                 }
-                Ok(lash::provider::LlmResponse { parts: vec![lash::direct::LlmOutputPart::Text { text, response_meta: None }], ..Default::default() })
+                Ok(lash::provider::LlmResponse { parts: vec![if done == rounds { lash::direct::LlmOutputPart::Text { text, response_meta: None } } else { lash::testing::execute_code(text) }], ..Default::default() })
             }
         }).build().into_handle()
 }
@@ -214,7 +214,6 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
         backend,
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
                 .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),

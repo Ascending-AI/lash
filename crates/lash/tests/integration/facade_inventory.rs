@@ -221,7 +221,7 @@ mod host_wrapping_inventory {
 mod rlm_host_wrapping_inventory {
     use lash::rlm::RlmPromptFeatures as _;
     use lash::rlm::RlmSeedPluginBody as _;
-    use lash::rlm::UnsetChannel as _;
+
     use lash::tools::DeferredResolutionError as _;
 }
 
@@ -263,7 +263,7 @@ mod workflow_authoring_inventory {
 mod rlm_inventory {
     // The code-mode dialect seam (ADR 0096).
     use lash::rlm::CellDialect as _;
-    use lash::rlm::CellTags as _;
+
     use lash::rlm::DialectPromptRefusal as _;
     use lash::rlm::DialectPromptVocabulary as _;
     use lash::rlm::DialectPrompts as _;

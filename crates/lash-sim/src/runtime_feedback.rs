@@ -313,7 +313,7 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
         "partial output before truncation".to_string(),
-        "<typescript>\nawait control.finish(42);\n</typescript>".to_string(),
+        "await control.finish(42);".to_string(),
     ])));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("cache-regression-rlm")
@@ -336,9 +336,13 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
                     };
                     Ok(lash_core::LlmResponse {
                         terminal_reason,
-                        parts: vec![lash_core::LlmOutputPart::Text {
-                            text,
-                            response_meta: None,
+                        parts: vec![if responses.lock().await.is_empty() {
+                            lash_protocol_rlm::test_support::execute_code(text)
+                        } else {
+                            lash_core::LlmOutputPart::Text {
+                                text,
+                                response_meta: None,
+                            }
                         }],
                         response_metadata: Default::default(),
                         ..lash_core::LlmResponse::default()
@@ -354,7 +358,6 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

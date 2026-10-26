@@ -578,7 +578,7 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat.db");
     let workload = script::resolve("chat-short").unwrap();
-    let mut book = provider::ScriptBook::new(workload.protocol);
+    let mut book = provider::ScriptBook::new();
     let inputs: Vec<_> = workload
         .expand(0, Some(4))
         .iter()

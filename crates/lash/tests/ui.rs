@@ -169,5 +169,4 @@ fn register_rlm_config_builder_contracts(t: &trybuild::TestCases) {
         return;
     }
     t.compile_fail("tests/ui/rlm_config_builder_requires_every_bound.rs");
-    t.compile_fail("tests/ui/rlm_config_builder_requires_channel.rs");
 }

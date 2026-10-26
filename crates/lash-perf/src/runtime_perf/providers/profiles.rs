@@ -33,14 +33,14 @@ pub(super) fn benchmark_stream_profile_for_request(
             }))
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
-            return text_profile(typescript_block(
+            return typescript_block(
                 r#"
 await sleep(0);
 const result = await tools.benchmarkAsync({ value: chunk.length, delay_ms: 0 });
 await control.finish({ len: result.value });"#,
-            ));
+            );
         }
-        return text_profile(typescript_block("await control.finish({ len: chunk.length });"));
+        return typescript_block("await control.finish({ len: chunk.length });");
     }
 
     if request.output_spec.is_some() {
@@ -180,31 +180,25 @@ await control.finish({ len: result.value });"#,
         | RuntimePerfScenario::RlmLargeToolCatalog
         | RuntimePerfScenario::EmbedRlm
         | RuntimePerfScenario::TraceJsonlExtended => {
-            let text = typescript_block(r#"await control.finish("runtime perf benchmark ok");"#);
-            text_profile(text)
+            typescript_block(r#"await control.finish("runtime perf benchmark ok");"#)
         }
         RuntimePerfScenario::RlmStreamedPairedLashVm => {
-            let full_text = concat!(
-                "Visible preface before executable code.\n",
-                "<typescript>\n",
-                "const value = \"runtime perf benchmark ok\";\n",
-                "await control.finish(value);\n",
-                "</typescript>\n",
-                "This suffix must be ignored after the close tag."
-            )
-            .to_string();
-            // The deltas still split inside the open and close tags, which is
-            // the whole point of the scenario: the cell scanner has to stitch a
-            // tag across chunk boundaries.
+            let prose = "Visible preface before executable code.";
             BenchmarkStreamProfile {
-                full_text,
+                full_text: prose.to_string(),
                 deltas: vec![
-                    "Visible preface before executable code.\n<type".to_string(),
-                    "script>\nconst value = \"runtime perf benchmark ok\";\n".to_string(),
-                    "await control.finish(value);\n</type".to_string(),
-                    "script>\nThis suffix must be ignored after the close tag.".to_string(),
+                    "Visible preface ".to_string(),
+                    "before executable code.".to_string(),
                 ],
-                parts: Vec::new(),
+                parts: vec![
+                    LlmOutputPart::Text {
+                        text: prose.to_string(),
+                        response_meta: None,
+                    },
+                    lash_protocol_rlm::test_support::execute_code(
+                        "const value = \"runtime perf benchmark ok\";\nawait control.finish(value);",
+                    ),
+                ],
             }
         }
         RuntimePerfScenario::RlmGlobals => {
@@ -213,7 +207,7 @@ await control.finish({ len: result.value });"#,
             // small values render in full, while `big_map`/`big_notes`/`big_text`
             // exceed the inline budget and go through the keys / head-tail
             // truncation path that runs on every prompt build.
-            let text = typescript_block(
+            typescript_block(
                 r#"
 const big_map = {};
 for (let i = 0; i < 24; i++) {
@@ -246,12 +240,10 @@ const live_list = [
 const live_message = "runtime perf benchmark ok";
 const host_snapshot = { benchmark: benchmark, input: input, chat: chat };
 await control.finish(live_message);"#,
-            );
-            text_profile(text)
+            )
         }
-        RuntimePerfScenario::RlmLargePrint => {
-            let text = typescript_block(
-                r#"
+        RuntimePerfScenario::RlmLargePrint => typescript_block(
+            r#"
 let big_text = "";
 for (let i = 0; i < 70; i++) {
   big_text = `${big_text}line ${i}: abcdefghijklmnopqrstuvwxyz0123456789 abcdefghijklmnopqrstuvwxyz0123456789\n`;
@@ -285,32 +277,25 @@ const payload = {
 const result = await tools.benchmarkEcho({ value: payload, ordinal: 1 });
 console.log(JSON.stringify(result));
 await control.finish("runtime perf benchmark ok");"#,
-            );
-            text_profile(text)
-        }
+        ),
         RuntimePerfScenario::RlmToolCalls | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite => {
-            let text = typescript_block(
+            typescript_block(
                 r#"
 const first = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 1 });
 const second = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 2 });
 const third = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 3 });
 const fourth = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 4 });
 await control.finish(first.value);"#,
-            );
-            text_profile(text)
+            )
         }
-        RuntimePerfScenario::RlmAsyncToolCompletion => {
-            let text = typescript_block(
-                r#"
+        RuntimePerfScenario::RlmAsyncToolCompletion => typescript_block(
+            r#"
 const first = await tools.benchmarkAsync({ value: "runtime perf benchmark ok", delay_ms: 0 });
 const second = await tools.benchmarkAsync({ value: "runtime perf benchmark ok", delay_ms: 0 });
 await control.finish(first.value);"#,
-            );
-            text_profile(text)
-        }
-        RuntimePerfScenario::RlmProcessHandles => {
-            let text = typescript_block(
-                r#"
+        ),
+        RuntimePerfScenario::RlmProcessHandles => typescript_block(
+            r#"
 const benchmarkEchoProcess = async (value: string, ordinal: number): Promise<{ value: string; ordinal: number | null }> => {
   return await tools.benchmarkEcho({ value: value, ordinal: ordinal });
 };
@@ -326,13 +311,10 @@ const live = await processes.list({});
 const first_result = await first;
 const second_result = await second;
 await control.finish(first_result.value);"#,
-            );
-            text_profile(text)
-        }
+        ),
 
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
-            let text = typescript_block(
-                r#"
+        RuntimePerfScenario::RlmProcessAsyncToolCompletion => typescript_block(
+            r#"
 const benchmarkAsyncProcess = async (value: string): Promise<{ value: string; mode: string; delay_ms: number }> => {
   return await tools.benchmarkAsync({ value: value, delay_ms: 0 });
 };
@@ -342,9 +324,7 @@ const second = await processes.start({ definition: benchmarkAsyncProcess, args: 
 const first_result = await first;
 const second_result = await second;
 await control.finish(first_result.value);"#,
-            );
-            text_profile(text)
-        }
+        ),
         RuntimePerfScenario::AsyncProcessSettlement2Children
         | RuntimePerfScenario::AsyncProcessSettlement8Children => {
             let children = scenario
@@ -358,7 +338,7 @@ await control.finish(first_result.value);"#,
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let text = typescript_block(&format!(
+            typescript_block(&format!(
                 r#"
 const settlementChild = async (value: string): Promise<{{ value: string; mode: string; delay_ms: number }}> => {{
   return await tools.benchmarkAsync({{ value: value, delay_ms: 0 }});
@@ -366,29 +346,24 @@ const settlementChild = async (value: string): Promise<{{ value: string; mode: s
 
 {starts}
 await control.finish("runtime perf benchmark ok");"#
-            ));
-            text_profile(text)
+            ))
         }
         RuntimePerfScenario::RlmSubagentSpawn
-        | RuntimePerfScenario::DurableAgentChildTurnSqlite => {
-            let text = typescript_block(
-                r#"
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite => typescript_block(
+            r#"
 const result = await agents.spawn({
   task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["alpha", "beta", "gamma"] },
   output: { len: "int" }
 });
 await control.finish("runtime perf benchmark ok");"#,
-            );
-            text_profile(text)
-        }
+        ),
         RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres => {
             unreachable!("durable checkpoint curves bypass the provider harness")
         }
-        RuntimePerfScenario::RlmObliqueStackMix => {
-            let text = typescript_block(
-                r#"
+        RuntimePerfScenario::RlmObliqueStackMix => typescript_block(
+            r#"
 const explore = async () => {
   return await agents.spawn({
     task: "Return `{ len: chunk.length }` using the seeded chunk.",
@@ -443,27 +418,19 @@ console.log(JSON.stringify({
 }));
 
 await control.finish("runtime perf benchmark ok");"#,
-            );
-            text_profile(text)
-        }
+        ),
         RuntimePerfScenario::IngressAdmissionProjection => {
             if latest_request_item_contains(request, "ingress projection marker") {
-                text_profile(typescript_block(
-                    r#"await control.finish("runtime perf benchmark ok");"#,
-                ))
+                typescript_block(r#"await control.finish("runtime perf benchmark ok");"#)
             } else {
-                text_profile(typescript_block(
-                    r#"console.log("checkpoint before projection");"#,
-                ))
+                typescript_block(r#"console.log("checkpoint before projection");"#)
             }
         }
         RuntimePerfScenario::DeepTurnComposition => {
             if request_text(request).contains("deep composition ingress marker") {
-                return text_profile(typescript_block(
-                    r#"await control.finish("runtime perf benchmark ok");"#,
-                ));
+                return typescript_block(r#"await control.finish("runtime perf benchmark ok");"#);
             }
-            let text = typescript_block(
+            typescript_block(
                 r#"
 const deepChild = async () => {
   const pending = await tools.benchmarkAsync({ value: "parent tool loop", delay_ms: 0 });
@@ -479,20 +446,16 @@ const deepChild = async () => {
 const handle = await processes.start({ definition: deepChild });
 const result = await handle;
 console.log(JSON.stringify(result));"#,
-            );
-            text_profile(text)
+            )
         }
-        RuntimePerfScenario::RlmLlmQuery => {
-            let text = typescript_block(
-                r#"
+        RuntimePerfScenario::RlmLlmQuery => typescript_block(
+            r#"
 const result = await llm.query({
   task: "Return the exact benchmark marker.",
   inputs: { marker: "runtime perf benchmark ok" }
 });
 await control.finish(result);"#,
-            );
-            text_profile(text)
-        }
+        ),
         _ => text_profile("runtime perf benchmark ok"),
     }
 }
@@ -500,25 +463,23 @@ await control.finish(result);"#,
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
     if kind == Some(HighTrafficOperationKind::Tool) {
-        return text_profile(typescript_block(
+        return typescript_block(
             r#"const result = await tools.benchmarkEcho({ value: "runtime perf benchmark ok", ordinal: 1 });
 await control.finish(result.value);"#,
-        ));
+        );
     }
     if kind == Some(HighTrafficOperationKind::Child) {
-        return text_profile(typescript_block(
+        return typescript_block(
             r#"const result = await agents.spawn({
   task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
   seed: { chunk: ["alpha", "beta", "gamma"] },
   output: { len: "int" }
 });
 await control.finish("runtime perf benchmark ok");"#,
-        ));
+        );
     }
 
-    text_profile(typescript_block(
-        r#"await control.finish("runtime perf benchmark ok");"#,
-    ))
+    typescript_block(r#"await control.finish("runtime perf benchmark ok");"#)
 }
 
 pub(super) fn high_traffic_operation_kind(
@@ -530,8 +491,12 @@ pub(super) fn high_traffic_operation_kind(
         .and_then(|kind| kind.parse().ok())
 }
 
-pub(super) fn typescript_block(source: &str) -> String {
-    format!("<typescript>\n{}\n</typescript>", source.trim())
+pub(super) fn typescript_block(source: &str) -> BenchmarkStreamProfile {
+    BenchmarkStreamProfile {
+        full_text: String::new(),
+        deltas: Vec::new(),
+        parts: vec![lash_protocol_rlm::test_support::execute_code(source.trim())],
+    }
 }
 
 pub(super) fn text_profile(text: impl Into<String>) -> BenchmarkStreamProfile {

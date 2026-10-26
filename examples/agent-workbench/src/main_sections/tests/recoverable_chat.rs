@@ -527,11 +527,9 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
             let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move {
                 Ok(match call {
-                    0 => text_response(&finish_cell("old frame answer")),
-                    1 => text_response(
-                        "<typescript>\nawait control.continueAs({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });\n</typescript>",
-                    ),
-                    2 => text_response(&finish_cell("follow frame answer")),
+                    0 => code_response(&finish_cell("old frame answer")),
+                    1 => LlmResponse { parts: vec![lash::testing::execute_code("await control.continueAs({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });")], ..Default::default() },
+                    2 => code_response(&finish_cell("follow frame answer")),
                     other => panic!("unexpected continue_as provider call {other}"),
                 })
             }
@@ -702,9 +700,12 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                     }
                     Ok(match call {
                         0 => {
-                            let mut response = text_response(
-                                "<typescript>\nconsole.log(\"durable execution disclosure\");\n</typescript>",
-                            );
+                            let mut response = LlmResponse {
+                                parts: vec![lash::testing::execute_code(
+                                    "console.log(\"durable execution disclosure\");",
+                                )],
+                                ..Default::default()
+                            };
                             response.parts.insert(
                                 0,
                                 lash::direct::LlmOutputPart::Reasoning {
@@ -714,7 +715,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                             );
                             response
                         }
-                        1 => text_response(&finish_cell("settled answer")),
+                        1 => code_response(&finish_cell("settled answer")),
                         other => panic!("unexpected provider call {other}"),
                     })
                 }
@@ -860,9 +861,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
 /// adds no terminal event: each completed turn keeps exactly its one `Done`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workbench_settled_turn_cancels_preserve_execution_done() {
-    let workbench =
-        Workbench::replying("<typescript>\nawait chat.reply(\"canonical answer\");\n</typescript>")
-            .await;
+    let workbench = Workbench::executing("await chat.reply(\"canonical answer\");").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state

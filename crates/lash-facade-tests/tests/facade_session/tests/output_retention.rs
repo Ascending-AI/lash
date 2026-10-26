@@ -554,7 +554,12 @@ async fn an_rlm_request_carries_no_history_surface_on_sqlite() -> Result<()> {
                 .lock_recover()
                 .pop_front()
                 .expect("a scripted cell");
-            async move { Ok(lash_facade_tests::text_response(&text)) }
+            async move {
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
+            }
         })
         .build()
         .into_handle();

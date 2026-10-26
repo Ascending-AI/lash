@@ -176,27 +176,35 @@ impl Script {
         };
         match self {
             Self::Overflow if rendered.contains(NEXT) => text(request, FINAL),
-            Self::Globals { .. } if rendered.contains(NEXT) => text(
-                request,
-                &cell(&format!("await control.finish(typeof {GLOBAL});")),
-            ),
+            Self::Globals { .. } if rendered.contains(NEXT) => LlmResponse {
+                parts: vec![cell(&format!("await control.finish(typeof {GLOBAL});"))],
+                ..Default::default()
+            },
             Self::Globals { pressure } => {
-                let set = text(
-                    request,
-                    &cell(&format!(
+                let set = LlmResponse {
+                    parts: vec![cell(&format!(
                         "let {GLOBAL} = \"kept\";\nawait control.finish(\"set\");"
-                    )),
-                );
+                    ))],
+                    ..Default::default()
+                };
                 if pressure { over(set) } else { set }
             }
             Self::ContinueAs if rendered.contains(TASK) && !rendered.contains(NEXT) => {
-                text(request, &cell("await control.finish(\"done\");"))
+                LlmResponse {
+                    parts: vec![cell("await control.finish(\"done\");")],
+                    ..Default::default()
+                }
             }
-            Self::ContinueAs if rendered.contains(NEXT) => over(text(
-                request,
-                &cell(&format!("await control.continueAs({{ task: {TASK:?} }});")),
-            )),
-            Self::ContinueAs => over(text(request, &cell("await control.finish(\"set\");"))),
+            Self::ContinueAs if rendered.contains(NEXT) => over(LlmResponse {
+                parts: vec![cell(&format!(
+                    "await control.continueAs({{ task: {TASK:?} }});"
+                ))],
+                ..Default::default()
+            }),
+            Self::ContinueAs => over(LlmResponse {
+                parts: vec![cell("await control.finish(\"set\");")],
+                ..Default::default()
+            }),
             Self::Overflow => LlmResponse {
                 terminal_reason: LlmTerminalReason::ContextOverflow,
                 terminal_diagnostic: Some("context window exceeded".to_owned()),
@@ -207,8 +215,8 @@ impl Script {
 }
 
 /// A code mode cell of `code`.
-fn cell(code: &str) -> String {
-    format!("<typescript>\n{code}\n</typescript>")
+fn cell(code: &str) -> LlmOutputPart {
+    lash::testing::execute_code(code)
 }
 
 /// One send of the summary as the model received it: the exact body, and
@@ -381,7 +389,6 @@ impl PressureFrame {
                         backend.clone(),
                         lash::rlm::RlmProtocolPluginFactory::new(
                             lash::rlm::RlmProtocolPluginConfig::builder()
-                                .channel(lash::rlm::RlmChannel::Cell)
                                 .instruction_limit(lash::rlm::InstructionBound::instructions(
                                     1_000_000,
                                 ))

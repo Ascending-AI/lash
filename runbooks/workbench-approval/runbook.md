@@ -29,7 +29,7 @@ tool failure, and a parked wait survives a workbench process restart.
    the boot and every restart; the `just agent-workbench …`
    recipes name the same operations but do not carry this row's environment.
 3. The call must reach the host as raw tool id `workbench_ops_apply_change` from a
-   `<typescript>` cell — the practical gate is
+   `execute_code` program — the practical gate is
    `/api/approvals[].tool == "workbench_ops_apply_change"`. The cell itself spells the
    **authority path** `ops.apply_change`; the raw id is what the approval ledger records, and
    requiring the raw id to appear in the cell text would be wrong. A model description of

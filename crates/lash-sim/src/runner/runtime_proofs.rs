@@ -546,7 +546,6 @@ pub(super) async fn final_value_session(
     let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -667,16 +666,10 @@ pub(super) async fn prove_final_value_semantic_channel()
 }
 
 pub(super) fn rlm_final_value_provider() -> ProviderHandle {
-    const RAW_FINAL: &str = "Visible prose before semantic value.\n<typescript>\nawait control.finish({ source: \"semantic-channel\", ok: true, count: 3 });\n</typescript>";
-    // The chunks still split inside the open and close tags, which is the point
-    // of the proof: the cell scanner has to stitch a tag across a chunk boundary.
-    const CHUNKS: &[&str] = &[
-        "Visible prose",
-        " before semantic value.\n<type",
-        "script>\nawait control.finish({ source: ",
-        "\"semantic-channel\", ok: true, count: 3 });",
-        "\n</typescript>",
-    ];
+    const PROSE: &str = "Visible prose before semantic value.";
+    const CODE: &str =
+        "await control.finish({ source: \"semantic-channel\", ok: true, count: 3 });";
+    const CHUNKS: &[&str] = &["Visible prose", " before semantic value."];
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-rlm-final-value")
         .requires_streaming(true)
@@ -691,14 +684,13 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
                     text: (*chunk).to_string(),
                 }));
             }
-            let response = text_llm_response(RAW_FINAL);
-            if response.full_text() != RAW_FINAL || response_text_part(&response) != Some(RAW_FINAL)
-            {
-                return Err(LlmTransportError::new(format!(
-                    "rlm final-value fixed response shape changed: expected {:?}, got full_text {:?} parts {:?}",
-                    RAW_FINAL, response.full_text(), response.parts
-                )));
-            }
+            let response = lash_core::LlmResponse {
+                parts: vec![
+                    crate::runner::rlm_contracts::rlm_text_part(PROSE),
+                    lash_protocol_rlm::test_support::execute_code(CODE),
+                ],
+                ..Default::default()
+            };
             Ok(response)
         })
         .build()

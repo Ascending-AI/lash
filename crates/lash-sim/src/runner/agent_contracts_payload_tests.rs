@@ -136,14 +136,12 @@ async fn process_display_name_does_not_change_the_oracle_verdict() {
         &SessionId::from("sim-agent-renamed-process-contract"),
         "Start a process under a declared display label and return its value.",
         vec![
-            r#"<typescript>
-const lookup = async (): Promise<{ ok: boolean }> => {
+            r#"const lookup = async (): Promise<{ ok: boolean }> => {
   return { ok: true };
 };
 const handle = await processes.start({ definition: lookup, label: "renamed display label" });
 const result = await handle;
-await control.finish(result);
-</typescript>"#,
+await control.finish(result);"#,
         ],
         &expected,
         None,

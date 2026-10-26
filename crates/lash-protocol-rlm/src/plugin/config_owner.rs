@@ -1,7 +1,7 @@
 //! The RLM protocol's session config owner (FIG-4379).
 //!
 //! A session records its RLM namespace once, at creation: the creator's
-//! stated facts, the channel and dialect this
+//! stated facts, the dialect this
 //! host selected (ADR 0096), and this host's configured behaviour
 //! ([`RlmRecordedBehaviour`], FIG-4398). Creation reads no other session: a
 //! child records what its creator states, like a root, and only a fork copies
@@ -16,7 +16,7 @@
 //! ([`RlmRunOptions`]), which this owner applies over the recorded namespace;
 //! the type of a turn's final value is its finishing tool's, which a run
 //! chooses through its tool access.
-//! The channel, the dialect and the behaviour are the session's pins: a
+//! The dialect and the behaviour are the session's pins: a
 //! candidate that changes any of them is refused, and a run's options have
 //! no field for them.
 //!
@@ -35,7 +35,6 @@ use lash_render::RenderParamsPatch;
 use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmTurnOptions};
 
 use super::RlmProtocolPluginConfig;
-use super::channel::RlmChannel;
 use super::config::RlmRecordedBehaviour;
 
 /// The RLM namespace a session records.
@@ -57,10 +56,6 @@ pub struct RlmRecordedConfig {
     /// config: a run that states another shape is not drift.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finish_value_schema: Option<serde_json::Value>,
-    /// The channel the session's programs run over.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
-    pub channel: Option<RlmChannel>,
     /// The language id of the session's dialect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<String>,
@@ -94,7 +89,7 @@ impl RlmRecordedConfig {
 impl RlmRecordedConfig {
     /// The recorded namespace of a session created stating `extras`, for
     /// a test that executes the protocol without creating a session: an
-    /// unbounded cell-channel behaviour.
+    /// unbounded RLM behaviour.
     #[expect(
         clippy::expect_used,
         reason = "a recorded RLM namespace is plain data and always encodes"
@@ -104,10 +99,9 @@ impl RlmRecordedConfig {
             render: extras.render,
             termination: extras.termination,
             finish_value_schema: extras.finish_value_schema,
-            channel: Some(RlmChannel::Cell),
+
             dialect: None,
             behaviour: RlmProtocolPluginConfig::builder()
-                .channel(RlmChannel::Cell)
                 .instruction_limit(super::InstructionBound::unbounded())
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
@@ -220,12 +214,11 @@ impl std::fmt::Display for RlmRenderRefusal {
     }
 }
 
-/// The RLM protocol's config owner, holding the channel and dialect this
+/// The RLM protocol's config owner, holding the dialect this
 /// host selected and the configuration a new session's behaviour is created
 /// from.
 #[derive(Clone, Debug)]
 pub struct RlmConfigOwner {
-    pub(crate) channel: RlmChannel,
     pub(crate) dialect: crate::CellDialect,
     pub(crate) config: RlmProtocolPluginConfig,
 }
@@ -236,7 +229,7 @@ impl ConfigOwner for RlmConfigOwner {
     type Refusal = RlmConfigRefusal;
     type RunOptions = RlmRunOptions;
 
-    /// The creator's stated facts, this host's channel and dialect, and its
+    /// The creator's stated facts, this host's dialect, and its
     /// behaviour (FIG-4527). Nothing is read from another session.
     fn create(
         &self,
@@ -255,13 +248,13 @@ impl ConfigOwner for RlmConfigOwner {
             render: stated.render,
             termination: stated.termination,
             finish_value_schema: admitted_finish_schema(stated.finish_value_schema)?,
-            channel: Some(self.channel),
+
             dialect: Some(self.dialect.name().to_owned()),
             behaviour,
         }))
     }
 
-    /// A candidate keeps the channel, dialect and behaviour its base
+    /// A candidate keeps the dialect and behaviour its base
     /// recorded.
     fn validate(
         &self,
@@ -272,13 +265,6 @@ impl ConfigOwner for RlmConfigOwner {
         let Some(base) = base else {
             return Ok(());
         };
-        if value.channel != base.channel {
-            return Err(RlmConfigRefusal::PinChanged {
-                pin: "channel".to_string(),
-                recorded: base.channel.map(|channel| channel.as_str().to_string()),
-                candidate: value.channel.map(|channel| channel.as_str().to_string()),
-            });
-        }
         if value.dialect != base.dialect {
             return Err(RlmConfigRefusal::PinChanged {
                 pin: "dialect".to_string(),
@@ -378,7 +364,6 @@ mod tests {
 
     fn config() -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig::builder()
-            .channel(RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build()
@@ -386,7 +371,6 @@ mod tests {
 
     fn owner() -> RlmConfigOwner {
         RlmConfigOwner {
-            channel: RlmChannel::Cell,
             dialect: crate::CellDialect::typescript(),
             config: config(),
         }
@@ -598,7 +582,7 @@ mod tests {
         assert_eq!(config.config_revision, 2);
     }
 
-    /// A candidate that changes the channel, the dialect or the behaviour
+    /// A candidate that changes the dialect or the behaviour
     /// is refused typed; one that keeps them is admitted.
     #[test]
     fn a_candidate_keeps_the_recorded_pins() {
@@ -608,18 +592,6 @@ mod tests {
             owner
                 .validate(&base, Some(&base), facts)
                 .expect("the recorded pins are kept");
-            let rechanneled = RlmRecordedConfig {
-                channel: Some(RlmChannel::NativeTool),
-                ..base.clone()
-            };
-            assert_eq!(
-                owner.validate(&rechanneled, Some(&base), facts),
-                Err(RlmConfigRefusal::PinChanged {
-                    pin: "channel".to_string(),
-                    recorded: Some("cell".to_string()),
-                    candidate: Some("native_tool".to_string()),
-                })
-            );
             let redialected = RlmRecordedConfig {
                 dialect: Some("python".to_string()),
                 ..base.clone()

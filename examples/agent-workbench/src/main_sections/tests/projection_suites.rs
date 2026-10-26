@@ -28,7 +28,6 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         .into_handle();
     let rlm_factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

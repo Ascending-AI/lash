@@ -1,17 +1,8 @@
 pub(crate) mod actions;
-mod cell;
-mod driver;
 pub(crate) mod finish;
 pub(crate) mod prompt;
 pub(crate) mod stall;
-#[cfg(test)]
-mod tests;
-
-pub(crate) use cell::{
-    CellExtractionError,
-    project_visible_assistant_prose_with_tags as project_visible_assistant_prose_for_dialect,
-};
-pub use driver::RlmDriver;
 #[cfg(feature = "testing")]
-pub use driver::project_conformance_messages_through_rlm_history;
+pub use crate::driver::project_conformance_messages_through_rlm_history;
+pub use crate::native::driver::RlmDriver;
 pub use prompt::RlmPromptFeatures;

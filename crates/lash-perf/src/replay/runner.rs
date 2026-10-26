@@ -131,7 +131,6 @@ pub(crate) fn build_core(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
                     .instruction_limit(crate::cell_bounds::INSTRUCTION_LIMIT)
                     .memory_limit(crate::cell_bounds::MEMORY_LIMIT)
                     .build(),
@@ -272,7 +271,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .config(replay_settings())
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))?;
-    let mut book = ScriptBook::new(workload.protocol);
+    let mut book = ScriptBook::new();
     let scripted: Vec<Vec<(ScriptedTurn, String)>> = (0..workload.sessions)
         .map(|session| {
             workload

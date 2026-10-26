@@ -448,19 +448,19 @@ def matrix() -> dict[str, object]:
                     "kind": "not_applicable",
                     "reason": "Responses has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='START_HERE\nawait control.finish("settled");\nSTOP_HERE\n')],
                 },
                 "codex.responses-sse": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='START_HERE\nawait control.finish("settled");\nSTOP_HERE\n')],
                 },
                 "codex.responses-websocket": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='START_HERE\nawait control.finish("settled");\nSTOP_HERE\n')],
                 },
             },
         }
@@ -480,7 +480,7 @@ def matrix() -> dict[str, object]:
         "openai.chat-completions": {"kind": "provider_wire_scripts", "paths": ["../../variations/openai-compatible.chat-literal-present.json"]},
     }
     for dialect in DIALECTS[3:]:
-        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')])
+        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='START_HERE\nawait control.finish("settled");\nSTOP_HERE\n')])
     rows.append(
         {
             "variation": "literal_present",
@@ -805,9 +805,9 @@ def write_stop_variations() -> None:
         for literal in (False, True):
             variation = "literal_present" if literal else "stop_consumed"
             name = f"{dialect}-{variation.replace('_', '-')}"
-            text = '<typescript>\nawait control.finish("settled");\n'
+            text = 'START_HERE\nawait control.finish("settled");\n'
             if literal:
-                text += "</typescript>\n"
+                text += "STOP_HERE\n"
             if provider == "anthropic":
                 reason = "end_turn" if literal else "stop_sequence"
                 events = anthropic(text=text, stop_reason=reason)
@@ -824,7 +824,7 @@ def write_stop_variations() -> None:
             else:
                 headers["authorization"] = {"present": True}
             body = {} if provider == "google_oauth" else {"stream": {"equals": True}}
-            body[stop_field] = {"present": False} if literal else {"equals": ["</typescript>"]}
+            body[stop_field] = {"present": False} if literal else {"equals": ["STOP_HERE"]}
             timeline = [{"at": 10, "event": "response_start", "status": 200,
                          "headers": [{"name": "content-type", "value": "text/event-stream"}]}]
             timeline.extend({"at": 20 + index, "event": "sse",

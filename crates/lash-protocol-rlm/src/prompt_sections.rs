@@ -16,7 +16,7 @@ use lash_core::plugin::prompt::{
 use lash_execution_contracts::plugin_error::PluginError;
 
 use crate::dialect::{ExecutionSection, SessionDialect};
-use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmRecordedConfig};
+use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmRecordedConfig};
 use crate::rlm_support::{effective_budget_tokens, format_budget_suffix_with_vocabulary};
 
 /// The keys the RLM protocol registers its sections under.
@@ -58,7 +58,7 @@ pub(crate) const PACKAGES_TITLE: &str = "Packages";
 /// session's plugin was built.
 pub(crate) struct RlmSectionBehaviour {
     pub(crate) dialect: Arc<SessionDialect>,
-    pub(crate) channel: RlmChannel,
+
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
     pub(crate) discovery: Option<crate::plugin::RlmDiscovery>,
     /// The soft context budget the session's plugin was built with.
@@ -73,7 +73,7 @@ impl RlmSectionBehaviour {
         }
         Self {
             dialect: Arc::new(dialect),
-            channel: self.channel,
+
             prompt_features: self.prompt_features,
             discovery: self.discovery.clone(),
             budget_tokens: self.budget_tokens,
@@ -81,7 +81,7 @@ impl RlmSectionBehaviour {
     }
 }
 
-/// The execution section a session on `behaviour.channel` renders over
+/// The execution section a session renders over
 /// `tool_catalog`: every tool, or, when the session has a discovery
 /// operation, the tools its recorded budget lists. A tool presenter that
 /// refuses the listing fails the section.
@@ -89,21 +89,14 @@ pub(crate) fn execution_section(
     behaviour: &RlmSectionBehaviour,
     tool_catalog: &lash_core::ToolCatalog,
 ) -> Result<ExecutionSection, PromptRenderError> {
-    match behaviour.channel {
-        RlmChannel::Cell => behaviour.dialect.execution_section(
-            behaviour.prompt_features,
-            tool_catalog,
-            RlmChannel::Cell,
-            behaviour.discovery.as_ref(),
-        ),
-        RlmChannel::NativeTool => crate::native::prompt::execution_section(
-            &behaviour.dialect,
+    behaviour
+        .dialect
+        .execution_section(
             behaviour.prompt_features,
             tool_catalog,
             behaviour.discovery.as_ref(),
-        ),
-    }
-    .map_err(|error| PromptRenderError::new(error.to_string()))
+        )
+        .map_err(|error| PromptRenderError::new(error.to_string()))
 }
 
 fn text_or_omit(text: impl AsRef<str>) -> SectionText {
@@ -200,7 +193,7 @@ fn finalization(
         .collect::<Vec<_>>();
     let copy = behaviour
         .dialect
-        .finalization_copy(termination.mode, &finishing, behaviour.channel);
+        .finalization_copy(termination.mode, &finishing);
     // The original tail separates finalization from bindings with three newlines.
     Ok(SectionText::Text(format!(
         "\n=== FINALIZATION ===\n\n{copy}"

@@ -28,10 +28,13 @@ async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy(
                         system_text(&request),
                         request_text(&request)
                     ));
-                    Ok(text_response(&typescript_block(&format!(
-                        "await control.finish({});",
-                        serde_json::to_string(answer).expect("string encodes")
-                    ))))
+                    Ok(lash_facade_tests::control_cell_response(
+                        0,
+                        format!(
+                            "await control.finish({});",
+                            serde_json::to_string(answer).expect("string encodes")
+                        ),
+                    ))
                 }
             }
         })

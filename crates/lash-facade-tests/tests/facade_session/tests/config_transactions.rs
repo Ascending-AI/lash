@@ -229,7 +229,12 @@ fn report_cells(bind: &str, read: &str, reads: usize) -> ProviderHandle {
                 .lock_recover()
                 .pop_front()
                 .expect("the law scripts every cell");
-            async move { Ok(text_response(&text)) }
+            async move {
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
+            }
         })
         .build()
         .into_handle()

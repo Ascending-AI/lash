@@ -92,12 +92,7 @@ impl ToolProvider for Tools {
 
 /// A TypeScript cell of `code`, as the model answers it.
 fn cell(code: &str) -> LlmResponse {
-    lash_facade_tests::control_cell_response(
-        &lash::rlm::CellDialect::typescript(),
-        lash::rlm::RlmChannel::Cell,
-        0,
-        code.to_owned(),
-    )
+    lash_facade_tests::control_cell_response(0, code.to_owned())
 }
 
 /// The model's answers, served in order; each takes `pause` first, so the
@@ -129,7 +124,6 @@ fn observed_core(
         .build()
         .into_handle();
     let config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::standard())
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build();
@@ -320,56 +314,6 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
         );
     }
     assert_parents_exported(&spans);
-    drop(session);
-    core.shutdown().await?;
-    Ok(())
-}
-
-/// FIG-6432 / S1: a predicted answer after the cell close is never the turn's
-/// answer, and its discard count is visible without capturing model content.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_discarded_prediction_is_counted_on_its_cell_span() -> Result<()> {
-    let tail = "Sent a joke…";
-    let reply = text_response(&format!(
-        "<typescript>\nawait tools.echoNow({{}});\n</typescript>{tail}"
-    ));
-    let (observed, core) = observed_core(
-        sqlite_memory_store_backend().await,
-        &Tools::default(),
-        vec![reply, text_response("Real answer.")],
-    )?;
-    let session = created_session(&core, SessionId::fixture("trace-cell-discard"))
-        .await
-        .open()
-        .await?;
-    let output = session
-        .send(TurnInput::text("call the tool"))
-        .output()
-        .await?;
-    assert!(output.is_success(), "{:?}", output.outcome);
-    observed
-        .until("the turn is exported", |observed| {
-            observed.spans("invoke_agent").len() == 1
-        })
-        .await;
-    let cells = observed.spans("execute_tool typescript");
-    let [cell] = &cells[..] else {
-        panic!("one cell span: {cells:#?}")
-    };
-    assert_eq!(
-        attribute(cell, "lash.cell.trailing_discarded"),
-        Some(tail.len().to_string())
-    );
-    assert_eq!(
-        attribute(cell, "lash.cell.tool_calls").as_deref(),
-        Some("1")
-    );
-    assert_eq!(
-        observed
-            .spans(&format!("execute_tool {ECHO_OPERATION}"))
-            .len(),
-        1
-    );
     drop(session);
     core.shutdown().await?;
     Ok(())

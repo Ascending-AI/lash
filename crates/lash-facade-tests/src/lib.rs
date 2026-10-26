@@ -147,10 +147,10 @@ impl TurnActivitySink for RecordingEvents {
     }
 }
 
-/// `source` as one TypeScript cell of an RLM answer.
+/// One complete RLM program delivered as a provider-native call.
 #[cfg(feature = "rlm")]
-pub fn typescript_block(source: &str) -> String {
-    format!("<typescript>\n{}\n</typescript>", source.trim())
+pub fn typescript_block(source: &str) -> LlmOutputPart {
+    lash::testing::execute_code(source)
 }
 
 /// An RLM core builder over `backend`, with the default test factory.
@@ -174,11 +174,11 @@ pub async fn committed(session: &lash::LashSession) -> lash_core::SessionReadVie
 }
 
 /// A provider that answers each request with the next of `texts`.
-pub fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
+pub fn queued_text_provider(texts: Vec<impl FixtureReply>) -> ProviderHandle {
     let responses = Arc::new(tokio::sync::Mutex::new(
         texts
             .into_iter()
-            .map(|text| text_response(&text.into()))
+            .map(FixtureReply::response)
             .collect::<std::collections::VecDeque<_>>(),
     ));
     lash_core::testing::TestProvider::builder()
@@ -371,7 +371,6 @@ pub fn app_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
 pub fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::standard())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -443,27 +442,40 @@ pub async fn created_session_with(
 }
 
 #[cfg(feature = "rlm")]
-pub fn control_cell_response(
-    dialect: &lash::rlm::CellDialect,
-    channel: lash::rlm::RlmChannel,
-    index: usize,
-    code: String,
-) -> LlmResponse {
-    if channel == lash::rlm::RlmChannel::Cell {
-        let tags = dialect.prompts().prompt_vocabulary().cell_tags;
-        text_response(&format!("{}\n{code}\n{}", tags.open, tags.close))
-    } else {
+pub fn control_cell_response(index: usize, code: String) -> LlmResponse {
+    let mut part = lash::testing::execute_code(code);
+    if let LlmOutputPart::ToolCall { call_id, .. } = &mut part {
+        *call_id = format!("cell-{index}");
+    }
+    LlmResponse {
+        parts: vec![part],
+        ..Default::default()
+    }
+}
+
+/// A scripted fixture authors either prose or a provider part.
+pub trait FixtureReply {
+    fn response(self) -> LlmResponse;
+}
+impl FixtureReply for String {
+    fn response(self) -> LlmResponse {
+        text_response(&self)
+    }
+}
+impl FixtureReply for &str {
+    fn response(self) -> LlmResponse {
+        text_response(self)
+    }
+}
+impl FixtureReply for LlmOutputPart {
+    fn response(self) -> LlmResponse {
         LlmResponse {
-            parts: vec![LlmOutputPart::ToolCall {
-                call_id: format!("cell-{index}"),
-                tool_name: "execute_code".into(),
-                input_json: serde_json::json!({"code": code}).to_string(),
-                replay: None,
-            }],
+            parts: vec![self],
             ..Default::default()
         }
     }
 }
+
 pub mod ingress;
 
 pub mod send;
@@ -490,3 +502,19 @@ pub fn diagnostic_core(backend: lash_execution_contracts::backend::Backend) -> L
 pub mod controls;
 
 pub use lash::testing::{model_calls_for_activity, tool_calls_for_activity};
+
+pub fn part_provider(kind: &'static str, part: LlmOutputPart) -> ProviderHandle {
+    lash_core::testing::TestProvider::builder()
+        .kind(kind)
+        .complete(move |_| {
+            let part = part.clone();
+            async move {
+                Ok(LlmResponse {
+                    parts: vec![part],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
+}

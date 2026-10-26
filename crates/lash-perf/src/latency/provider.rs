@@ -226,15 +226,14 @@ pub(crate) fn latency_provider(
                     let switch = turn > 0
                         && turn < turns
                         && continue_as_every.is_some_and(|k| turn.is_multiple_of(k));
-                    Ok(response(vec![LlmOutputPart::Text {
-                        text: super::history::cell_text(
+                    Ok(response(vec![
+                        lash_protocol_rlm::test_support::execute_code(super::history::cell_text(
                             switch,
                             follow_on,
                             growing_heap,
                             history_first,
-                        ),
-                        response_meta: None,
-                    }]))
+                        )),
+                    ]))
                 } else {
                     answer(kind, &request)
                 };
@@ -295,6 +294,9 @@ fn answer(
         // checkpoint applies the steered input; a plain answer would finish
         // the turn first and defer the input to the next one.
         LatencyProviderKind::Steer if !carries_steer(request) => tool_call(),
+        LatencyProviderKind::Cell => Ok(response(vec![
+            lash_protocol_rlm::test_support::execute_code(cell_text(request)),
+        ])),
         _ => Ok(response(vec![LlmOutputPart::Text {
             text: kind.text(request),
             response_meta: None,
@@ -350,7 +352,7 @@ console.log(echoed.value);"#
     } else {
         r#"await control.finish("latency cell done");"#
     };
-    format!("<typescript>\n{source}\n</typescript>")
+    source.to_string()
 }
 
 fn response_text(request: &LlmRequest) -> String {

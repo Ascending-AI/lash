@@ -186,7 +186,6 @@ fn core_over(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
-                    .channel(lash::rlm::RlmChannel::Cell)
                     .instruction_limit(lash::rlm::InstructionBound::instructions(instructions))
                     .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                     .build(),

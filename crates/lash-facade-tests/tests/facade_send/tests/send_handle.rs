@@ -779,9 +779,12 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
         lash::testing::TestProvider::builder()
             .kind("engine-first-open")
             .complete(|_| async {
-                Ok(text_response(
-                    "<typescript>\nawait control.finish(\"engine answered\");\n</typescript>",
-                ))
+                Ok(lash_core::LlmResponse {
+                    parts: vec![lash::testing::execute_code(
+                        "await control.finish(\"engine answered\");",
+                    )],
+                    ..Default::default()
+                })
             })
             .build()
             .into_handle(),
@@ -839,9 +842,11 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
                     let call = calls.fetch_add(1, Ordering::SeqCst);
                     async move {
                         if call == 0 {
-                            return Ok(text_response(&typescript_block(
-                                r#"await control.continueAs({ task: "wait to be cancelled" });"#,
-                            )));
+                            return Ok(lash_facade_tests::control_cell_response(
+                                0,
+                                (r#"await control.continueAs({ task: "wait to be cancelled" });"#)
+                                    .to_string(),
+                            ));
                         }
                         std::future::pending::<()>().await;
                         unreachable!("the follow-on turn's call is cancelled")
@@ -1455,30 +1460,31 @@ mod sqlite_memory {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<()> {
     let calls = Arc::new(AtomicUsize::new(0));
-    let core = explicit_ephemeral_facets(super::rlm_core_builder_over(
-        sqlite_memory_store_backend().await,
-    ))
-    .serve_test_llm_profile(
-        {
-            let calls = Arc::clone(&calls);
-            lash::testing::TestProvider::builder()
-                .kind("exact-host-run-observation")
-                .complete(move |_| {
-                    let call = calls.fetch_add(1, Ordering::SeqCst);
-                    async move {
-                        Ok(text_response(&typescript_block(if call == 0 {
+    let core =
+        explicit_ephemeral_facets(super::rlm_core_builder_over(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(
+            {
+                let calls = Arc::clone(&calls);
+                lash::testing::TestProvider::builder()
+                    .kind("exact-host-run-observation")
+                    .complete(move |_| {
+                        let call = calls.fetch_add(1, Ordering::SeqCst);
+                        async move {
+                            Ok(lash_facade_tests::control_cell_response(0, (if call == 0 {
                             r#"await control.continueAs({ task: "finish in the next frame" });"#
                         } else {
                             r#"await control.finish("done");"#
-                        })))
-                    }
-                })
-                .build()
-                .into_handle()
-        },
-        mock_llm_profile_spec(),
-    )
-    .build(lash_facade_tests::runtime_lease_owner())?;
+                        }).to_string()))
+                        }
+                    })
+                    .build()
+                    .into_handle()
+            },
+            mock_llm_profile_spec(),
+        )
+        .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
         lash_vocabulary::identity::SessionId::fixture("exact-host-run-observation"),

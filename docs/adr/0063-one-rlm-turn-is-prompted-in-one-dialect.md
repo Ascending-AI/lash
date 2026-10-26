@@ -14,10 +14,10 @@ remint execution identities.
 
 Every shared RLM prompt fragment uses the recorded `CellDialect` and its
 `DialectPrompts`. `DialectPromptVocabulary` supplies the language, cell noun,
-print and finish forms, tags and notation. Tool paths and schema spellings
+print and finish forms and notation. Tool paths and schema spellings
 come from that same dialect. Bound-variable feedback, budget advice and
-finalization describe its source. Delimiter advice belongs to the cell
-channel; native transport has its own code-call instructions.
+finalization describe its source. Programs travel through `execute_code`
+with dialect-specific code-call instructions (ADR 0148).
 
 TypeScript and Python are shipped front ends. The host chooses explicitly,
 and the session pins its name at creation (ADRs 0138 and 0140). The protocol

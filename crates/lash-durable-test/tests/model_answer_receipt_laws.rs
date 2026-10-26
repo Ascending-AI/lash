@@ -171,7 +171,6 @@ struct World {
     held: AtomicUsize,
     /// Receipt acknowledgements their owners received.
     acknowledged: AtomicUsize,
-    hold_tail: AtomicUsize,
     /// Commits that entered the store after a receipt and before its
     /// acknowledgement reached its owner.
     early: Mutex<Vec<String>>,
@@ -228,7 +227,6 @@ enum Answer {
     /// Text, streamed in three deltas: [`ANSWERS`] by send.
     Text,
     RetriedText,
-    MixedCalls,
     /// A call to [`WRITE`] beside text, then `done`.
     Tool,
     /// A TypeScript cell that calls [`WRITE`] with its send's marker, then
@@ -236,10 +234,6 @@ enum Answer {
     Cell,
     /// A TypeScript cell that only prints, then `done`.
     PrintingCell,
-    /// The [`Answer::Cell`] cell, accepted by the cell mask at its close
-    /// tag while the provider still generates: the provider streams its
-    /// trailing text and reports [`USAGE`] only after the cell ran.
-    AbortedCell,
     /// Two streamed deltas, then a provider failure no retry follows.
     Failed,
     /// Two calls; the second retries once before answering.
@@ -248,10 +242,7 @@ enum Answer {
 
 impl Answer {
     fn code(self) -> bool {
-        matches!(
-            self,
-            Self::Cell | Self::PrintingCell | Self::AbortedCell | Self::MixedCalls
-        )
+        matches!(self, Self::Cell | Self::PrintingCell)
     }
 }
 
@@ -268,10 +259,7 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
             ..Default::default()
         })
         .generation_retry_guarantee(
-            if matches!(
-                answer,
-                Answer::RetryTool | Answer::RetriedText | Answer::MixedCalls
-            ) {
+            if matches!(answer, Answer::RetryTool | Answer::RetriedText) {
                 lash_core::provider::GenerationRetryGuarantee::Idempotent
             } else {
                 lash_core::provider::GenerationRetryGuarantee::None
@@ -281,9 +269,6 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
             let world = Arc::clone(&world);
             async move {
                 let send_index = world.all_sends.fetch_add(1, Ordering::SeqCst);
-                if answer == Answer::MixedCalls {
-                    return mixed_call(&request, send_index).await;
-                }
                 let answered = request
                     .messages
                     .iter()
@@ -311,7 +296,6 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                                 .with_retry_verdict(TransportRetryVerdict::NotRetryable),
                         );
                     }
-                    Answer::MixedCalls => unreachable!("the mixed history is handled above"),
                     Answer::Text | Answer::RetriedText => {
                         let (head, tail) = marker.split_at(4);
                         let (middle, tail) = tail.split_at(6);
@@ -327,36 +311,18 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                         });
                         response
                     }
-                    Answer::Cell => streamed(&request, &cell(marker)),
-                    Answer::PrintingCell => streamed(
+                    Answer::Cell => code_answer(
                         &request,
-                        &[
-                            "Printing.\n<typescript>\n",
-                            &format!("console.log({marker:?});\n"),
-                            "</typescript>",
-                        ],
+                        "Running a cell.\n",
+                        &format!(
+                            "await tools.write({{ marker: {marker:?} }});\nconsole.log({marker:?});"
+                        ),
                     ),
-                    Answer::AbortedCell => {
-                        let mut pieces = cell(marker);
-                        stream(&request, &pieces);
-                        // The mask accepts the cell at its close tag and the
-                        // cell runs from what streamed; the provider's tail
-                        // drains off the turn's path (FIG-6433).
-                        world.written.notified().await;
-                        if world.hold_tail.load(Ordering::SeqCst) > 0 {
-                            std::future::pending::<()>().await;
-                        }
-                        let tail = "\nTrailing prose the mask cuts.".to_owned();
-                        stream(&request, std::slice::from_ref(&tail));
-                        pieces.push(tail);
-                        LlmResponse {
-                            parts: vec![LlmOutputPart::Text {
-                                text: pieces.concat(),
-                                response_meta: None,
-                            }],
-                            ..LlmResponse::default()
-                        }
-                    }
+                    Answer::PrintingCell => code_answer(
+                        &request,
+                        "Printing.\n",
+                        &format!("console.log({marker:?});"),
+                    ),
                 };
                 response.usage = USAGE;
                 response.terminal_reason = lash_core::LlmTerminalReason::Stop;
@@ -368,16 +334,6 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
         })
         .build()
         .into_handle()
-}
-
-/// The pieces of a cell calling [`WRITE`] with `marker`.
-fn cell(marker: &str) -> Vec<String> {
-    vec![
-        "Running a cell.\n<typescript>\n".to_owned(),
-        format!("await tools.write({{ marker: {marker:?} }});\n"),
-        format!("console.log({marker:?});\n"),
-        "</typescript>".to_owned(),
-    ]
 }
 
 /// Stream `pieces` as deltas of one text block.
@@ -535,7 +491,7 @@ fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFact
                         .iter_mut()
                         .rev()
                         .find(|part| matches!(part, LlmOutputPart::Text { .. }))
-                        && !text.contains("<typescript>")
+                        && !text.contains("console.log(")
                     {
                         text.push_str(HOOKED);
                     }
@@ -612,7 +568,6 @@ fn core(
     let builder = if answer.code() {
         let factory = lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
@@ -629,18 +584,7 @@ fn core(
         .serve_sessions(false)
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .execution_budgets(if answer == Answer::MixedCalls {
-            let total = Duration::from_secs(10);
-            lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
-                model_total: total,
-                stop_grace: Duration::from_millis(50),
-                provider: lash_core::ProviderAttemptLimits::new(total, total, total, 2).unwrap(),
-                ..lash_core::ExecutionBudgetsConfig::recommended()
-            })
-            .unwrap()
-        } else {
-            lash::ExecutionBudgets::recommended()
-        })
+        .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
             model(Arc::clone(world), answer),
@@ -1292,7 +1236,7 @@ async fn a_cell_killed_after_its_first_save_resumes_its_progress() {
         .world
         .derived()
         .iter()
-        .filter(|(handed, _)| handed.to_string().contains("typescript"))
+        .filter(|(handed, _)| handed.to_string().contains("execute_code"))
         .count();
     assert_eq!(cell_derivations, 1, "the cell's answer is derived once");
     deployment.end();
@@ -1381,10 +1325,7 @@ async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answe
         "B derives from the receipt what the uncut run derives"
     );
     assert_eq!(markers(&deployment.world), [ANSWERS[0]]);
-    let resumed_usage = match answer {
-        Answer::AbortedCell => LlmUsage::unknown_call(),
-        _ => USAGE,
-    };
+    let resumed_usage = USAGE;
     assert_eq!(
         deployment.usage().await,
         resumed_usage.checked_add(&final_omission).unwrap()
@@ -1396,14 +1337,6 @@ async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answe
 #[tokio::test]
 async fn a_completed_streams_finish_resumes_from_the_receipt_on_another_core() {
     a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(Answer::Cell).await;
-}
-
-/// RECEIPT-INCLUDES-STREAM-RECOVERY-INPUTS for a stream whose cell the
-/// cell mask accepted at its close tag, whose response the runtime derived
-/// from what streamed while the provider's tail drained.
-#[tokio::test]
-async fn a_protocol_aborted_streams_finish_resumes_from_the_receipt_on_another_core() {
-    a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(Answer::AbortedCell).await;
 }
 
 /// Step the deployment for `millis` of virtual time, or until nothing is
@@ -2018,75 +1951,6 @@ async fn a_resent_model_call_counts_the_attempt_its_process_lost() {
 }
 
 #[tokio::test]
-async fn a_consumed_receipts_lost_tail_commits_one_unobserved_record() {
-    let deployment = Deployment::new(Setup::new(Answer::AbortedCell, Hooks::All), |script| {
-        script.cut_on(
-            "a",
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            1,
-            Fault::CommitThenAbort,
-        );
-    })
-    .await;
-    deployment.world.hold_tail.store(1, Ordering::SeqCst);
-    let _handle = deployment.send().await;
-    deployment
-        .until("receipt consumed before tail settlement", |d| {
-            d.cut(CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT)
-        })
-        .await;
-    let open = deployment
-        .nodes
-        .database()
-        .turn(&session())
-        .await
-        .unwrap()
-        .unwrap();
-    let pins = deployment
-        .nodes
-        .database()
-        .model_call_pins(
-            &session(),
-            &lash_durable::domain::ModelCallId::turn_owner(&open.run),
-        )
-        .await
-        .unwrap();
-    assert_eq!(pins.len(), 1);
-    let reads = deployment
-        .durable
-        .read_model_calls(&[lash::turn::TurnModelCallRef {
-            turn_id: open.run,
-            call_id: pins[0].call_id.clone(),
-        }])
-        .await
-        .unwrap();
-    assert!(matches!(
-        reads[0],
-        lash::turn::ModelCallRead::NotYetSettled { .. }
-    ));
-    deployment.take_over().await;
-    deployment.settle().await;
-    let (_, rows) = retained_model_rows(&deployment.durable).await;
-    let first: lash::turn::ModelCallRecord =
-        serde_json::from_value(rows[0].clone()).expect("retained call");
-    assert_eq!(first.end, lash::turn::ModelCallEnd::Answered);
-    assert_eq!(first.record.attempts.len(), 1);
-    assert_eq!(
-        first.record.attempts[0].protocol_position,
-        lash::provider::ProtocolPosition::Unobserved
-    );
-    assert_eq!(first.usage().unwrap().unknown_calls, 1);
-    assert_eq!(deployment.world.sends(), 1);
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row["call_id"] == rows[0]["call_id"])
-            .count(),
-        1
-    );
-    deployment.end();
-}
-
-#[tokio::test]
 async fn a_reserved_retry_lost_with_its_process_never_reuses_its_ordinal() {
     let label = CommitLabel::new("model.attempt");
     let deployment = Deployment::new(Setup::new(Answer::RetriedText, Hooks::All), |script| {
@@ -2148,101 +2012,6 @@ async fn a_reserved_retry_lost_with_its_process_never_reuses_its_ordinal() {
         "explicitly reported zero is known, including an interrupted attempt"
     );
     deployment.end();
-}
-
-/// One turn with a returned retry, an accepted cell whose tail is cancelled
-/// at its deadline, and a final completed call.
-async fn mixed_call(request: &LlmRequest, sent: usize) -> Result<LlmResponse, LlmTransportError> {
-    let usage = LlmUsage {
-        input_tokens: 2,
-        output_tokens: 1,
-        ..Default::default()
-    };
-    if sent == 0 {
-        return Err(LlmTransportError::new("retry with partial usage")
-            .with_kind(lash_core::ProviderFailureKind::Stream)
-            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-            .with_partial_response(LlmResponse {
-                usage,
-                provider_usage: Some(json!({"input_tokens":2,"output_tokens":1})),
-                ..Default::default()
-            }));
-    }
-    if sent == 2 {
-        request
-            .stream_events
-            .as_ref()
-            .unwrap()
-            .send(LlmStreamEvent::Usage(usage));
-        stream(
-            request,
-            &["<typescript>\nconsole.log(\"second cell\");\n</typescript>"],
-        );
-        return std::future::pending().await;
-    }
-    let text = if sent == 1 {
-        "<typescript>\nconsole.log(\"retried cell\");\n</typescript>"
-    } else {
-        "<typescript>\nawait control.finish(\"done\");\n</typescript>"
-    };
-    Ok(LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: text.to_owned(),
-            response_meta: None,
-        }],
-        usage: USAGE,
-        terminal_reason: lash_core::LlmTerminalReason::Stop,
-        ..Default::default()
-    })
-}
-
-async fn retained_usage_matches_head(postgres: bool) {
-    let mut setup = Setup::new(Answer::MixedCalls, Hooks::All);
-    setup.postgres = postgres;
-    let deployment = Deployment::new(setup, |_| {}).await;
-    let handle = deployment.send().await;
-    deployment.settle().await;
-    handle.output().await.expect("the mixed turn completes");
-    let (_, rows) = retained_model_rows(&deployment.durable).await;
-    assert_eq!(rows.len(), 3, "one row per logical call: {rows:#?}");
-    let calls = rows
-        .into_iter()
-        .map(|row| serde_json::from_value::<lash::turn::ModelCallRecord>(row).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        calls.iter().map(|call| call.call).collect::<Vec<_>>(),
-        [1, 2, 3]
-    );
-    assert_eq!(calls[0].record.attempts.len(), 2, "the first call retried");
-    assert_eq!(
-        calls[1].record.attempts.last().unwrap().outcome,
-        lash::provider::AttemptOutcome::Interrupted
-    );
-    assert_eq!(
-        calls[2].record.attempts.last().unwrap().outcome,
-        lash::provider::AttemptOutcome::Completed
-    );
-    let usage = calls
-        .iter()
-        .try_fold(LlmUsage::default(), |sum, call| {
-            sum.checked_add(&call.usage()?)
-        })
-        .unwrap();
-    assert_eq!(usage, deployment.usage().await);
-    assert_eq!(usage.input_tokens, 26);
-    assert_eq!(usage.output_tokens, 16);
-    deployment.end();
-}
-
-#[tokio::test]
-async fn the_heads_usage_delta_equals_its_retried_cancelled_and_completed_calls() {
-    retained_usage_matches_head(false).await;
-}
-
-#[tokio::test]
-#[ignore = "requires PostgreSQL"]
-async fn postgres_the_heads_usage_delta_equals_its_retried_cancelled_and_completed_calls() {
-    retained_usage_matches_head(true).await;
 }
 
 /// MODEL-HOOK-ADDRESS: live attempts are distinct; another node derives the
@@ -2333,4 +2102,10 @@ async fn model_hooks_keep_call_attempt_addresses_across_retry_and_receipt_takeov
     assert_eq!(deployment.world.all_sends.load(Ordering::SeqCst), 3);
     drop(streamed);
     deployment.end();
+}
+
+fn code_answer(request: &LlmRequest, prose: &str, source: &str) -> LlmResponse {
+    let mut response = streamed(request, &[prose]);
+    response.parts.push(lash::testing::execute_code(source));
+    response
 }

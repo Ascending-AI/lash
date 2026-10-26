@@ -148,7 +148,7 @@ admin query exceeded the client's 16 MiB response limit. C retained four answere
 batches before the process fixture's Markdown fence was treated as prose. D
 completed successfully. Those harness failures do not enter the sample population.
 The final harness sizes the 100-session pool, pages administration reads within
-the existing response limit, and emits the actual `<typescript>` channel fence.
+the existing response limit, and used the former text-cell execution boundary (superseded by ADR 0148).
 Earlier setup attempts and their logs remain under `.kiln/FIG-5168/attempt-*`;
 their numbers are excluded. Counters, outcome checks and percentile definitions
 were identical for the retained successful batches.

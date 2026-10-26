@@ -99,7 +99,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             expected_reply()
         ),
         RuntimePerfScenario::RlmStreamedPairedLashVm => format!(
-            "Turn {} in RLM mode. Stream visible prose before a paired <typescript> block, close it, ignore any suffix after the close tag, and finish exactly: {}",
+            "Turn {} in RLM mode. Stream visible prose before a paired  block, close it, ignore any suffix after the close tag, and finish exactly: {}",
             turn_index + 1,
             expected_reply()
         ),

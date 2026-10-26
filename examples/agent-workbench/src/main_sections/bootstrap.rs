@@ -210,16 +210,6 @@ pub(crate) fn configure_workbench_plugins(
     plugins.push(mcp);
 }
 
-/// The `LASH_RLM_CHANNEL` value the workbench's RLM protocol factory is built
-/// with.
-pub(crate) fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
-    match std::env::var("LASH_RLM_CHANNEL") {
-        Ok(value) => value.parse().map_err(anyhow::Error::msg),
-        Err(std::env::VarError::NotPresent) => Ok(lash::rlm::RlmChannel::Cell),
-        Err(error) => Err(error.into()),
-    }
-}
-
 /// Refuse a broken deployment before any session can admit a turn. Starting
 /// the real pool also checks the worker handshake, not just file existence.
 fn prewarm_workbench_worker(
@@ -270,7 +260,7 @@ pub(crate) struct WorkbenchCorePlugins {
 /// `build` binds the backend's generation to this composition.
 pub(crate) async fn workbench_core_builder(
     host_backend: lash::Backend,
-    rlm_channel: lash::rlm::RlmChannel,
+
     context_window_tokens: usize,
     plugins: WorkbenchCorePlugins,
 ) -> AnyhowResult<lash::LashCoreBuilder> {
@@ -303,7 +293,6 @@ pub(crate) async fn workbench_core_builder(
         }
         crate::session_protocol::SessionProtocol::Rlm => {
             let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(rlm_channel)
                 .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build();
@@ -426,7 +415,7 @@ pub(crate) struct WorkbenchTracing {
 /// its open model catalog served by `provider`.
 pub(crate) async fn build_workbench_core(
     stores: &Arc<dyn lash::StoreSet>,
-    rlm_channel: lash::rlm::RlmChannel,
+
     context_window_tokens: usize,
     plugins: WorkbenchCorePlugins,
     tracing: WorkbenchTracing,
@@ -437,8 +426,7 @@ pub(crate) async fn build_workbench_core(
         .config(lash::durable::DurableSettings::standard())
         .build()
         .context("build the durable backend")?;
-    let mut builder =
-        workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
+    let mut builder = workbench_core_builder(host_backend, context_window_tokens, plugins).await?;
     if let Some(export) = tracing.lash_vm_execution_sink {
         builder = builder.trace_product_observer(export);
     }
@@ -556,7 +544,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         ));
     }
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
-    let rlm_channel = workbench_rlm_channel()?;
     // A case's tool fixture brings its own scripted provider.
     #[cfg(feature = "e2e-tools")]
     let fixture_provider = tool_fixture.is_some();
@@ -755,7 +742,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //     .trace_context(TraceContext::default());
     let core = build_workbench_core(
         &stores.stores,
-        rlm_channel,
         context_window_tokens,
         plugins,
         WorkbenchTracing {

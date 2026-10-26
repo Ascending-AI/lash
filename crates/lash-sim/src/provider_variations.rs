@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use lash_provider_fixtures::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
 
-pub const TYPESCRIPT_CLOSE_DELIMITER: &str = "</typescript>";
+pub const PROVIDER_STOP_LITERAL: &str = "STOP_HERE";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderStopDialect {
@@ -189,14 +189,14 @@ pub fn provider_stop_fixture(
 pub struct ProviderStopSelection {
     pub call_index: usize,
     pub variation: ProviderStopVariation,
-    pub carries_unclosed_cell_retry_prompt: bool,
+    pub carries_code_retry_prompt: bool,
 }
 
 /// Reusable stop-boundary transport which selects a fresh fixture from the
 /// actual provider request on every call.
 ///
 /// Unlike a queue of request-matched scripts, this transport can model an
-/// unbounded protocol retry: every request with `</typescript>` receives the
+/// unbounded protocol retry: every request with `` receives the
 /// stop-consumed/no-literal response, while every request without a stop gets
 /// the literal-present response.
 #[derive(Clone, Debug)]
@@ -243,12 +243,12 @@ impl PairedProviderStopTransport {
             None => Ok(ProviderStopVariation::LiteralPresent),
             Some(Value::Array(stops))
                 if stops.len() == 1
-                    && stops.first().and_then(Value::as_str) == Some(TYPESCRIPT_CLOSE_DELIMITER) =>
+                    && stops.first().and_then(Value::as_str) == Some(PROVIDER_STOP_LITERAL) =>
             {
                 Ok(ProviderStopVariation::StopConsumed)
             }
             Some(other) => Err(LlmTransportError::new(format!(
-                "paired provider-stop transport expected no stop or exactly [\"{TYPESCRIPT_CLOSE_DELIMITER}\"], got {other}"
+                "paired provider-stop transport expected no stop or exactly [\"{PROVIDER_STOP_LITERAL}\"], got {other}"
             ))
             .with_kind(ProviderFailureKind::Validation)),
         }
@@ -270,9 +270,7 @@ impl LlmHttpTransport for PairedProviderStopTransport {
             selections.push(ProviderStopSelection {
                 call_index,
                 variation,
-                carries_unclosed_cell_retry_prompt: body_text.contains(
-                    "Reply again using exactly one paired `<typescript>...</typescript>` block",
-                ),
+                carries_code_retry_prompt: body_text.contains("Resend the program"),
             });
         }
 
@@ -287,15 +285,12 @@ impl LlmHttpTransport for PairedProviderStopTransport {
 mod tests {
     use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
 
-    use lash_core::facade_support::TurnFinish;
+    use lash_core::GenerationOptions;
     use lash_core::llm::types::{
         LlmEventSender, LlmMessage, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest,
         LlmRole, LlmTerminalReason, LlmToolChoice,
     };
-    use lash_core::{GenerationOptionOutcome, GenerationOptions};
-    use serde_json::json;
 
     use super::*;
     use lash_provider_fixtures::runtime_providers::runtime_provider_components;
@@ -438,7 +433,7 @@ mod tests {
                     variation.name()
                 );
                 assert_eq!(
-                    response.full_text().contains(TYPESCRIPT_CLOSE_DELIMITER),
+                    response.full_text().contains(PROVIDER_STOP_LITERAL),
                     matches!(variation, ProviderStopVariation::LiteralPresent),
                     "{} {} returned the wrong delimiter shape",
                     dialect.name(),
@@ -449,179 +444,11 @@ mod tests {
                     vec![ProviderStopSelection {
                         call_index: 0,
                         variation,
-                        carries_unclosed_cell_retry_prompt: false,
+                        carries_code_retry_prompt: false,
                     }]
                 );
             }
         }
-    }
-
-    #[tokio::test]
-    async fn rlm_stop_honoring_fixture_settles_once_without_wire_stop_or_unclosed_retry() {
-        let fixture = provider_stop_fixture(
-            ProviderStopDialect::AnthropicMessages,
-            ProviderStopVariation::LiteralPresent,
-        );
-        let transport = Arc::new(PairedProviderStopTransport::new(fixture.dialect));
-        let (provider, model, _) =
-            runtime_provider_components(fixture.dialect.provider_kind(), &transport)
-                .expect("Anthropic provider components");
-        let engine = crate::backend::SimEngine::new(0x5eed_7006)
-            .await
-            .expect("sim engine");
-        let backend = engine.backend();
-        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            lash_protocol_rlm::CellDialect::typescript(),
-        );
-        // This law bounds stop handling on a ready host. Kernel worker startup
-        // belongs to host setup, before the turn's two-second bound begins.
-        factory
-            .worker_service()
-            .pool()
-            .expect("prewarm the host's kernel worker");
-        let core = lash::LashCore::rlm_builder(backend, factory)
-            .data_retention(lash::DataRetention::standard())
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .execution_budgets(lash::ExecutionBudgets::recommended())
-            .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .serve_test_llm_profile(provider, model.clone())
-            .build(crate::sim_process_owner())
-            .expect("RLM core");
-        let session = crate::open_created_session_from(
-            lash::SessionSpec::new(
-                model.wire_model.clone(),
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-                lash_core::NoProgressBudget::bounded(12),
-            )
-            .generation(GenerationOptions {
-                stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
-                ..GenerationOptions::default()
-            }),
-            &core,
-            "rlm-stop-honoring-boundary",
-        )
-        .await
-        .expect("RLM session");
-        let run = tokio::time::timeout(
-            Duration::from_secs(2),
-            engine.run_text_turn(
-                &session,
-                "rlm-stop-honoring-turn",
-                "finish with the scripted value",
-            ),
-        )
-        .await;
-        let turn = match run {
-            Ok(turn) => turn.expect("RLM turn handler").expect("RLM turn"),
-            Err(_) => {
-                let selections = transport.selections();
-                let stop_consumed_calls = selections
-                    .iter()
-                    .filter(|selection| selection.variation == ProviderStopVariation::StopConsumed)
-                    .count();
-                let literal_present_calls = selections.len() - stop_consumed_calls;
-                let retry_prompt_calls = selections
-                    .iter()
-                    .filter(|selection| selection.carries_unclosed_cell_retry_prompt)
-                    .count();
-                panic!(
-                    "RLM turn exceeded 2s: calls={}, stop_consumed_calls={stop_consumed_calls}, literal_present_calls={literal_present_calls}, retry_unclosed_cell_prompt_calls={retry_prompt_calls}",
-                    selections.len()
-                );
-            }
-        };
-
-        assert_eq!(
-            turn.outcome,
-            lash::TurnOutcome::Finished(TurnFinish::Finished {
-                tool_name: "control.finish".into(),
-                value: json!("settled")
-            })
-        );
-        let read_view = session
-            .durable()
-            .read()
-            .await
-            .expect("committed read")
-            .expect("head");
-        assert_eq!(read_view.turn_index(), 1);
-        assert_eq!(transport.call_count(), 1);
-        assert_eq!(
-            transport.selections(),
-            vec![ProviderStopSelection {
-                call_index: 0,
-                variation: ProviderStopVariation::LiteralPresent,
-                carries_unclosed_cell_retry_prompt: false,
-            }]
-        );
-        let turn_model_calls =
-            lash::testing::model_calls_for_activity(&session.durable(), &turn.activities).await;
-
-        let attempt = turn_model_calls
-            .first()
-            .and_then(|call| call.attempts.first())
-            .expect("one provider attempt");
-        assert_eq!(turn_model_calls.len(), 1);
-        assert_eq!(turn_model_calls[0].attempts.len(), 1);
-        assert_eq!(
-            attempt
-                .generation_disposition
-                .expect("generation disposition")
-                .stop_sequences,
-            GenerationOptionOutcome::SuppressedProtocolOwned
-        );
-
-        let transcript = read_view.transcript().expect("valid committed history");
-        assert_eq!(
-            transcript
-                .visible()
-                .filter(|entry| matches!(
-                    &entry.item,
-                    lash_core::transcript::TranscriptItem::Message(message)
-                        if message.role == lash_core::transcript::TranscriptRole::User
-                ))
-                .count(),
-            1,
-            "one admitted input produces one canonical user row"
-        );
-        assert_eq!(
-            transcript
-                .visible()
-                .filter(|entry| entry.provenance.is_turn_reply)
-                .flat_map(|entry| match &entry.item {
-                    lash_core::transcript::TranscriptItem::Message(message) => message
-                        .blocks
-                        .iter()
-                        .filter_map(|block| match block {
-                            lash_core::transcript::TranscriptBlock::Text { text } => {
-                                Some(text.as_str())
-                            }
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>(),
-                    _ => Vec::new(),
-                })
-                .collect::<Vec<_>>(),
-            ["settled"],
-            "the final value has exactly one committed marked reply"
-        );
-        let extraction_decisions =
-            lash_protocol_rlm::recorded_extraction_decisions(read_view.active_events())
-                .expect("valid committed history");
-        assert_eq!(extraction_decisions, vec!["execute_typescript"]);
-        assert_eq!(
-            extraction_decisions
-                .iter()
-                .filter(|decision| decision.as_str() == "retry_unclosed_cell")
-                .count(),
-            0
-        );
     }
 
     fn google_native_finish_reason_from_adapter_trace(
@@ -674,7 +501,7 @@ mod tests {
             attachment_acceptance: Default::default(),
             generation: GenerationOptions {
                 stop_sequences: (variation == ProviderStopVariation::StopConsumed)
-                    .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())
+                    .then(|| PROVIDER_STOP_LITERAL.to_string())
                     .into_iter()
                     .collect(),
                 ..GenerationOptions::default()

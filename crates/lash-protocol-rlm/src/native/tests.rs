@@ -19,26 +19,16 @@ impl From<lash_core::TerminationMode> for Ending {
     }
 }
 
-pub(super) fn config(native: bool, ending: impl Into<Ending>) -> TurnMachineConfig {
-    config_with_dialect(
-        native,
-        ending.into(),
-        crate::dialect::CellDialect::typescript(),
-    )
+pub(super) fn config(ending: impl Into<Ending>) -> TurnMachineConfig {
+    config_with_dialect(ending.into(), crate::dialect::CellDialect::typescript())
 }
 
 pub(super) fn config_with_dialect(
-    native: bool,
     ending: Ending,
     dialect: crate::dialect::CellDialect,
 ) -> TurnMachineConfig {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
-            .channel(if native {
-                crate::RlmChannel::NativeTool
-            } else {
-                crate::RlmChannel::Cell
-            })
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
@@ -108,25 +98,7 @@ pub(super) fn text(text: &str) -> LlmOutputPart {
         response_meta: None,
     }
 }
-fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
-    LlmOutputPart::Text {
-        text: text.to_string(),
-        response_meta: Some(lash_core::llm::types::ResponseTextMeta {
-            phase: Some(
-                lash_core::llm::types::ResponsePhase::from_provider_wire(phase)
-                    .expect("test phase vocabulary"),
-            ),
-            ..Default::default()
-        }),
-    }
-}
-fn typescript_cell_config(termination: impl Into<Ending>) -> TurnMachineConfig {
-    let mut config = config(false, termination);
-    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new(
-        crate::dialect::CellDialect::typescript(),
-    ));
-    config
-}
+
 pub(super) fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
     LlmOutputPart::ToolCall {
         call_id: id.to_string(),
@@ -204,14 +176,13 @@ pub(super) fn reply_with_reason(
     drain(machine)
 }
 fn run(
-    native: bool,
     termination: impl Into<Ending>,
     prose: Option<&str>,
     exec: Option<Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>>,
 ) -> (Vec<serde_json::Value>, Vec<lash_core::CellRecord>) {
     let termination: Ending = termination.into();
     let mut machine = TurnMachine::new(
-        config(native, termination.clone()),
+        config(termination.clone()),
         Vec::new(),
         Default::default(),
         0,
@@ -225,13 +196,10 @@ fn run(
                 vec![text(prose)]
             }
         }
-        None if native => vec![call(
+        None => vec![call(
             "provider-id",
             "execute_code",
             r#"{"code":"await control.finish(1);"}"#,
-        )],
-        None => vec![text(
-            "<typescript>\nawait control.finish(1);\n</typescript>",
         )],
     };
     let mut effects = reply(&mut machine, &initial, parts);
@@ -247,9 +215,8 @@ fn run(
         // Pending provider replay metadata survives the parked execution boundary.
         let checkpoint = serde_json::to_string(&machine.checkpoint()).unwrap();
         let saved = serde_json::from_str(&checkpoint).unwrap();
-        machine =
-            TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved, None)
-                .expect("supported checkpoint");
+        machine = TurnMachine::restore_from_checkpoint(config(termination.clone()), saved, None)
+            .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::ExecResult { id, result });
         effects = drain(&mut machine);
@@ -269,9 +236,8 @@ fn run(
         checkpoints.push(serde_json::to_value(checkpoint).unwrap());
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine =
-            TurnMachine::restore_from_checkpoint(config(native, termination.clone()), saved, None)
-                .expect("supported checkpoint");
+        machine = TurnMachine::restore_from_checkpoint(config(termination.clone()), saved, None)
+            .expect("supported checkpoint");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -308,7 +274,7 @@ fn run(
                 // each real projector's rendered continuation independently.
                 let scenario = format!(
                     "{}_{}_{}",
-                    if native { "native" } else { "cell" },
+                    "native",
                     match termination.mode {
                         lash_core::TerminationMode::Natural => "natural",
                         lash_core::TerminationMode::TerminalRequired => "finish",
@@ -379,7 +345,6 @@ fn scripted_response_contains(parts: &[LlmOutputPart], needle: &str) -> bool {
 }
 
 fn assert_driver_stops_before_queued_provider_response(
-    native: bool,
     allowed_response: Vec<LlmOutputPart>,
     queued_response: Vec<LlmOutputPart>,
     allowed_code: &str,
@@ -390,7 +355,7 @@ fn assert_driver_stops_before_queued_provider_response(
         "the queued response must prove it would schedule the forbidden effect"
     );
     let mut provider_script = VecDeque::from([allowed_response, queued_response]);
-    let mut turn_config = config(native, lash_core::TerminationMode::Natural);
+    let mut turn_config = config(lash_core::TerminationMode::Natural);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
     let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
     let mut pending = drain(&mut machine);
@@ -501,7 +466,6 @@ fn assert_driver_stops_before_queued_provider_response(
 #[test]
 fn native_driver_stops_at_budget_before_queued_provider_response() {
     assert_driver_stops_before_queued_provider_response(
-        true,
         vec![call(
             "allowed-call",
             "execute_code",
@@ -517,23 +481,8 @@ fn native_driver_stops_at_budget_before_queued_provider_response() {
     );
 }
 
-#[test]
-fn cell_driver_stops_at_budget_before_queued_provider_response() {
-    assert_driver_stops_before_queued_provider_response(
-        false,
-        vec![text(
-            "<typescript>\nprint(\"cell-allowed\");\n</typescript>",
-        )],
-        vec![text(
-            "<typescript>\nprint(\"cell-forbidden-iteration-one\");\n</typescript>",
-        )],
-        r#"print("cell-allowed");"#,
-        "cell-forbidden-iteration-one",
-    );
-}
-
-fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(native: bool) {
-    let mut turn_config = config(native, lash_core::TerminationMode::TerminalRequired);
+fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
+    let mut turn_config = config(lash_core::TerminationMode::TerminalRequired);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
     turn_config.no_progress_budget = lash_core::NoProgressBudget::bounded(1);
     let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
@@ -578,41 +527,9 @@ fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(
 
 #[test]
 fn native_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
-    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(true);
+    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop();
 }
 
-#[test]
-fn cell_protocol_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
-    assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(false);
-}
-
-#[test]
-fn termination_and_trajectory_parity() {
-    for termination in [
-        Ending::from(lash_core::TerminationMode::Natural),
-        Ending::from(lash_core::TerminationMode::TerminalRequired),
-    ] {
-        for prose in ["answer", ""] {
-            assert_eq!(
-                run(false, termination.clone(), Some(prose), None),
-                run(true, termination.clone(), Some(prose), None)
-            );
-        }
-        for result in [
-            Ok(response(Some(serde_json::json!(1)))),
-            Err(lash_core::ExecCodeFailure::new(
-                lash_core::ExecCodeFailureReason::RuntimeStopped,
-                "runtime error",
-            )),
-            Ok(response(None)),
-        ] {
-            assert_eq!(
-                run(false, termination.clone(), None, Some(result.clone())),
-                run(true, termination.clone(), None, Some(result))
-            );
-        }
-    }
-}
 #[test]
 fn native_normalization_covers_every_schema_refusal() {
     let cases = [
@@ -668,7 +585,7 @@ fn native_normalization_covers_every_schema_refusal() {
     ];
     for (parts, decision) in cases {
         let mut machine = TurnMachine::new(
-            config(true, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -703,7 +620,7 @@ fn native_normalization_covers_every_schema_refusal() {
         assert_eq!(decisions, vec![serde_json::json!(decision)]);
     }
     let mut machine = TurnMachine::new(
-        config(true, lash_core::TerminationMode::Natural),
+        config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -723,7 +640,7 @@ fn native_normalization_covers_every_schema_refusal() {
 #[test]
 fn native_reasoning_only_is_provider_error() {
     let mut machine = TurnMachine::new(
-        config(true, lash_core::TerminationMode::Natural),
+        config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -761,7 +678,6 @@ fn native_reasoning_only_is_provider_error() {
 async fn factory_selects_native_abi_and_completed_cell_events() {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
-            .channel(crate::RlmChannel::NativeTool)
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
@@ -834,7 +750,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
 #[test]
 fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
     let mut machine = TurnMachine::new(
-        config(true, lash_core::TerminationMode::Natural),
+        config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -929,10 +845,10 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
 }
 
 #[test]
-fn output_limit_prose_repairs_on_both_plugins() {
-    for native in [false, true] {
+fn output_limit_prose_repairs() {
+    {
         let mut machine = TurnMachine::new(
-            config(native, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -952,7 +868,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
                     ..
                 }
             )),
-            "native={native}: truncated prose must repair, not finish"
+            "truncated prose must repair, not finish"
         );
         let id = effects
             .iter()
@@ -964,7 +880,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             saved,
             None,
         )
@@ -986,11 +902,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
         assert!(rendered.contains("partial answer"));
         assert!(rendered.contains("output limit"));
         insta::assert_snapshot!(
-            if native {
-                "native_output_limit_prose"
-            } else {
-                "cell_output_limit_prose"
-            },
+            "native_output_limit_prose",
             serde_json::to_string_pretty(&request.messages).unwrap()
         );
     }
@@ -1000,7 +912,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
 fn output_limit_calls_repair_without_execution_until_stall_budget() {
     for arguments in [r#"{"code":"finish(1);"}"#, r#"{"code":"finish"#] {
         let mut machine = TurnMachine::new(
-            config(true, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1040,7 +952,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap())
                     .unwrap();
             machine = TurnMachine::restore_from_checkpoint(
-                config(true, lash_core::TerminationMode::Natural),
+                config(lash_core::TerminationMode::Natural),
                 saved,
                 None,
             )
@@ -1093,237 +1005,12 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
     }
 }
 
-/// FIG-2777: a provider tool call on the cell channel — whose request declares
-/// no tools — is malformed provider output, repaired like a reply with no
-/// usable cell, not a terminal runtime error. The chunk is glm-5.3-flash's
-/// captured shape: the tool name is a stray `lash_vm</arg_value>` and the
-/// arguments hold the lash_vm source.
 #[test]
-fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() {
-    let stray_tool_call = || {
-        vec![call(
-            "call_stray",
-            "lash_vm</arg_value>",
-            r#"{"p":"await retail.customer(...)?"}"#,
-        )]
-    };
-    let mut machine = TurnMachine::new(
-        config(false, lash_core::TerminationMode::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let mut effects = drain(&mut machine);
-    let mut events = Vec::new();
-    let request = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::LlmCall { request, .. } => Some(request),
-            _ => None,
-        })
-        .expect("initial provider request");
-    assert!(
-        request.tools.is_empty(),
-        "the cell channel declares no tools: {request:?}"
-    );
-
-    // Attempts 1 and 2 repair; attempt 3 exhausts the stall budget.
-    for attempt in 1..=3 {
-        effects = reply(&mut machine, &effects, stray_tool_call());
-        events.extend(delivered_events(&effects).cloned());
-        assert!(
-            !effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-            "a stray tool call must never reach execution"
-        );
-        let outcome = effects.iter().find_map(|effect| match effect {
-            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome { outcome }) => {
-                Some(outcome)
-            }
-            _ => None,
-        });
-        if attempt < 3 {
-            assert!(
-                outcome.is_none(),
-                "attempt {attempt}: a repairable extraction failure must not finish the turn"
-            );
-        } else {
-            assert!(
-                matches!(
-                    outcome,
-                    Some(lash_core::facade_support::TurnOutcome::Stopped(
-                        lash_core::facade_support::TurnStop::MaxTurns
-                    ))
-                ),
-                "the typed failure lands only when the repair budget is exhausted: {outcome:?}"
-            );
-        }
-        if attempt == 3 {
-            assert!(
-                effects
-                    .iter()
-                    .any(|effect| matches!(effect, Effect::Done { .. }))
-            );
-            break;
-        }
-        let id = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::Checkpoint { id, .. } => Some(*id),
-                _ => None,
-            })
-            .expect("a repair round checkpoints before the next request");
-        let saved =
-            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(
-            config(false, lash_core::TerminationMode::Natural),
-            saved,
-            None,
-        )
-        .expect("supported checkpoint");
-        drain(&mut machine);
-        machine.handle_response(Response::Checkpoint {
-            id,
-            delivery: Default::default(),
-        });
-        effects = drain(&mut machine);
-        events.extend(delivered_events(&effects).cloned());
-        let request = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::LlmCall { request, .. } => Some(request),
-                _ => None,
-            })
-            .expect("a repair round issues another provider request");
-        let repair_text = request
-            .messages
-            .iter()
-            .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                lash_core::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            repair_text.contains("lash_vm</arg_value>"),
-            "the repair copy names the stray call: {repair_text}"
-        );
-        assert!(
-            repair_text.contains("paired `<typescript>...</typescript>` block"),
-            "the standard paired-block diagnostic rides the repair: {repair_text}"
-        );
-    }
-
-    let decisions = events
-        .iter()
-        .filter_map(|record| match record {
-            lash_core::SessionHistoryRecord::Protocol(event) => {
-                match crate::projection::decode_rlm_protocol_event(event)
-                    .expect("valid history fixture")
-                    .as_deref()
-                {
-                    Some(RlmProtocolEvent::RlmDiagnostic(d))
-                        if d.phase == lash_rlm_types::RlmDiagnosticPhase::LlmExtraction =>
-                    {
-                        Some(d.payload["decision"].clone())
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        decisions,
-        vec![serde_json::json!("retry_native_tool_call"); 3]
-    );
-}
-
-/// The same stray call repaired once lets the turn finish normally when the
-/// model's next reply carries a real cell.
-#[test]
-fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
-    let mut machine = TurnMachine::new(
-        typescript_cell_config(lash_core::TerminationMode::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-    let mut effects = reply(
-        &mut machine,
-        &initial,
-        vec![call(
-            "call_stray",
-            "native_lookup",
-            r#"{"query":"forbidden"}"#,
-        )],
-    );
-    let id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        })
-        .expect("a repair round checkpoints before the next request");
-    machine.handle_response(Response::Checkpoint {
-        id,
-        delivery: Default::default(),
-    });
-    effects = drain(&mut machine);
-    effects = reply(
-        &mut machine,
-        &effects,
-        vec![text(
-            "<typescript>\nawait control.finish(1);\n</typescript>",
-        )],
-    );
-    let id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::ExecCode { id, .. } => Some(*id),
-            _ => None,
-        })
-        .expect("the repaired turn executes the next cell");
-    machine.handle_response(Response::ExecResult {
-        id,
-        result: Ok(response(Some(serde_json::json!(1)))),
-    });
-    effects = drain(&mut machine);
-    for _ in 0..4 {
-        let Some(id) = effects.iter().find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        }) else {
-            break;
-        };
-        machine.handle_response(Response::Checkpoint {
-            id,
-            delivery: Default::default(),
-        });
-        effects = drain(&mut machine);
-    }
-    assert!(
-        effects.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
-                outcome: lash_core::facade_support::TurnOutcome::Finished(
-                    lash_core::facade_support::TurnFinish::Finished { .. }
-                )
-            })
-        )),
-        "a repaired stray call lets the next cell settle the turn: {effects:?}"
-    );
-}
-
-#[test]
-fn configured_prompt_is_instructions_on_both_channels() {
-    for native in [false, true] {
+fn configured_prompt_is_instructions() {
+    {
         for (prompt, expected) in [("configured prompt", Some("configured prompt")), ("", None)] {
             let mut machine = TurnMachine::new(
-                config(native, lash_core::TerminationMode::Natural),
+                config(lash_core::TerminationMode::Natural),
                 Vec::new(),
                 Default::default(),
                 0,
@@ -1336,10 +1023,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
                     _ => None,
                 })
                 .expect("initial provider request");
-            assert_eq!(
-                projected.instructions, None,
-                "native={native}: history only"
-            );
+            assert_eq!(projected.instructions, None, "history only");
             // The call's admission lowers its composed prompt onto the
             // projected request.
             let mut request = projected.materialize();
@@ -1349,133 +1033,15 @@ fn configured_prompt_is_instructions_on_both_channels() {
                 None,
                 true,
             );
-            assert_eq!(request.instructions.as_deref(), expected, "native={native}");
+            assert_eq!(request.instructions.as_deref(), expected, "native");
             assert!(
                 request
                     .messages
                     .iter()
                     .all(|message| message.role != lash_core::llm::types::LlmRole::System),
-                "native={native}: configured prompt must not enter conversation history"
+                "configured prompt must not enter conversation history"
             );
         }
-    }
-}
-
-#[test]
-fn multipart_response_preserves_executable_cell() {
-    let mut machine = TurnMachine::new(
-        typescript_cell_config(lash_core::TerminationMode::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-
-    let effects = reply(
-        &mut machine,
-        &initial,
-        vec![
-            phased_text(
-                "commentary",
-                "Creating the artifact.\n<typescript>\nfinish(\"created\");\n</typescript>",
-            ),
-            phased_text("final_answer", "The artifact is ready."),
-        ],
-    );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::ExecCode { language, code, .. }
-            if language == "typescript" && code.trim() == "finish(\"created\");"
-    )));
-}
-
-#[test]
-fn no_cell_multipart_response_finishes_with_final_answer_prose() {
-    let mut machine = TurnMachine::new(
-        typescript_cell_config(lash_core::TerminationMode::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-
-    let effects = reply(
-        &mut machine,
-        &initial,
-        vec![
-            phased_text("commentary", "Internal progress."),
-            phased_text("final_answer", "Visible answer."),
-        ],
-    );
-
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-    );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(lash_core::session_model::SessionStreamEvent::LlmResponse { content, .. })
-            if content == "Visible answer."
-    )));
-
-    let checkpoint_id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        })
-        .expect("prose-only response reaches completion checkpoint");
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: Default::default(),
-    });
-    let completed = drain(&mut machine);
-    assert!(completed.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage { text }
-            )
-        }) if text == "Visible answer."
-    )));
-}
-
-#[test]
-fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
-    for dialect in [
-        Arc::new(crate::dialect::typescript_test_dialect()) as Arc<crate::dialect::SessionDialect>,
-        Arc::new(crate::dialect::typescript_test_dialect()),
-    ] {
-        let mut config = config(false, lash_core::TerminationMode::TerminalRequired);
-        config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
-            &dialect,
-        )));
-        let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
-        let initial = drain(&mut machine);
-        let effects = reply(
-            &mut machine,
-            &initial,
-            vec![text("```typescript\nawait control.finish(1)\n```")],
-        );
-        assert!(
-            !effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-        );
-        let events = serde_json::to_string(&machine.events()).unwrap();
-        assert!(events.contains("request_finish"), "{events}");
-        // The repair is durably appended before the continuation checkpoint.
-        let continuation = events;
-        assert!(
-            continuation.contains(
-                "No code from that response executed. Markdown code fences do not execute here."
-            ),
-            "{continuation}"
-        );
-        let tags = dialect.cell_tags();
-        assert!(continuation.contains(&format!("Resend the needed program between `{}` and `{}` on their own lines, without backticks.", tags.open, tags.close)), "{continuation}");
     }
 }
 
@@ -1511,7 +1077,7 @@ fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
 fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
     let fingerprint_for = |reasoning: &str| {
         let mut machine = TurnMachine::new(
-            config(true, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1551,7 +1117,7 @@ fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
 fn native_user_stop_is_terminal_live_and_after_restore() {
     for restore in [false, true] {
         let mut machine = TurnMachine::new(
-            config(true, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1571,7 +1137,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
                     .unwrap();
             machine = TurnMachine::restore_from_checkpoint(
-                config(true, lash_core::TerminationMode::Natural),
+                config(lash_core::TerminationMode::Natural),
                 checkpoint,
                 None,
             )
@@ -1646,15 +1212,10 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
             items: Some(Box::new(lash_core::ValueShape::String { bytes: 99_996 })),
         },
     };
-    for native in [false, true] {
+    {
         let mut exec = response(Some(serde_json::json!(1)));
         exec.prints_retained = Some(archive.clone());
-        let (_, steps) = run(
-            native,
-            lash_core::TerminationMode::Natural,
-            None,
-            Some(Ok(exec)),
-        );
+        let (_, steps) = run(lash_core::TerminationMode::Natural, None, Some(Ok(exec)));
         let [step] = steps.as_slice() else {
             panic!("one trajectory step: {steps:?}");
         };
@@ -1669,9 +1230,9 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
 fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints() {
     let payload =
         serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
-    for native in [false, true] {
+    {
         let mut machine = TurnMachine::new(
-            config(native, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1684,15 +1245,11 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
                 _ => None,
             })
             .expect("one model call");
-        let parts = if native {
+        let parts = {
             vec![call(
                 "terminal",
                 "execute_code",
                 r#"{"code":"await tools.appLookup({});"}"#,
-            )]
-        } else {
-            vec![text(
-                "<typescript>\nawait tools.appLookup({});\n</typescript>",
             )]
         };
         machine.handle_response(Response::LlmComplete {
@@ -1712,7 +1269,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
         let usage = saved["checkpoint"]["cumulative_usage"].clone();
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             serde_json::from_value(saved).unwrap(),
             None,
         )
@@ -1782,7 +1339,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
         assert_eq!(saved["checkpoint"]["cumulative_usage"], usage);
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, lash_core::TerminationMode::Natural),
+            config(lash_core::TerminationMode::Natural),
             serde_json::from_value(saved).unwrap(),
             None,
         )

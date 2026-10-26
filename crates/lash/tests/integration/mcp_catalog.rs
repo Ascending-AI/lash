@@ -77,7 +77,7 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
     )])).await.expect("instruction peer connects"));
     assert_eq!(factory.pool().advertised_tools().len(), 2);
     let mut observations = Vec::new();
-    for surface in ["standard", "cell", "native"] {
+    for surface in ["standard", "native"] {
         let (protocol, protocol_id): (Arc<dyn PluginFactory>, &str) = if surface == "standard" {
             (
                 Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
@@ -87,11 +87,6 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
             (
                 Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                        .channel(if surface == "cell" {
-                            lash_protocol_rlm::RlmChannel::Cell
-                        } else {
-                            lash_protocol_rlm::RlmChannel::NativeTool
-                        })
                         .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1000))
                         .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(1))
                         .build(),
@@ -134,7 +129,7 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
         observations.push((surface, prompt.matches(INSTRUCTIONS).count()));
     }
     factory.shutdown().await.expect("peer shutdown");
-    assert_eq!(observations, [("standard", 1), ("cell", 1), ("native", 1)]);
+    assert_eq!(observations, [("standard", 1), ("native", 1)]);
 }
 
 const PEER: &str = r#"

@@ -222,11 +222,15 @@ await control.finish("must not finish");"#
         .complete(move |_| {
             let first = counted.fetch_add(1, Ordering::SeqCst) == 0;
             async move {
-                Ok(text_response(&typescript_block(if first {
-                    script
-                } else {
-                    "await control.finish(2);"
-                })))
+                Ok(lash_facade_tests::control_cell_response(
+                    0,
+                    (if first {
+                        script
+                    } else {
+                        "await control.finish(2);"
+                    })
+                    .to_string(),
+                ))
             }
         })
         .build()

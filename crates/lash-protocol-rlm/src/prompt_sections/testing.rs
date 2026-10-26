@@ -11,24 +11,24 @@ use lash_rlm_types::RlmCreateExtras;
 
 use super::{RlmPromptFacts, RlmSectionBehaviour, register_sections};
 use crate::dialect::SessionDialect;
-use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmRecordedConfig};
+use crate::plugin::{RLM_PROTOCOL_PLUGIN_ID, RlmRecordedConfig};
 
 /// The RLM protocol's sections under one behaviour, as a plugin.
 #[derive(Clone)]
 pub(crate) struct RlmSections {
     pub(crate) dialect: Arc<SessionDialect>,
-    pub(crate) channel: RlmChannel,
+
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
     pub(crate) discovery: Option<crate::plugin::RlmDiscovery>,
     pub(crate) budget_tokens: Option<usize>,
 }
 
 impl RlmSections {
-    /// The TypeScript cell channel with the default features and no budget.
+    /// The TypeScript protocol with the default features and no budget.
     pub(crate) fn cell(dialect: SessionDialect) -> Self {
         Self {
             dialect: Arc::new(dialect),
-            channel: RlmChannel::Cell,
+
             prompt_features: Default::default(),
             discovery: None,
             budget_tokens: None,
@@ -53,7 +53,6 @@ impl RlmSections {
         let mut reg = lash_core::plugin::PluginRegistrar::<Self>::new(RLM_PROTOCOL_PLUGIN_ID);
         register_sections(&mut reg, |owner| RlmSectionBehaviour {
             dialect: Arc::clone(&owner.dialect),
-            channel: owner.channel,
             prompt_features: owner.prompt_features,
             discovery: owner.discovery.clone(),
             budget_tokens: owner.budget_tokens,

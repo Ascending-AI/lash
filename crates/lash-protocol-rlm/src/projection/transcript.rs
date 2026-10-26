@@ -5,7 +5,7 @@ use lash_core::transcript::{
 use lash_rlm_types::RlmProtocolEvent;
 
 /// Decodes the RLM protocol's stored shapes into typed transcript items, the
-/// same way for both channels: a cell's assistant context and a refused
+/// same way for every exchange: a cell's assistant context and a refused
 /// call's exchange as the committed messages they are, other protocol output
 /// as its reasoning, and each trajectory step as the cell record it stores.
 pub(crate) struct RlmTranscriptDecoder;

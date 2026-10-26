@@ -172,10 +172,11 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
         .await
         .expect("rlm final-value provider response");
 
-    assert!(response.full_text().contains("semantic-channel"));
+    assert_eq!(response.full_text(), "Visible prose before semantic value.");
     assert!(
-        response_text_part(&response).is_some_and(|text| text.contains("semantic-channel")),
-        "rlm final-value provider must return the semantic text part"
+        matches!(response.parts.as_slice(), [LlmOutputPart::Text { .. }, LlmOutputPart::ToolCall { tool_name, input_json, .. }]
+            if tool_name == "execute_code" && input_json.contains("semantic-channel")),
+        "rlm final-value provider must return its program as a native call"
     );
 }
 

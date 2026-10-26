@@ -174,113 +174,6 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
     Ok(())
 }
 
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
-        const RAW_FINAL: &str = "Visible before cell.\n<typescript>\nconst payload = \"```markdown\\ninside\\n```\";\nawait control.finish(\"streamed raw final ok\");\n</typescript>";
-        const EXPECTED_CODE: &str = "const payload = \"```markdown\\ninside\\n```\";\nawait control.finish(\"streamed raw final ok\");";
-
-        let provider = lash::testing::TestProvider::builder()
-            .kind("stream-raw-final-test")
-            .requires_streaming(true)
-            .complete(|request| async move {
-                let stream = request
-                    .stream_events
-                    .expect("RLM streaming turn should request provider stream events");
-                for chunk in [
-                    "Visible before",
-                    " cell.\n<type",
-                    "script>\nconst payload = \"",
-                    "```markdown\\ninside\\n",
-                    "```\";\nawait control.finish(",
-                    "\"streamed raw final ok\");\n</typescript>",
-                ] {
-                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::AssistantText,
-                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                        text: chunk.to_string(),
-                    }));
-                }
-                Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: RAW_FINAL.to_string(),
-                        response_meta: None,
-                    }],
-                    response_metadata: Default::default(),
-                    ..LlmResponse::default()
-                })
-            })
-            .build()
-            .into_handle();
-
-        let core =
-            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
-                .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .build(lash_facade_tests::runtime_lease_owner())?;
-        let session = created_session(
-            &core,
-            lash_vocabulary::identity::SessionId::parse("rlm-streamed-raw-final-cell")
-                .expect("nonblank host identity"),
-        )
-        .await
-        .open()
-        .await?;
-        let events = Arc::new(RecordingEvents::default());
-
-        let result = session
-            .send(TurnInput::text("say hi"))
-            .output_into(events.as_ref())
-            .await?;
-
-        assert!(matches!(
-            result,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
-        ));
-        assert_eq!(
-            result.finished().map(|(_, value)| value),
-            Some(&serde_json::json!("streamed raw final ok"))
-        );
-
-        let events = events.snapshot().await;
-        let prose = assistant_prose(&events);
-        assert_eq!(prose, "Visible before cell.\n");
-        assert!(!prose.contains("<typescript>"));
-        assert!(!prose.contains("finish"));
-        assert!(!prose.contains("```markdown"));
-
-        let code_started = events
-            .iter()
-            .find(|event| matches!(&event.event, TurnEvent::CodeBlockStarted { .. }))
-            .expect("code started");
-        let TurnEvent::CodeBlockStarted { language, code, .. } = &code_started.event else {
-            unreachable!();
-        };
-        assert_eq!(language, "typescript");
-        assert_eq!(code, EXPECTED_CODE);
-        assert!(!code.contains("<typescript>"));
-
-        let code_completed = events
-            .iter()
-            .find(|event| matches!(&event.event, TurnEvent::CodeBlockCompleted { .. }))
-            .expect("code completed");
-        let TurnEvent::CodeBlockCompleted { result, .. } = &code_completed.event else {
-            unreachable!();
-        };
-        assert!(!result.is_failed());
-
-        let terminal_output = events
-            .iter()
-            .find(|event| matches!(&event.event, TurnEvent::Finished { .. }))
-            .expect("terminal output");
-        let TurnEvent::Finished { value, .. } = &terminal_output.event else {
-            unreachable!();
-        };
-        assert_eq!(value, &serde_json::json!("streamed raw final ok"));
-        Ok(())
-    })
-}
-
 /// Budgets for a call whose cell is accepted mid-stream: a short stop grace,
 /// which the tail's drain must outlast, and `model_total` as the call's
 /// deadline.
@@ -310,244 +203,6 @@ pub(super) async fn rlm_abort_drain_core(
         .build(lash_facade_tests::runtime_lease_owner())
 }
 
-/// The first cell of an RLM answer, as the provider streams it.
-#[cfg(feature = "rlm")]
-fn streamed_cell(stream: &lash_core::llm::types::LlmEventSender, value: &str) {
-    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-        kind: StreamBlockKind::AssistantText,
-        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-        text: format!("<typescript>\nawait control.finish(\"{value}\");\n</typescript>\n"),
-    }));
-}
-
-/// Hands the provider the turn's first `CodeBlockStarted`: the accepted cell
-/// is running. Records every activity.
-#[cfg(feature = "rlm")]
-#[derive(Default)]
-struct CellStarted {
-    started: StdMutex<Option<oneshot::Sender<()>>>,
-    events: RecordingEvents,
-}
-
-#[cfg(feature = "rlm")]
-#[async_trait]
-impl TurnActivitySink for CellStarted {
-    async fn emit(&self, activity: TurnActivity) {
-        if matches!(activity.event, TurnEvent::CodeBlockStarted { .. })
-            && let Some(started) = self.started.lock_recover().take()
-        {
-            let _ = started.send(());
-        }
-        self.events.emit(activity).await;
-    }
-}
-
-/// Observes the provider's future as a host decorator around it does: it
-/// either ran to its end or was dropped first.
-#[cfg(feature = "rlm")]
-struct DecoratedFuture {
-    ended: Arc<std::sync::atomic::AtomicBool>,
-    dropped_early: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[cfg(feature = "rlm")]
-impl DecoratedFuture {
-    fn end(self) {
-        self.ended.store(true, Ordering::SeqCst);
-    }
-}
-
-#[cfg(feature = "rlm")]
-impl Drop for DecoratedFuture {
-    fn drop(&mut self) {
-        if !self.ended.load(Ordering::SeqCst) {
-            self.dropped_early.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
-/// FIG-6433: a call whose cell the protocol accepts mid-stream still
-/// commits the usage its provider reports after the tail, later than the
-/// stop grace: the cell runs first, the provider future runs to its end,
-/// and the call record and the turn's totals carry the usage.
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_accepted_cell_commits_the_usage_its_tail_reports() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-tail-usage", || async {
-        let (started_tx, started_rx) = oneshot::channel();
-        let started_rx = Arc::new(StdMutex::new(Some(started_rx)));
-        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let dropped_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let provider = lash::testing::TestProvider::builder()
-            .kind("rlm-tail-usage")
-            .requires_streaming(true)
-            .complete({
-                let ended = Arc::clone(&ended);
-                let dropped_early = Arc::clone(&dropped_early);
-                move |request| {
-                    let started = started_rx.lock_recover().take();
-                    let decorated = DecoratedFuture {
-                        ended: Arc::clone(&ended),
-                        dropped_early: Arc::clone(&dropped_early),
-                    };
-                    async move {
-                        let stream = request.stream_events.expect("stream events");
-                        streamed_cell(&stream, "tail drained");
-                        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                            kind: StreamBlockKind::AssistantText,
-                            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                            text: "Predicted continuation.".to_string(),
-                        }));
-                        // The usage chunk waits for the accepted cell to run,
-                        // then for longer than the stop grace.
-                        started.expect("one call").await.expect("the cell started");
-                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
-                        let usage = lash_core::llm::types::LlmUsage {
-                            input_tokens: 17,
-                            output_tokens: 5,
-                            ..Default::default()
-                        };
-                        stream.send(LlmStreamEvent::Usage(usage.clone()));
-                        decorated.end();
-                        Ok(LlmResponse {
-                            parts: vec![LlmOutputPart::Text {
-                                text: "<typescript>\nawait control.finish(\"tail drained\");\n</typescript>\nPredicted continuation.".to_string(),
-                                response_meta: None,
-                            }],
-                            usage,
-                            terminal_reason: lash_core::LlmTerminalReason::Stop,
-                            ..LlmResponse::default()
-                        })
-                    }
-                }
-            })
-            .build()
-            .into_handle();
-        let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
-        let session = created_session(
-            &core,
-            lash_vocabulary::identity::SessionId::parse("rlm-tail-usage")
-                .expect("nonblank host identity"),
-        )
-        .await
-        .open()
-        .await?;
-        let sink = CellStarted {
-            started: StdMutex::new(Some(started_tx)),
-            ..CellStarted::default()
-        };
-
-        let result = session
-            .send(TurnInput::text("finish"))
-            .output_into(&sink)
-            .await?;
-
-        assert_eq!(
-            result.finished().map(|(_, value)| value),
-            Some(&serde_json::json!("tail drained"))
-        );
-        assert!(
-            ended.load(Ordering::SeqCst),
-            "the provider future ran to its end"
-        );
-        assert!(
-            !dropped_early.load(Ordering::SeqCst),
-            "the provider future was never dropped before its end"
-        );
-        let calls = lash::testing::model_calls_for_activity(
-            &session.durable(),
-            &sink.events.snapshot().await,
-        )
-        .await;
-        let record = calls.first().expect("the call's record");
-        let attempt = record.attempts.last().expect("the call's attempt");
-        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
-        assert_eq!(
-            attempt.usage.as_ref().map(|usage| usage.input_tokens),
-            Some(17)
-        );
-        assert_eq!(
-            attempt.usage.as_ref().map(|usage| usage.output_tokens),
-            Some(5)
-        );
-        assert_eq!(record.usage().expect("usage").input_tokens, 17);
-        assert_eq!(record.usage().expect("usage").output_tokens, 5);
-        let committed = committed(&session).await;
-        assert_eq!(committed.token_usage().input_tokens, 17);
-        assert_eq!(committed.token_usage().output_tokens, 5);
-        // The cell ran before the call's record, which waits for the usage.
-        let events = sink.events.snapshot().await;
-        let cell_started = events
-            .iter()
-            .position(|event| matches!(event.event, TurnEvent::CodeBlockStarted { .. }))
-            .expect("the cell started");
-        let call_recorded = events
-            .iter()
-            .position(|event| matches!(event.event, TurnEvent::ModelCallRecorded { .. }))
-            .expect("the call was recorded");
-        assert!(cell_started < call_recorded);
-        Ok(())
-    })
-}
-
-/// FIG-6433: a call whose cell was accepted mid-stream and whose usage
-/// never arrives, because its deadline passes or its stream fails, has
-/// unknown usage on its record and in the turn's totals, never zero.
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-tail-unknown", || async {
-        for case in ["deadline", "stream-error"] {
-            let provider = lash::testing::TestProvider::builder()
-                .kind("rlm-tail-unknown")
-                .requires_streaming(true)
-                .complete(move |request| async move {
-                    let stream = request.stream_events.expect("stream events");
-                    streamed_cell(&stream, "unknown usage");
-                    if case == "deadline" {
-                        return std::future::pending().await;
-                    }
-                    tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
-                    Err(LlmTransportError::new("the stream broke after the cell")
-                        .with_kind(lash_core::ProviderFailureKind::Stream)
-                        .with_retry_verdict(lash::provider::TransportRetryVerdict::NotRetryable))
-                })
-                .build()
-                .into_handle();
-            let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
-            let session = created_session(
-                &core,
-                lash_vocabulary::identity::SessionId::parse(format!("rlm-tail-unknown-{case}"))
-                    .expect("nonblank host identity"),
-            )
-            .await
-            .open()
-            .await?;
-
-            let result = session.send(TurnInput::text("finish")).output().await?;
-
-            assert_eq!(
-                result.finished().map(|(_, value)| value),
-                Some(&serde_json::json!("unknown usage")),
-                "{case}"
-            );
-            let result_model_calls =
-                lash::testing::model_calls_for_activity(&session.durable(), &result.activities)
-                    .await;
-            let record = result_model_calls.first().expect("the call's record");
-            let attempt = record.attempts.last().expect("the call's attempt");
-            assert_eq!(attempt.usage, None, "{case}");
-            assert!(record.usage_unknown(), "{case}");
-            let unknown = lash_core::llm::types::LlmUsage::unknown_call();
-            assert_eq!(record.usage().expect("bounded usage"), unknown, "{case}");
-            assert_eq!(committed(&session).await.token_usage(), &unknown, "{case}");
-        }
-        Ok(())
-    })
-}
-
-/// FIG-6547: a host decorator receives a terminal for every dispatched
-/// attempt, including deadline and cancellation while a cell's tail drains.
 #[cfg(feature = "rlm")]
 #[derive(Debug)]
 struct CountingProvider {
@@ -641,9 +296,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
         use lash_core::provider::{AttemptEndReason, AttemptTerminal};
         for case in [
             "deadline-streaming",
-            "deadline-tail",
             "cancel-streaming",
-            "cancel-tail",
             "stream-hook",
             "provider-panic",
         ] {
@@ -672,8 +325,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                             ..Default::default()
                         }));
                         stream.send(LlmStreamEvent::Usage(usage));
-                        if case.ends_with("tail") { streamed_cell(&stream, "partial receipt"); }
-                        else { stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText, block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "Let me think.".into() })); }
+                        { stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText, block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "Let me think.".into() })); }
                         if case == "provider-panic" { panic!("provider panicked after receiving usage"); }
                         std::future::pending().await
                     }
@@ -694,32 +346,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             ))
             .execution_budgets(tail_budgets(total))
             .serve_test_llm_profile(provider, mock_llm_profile_spec());
-            let before_completion = Arc::new(tokio::sync::Notify::new());
-            let finish_checkpoint = Arc::new(tokio::sync::Notify::new());
-            if case == "cancel-tail" {
-                builder = builder.plugin(Arc::new(StaticPluginFactory::new(
-                    lash_core::plugin::PluginDeclaration::initial("cancel-before-commit"),
-                    lash_core::facade_support::PluginSpec::new().with_checkpoint(
-                        lash_core::hook_key!("hold-before-completion"),
-                        Arc::new({
-                            let before_completion = before_completion.clone();
-                            let finish_checkpoint = finish_checkpoint.clone();
-                            move |ctx| {
-                                let before_completion = before_completion.clone();
-                                let finish_checkpoint = finish_checkpoint.clone();
-                                Box::pin(async move {
-                                    if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
-                                    {
-                                        before_completion.notify_one();
-                                        finish_checkpoint.notified().await;
-                                    }
-                                    Ok(Default::default())
-                                })
-                            }
-                        }),
-                    ),
-                )));
-            }
+
             if case == "stream-hook" {
                 builder = builder.plugin(Arc::new(StaticPluginFactory::new(
                     lash_core::plugin::PluginDeclaration::initial("failing-stream-consumer"),
@@ -748,11 +375,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
             .await?;
             let handle = session.send(TurnInput::text("finish")).await?;
             if case.starts_with("cancel") {
-                if case == "cancel-tail" {
-                    // Force the cancel after the cell finished, before Done's
-                    // cancel read. CodeBlockStarted also allowed a live-cell stop.
-                    before_completion.notified().await;
-                } else {
+                {
                     let mut events = handle.events();
                     while let Some(activity) = events.next_activity().await {
                         if matches!(
@@ -767,7 +390,6 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                     .cancel()
                     .mode(lash::TurnCancelMode::Immediate)
                     .await?;
-                finish_checkpoint.notify_one();
             }
             let output = handle.output().await;
             if case != "provider-panic" {
@@ -794,9 +416,7 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
                 let lash::turn::ModelCallRead::Settled { record } = &records[0] else {
                     panic!("{case}: the record settled");
                 };
-                if case.ends_with("tail") {
-                    assert_eq!(record.end, lash::turn::ModelCallEnd::Answered);
-                } else {
+                {
                     assert!(
                         matches!(record.end, lash::turn::ModelCallEnd::Unanswered { .. }),
                         "{case}: {record:?}"
@@ -866,12 +486,11 @@ pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_rece
 #[test]
 pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_terminal() -> Result<()> {
     run_async_test_on_stack_budget("returned-provider-attempt", || async {
-        for case in ["completed", "accepted-mid-stream", "retry"] {
+        for case in ["completed", "retry"] {
             let terminals = Arc::new(StdMutex::new(Vec::new()));
             let returned = Arc::new(StdMutex::new(Vec::new()));
             let provider = lash::testing::TestProvider::builder()
                 .kind("returned-provider-attempt")
-                .requires_streaming(case == "accepted-mid-stream")
                 .options(lash_core::provider::ProviderOptions {
                     reliability: lash_core::provider::ProviderReliability::default()
                         .max_attempts(Some(2))
@@ -903,17 +522,10 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
                                 ..Default::default()
                             }));
                     }
-                    if case == "accepted-mid-stream" {
-                        streamed_cell(&request.stream_events.expect("stream events"), "settled");
-                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
-                    }
                     Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text:
-                                "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
-                                    .into(),
-                            response_meta: None,
-                        }],
+                        parts: vec![lash::testing::execute_code(
+                            "await control.finish(\"settled\");\n",
+                        )],
                         usage: lash_core::llm::types::LlmUsage {
                             input_tokens: 17,
                             output_tokens: 5,
@@ -1134,44 +746,6 @@ pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> 
     })
 }
 
-/// A provider reset after the cell was accepted never erases the cell: the
-/// reset belongs to the call's tail.
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-abort-drain-attempt-reset", || async {
-        let provider = lash::testing::TestProvider::builder()
-            .kind("rlm-abort-reset")
-            .requires_streaming(true)
-            .complete(|request| async move {
-                let stream = request.stream_events.expect("stream events");
-                streamed_cell(&stream, "cell survived reset");
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                stream.send(LlmStreamEvent::AttemptReset);
-                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
-            })
-            .build()
-            .into_handle();
-        let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
-        let session = created_session(
-            &core,
-            lash_vocabulary::identity::SessionId::parse("rlm-abort-reset")
-                .expect("nonblank host identity"),
-        )
-        .await
-        .open()
-        .await?;
-
-        let result = session.send(TurnInput::text("finish")).output().await?;
-
-        assert_eq!(
-            result.finished().map(|(_, value)| value),
-            Some(&serde_json::json!("cell survived reset"))
-        );
-        Ok(())
-    })
-}
-
 #[cfg(feature = "rlm")]
 #[test]
 pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() -> Result<()> {
@@ -1180,11 +754,9 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .kind("rlm-zero-usage")
             .complete(|_request| async move {
                 Ok(LlmResponse {
-                    parts: vec![lash_core::llm::types::LlmOutputPart::Text {
-                        text: "<typescript>\nawait control.finish(\"quiet\");\n</typescript>\n"
-                            .to_string(),
-                        response_meta: None,
-                    }],
+                    parts: vec![lash::testing::execute_code(
+                        "await control.finish(\"quiet\");\n".to_string(),
+                    )],
                     terminal_reason: lash_core::LlmTerminalReason::Stop,
                     ..LlmResponse::default()
                 })
@@ -1537,125 +1109,6 @@ await control.finish("done");"#,
         );
     }
     Ok(())
-}
-
-/// FIG-2777: a provider tool call on the cell channel — whose request declares
-/// no tools — is malformed provider output, so it takes the extraction-failure
-/// repair round like a reply with no usable cell. The turn stops typed only if
-/// the repair budget dies with it.
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-native-tool-contract-test", || async {
-        let trace = Arc::new(lash::testing::RecordingTraceSink::new());
-        let repair_request = Arc::new(std::sync::Mutex::new(None));
-        let responses = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from([
-            LlmResponse {
-                parts: vec![LlmOutputPart::ToolCall {
-                    call_id: "native-call-1".to_string(),
-                    tool_name: "native_lookup".to_string(),
-                    input_json: r#"{"query":"forbidden"}"#.to_string(),
-                    replay: None,
-                }],
-                terminal_reason: lash_core::LlmTerminalReason::ToolUse,
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            },
-            text_response(&typescript_block("await control.finish(1);")),
-        ])));
-        let provider = lash::testing::TestProvider::builder()
-            .kind("native-tool-call-under-rlm")
-            .complete({
-                let repair_request = Arc::clone(&repair_request);
-                move |request| {
-                    let responses = Arc::clone(&responses);
-                    let repair_request = Arc::clone(&repair_request);
-                    async move {
-                        if responses.lock().await.len() == 1 {
-                            *repair_request.lock().unwrap() = Some(format!("{request:?}"));
-                        }
-                        Ok(responses.lock().await.pop_front().expect("queued response"))
-                    }
-                }
-            })
-            .build()
-            .into_handle();
-        let core =
-            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
-                .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .trace_sink(trace.clone())
-                .content_policy(lash_trace::ContentPolicy::captured())
-                .build(lash_facade_tests::runtime_lease_owner())?;
-        let session = created_session(
-            &core,
-            lash_vocabulary::identity::SessionId::parse("rlm-native-tool-contract")
-                .expect("nonblank host identity"),
-        )
-        .await
-        .open()
-        .await?;
-
-        let turn = session
-            .send(TurnInput::text("trigger native provider tool call"))
-            .output()
-            .await?;
-
-        assert_eq!(
-            turn.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
-                tool_name: "control.finish".to_string(),
-                value: serde_json::json!(1)
-            }),
-            "the stray call is repaired and the next cell settles the turn"
-        );
-        assert!(
-            !turn
-                .activities
-                .iter()
-                .filter_map(|activity| match &activity.event {
-                    lash::TurnEvent::Error(error) => error.envelope.as_ref(),
-                    _ => None,
-                })
-                .any(|issue| issue.code
-                    == Some(lash::turn::TurnFailureCode::NativeToolCallNotAllowed.into())),
-            "a repaired stray call records no terminal protocol issue: {:?}",
-            turn.outcome.error_cause()
-        );
-        let repair = repair_request
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("a repair round issues a second provider request")
-            .clone();
-        assert!(repair.contains("native_lookup"), "{repair}");
-        assert!(
-            repair.contains("paired `<typescript>...</typescript>` block"),
-            "{repair}"
-        );
-
-        let entries = trace.json_records().expect("trace records serialize");
-        entries
-            .iter()
-            .find(|entry| {
-                entry.get("type").and_then(|value| value.as_str()) == Some("protocol_step")
-                    && entry.get("plugin_id").and_then(|value| value.as_str())
-                        == Some(lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID)
-                    // The RLM event rides its format-stamped envelope (FIG-5028).
-                    && entry
-                        .pointer("/payload/event/RlmDiagnostic/phase")
-                        .and_then(|value| value.as_str())
-                        == Some("llm_extraction")
-                    && entry
-                        .pointer("/payload/event/RlmDiagnostic/payload/decision")
-                        .and_then(|value| value.as_str())
-                        == Some("retry_native_tool_call")
-            })
-            .unwrap_or_else(|| {
-                panic!("the stray call is classified as an extraction failure: {entries:?}")
-            });
-
-        Ok(())
-    })
 }
 
 #[cfg(feature = "rlm")]

@@ -124,7 +124,6 @@ fn reading_builder(protocol: RecordedProtocol, backend: lash::Backend) -> lash::
     };
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(50_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -643,11 +642,7 @@ mod tests {
             message(one, TranscriptRole::User, vec![text("second")]),
             message(one, TranscriptRole::Assistant, vec![reasoning]),
             entry(one, cell("c1", "console.log(1);", CellOutcome::Completed)),
-            context(
-                one,
-                "c1",
-                vec![text("<typescript>console.log(1);</typescript>")],
-            ),
+            context(one, "c1", vec![text("console.log(1);")]),
             // The native channel's context carries the cell's call.
             entry(one, cell("c2", "console.log(2);", CellOutcome::Completed)),
             context(one, "c2", vec![call("x", "execute_code")]),

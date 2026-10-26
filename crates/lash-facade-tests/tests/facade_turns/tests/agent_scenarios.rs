@@ -9,7 +9,10 @@ use std::collections::VecDeque;
 use tokio::sync::Mutex as TokioMutex;
 
 /// A provider answering `responses` in order, recording every request.
-fn scripted(responses: Vec<String>, requests: Arc<StdMutex<Vec<LlmRequest>>>) -> ProviderHandle {
+fn scripted(
+    responses: Vec<LlmOutputPart>,
+    requests: Arc<StdMutex<Vec<LlmRequest>>>,
+) -> ProviderHandle {
     let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
     lash::testing::TestProvider::builder()
         .kind("agent-scenario")
@@ -23,7 +26,10 @@ fn scripted(responses: Vec<String>, requests: Arc<StdMutex<Vec<LlmRequest>>>) ->
                         "scripted agent scenario provider exhausted its expected responses",
                     )
                 })?;
-                Ok(text_response(&text))
+                Ok(LlmResponse {
+                    parts: vec![text],
+                    ..Default::default()
+                })
             }
         })
         .build()
@@ -83,9 +89,8 @@ const enrich = async (event: { email: string }): Promise<{ category: string; con
 const handle = await processes.start({ definition: enrich, args: { event: { email: "hello@example.com" } } });
 await control.finish(await handle);"#,
                 ),
-                r#"{"kind":"value","value":{"name":"email"},"error":null}"#.to_owned(),
-                r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#
-                    .to_owned(),
+                LlmOutputPart::Text { text: r#"{"kind":"value","value":{"name":"email"},"error":null}"#.to_owned(), response_meta: None },
+                LlmOutputPart::Text { text: r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#.to_owned(), response_meta: None },
             ],
             Arc::clone(&requests),
         ),
@@ -240,8 +245,14 @@ const retryDirect = async (): Promise<string> => {
 const handle = await processes.start({ definition: retryDirect });
 await control.finish(await handle);"#,
                 ),
-                "first-provider-result".to_owned(),
-                "second-provider-result".to_owned(),
+                LlmOutputPart::Text {
+                    text: "first-provider-result".to_owned(),
+                    response_meta: None,
+                },
+                LlmOutputPart::Text {
+                    text: "second-provider-result".to_owned(),
+                    response_meta: None,
+                },
             ],
             Arc::clone(&requests),
         ),
@@ -356,9 +367,8 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                     let tool_calls = Arc::clone(&tool_calls);
                     async move {
                         match call {
-                            1 => Ok(text_response(&typescript_block(
-                                "const overflow_payload = await tools.overflowPayload({});\nconsole.log(overflow_payload.length);",
-                            ))),
+                            1 => Ok(lash_facade_tests::control_cell_response(0, (
+                                "const overflow_payload = await tools.overflowPayload({});\nconsole.log(overflow_payload.length);").to_string())),
                             2 => {
                                 assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
                                 assert!(request_text(&request).contains("262144"));
@@ -375,9 +385,8 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                                     })
                                 }
                             }
-                            3 => Ok(text_response(&typescript_block(
-                                "await control.finish(overflow_payload.length);",
-                            ))),
+                            3 => Ok(lash_facade_tests::control_cell_response(0, (
+                                "await control.finish(overflow_payload.length);").to_string())),
                             _ => panic!("unexpected provider call {call}"),
                         }
                     }

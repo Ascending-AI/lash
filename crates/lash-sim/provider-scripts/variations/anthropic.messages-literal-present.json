@@ -52,7 +52,7 @@
     {
       "at": 22,
       "event": "sse",
-      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<typescript>\\nawait control.finish(\\\"settled\\\");\\n</typescript>\\n\"}}"
+      "data": "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"START_HERE\\nawait control.finish(\\\"settled\\\");\\nSTOP_HERE\\n\"}}"
     },
     {
       "at": 23,

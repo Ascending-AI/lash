@@ -202,36 +202,44 @@ pub fn output_then_failing_rlm_prose_provider(
             let transport_calls = Arc::clone(&transport_calls);
             let requests = Arc::clone(&requests);
             async move {
-                requests
-                    .lock_recover()
-                    .push(request.clone());
+                requests.lock_recover().push(request.clone());
                 let call = transport_calls.fetch_add(1, Ordering::SeqCst);
                 let stream = request.stream_events.expect("stream events");
                 if call == 0 {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                         kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                        text: "retry observer single-copy marker\n<typescript>\n".to_string(),
+                        text: "retry observer single-copy marker\n".to_string(),
                     }));
-                    return Err(
-                        LlmTransportError::new("deterministic rate limit")
-                            .with_http_status(429)
-                            .with_output_started(true),
-                    );
+                    return Err(LlmTransportError::new("deterministic rate limit")
+                        .with_http_status(429)
+                        .with_output_started(true));
                 }
-                let text = match call {
-                    1 => {
-                        "retry observer single-copy marker\n<typescript>\nretry_missing_name;\n</typescript>"
-                    }
-                    2 => "<typescript>\nawait control.finish(\"provider retry succeeded\");\n</typescript>",
-                    _ => "<typescript>\nawait control.finish(\"subsequent turn succeeded\");\n</typescript>",
+                let prose = if call == 1 {
+                    "retry observer single-copy marker\n"
+                } else {
+                    ""
                 };
-                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: text.to_string() }));
+                let source = match call {
+                    1 => "retry_missing_name;",
+                    2 => "await control.finish(\"provider retry succeeded\");",
+                    _ => "await control.finish(\"subsequent turn succeeded\");",
+                };
+                if !prose.is_empty() {
+                    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                        kind: StreamBlockKind::AssistantText,
+                        block: bid(),
+                        text: prose.to_owned(),
+                    }));
+                }
                 Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: text.to_string(),
-                        response_meta: None,
-                    }],
+                    parts: vec![
+                        LlmOutputPart::Text {
+                            text: prose.to_owned(),
+                            response_meta: None,
+                        },
+                        lash::testing::execute_code(source),
+                    ],
                     response_metadata: Default::default(),
                     ..LlmResponse::default()
                 })

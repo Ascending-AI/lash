@@ -339,6 +339,7 @@ pub(super) fn contract_execution_payload<E>(
     }))
 }
 
+#[cfg(test)]
 pub(super) fn fixed_texts_provider(
     kind: &'static str,
     responses: Vec<&'static str>,
@@ -689,4 +690,32 @@ fn first_successful_provider(
                 && event.observed.get("success").and_then(Value::as_bool) == Some(true)
         })
         .min_by_key(|event| event.sequence)
+}
+
+pub(super) fn fixed_code_provider(
+    kind: &'static str,
+    responses: Vec<&'static str>,
+) -> ProviderHandle {
+    let responses = Arc::new(tokio::sync::Mutex::new(
+        responses.into_iter().collect::<VecDeque<_>>(),
+    ));
+    lash_core::testing::TestProvider::builder()
+        .kind(kind)
+        .complete(move |_| {
+            let responses = responses.clone();
+            async move {
+                let source = responses.lock().await.pop_front().ok_or_else(|| {
+                    LlmTransportError::new(format!("{kind} provider exhausted its fixed response"))
+                        .with_retry_verdict(
+                            lash_transport_failure::TransportRetryVerdict::NotRetryable,
+                        )
+                })?;
+                Ok(lash_core::LlmResponse {
+                    parts: vec![lash_protocol_rlm::test_support::execute_code(source)],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle()
 }

@@ -23,7 +23,7 @@ use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockK
 
 use lash_vocabulary::tool_contract::ExecutionPolicy;
 
-use super::script::{Protocol, Reply, ScriptedTurn};
+use super::script::{Reply, ScriptedTurn};
 
 /// The text a call past its turn's script receives.
 pub const FALLBACK_TEXT: &str = "Replay: the scripted turn is complete.";
@@ -39,7 +39,6 @@ pub fn marker(session: usize, ordinal: usize) -> String {
 /// Every scripted turn of a run, by its marker, and the calls each received.
 #[derive(Default)]
 pub struct ScriptBook {
-    protocol: Option<Protocol>,
     turns: HashMap<String, Vec<Reply>>,
     calls: Mutex<HashMap<String, TurnCalls>>,
 }
@@ -60,11 +59,8 @@ pub struct TurnCalls {
 const QUOTED_TAIL: usize = 2_048;
 
 impl ScriptBook {
-    pub fn new(protocol: Protocol) -> Self {
-        Self {
-            protocol: Some(protocol),
-            ..Self::default()
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Register session `session`'s `turn`, returning the user input that
@@ -137,14 +133,7 @@ impl ScriptBook {
                     .collect(),
             ),
             Reply::Cell(super::script::Source(source)) => {
-                let (open, close) = self
-                    .protocol
-                    .and_then(Protocol::fence)
-                    .unwrap_or(("<typescript>", "</typescript>"));
-                response(vec![LlmOutputPart::Text {
-                    text: format!("{open}\n{source}\n{close}"),
-                    response_meta: None,
-                }])
+                response(vec![lash::testing::execute_code(source)])
             }
         }
     }

@@ -239,14 +239,20 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                     .await;
                     elapsed = chunk.due_ms;
                 }
-                Ok(facade::response(response.text))
+                Ok(if let Some(code) = response.cell_source {
+                    lash_core::LlmResponse {
+                        parts: vec![lash_protocol_rlm::test_support::execute_code(code)],
+                        ..Default::default()
+                    }
+                } else {
+                    facade::response(response.text)
+                })
             }
         })
         .build()
         .into_handle();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

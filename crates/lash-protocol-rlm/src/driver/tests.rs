@@ -1,4 +1,7 @@
+use crate::driver::history::build_rlm_history_messages_from_turn;
 use lash_core::llm::types::LlmRole;
+use lash_core::sansio::ContextProjector;
+use lash_core::{LlmRequest, ProjectorContext};
 use lash_rlm_types::RlmTurnOptions;
 use lash_vocabulary::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
@@ -174,7 +177,7 @@ fn project_iteration_request_with_generation(
 /// A request projected from a one-message history, for the prompt laws
 /// that place sections on it.
 pub(crate) fn projected_request() -> LlmRequest {
-    projected_request_with_facts(crate::RlmChannel::Cell, false).0
+    projected_request_with_facts(false).0
 }
 
 pub(crate) fn prompt_history_fixture(structured: bool) -> Vec<SessionHistoryRecord> {
@@ -186,15 +189,11 @@ pub(crate) fn prompt_history_fixture(structured: bool) -> Vec<SessionHistoryReco
 }
 
 pub(crate) fn projected_request_with_facts(
-    channel: crate::RlmChannel,
     structured: bool,
 ) -> (LlmRequest, crate::prompt_sections::RlmPromptFacts) {
     let cell = projector(1000);
-    let dialect = Arc::clone(&cell.dialect);
-    let projector: Arc<dyn ContextProjector<lash_core::HostTurnProtocol>> = match channel {
-        crate::RlmChannel::Cell => Arc::new(cell),
-        crate::RlmChannel::NativeTool => crate::native::testing_projector(Arc::clone(&dialect)),
-    };
+    let projector: Arc<dyn lash_core::sansio::ContextProjector<lash_core::HostTurnProtocol>> =
+        Arc::new(cell);
     assert!(projector.has_current_context_prefix());
     let events = prompt_history_fixture(structured);
     let messages = lash_core::facade_support::MessageSequence::default();
@@ -274,7 +273,7 @@ fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
 fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
     for caller_stops in [
         vec!["caller-boundary".to_string()],
-        vec!["</typescript>".to_string()],
+        vec!["other-caller-boundary".to_string()],
     ] {
         let request = project_iteration_request_with_generation(
             &projector(100),
@@ -302,50 +301,6 @@ pub(crate) fn message_text(message: &LlmMessage) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-#[test]
-fn folded_step_renders_as_emission_cell_not_history_echo() {
-    let projector = projector(1000);
-    // Regression for the observed glm-5.2 echo: a step preceded by assistant
-    // prose folds into ONE assistant message that is the literal `<typescript>`
-    // cell — byte-identical to what the model emits — never a
-    // `--- history[N] ---` meta-format the model could imitate.
-    let events = [
-        user_event("u1", "find it"),
-        assistant_prose_event("a1", "Found it. Running it now."),
-        step_event(0, "loc = run()", "ok"),
-    ];
-
-    let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
-        dialect: projector.dialect.as_ref(),
-        events: &events,
-        turn_messages: &lash_core::facade_support::MessageSequence::default(),
-        max_output_chars: 1000,
-        protocol_iteration: 1,
-    })
-    .expect("valid history fixture");
-
-    let assistant_texts = messages
-        .iter()
-        .filter(|message| matches!(message.role, LlmRole::Assistant))
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    // The prose folded into the cell: exactly one assistant message, no echo.
-    assert_eq!(assistant_texts.len(), 1);
-    assert!(!assistant_texts[0].contains("--- history["));
-    assert!(!assistant_texts[0].contains("Code:\n"));
-    assert_eq!(
-        assistant_texts[0],
-        projector
-            .dialect
-            .render_history_cell("Found it. Running it now.", "loc = run()")
-    );
 }
 
 #[test]
@@ -393,7 +348,7 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("<typescript>\nprint \"observed mid-turn\"\n</typescript>"));
+    assert!(rendered.contains("Earlier program:\nprint \"observed mid-turn\""));
     assert!(rendered.contains("observed mid-turn"));
     assert!(rendered.contains("Host-rendered answer: forty-two."));
     assert!(!rendered.contains("Internal terminal commentary."));
@@ -429,7 +384,7 @@ fn terminal_step_without_committed_transcript_renders_unchanged() {
         ];
         let history = projector(1000).format_history(&events);
 
-        assert!(history.contains(&format!("<typescript>\n{code}\n</typescript>")));
+        assert!(history.contains(&format!("Earlier program:\n{code}")));
         assert!(history.contains(&format!("Final output:\n{expected}")));
     }
 }
@@ -450,7 +405,7 @@ fn later_turn_assistant_does_not_supersede_uncommitted_terminal_step() {
     ];
     let history = projector(1000).format_history(&events);
 
-    assert!(history.contains("<typescript>\nfinish 42\n</typescript>"));
+    assert!(history.contains("Earlier program:\nfinish 42"));
     assert!(history.contains("Final output:\n42"));
     assert!(history.contains("Natural answer from turn two."));
 }
@@ -655,7 +610,8 @@ fn printed_images_render_as_llm_image_blocks() {
 #[test]
 fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() {
     let projector = projector(1000);
-    let events = [user_event("u1", "first"), step_event(0, "print 1", "1")];
+    let step = step_event(0, "print 1", "1");
+    let events = [user_event("u1", "first"), native_context(&step), step];
 
     let messages = build_rlm_history_messages_from_turn(RlmHistoryRenderInput {
         dialect: projector.dialect.as_ref(),
@@ -680,22 +636,22 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             ..
         }) if text.as_ref() == "first"
     ));
+    assert!(
+        matches!(messages[1].blocks.first(), Some(LlmContentBlock::ToolCall { tool_name, input_json, .. }) if tool_name == "execute_code" && input_json.contains("print 1"))
+    );
+    // The portable fence follows the typed result, so all result bytes enter the cache prefix.
+    assert!(
+        matches!(messages[1].blocks.get(1), Some(LlmContentBlock::Text { text, cache_breakpoint: false, .. }) if text.as_ref() == "Running the program.")
+    );
+    assert!(
+        matches!(messages[2].blocks.first(), Some(LlmContentBlock::ToolResult { content, .. }) if content.iter().any(|part| matches!(part, lash_core::facade_support::ModelToolReturnPart::Text { text } if text.starts_with("Output:\n"))))
+    );
     assert!(matches!(
-        messages[1].blocks.first(),
+        messages[2].blocks.last(),
         Some(LlmContentBlock::Text {
-            text,
-            cache_breakpoint: false,
-            ..
-        }) if text.starts_with("<typescript>") && text.contains("print 1")
-    ));
-    // The last history message (the observation) carries the rolling fence.
-    assert!(matches!(
-        messages[2].blocks.first(),
-        Some(LlmContentBlock::Text {
-            text,
             cache_breakpoint: true,
             ..
-        }) if text.starts_with("Output:\n")
+        })
     ));
     assert!(matches!(
         messages[3].blocks.first(),
@@ -717,14 +673,16 @@ fn growing_turn_decodes_only_new_history_events() {
     let mut events = Vec::new();
     crate::projection::EVENT_DECODES.with(|count| count.set(0));
     for round in 0..16 {
-        events.push(step_event(round, "console.log(1)", "ok"));
+        let step = step_event(round, "console.log(1)", "ok");
+        events.push(native_context(&step));
+        events.push(step);
         let request = project_iteration_request(&projector, &events, round, "test-model");
         assert_eq!(request.messages.len(), (round + 1) * 2 + 1);
     }
     let decodes = crate::projection::EVENT_DECODES.with(std::cell::Cell::get);
     assert_eq!(
         decodes,
-        events.len(),
+        events.len() / 2,
         "unchanged history must not be decoded again"
     );
     let fresh = self::projector(100);
@@ -733,7 +691,7 @@ fn growing_turn_decodes_only_new_history_events() {
         crate::projection::EVENT_DECODES.with(std::cell::Cell::get),
         decodes
     );
-    let SessionHistoryRecord::Protocol(first) = &mut events[0] else {
+    let SessionHistoryRecord::Protocol(first) = &mut events[1] else {
         unreachable!()
     };
     first.payload.make_mut()["format"] = serde_json::json!(0);
@@ -749,4 +707,34 @@ fn growing_turn_decodes_only_new_history_events() {
         })
         .expect_err("rewritten corrupt content must validate again");
     assert_eq!(error.record_kind, "RLM protocol event");
+}
+
+pub(crate) fn native_context(event: &SessionHistoryRecord) -> SessionHistoryRecord {
+    let SessionHistoryRecord::Protocol(event) = event else {
+        panic!("expected a trajectory")
+    };
+    let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = Some(
+        serde_json::from_value::<lash_rlm_types::RlmProtocolEvent>(event.payload["event"].clone())
+            .expect("typed fixture"),
+    ) else {
+        panic!("expected a cell")
+    };
+    SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord::from_message(
+        crate::native::transport::cell_context_message(
+            &lash_vocabulary::identity::TurnId::from("turn"),
+            format!("context-{}", step.id),
+            step.id.clone(),
+            vec![
+                lash_core::Part::tool_call(
+                    "p0".into(),
+                    serde_json::json!({"code":step.code}).to_string(),
+                    lash_core::ToolCallId::fixture(&format!("call-{}", step.id)),
+                    format!("provider-{}", step.id),
+                    "execute_code".into(),
+                    None,
+                ),
+                lash_core::Part::prose("commentary".into(), "Running the program.".into(), None),
+            ],
+        ),
+    ))
 }

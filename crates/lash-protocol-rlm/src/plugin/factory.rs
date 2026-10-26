@@ -3,7 +3,6 @@ use std::sync::Arc;
 use lash_core::plugin::PluginFactory;
 use lash_execution_contracts::plugin_error::PluginError;
 
-use super::registration::register_rlm_protocol_plugin;
 use super::{
     RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig, RlmRecordedBehaviour, RlmRecordedConfig,
 };
@@ -267,7 +266,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
     }
 
     /// The session's RLM namespace and its one command (FIG-4379): the
-    /// channel and dialect this host selected are recorded at creation.
+    /// dialect this host selected is recorded at creation.
     /// The kernel process engine: a process is an entry of an admitted
     /// document, kept in the runtime's own backend and run on this
     /// factory's workers.
@@ -292,12 +291,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             let mut reg = lash_core::plugin::PluginRegistrar::<RlmProtocolPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
             );
-            match self.config.channel {
-                super::RlmChannel::Cell => register_rlm_protocol_plugin(&mut reg)?,
-                super::RlmChannel::NativeTool => {
-                    crate::native::plugin::register_native_plugin(&mut reg)?
-                }
-            }
+            crate::native::plugin::register_native_plugin(&mut reg)?;
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
             Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
@@ -312,11 +306,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
                         .execution_bounds()
                         .admitted_under(&self.workers.config().run_bounds)?;
                     let recorded = recorded_config(&ctx.plugin_config.config)?;
-                    super::channel::validate_channel(
-                        recorded.as_ref(),
-                        self.config.channel,
-                        ctx.materialization,
-                    )?;
                     let dialect = presenting_as_recorded(
                         self.session_dialect(recorded.as_ref(), ctx.materialization)?,
                         &behaviour,
@@ -333,7 +322,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
                             workers: self.workers.clone(),
                             code_renderer: config.code_renderer.clone(),
                             execution_bounds: config.execution_bounds(),
-                            channel: config.channel,
+
                             kernel: crate::executor::KernelCarry::holding(
                                 Some(self.library().map_err(|error| {
                                     PluginError::Registration(error.to_string())
@@ -361,13 +350,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
                             config.clone(),
                             runtime_state,
                         ));
-                    let mask = crate::stream_mask::bind_stream_mask(Arc::clone(&dialect));
                     Ok(Arc::new(RlmProtocolPlugin {
                         config,
                         dialect,
                         code_executor,
                         protocol_session,
-                        mask,
                     }))
                 },
             ))
@@ -395,7 +382,6 @@ impl RlmProtocolPluginFactory {
         super::config_owner::register(
             registrar,
             super::config_owner::RlmConfigOwner {
-                channel: self.config.channel,
                 dialect: self.creation_dialect().clone(),
                 config: self.config.clone(),
             },
@@ -465,7 +451,6 @@ pub(crate) struct RlmProtocolPlugin {
     pub(crate) dialect: Arc<SessionDialect>,
     pub(crate) code_executor: Arc<super::runtime_state::CodeModeCodeExecutor>,
     pub(crate) protocol_session: Arc<super::protocol_session::RlmProtocolSession>,
-    pub(crate) mask: crate::stream_mask::StreamMaskBindings,
 }
 
 #[cfg(test)]
@@ -476,7 +461,6 @@ mod tests {
     /// A recorded namespace naming `dialect`.
     fn recorded(dialect: Option<&str>) -> RlmRecordedConfig {
         let config = RlmProtocolPluginConfig::standard()
-            .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::unbounded())
             .memory_limit(crate::MemoryBound::unbounded())
             .build();
@@ -484,7 +468,7 @@ mod tests {
             finish_value_schema: None,
             render: None,
             termination: None,
-            channel: Some(crate::RlmChannel::Cell),
+
             dialect: dialect.map(str::to_owned),
             behaviour: config
                 .recorded_behaviour(&CellDialect::typescript())
@@ -545,7 +529,6 @@ mod tests {
     fn an_instruction_limit_past_the_worker_ceiling_refuses_the_plugin_at_assembly() {
         let host = |limit| {
             let config = RlmProtocolPluginConfig::standard()
-                .channel(crate::RlmChannel::Cell)
                 .instruction_limit(limit)
                 .memory_limit(crate::MemoryBound::mebibytes(64))
                 .build();
@@ -589,7 +572,6 @@ mod tests {
 
     fn factory() -> RlmProtocolPluginFactory {
         let config = RlmProtocolPluginConfig::standard()
-            .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::unbounded())
             .memory_limit(crate::MemoryBound::unbounded())
             .build();
@@ -603,7 +585,6 @@ mod tests {
         presentation: serde_json::Value,
     ) -> RlmProtocolPluginFactory {
         let mut config = RlmProtocolPluginConfig::standard()
-            .channel(crate::RlmChannel::Cell)
             .instruction_limit(crate::InstructionBound::unbounded())
             .memory_limit(crate::MemoryBound::unbounded())
             .build();

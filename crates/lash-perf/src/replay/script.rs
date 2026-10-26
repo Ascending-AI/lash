@@ -48,17 +48,6 @@ pub enum Protocol {
     Python,
 }
 
-impl Protocol {
-    /// The cell fence a code-mode reply is wrapped in.
-    pub fn fence(self) -> Option<(&'static str, &'static str)> {
-        match self {
-            Self::Standard => None,
-            Self::Typescript => Some(("<typescript>", "</typescript>")),
-            Self::Python => Some(("<python>", "</python>")),
-        }
-    }
-}
-
 /// `repeat` consecutive turns sharing one user input and reply script.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

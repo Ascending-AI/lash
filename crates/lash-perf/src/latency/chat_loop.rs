@@ -76,7 +76,6 @@ pub(crate) fn cell_protocol(
 ) -> Result<lash_protocol_rlm::RlmProtocolPluginFactory> {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::standard())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),

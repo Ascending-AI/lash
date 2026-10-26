@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn typescript_tool_prose_is_rendered_verbatim() {
-        let description = "Run a TypeScript child session in a <typescript> cell.";
+        let description = "Run a TypeScript child session using execute_code.";
         let schema_description = "A TypeScript process definition value.";
         let tool = tool_with_prose(description, schema_description);
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
@@ -651,7 +651,7 @@ mod discovery_tests {
             .collect::<Vec<_>>();
         {
             let dialect = crate::dialect::typescript_test_dialect();
-            for native in [false, true] {
+            {
                 for discovery in [
                     None,
                     Some(crate::plugin::RlmDiscovery {
@@ -661,25 +661,9 @@ mod discovery_tests {
                 ] {
                     validate_discovery(&manifests, discovery.as_ref()).unwrap();
                     let visible = catalog.clone();
-                    let execution = if native {
-                        crate::native::prompt::execution_section(
-                            &dialect,
-                            Default::default(),
-                            &visible,
-                            discovery.as_ref(),
-                        )
-                        .expect("the catalogue presents")
-                        .joined()
-                    } else {
-                        dialect
-                            .render_execution_section(
-                                Default::default(),
-                                &visible,
-                                crate::plugin::RlmChannel::Cell,
-                                discovery.as_ref(),
-                            )
-                            .unwrap()
-                    };
+                    let execution = dialect
+                        .render_execution_section(Default::default(), &visible, discovery.as_ref())
+                        .expect("the catalogue presents");
                     let text = execution;
                     let docs =
                         ToolListing::of(&visible, &dialect, Default::default(), discovery.as_ref())

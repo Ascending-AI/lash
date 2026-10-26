@@ -65,8 +65,6 @@ pub enum RlmProtocolEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RlmDiagnosticPhase {
-    /// A program extracted from a text-protocol reply.
-    LlmExtraction,
     /// A program extracted from a native tool-call reply.
     NativeExtraction,
     /// The turn's no-progress budget ran out.

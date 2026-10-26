@@ -32,7 +32,6 @@ async fn sleeping_cell_session(
     let backend = sqlite_memory_store_backend().await;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -48,11 +47,19 @@ async fn sleeping_cell_session(
                 started.notify_one();
             }
             async move {
-                Ok(text_response(&if call == 0 {
-                    typescript_block(&format!("await sleep({sleep_ms});\nconsole.log(\"woke\");"))
-                } else {
-                    "after the sleep".to_string()
-                }))
+                Ok(LlmResponse {
+                    parts: vec![if call == 0 {
+                        typescript_block(&format!(
+                            "await sleep({sleep_ms});\nconsole.log(\"woke\");"
+                        ))
+                    } else {
+                        LlmOutputPart::Text {
+                            text: "after the sleep".to_string(),
+                            response_meta: None,
+                        }
+                    }],
+                    ..Default::default()
+                })
             }
         })
         .build()

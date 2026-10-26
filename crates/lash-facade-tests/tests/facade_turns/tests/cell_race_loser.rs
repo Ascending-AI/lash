@@ -86,7 +86,6 @@ fn race_core(
 ) -> Result<LashCore> {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
@@ -95,7 +94,13 @@ fn race_core(
     .with_worker_service(untimed_fixture_workers());
     explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(
-            queued_text_provider(vec![typescript_block(source), "The race settled.".into()]),
+            queued_text_provider(vec![
+                typescript_block(source),
+                LlmOutputPart::Text {
+                    text: "The race settled.".into(),
+                    response_meta: None,
+                },
+            ]),
             mock_llm_profile_spec(),
         )
         .tools(lash::tool_provider_key!("tools"), tools)

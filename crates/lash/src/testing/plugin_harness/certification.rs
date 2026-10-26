@@ -887,7 +887,6 @@ mod tests {
             let protocol: Arc<dyn PluginFactory> = Arc::new(
                 lash::rlm::RlmProtocolPluginFactory::new(
                     lash::rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash::rlm::RlmChannel::NativeTool)
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),

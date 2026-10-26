@@ -88,7 +88,7 @@ pub(super) fn cell_text(switch: bool, follow_on: bool, growing: bool, first: boo
         String::new()
     };
     format!(
-        "<typescript>\n{handover}{growth}const receipt = await tools.benchmarkEcho({{value: \"history turn\", ordinal: 1}});\nconst total = [125, 250, 375].reduce((sum, amount) => sum + amount, 0);\nconsole.log({{total: total, receipt: receipt.value}});\n{end}\n</typescript>"
+        "{handover}{growth}const receipt = await tools.benchmarkEcho({{value: \"history turn\", ordinal: 1}});\nconst total = [125, 250, 375].reduce((sum, amount) => sum + amount, 0);\nconsole.log({{total: total, receipt: receipt.value}});\n{end}"
     )
 }
 #[derive(Serialize)]

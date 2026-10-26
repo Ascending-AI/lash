@@ -28,15 +28,12 @@ const DEFAULT_MODEL: &str = "z-ai/glm-5.3-flash";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum ChannelSelection {
-    Cell,
-    #[value(alias = "native_tool")]
     Native,
     Standard,
 }
 impl ChannelSelection {
     fn name(self) -> &'static str {
         match self {
-            Self::Cell => "cell",
             Self::Native => "native",
             Self::Standard => "standard",
         }
@@ -73,7 +70,7 @@ impl ReasoningEffort {
 struct Args {
     #[arg(long, value_enum, default_value_t = Pack::All)]
     pack: Pack,
-    #[arg(long, env = "LASH_RLM_CHANNEL", value_enum, default_value_t = ChannelSelection::Cell)]
+    #[arg(long, value_enum, default_value_t = ChannelSelection::Native)]
     channel: ChannelSelection,
     /// Pair the same task/model in randomized channel order.
     #[arg(long)]
@@ -385,9 +382,9 @@ fn build_work_list(
         for task_index in 0..tasks.len() {
             let channels = if paired {
                 if reverse_pair()? {
-                    vec![ChannelSelection::Native, ChannelSelection::Cell]
+                    vec![ChannelSelection::Native, ChannelSelection::Standard]
                 } else {
-                    vec![ChannelSelection::Cell, ChannelSelection::Native]
+                    vec![ChannelSelection::Standard, ChannelSelection::Native]
                 }
             } else {
                 vec![channel]
@@ -551,7 +548,7 @@ mod tests {
             assert_eq!(
                 pair[0].channel,
                 if index % 2 == 0 {
-                    ChannelSelection::Cell
+                    ChannelSelection::Standard
                 } else {
                     ChannelSelection::Native
                 }

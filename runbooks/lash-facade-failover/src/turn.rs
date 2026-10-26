@@ -33,7 +33,7 @@ pub const TOOL_OPERATION: &str = "tools.ext_write";
 const MODEL: &str = "facade-failover-model";
 
 /// The cell the model writes: one `Once` tool call, and what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.extWrite({ x: 7 });\nconsole.log(written);\n</typescript>";
+const CELL: &str = "const written = await tools.extWrite({ x: 7 });\nconsole.log(written);";
 /// What the final answer starts with.
 pub const FINAL_PREFIX: &str = "final answer from ";
 
@@ -167,7 +167,18 @@ fn model(witness: Witness, hold: Hold) -> ProviderHandle {
                 } else {
                     CELL.to_owned()
                 };
-                Ok(streamed(&request, &text))
+                if answered {
+                    Ok(streamed(&request, &text))
+                } else {
+                    let part = lash::testing::execute_code(text);
+                    if let Some(stream) = &request.stream_events {
+                        stream.send(lash::direct::LlmStreamEvent::Part(part.clone()));
+                    }
+                    Ok(LlmResponse {
+                        parts: vec![part],
+                        ..Default::default()
+                    })
+                }
             }
         })
         .build()
@@ -236,7 +247,6 @@ pub fn core(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),

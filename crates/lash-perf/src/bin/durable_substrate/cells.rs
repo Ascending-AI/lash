@@ -54,7 +54,6 @@ pub fn core(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_perf::cell_bounds::INSTRUCTION_LIMIT)
                 .memory_limit(lash_perf::cell_bounds::MEMORY_LIMIT)
                 .build(),
@@ -132,7 +131,7 @@ fn cell_source(scripts: &Scripts, session: &SessionId) -> String {
     let pad = "x".repeat(script.cell_payload);
     let fresh = if script.cell_fresh { " + i" } else { "" };
     format!(
-        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.extEcho({{ i: i, pad: \"{pad}\"{fresh} }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
+        "const kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.extEcho({{ i: i, pad: \"{pad}\"{fresh} }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);",
         calls = script.cell_calls,
     )
 }
@@ -171,7 +170,14 @@ fn model(scripts: Arc<Scripts>, recorder: Arc<Recorder>) -> ProviderHandle {
                     Some(session) if !answered => cell_source(&scripts, &session),
                     _ => ANSWER.to_owned(),
                 };
-                Ok(streamed(&request, &text))
+                Ok(if answered {
+                    streamed(&request, &text)
+                } else {
+                    LlmResponse {
+                        parts: vec![lash::testing::execute_code(text)],
+                        ..Default::default()
+                    }
+                })
             }
         })
         .build()

@@ -2,7 +2,7 @@
 //! their durable ids and bounded results (FIG-6293, FIG-6338).
 //!
 //! Real RLM turns on the core's own node over a SQLite memory store set, in
-//! both dialects and on both channels. The model's next request is read as
+//! both dialects. The model's next request is read as
 //! the scripted provider received it.
 
 use super::*;
@@ -30,26 +30,18 @@ fn message_strings<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
 fn core(
     backend: lash_execution_contracts::backend::Backend,
     dialect: lash::rlm::CellDialect,
-    channel: lash::rlm::RlmChannel,
+
     presentation: lash::rlm::RlmPresentationConfig,
     responses: &Responses,
     requests: &Requests,
 ) -> Result<LashCore> {
-    core_with_feedback(
-        backend,
-        dialect,
-        channel,
-        presentation,
-        responses,
-        requests,
-        None,
-    )
+    core_with_feedback(backend, dialect, presentation, responses, requests, None)
 }
 
 fn core_with_feedback(
     backend: lash_execution_contracts::backend::Backend,
     dialect: lash::rlm::CellDialect,
-    channel: lash::rlm::RlmChannel,
+
     presentation: lash::rlm::RlmPresentationConfig,
     responses: &Responses,
     requests: &Requests,
@@ -74,7 +66,6 @@ fn core_with_feedback(
         .build()
         .into_handle();
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(channel)
         .instruction_limit(lash::rlm::InstructionBound::standard())
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build();
@@ -124,11 +115,8 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
         lash::rlm::CellDialect::typescript(),
         lash::rlm::CellDialect::python(),
     ] {
-        for channel in [
-            lash::rlm::RlmChannel::Cell,
-            lash::rlm::RlmChannel::NativeTool,
-        ] {
-            let case = format!("{} {channel:?}", dialect.name());
+        {
+            let case = format!("{} native", dialect.name());
             let code = if dialect.name() == "python" {
                 "found = await tools.app_lookup({})"
             } else {
@@ -136,7 +124,7 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
             };
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
-                    control_cell_response(&dialect, channel, 0, code.to_string()),
+                    control_cell_response(0, code.to_string()),
                     text_response("The lookup succeeded."),
                 ]
                 .into(),
@@ -145,7 +133,6 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
             let running = core(
                 sqlite_memory_store_backend().await,
                 dialect.clone(),
-                channel,
                 lash::rlm::RlmPresentationConfig::standard(),
                 &responses,
                 &requests,
@@ -209,11 +196,8 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
         lash::rlm::CellDialect::typescript(),
         lash::rlm::CellDialect::python(),
     ] {
-        for channel in [
-            lash::rlm::RlmChannel::Cell,
-            lash::rlm::RlmChannel::NativeTool,
-        ] {
-            let case = format!("{} {channel:?}", dialect.name());
+        {
+            let case = format!("{} native", dialect.name());
             let code = if dialect.name() == "python" {
                 "found = await tools.app_lookup({})\nraise ValueError('after the lookup')"
             } else {
@@ -221,7 +205,7 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
             };
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
-                    control_cell_response(&dialect, channel, 0, code.to_string()),
+                    control_cell_response(0, code.to_string()),
                     text_response("The lookup ran; the cell failed after it."),
                 ]
                 .into(),
@@ -232,7 +216,6 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
             let running = core(
                 backend.clone(),
                 dialect.clone(),
-                channel,
                 lash::rlm::RlmPresentationConfig::standard(),
                 &responses,
                 &requests,
@@ -300,14 +283,7 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                 .lock()
                 .await
                 .push_back(text_response("Nothing more to do."));
-            let reopened = core(
-                backend,
-                dialect.clone(),
-                channel,
-                live,
-                &responses,
-                &requests,
-            )?;
+            let reopened = core(backend, dialect.clone(), live, &responses, &requests)?;
             reopened
                 .session(session_id)
                 .open()
@@ -362,12 +338,7 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
             });
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
-                    control_cell_response(
-                        &dialect,
-                        lash::rlm::RlmChannel::Cell,
-                        0,
-                        code.to_owned(),
-                    ),
+                    control_cell_response(0, code.to_owned()),
                     text_response("done"),
                 ]
                 .into(),
@@ -376,7 +347,6 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
             let running = core_with_feedback(
                 sqlite_memory_store_backend().await,
                 dialect.clone(),
-                lash::rlm::RlmChannel::Cell,
                 lash::rlm::RlmPresentationConfig::standard(),
                 &responses,
                 &requests,
@@ -418,8 +388,7 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
                 assert_eq!(
                     feedback,
                     format!(
-                        "{diagnostic_code}: {message} (line 1, column 7)\n  {code}\n\nA line starting with `</{}>` after whitespace terminates the outer cell even inside multiline source text; construct that content without a line-leading closing delimiter. Everything after that closing tag is discarded; wait for real results before continuing.\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.",
-                        dialect.name(),
+                        "{diagnostic_code}: {message} (line 1, column 7)\n  {code}\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.",
                     ),
                     "no plugin preserves the original feedback bytes"
                 );
@@ -466,7 +435,7 @@ async fn runtime_cell_failure_repairs_reach_the_next_model_input() -> Result<()>
         };
         let responses: Responses = Arc::new(tokio::sync::Mutex::new(
             [
-                control_cell_response(&dialect, lash::rlm::RlmChannel::Cell, 0, code.to_owned()),
+                control_cell_response(0, code.to_owned()),
                 text_response("done"),
             ]
             .into(),
@@ -475,7 +444,6 @@ async fn runtime_cell_failure_repairs_reach_the_next_model_input() -> Result<()>
         let running = core_with_feedback(
             sqlite_memory_store_backend().await,
             dialect,
-            lash::rlm::RlmChannel::Cell,
             lash::rlm::RlmPresentationConfig::standard(),
             &responses,
             &requests,

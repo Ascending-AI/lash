@@ -369,13 +369,8 @@ fn build_turn_core(
     let backend = substrate.backend.clone();
     let builder = match channel {
         crate::ChannelSelection::Standard => LashCore::standard_builder(backend),
-        crate::ChannelSelection::Cell | crate::ChannelSelection::Native => {
+        crate::ChannelSelection::Native => {
             let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(if channel == crate::ChannelSelection::Cell {
-                    lash::rlm::RlmChannel::Cell
-                } else {
-                    lash::rlm::RlmChannel::NativeTool
-                })
                 .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build();

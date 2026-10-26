@@ -96,7 +96,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -112,7 +112,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -136,7 +136,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]
@@ -224,7 +224,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -240,7 +240,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -264,7 +264,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]
@@ -352,7 +352,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -368,7 +368,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -392,7 +392,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]
@@ -494,7 +494,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -510,7 +510,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -534,7 +534,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]
@@ -612,7 +612,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -628,7 +628,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -652,7 +652,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]
@@ -730,7 +730,7 @@
                     "type": "response.output_text.delta",
                     "output_index": 0,
                     "item_id": "matrix-message-1",
-                    "delta": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                    "delta": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n"
                   }
                 },
                 {
@@ -746,7 +746,7 @@
                       "content": [
                         {
                           "type": "output_text",
-                          "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                          "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                           "annotations": []
                         }
                       ]
@@ -770,7 +770,7 @@
                           "content": [
                             {
                               "type": "output_text",
-                              "text": "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n",
+                              "text": "START_HERE\nawait control.finish(\"settled\");\nSTOP_HERE\n",
                               "annotations": []
                             }
                           ]

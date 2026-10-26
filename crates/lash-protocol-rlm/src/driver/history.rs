@@ -1,50 +1,4 @@
-//! RLM history rendering: turns the current frame's chronological turn view
-//! into the LLM message sequence the model sees each iteration. The frame is
-//! the boundary: a model sees the frame's turns and the session's variables,
-//! and nothing else (ADR 0147). A value it needs later lives in a variable;
-//! printed output is display.
-//!
-//! Contract:
-//! - **History == emission.** A prior executed step renders as an `Assistant`
-//!   message holding the canonical cell `{prose}\n{open}\n{code}\n{close}`
-//!   (`render_cell_text_for_tests`), followed by a `User` message holding that
-//!   step's printed output, images, error, and final value under plain
-//!   headers. A plain user turn renders its content verbatim as a `User`
-//!   message. What the model sees as history is exactly the grammar it must
-//!   emit, so a continuation lands in that grammar.
-//! - **Folding.** A step is stored as two consecutive entries — an assistant
-//!   prose `Message` then a `CellRecord`. They fold into one assistant
-//!   message. `visit_turn_view` is a push visitor with no lookahead, so the
-//!   prose is buffered (`PendingProse`) and either folded into the next step or
-//!   flushed as a standalone assistant message (a prose-only finish).
-//! - **Completed-turn precedence.** When a successful terminal step is
-//!   followed by a committed assistant transcript message in the same turn,
-//!   the transcript is canonical for assistant prose. The cell's own prose,
-//!   the terminal emission cell, and its never-observed output echo are
-//!   omitted (`completed_turn_suppressions`). Intermediate trajectory entries
-//!   remain. This is derived from event/turn ordering, never message
-//!   content. Without a committed transcript, the trajectory renders
-//!   unchanged.
-//! - **Repaired-failure scrub.** A failed cell stays in the transcript for the
-//!   repair turn — that is the whole point of showing it — but once a later
-//!   cell in the same turn runs clean, the failure has done its job. It, its
-//!   `Error:` observation, the prose folded into it, and the protocol feedback
-//!   written to repair it are omitted from every subsequent render
-//!   (`superseded_failure_indices`). A model re-reading its own dead ends
-//!   re-attempts them. The scrub is render-only: the committed cell records
-//!   keep the failed step.
-//! - **Cache fence.** The last history message is marked with a
-//!   `cache_breakpoint` (`mark_last_history_text_cache_breakpoint`) so the
-//!   provider can reuse the stable history prefix across iterations. Active-turn
-//!   input and the volatile iteration prefix (iteration number and turn causes)
-//!   are appended uncached. The host continues that User message with the
-//!   call's CurrentContext sections, outside stored history.
-//! - **Cut output.** A print or message past its budget, and a print array or
-//!   final value retained out of history (FIG-1643), shows what fits and
-//!   states the total size. It names no address: nothing reads it back.
-//! - **Variables.** The `bound_variables` prompt section renders the live
-//!   variable namespace from protocol facts. Projectors render none of those
-//!   instruction lines.
+//! RLM prompt history preserves complete provider call/result exchanges and replay metadata.
 
 #[cfg(test)]
 mod tests;
@@ -60,10 +14,7 @@ use lash_core::facade_support::{
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 
-/// What either channel renders its prompt history from. The cell channel
-/// renders here; the native channel (`crate::native::history`) shares this
-/// input, the ordinary-message and prose helpers and the repair scrub, and
-/// keeps its own exchange renderer.
+/// The chronological facts rendered into provider history.
 pub(crate) struct RlmHistoryRenderInput<'a> {
     pub(crate) dialect: &'a SessionDialect,
     pub(crate) events: &'a [lash_core::SessionHistoryRecord],
@@ -73,8 +24,7 @@ pub(crate) struct RlmHistoryRenderInput<'a> {
 }
 
 /// Assistant prose awaiting the next chronological boundary. Buffered because
-/// `visit_turn_view` is a push visitor with no lookahead: the cell channel
-/// folds it into the next step, and either channel flushes it standalone.
+/// `visit_turn_view` is a push visitor with no lookahead: the renderer flushes it at the next chronological boundary.
 pub(crate) struct PendingProse {
     text: String,
     reasoning_blocks: Vec<LlmContentBlock>,
@@ -97,7 +47,7 @@ impl PendingProse {
     }
 }
 
-pub(super) fn build_rlm_history_messages_from_turn(
+pub(crate) fn build_rlm_history_messages_from_turn(
     input: RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     Ok(complete_history_messages(
@@ -129,27 +79,43 @@ pub(crate) fn complete_history_messages(
 }
 
 /// The history portion only (no current-iteration tail): each prior step as an
-/// assistant cell message + a user observation message, with prose folded in.
+/// assistant tool-call message + matching tool results, projected atomically.
 #[expect(
     clippy::expect_used,
-    reason = "the fallible history projection validates every event before the visitors run"
+    reason = "the fallible suppression pass validates every event before the visitors run"
 )]
-pub(super) fn render_history_messages(
+pub(crate) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = Vec::new();
+    let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
+        input.events,
+        input.turn_messages,
+    );
+    let exchanges = crate::native::transport::NativeExchangeIndex::new(&chronological);
     let suppressed = completed_turn_suppressions(input.dialect, input.events, input.turn_messages)?;
     let mut pending: Option<PendingProse> = None;
-    // This channel captures no provider exchange: every message is ordinary.
     let superseded =
-        superseded_failure_indices(input.dialect, input.events, input.turn_messages, |_| None);
+        superseded_failure_indices(input.dialect, input.events, input.turn_messages, |index| {
+            exchanges.contains(index).then(|| {
+                if exchanges.refusal(index).is_some() {
+                    ExchangeMessage::Refused
+                } else {
+                    ExchangeMessage::Executed
+                }
+            })
+        });
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
-        // A native provider exchange is not prose: this channel shows its
-        // cell as the semantic step alone.
-        if let BorrowedChronologicalPayload::Message(message) = entry.payload
-            && crate::native::transport::is_exchange_message(message.origin, message.parts)
-        {
+        // An exchange message renders only as its pair: a cell's at the
+        // cell's semantic step, a refused call's where the call stands.
+        if exchanges.contains(entry.index) {
+            if superseded.contains(&entry.index) {
+                pending = None;
+            } else if let Some((parts, correction)) = exchanges.refusal(entry.index) {
+                flush_pending_prose(&mut messages, &mut pending);
+                crate::native::transport::append_pair(&mut messages, parts, correction);
+            }
             return;
         }
         if suppressed.contains(&entry.index) || superseded.contains(&entry.index) {
@@ -160,7 +126,7 @@ pub(super) fn render_history_messages(
             BorrowedChronologicalPayload::Message(message)
                 if matches!(message.role, lash_core::MessageRole::Assistant) =>
             {
-                // Assistant prose: buffer to fold into the next lash_vm step.
+                // Keep standalone assistant prose in chronological order.
                 flush_pending_prose(&mut messages, &mut pending);
                 pending = Some(PendingProse::of(entry, message));
             }
@@ -176,32 +142,25 @@ pub(super) fn render_history_messages(
                 else {
                     return;
                 };
-                // Fold buffered prose into one assistant message: prose + cell,
-                // byte-identical to the model's own emission.
-                let prose = pending.take();
-                let prose_text = prose.as_ref().map(|p| p.text.as_str()).unwrap_or("");
-                let cell = input
-                    .dialect
-                    .render_history_cell(prose_text, step.code.trim());
-                let mut cell_blocks = prose
-                    .as_ref()
-                    .map(|prose| prose.reasoning_blocks.clone())
-                    .unwrap_or_default();
-                cell_blocks.push(text_block(cell, false));
-                if let Some(prose) = prose {
-                    cell_blocks.extend(prose.image_blocks);
-                }
-                messages.push(LlmMessage::new(LlmRole::Assistant, cell_blocks));
-
-                // The step's printed outputs become a user observation message.
-                let obs_text = step_output_text(
+                flush_pending_prose(&mut messages, &mut pending);
+                let observation = step_output_text(
                     input.dialect.prompt_vocabulary(),
                     step,
                     input.dialect.presentation(),
                 );
-                let mut obs_blocks = vec![text_block(obs_text, false)];
-                append_step_image_blocks(step, &mut obs_blocks);
-                messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
+                if let Some(parts) = exchanges.execution_parts(&step.id) {
+                    crate::native::transport::append_pair(&mut messages, parts, &observation);
+                } else {
+                    // Frame seeds carry semantic history, not authority to mint
+                    // provider calls. Keep the facts visible as user context.
+                    messages.push(LlmMessage::text(
+                        LlmRole::User,
+                        format!("Earlier program:\n{}\n\n{observation}", step.code),
+                    ));
+                }
+                if let Some(message) = messages.last_mut() {
+                    append_step_image_blocks(step, Arc::make_mut(&mut message.blocks));
+                }
             }
             BorrowedChronologicalPayload::Message(message) => {
                 flush_pending_prose(&mut messages, &mut pending);

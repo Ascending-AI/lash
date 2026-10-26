@@ -244,10 +244,7 @@ async fn backend(
 
 fn response(code: &str) -> LlmResponse {
     LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: format!("<typescript>\n{code}\n</typescript>"),
-            response_meta: None,
-        }],
+        parts: vec![lash::testing::execute_code(code.to_string())],
         ..Default::default()
     }
 }
@@ -274,7 +271,6 @@ fn core(
     let protocol = HostRlmFactory {
         inner: Arc::new(lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),

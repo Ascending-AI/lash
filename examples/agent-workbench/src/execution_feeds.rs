@@ -862,8 +862,8 @@ mod tests {
         ));
         // Chat's reply tool takes text, so this cell must finish with text
         // before the law can attach to its completed execution.
-        let workbench = Workbench::builder(crate::tests::replying_provider(
-            r#"<typescript>let answer = "42"; await chat.reply(answer);</typescript>"#,
+        let workbench = Workbench::builder(crate::tests::replying_code_provider(
+            r#"let answer = "42"; await chat.reply(answer);"#,
         ))
         .live_replay(replay.clone())
         .build()

@@ -12,7 +12,7 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
   rows identify their concrete `pack`; summary and exclusion rows identify the
   selected pack. `--task` IDs must belong to that selection.
 
-- `--channel cell|native|standard` selects one channel (default: cell).
+- `--channel native|standard` selects the protocol (default: native).
 - `--paired` pairs cell and native in randomized order for each task.
 - `--channel-set all` includes both paired RLM channels plus standard, even
   without `--paired`. Standard runs once per task and runs no code mode cell.

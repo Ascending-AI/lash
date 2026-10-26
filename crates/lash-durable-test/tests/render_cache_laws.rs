@@ -510,17 +510,19 @@ impl lash::rlm::CodeRenderer for CountingCodeRenderer {
 
 fn rlm_script(call: usize, request: &LlmRequest) -> LlmResponse {
     let text = match call {
-        0 => {
-            "<typescript>\nlet saved = \"live value\"; console.log(\"ok\"); console.log(\"abcdefgh\");\n</typescript>"
-        }
+        0 => "let saved = \"live value\"; console.log(\"ok\"); console.log(\"abcdefgh\");",
         1 => "first done",
-        2 => "<typescript>\nconsole.log(\"abcdefgh\");\n</typescript>",
+        2 => "console.log(\"abcdefgh\");",
         3 => "second done",
-        4 => "<typescript>\nconsole.log(\"run spec\");\n</typescript>",
+        4 => "console.log(\"run spec\");",
         5 => "run spec done",
         _ => "reopened done",
     };
-    served::text(request, text)
+    if matches!(call, 0 | 2 | 4) {
+        served::cell(text)
+    } else {
+        served::text(request, text)
+    }
 }
 
 fn print_cap(max_chars: usize) -> lash::rlm::RlmRenderPatch {
@@ -543,7 +545,6 @@ fn rlm_core(
     build: &'static str,
 ) -> lash::LashCore {
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .build();
@@ -643,6 +644,9 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
         .flat_map(|message| message.blocks.iter())
         .filter_map(|block| match block {
             LlmContentBlock::Text { text, .. } => Some(text.to_string()),
+            LlmContentBlock::ToolResult { content, .. } => {
+                Some(lash_llm_transport::tool_result_text(content).into_owned())
+            }
             _ => None,
         })
         .find(|text| text.contains("within 3"))

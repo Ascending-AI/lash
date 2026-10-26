@@ -67,8 +67,7 @@ pub(crate) struct CellServices {
     /// The workers that lower the cell and host its machine.
     pub workers: lash_vm_client::service::Service,
     pub execution_bounds: crate::plugin::ExecutionBounds,
-    /// The transport the program arrived on.
-    pub channel: crate::plugin::RlmChannel,
+    /// How the host renders executed code.
     pub code_renderer: crate::render::CodeRendererSlot,
     /// How the session's dialect words what a model reads.
     pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
@@ -1039,7 +1038,6 @@ async fn run_linked_cell(
                             map.validate_identified(&host.envelope.document, code)
                                 .is_ok()
                         }),
-                        services.channel,
                         services.prompts.as_ref(),
                         state
                             .shown_packages()

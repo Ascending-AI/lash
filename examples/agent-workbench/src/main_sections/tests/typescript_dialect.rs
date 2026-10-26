@@ -63,15 +63,15 @@ fn the_workbench_tutorials_are_written_in_the_session_dialect() {
 fn prompt_programs(dialect: WorkbenchDialect) -> Vec<String> {
     let prompt = workbench_prompt(dialect);
     let name = dialect.cell_dialect();
-    let open_tag = format!("<{}>", name.name());
-    let close_tag = format!("</{}>", name.name());
+    let open_tag = format!("```{}\n", name.name());
+    let close_tag = "```";
     let mut programs = Vec::new();
     let mut rest = prompt;
     while let Some(open) = rest.find(&open_tag) {
         let body = &rest[open + open_tag.len()..];
         let close = body
-            .find(&close_tag)
-            .expect("every opened cell closes in the prompt");
+            .find(close_tag)
+            .expect("every worked program has a closing example fence");
         programs.push(body[..close].to_string());
         rest = &body[close..];
     }
@@ -166,7 +166,7 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
                 // The request's own rendering, so this fixture needs no
                 // message-vocabulary types the facade does not export.
                 served_prompts.lock_recover().push(format!("{request:?}"));
-                async { Ok(text_response(&finish_cell("canonical answer"))) }
+                async { Ok(code_response(&finish_cell("canonical answer"))) }
             })
             .build()
             .into_handle()
@@ -251,9 +251,12 @@ async fn a_python_workbench_serves_python_turns_and_records_the_dialect() {
             .complete(move |request: lash::provider::LlmRequest| {
                 served_prompts.lock_recover().push(format!("{request:?}"));
                 async {
-                    Ok(text_response(
-                        "<python>\nawait chat.reply('canonical answer')\n</python>",
-                    ))
+                    Ok(LlmResponse {
+                        parts: vec![lash::testing::execute_code(
+                            "await chat.reply('canonical answer')",
+                        )],
+                        ..Default::default()
+                    })
                 }
             })
             .build()
@@ -268,8 +271,8 @@ async fn a_python_workbench_serves_python_turns_and_records_the_dialect() {
         prompts
             .iter()
             .all(|prompt| prompt.contains("## Python execution")
-                && prompt.contains("<python>")
-                && !prompt.contains("<typescript>")),
+                && prompt.contains("execute_code")
+                && !prompt.contains("## TypeScript execution")),
         "Python served prompts: {prompts:#?}"
     );
     let projected = read_state(&workbench.state, None)

@@ -15,7 +15,7 @@ fn inspecting_provider(
             let request =
                 serde_json::to_string(&request.messages).expect("serialize the provider request");
             let cell = respond(call, request);
-            async move { Ok(text_response(&cell)) }
+            async move { Ok(code_response(&cell)) }
         })
         .build()
         .into_handle()
@@ -35,17 +35,13 @@ async fn assistant_rows(state: &AppState) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deferred_search_observation_enables_next_block_call() {
     let provider = inspecting_provider(|call, request| match call {
-        0 => r#"<typescript>
-const matches = await tools.search({ query: "text checksum", limit: 1 });
-console.log(JSON.stringify(matches));
-</typescript>"#
+        0 => r#"const matches = await tools.search({ query: "text checksum", limit: 1 });
+console.log(JSON.stringify(matches));"#
             .to_string(),
         1 => {
             assert!(request.contains("strings.sha256"), "{request}");
-            r#"<typescript>
-const result = await strings.sha256({ text: "restart proof" });
-await chat.reply(result.digest);
-</typescript>"#
+            r#"const result = await strings.sha256({ text: "restart proof" });
+await chat.reply(result.digest);"#
                 .to_string()
         }
         other => panic!("unexpected deferred round-trip provider call {other}"),
@@ -70,19 +66,15 @@ await chat.reply(result.digest);
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors() {
     let provider = inspecting_provider(|call, request| match call {
-        0 => r#"<typescript>
-const matches = await tools.search({ query: "text checksum", limit: 1 });
+        0 => r#"const matches = await tools.search({ query: "text checksum", limit: 1 });
 const result = await strings.sha256({ text: "too soon" });
-await chat.reply(result.digest);
-</typescript>"#
+await chat.reply(result.digest);"#
             .to_string(),
         1 => {
             assert!(request.contains("strings.sha256"), "{request}");
             assert!(request.contains("link"), "{request}");
-            r#"<typescript>
-const result = await mystery.not_real({});
-await chat.reply(result);
-</typescript>"#
+            r#"const result = await mystery.not_real({});
+await chat.reply(result);"#
                 .to_string()
         }
         2 => {

@@ -4,19 +4,26 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage};
-use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
-use lash_core::sansio::ContextProjector;
-use lash_core::{
-    LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
-};
+use lash_core::{ProtocolBuildInput, TurnDriverPreamble};
 
 use crate::dialect::SessionDialect;
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
 
+#[cfg(feature = "testing")]
+use crate::driver_state::RlmReasoningPart;
+#[cfg(test)]
+use crate::native::projector::RlmContextProjector;
+pub(crate) use crate::native::projector::build_rlm_preamble_with_dialect;
+#[cfg(feature = "testing")]
+use crate::protocol::finish::internal_assistant_prose_message;
+use history::RlmHistoryRenderInput;
 #[cfg(any(test, feature = "testing"))]
 use history::render_history_messages;
-use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
+#[cfg(feature = "testing")]
+use lash_core::llm::types::{LlmRole, append_assistant_text_part};
+#[cfg(feature = "testing")]
+use lash_core::{LlmOutputPart, Message};
 
 /// A prompt-only RLM preamble's configuration: the host's selected dialect
 /// and the prompt knobs.
@@ -55,88 +62,7 @@ pub fn build_rlm_preamble(
     )
 }
 
-pub(crate) fn build_rlm_preamble_with_dialect(
-    input: ProtocolBuildInput,
-    config: RlmPreambleConfig,
-    dialect: Arc<SessionDialect>,
-) -> TurnDriverPreamble {
-    let tool_catalog = input.tool_catalog.as_ref();
-    let tool_names = tool_catalog.tool_names();
-    TurnDriverPreamble {
-        config: TurnDriverConfig {
-            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
-                &dialect,
-            ))),
-            projector: Arc::new(RlmContextProjector {
-                max_output_chars: config.max_output_chars,
-                dialect: Arc::clone(&dialect),
-            }),
-        },
-        tool_specs: Arc::new(Vec::new()),
-        tool_names,
-        writer_formats: input.writer_formats,
-    }
-}
-
-struct RlmContextProjector {
-    max_output_chars: usize,
-    dialect: Arc<SessionDialect>,
-}
-
-impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
-    fn has_current_context_prefix(&self) -> bool {
-        true
-    }
-
-    fn project(
-        &self,
-        ctx: ProjectorContext<'_>,
-    ) -> Result<Arc<LlmRequest>, lash_core::StoredDataCorruption> {
-        let mut messages = Vec::new();
-
-        messages.extend(build_rlm_history_messages_from_turn(
-            RlmHistoryRenderInput {
-                dialect: self.dialect.as_ref(),
-                events: ctx.events,
-                turn_messages: ctx.messages,
-                max_output_chars: self.max_output_chars,
-                protocol_iteration: ctx.protocol_iteration + 1,
-            },
-        )?);
-
-        let mut generation = ctx.config.generation.clone();
-        // The paired-tag grammar is RLM's response boundary. Provider wire
-        // stops, including caller-supplied ones, could withhold that literal
-        // boundary and leave the parser with a truncated cell. The boundary is
-        // the dialect's, but no dialect hands it to the provider as a stop.
-        generation.suppress_stop_sequences_for_protocol();
-
-        Ok(Arc::new(LlmRequest {
-            instructions: None,
-            model: ctx.config.model.clone(),
-            messages,
-
-            tools: Arc::new(Vec::new()),
-            tool_choice: LlmToolChoice::None,
-            attachment_acceptance: Arc::clone(&ctx.config.attachment_acceptance),
-            scope: LlmRequestScope::new(
-                ctx.config.session_id.clone(),
-                ctx.config.agent_frame_id.clone(),
-                format!(
-                    "{}:sansio:rlm:{}",
-                    ctx.config.session_id, ctx.protocol_iteration
-                ),
-            ),
-            output_spec: None,
-            stream_events: None,
-            generation,
-            provider_trace: None,
-            attempt_control: Default::default(),
-        }))
-    }
-}
-
-impl RlmContextProjector {
+impl crate::native::projector::RlmContextProjector {
     #[cfg(test)]
     fn format_history(&self, events: &[lash_core::SessionHistoryRecord]) -> String {
         let messages = render_history_messages(&RlmHistoryRenderInput {
@@ -195,3 +121,113 @@ pub(crate) fn render_conformance_history_message(
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(feature = "testing")]
+struct ProjectedResponse {
+    assistant_text: String,
+    reasoning: Vec<RlmReasoningPart>,
+}
+
+#[derive(Debug)]
+#[cfg(feature = "testing")]
+struct NativeToolCall {
+    tool_name: String,
+}
+
+#[cfg(feature = "testing")]
+fn project_response(parts: Vec<LlmOutputPart>) -> Result<ProjectedResponse, NativeToolCall> {
+    let mut assistant_text = String::new();
+    let mut reasoning = Vec::new();
+    for part in parts {
+        match part {
+            LlmOutputPart::Text { text, .. } => {
+                append_assistant_text_part(&mut assistant_text, &text);
+            }
+            LlmOutputPart::Reasoning { text, replay } => {
+                let text = if text.trim().is_empty() {
+                    replay
+                        .as_ref()
+                        .map(|meta| meta.summary.join("\n\n"))
+                        .unwrap_or_default()
+                } else {
+                    text
+                };
+                if !text.trim().is_empty() || replay.as_ref().is_some_and(|meta| !meta.is_empty()) {
+                    reasoning.push(RlmReasoningPart { text, replay });
+                }
+            }
+            LlmOutputPart::ToolCall { tool_name, .. } => {
+                return Err(NativeToolCall { tool_name });
+            }
+        }
+    }
+    Ok(ProjectedResponse {
+        assistant_text,
+        reasoning,
+    })
+}
+
+/// Test support for exercising the production RLM response-to-history seam.
+/// The bridge uses the same typed response projection, durable `Part`
+/// representation, JSON round trip, and RLM history renderer as production.
+#[cfg(feature = "testing")]
+pub fn project_conformance_messages_through_rlm_history(
+    messages: Vec<LlmMessage>,
+) -> Result<Vec<LlmMessage>, String> {
+    messages
+        .into_iter()
+        .map(|message| {
+            if !matches!(message.role, LlmRole::Assistant) {
+                return Ok(message);
+            }
+            let parts = message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    LlmContentBlock::Text {
+                        text,
+                        response_meta,
+                        ..
+                    } => Some(LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: response_meta.clone(),
+                    }),
+                    LlmContentBlock::Reasoning { text, replay } => Some(LlmOutputPart::Reasoning {
+                        text: text.clone(),
+                        replay: replay.clone(),
+                    }),
+                    LlmContentBlock::ToolCall {
+                        call_id,
+                        tool_name,
+                        input_json,
+                        replay,
+                    } => Some(LlmOutputPart::ToolCall {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        input_json: input_json.clone(),
+                        replay: replay.clone(),
+                    }),
+                    LlmContentBlock::Attachment { .. } | LlmContentBlock::ToolResult { .. } => None,
+                })
+                .collect();
+            let projected = project_response(parts).map_err(|tool_call| {
+                format!(
+                    "RLM conformance history fixture contains native tool call `{}`",
+                    tool_call.tool_name
+                )
+            })?;
+            let durable = internal_assistant_prose_message(
+                "conformance.rlm.assistant".to_string(),
+                projected.assistant_text,
+                &projected.reasoning,
+            );
+            let encoded = serde_json::to_string(&durable).map_err(|err| {
+                format!("RLM conformance history message did not serialize: {err}")
+            })?;
+            let durable: Message = serde_json::from_str(&encoded).map_err(|err| {
+                format!("RLM conformance history message did not deserialize: {err}")
+            })?;
+            crate::driver::render_conformance_history_message(durable)
+        })
+        .collect()
+}

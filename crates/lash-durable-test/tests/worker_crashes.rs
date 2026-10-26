@@ -446,7 +446,6 @@ impl Limit {
 fn unbounded_rlm(workers: lash::vm::WorkerService) -> lash::rlm::RlmProtocolPluginFactory {
     lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::unbounded())
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),

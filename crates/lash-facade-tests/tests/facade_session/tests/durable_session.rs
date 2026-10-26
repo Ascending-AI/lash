@@ -1177,15 +1177,14 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
                             text: "committed corpus reasoning".into(),
                             replay: None,
                         },
-                        lash_core::LlmOutputPart::Text {
-                            text: if call == 0 {
-                                "<typescript>console.log(\"committed corpus output\");</typescript>"
+                        lash::testing::execute_code(
+                            if call == 0 {
+                                "console.log(\"committed corpus output\");"
                             } else {
-                                "<typescript>await control.finish(\"committed corpus reply\");</typescript>"
+                                "await control.finish(\"committed corpus reply\");"
                             }
-                            .into(),
-                            response_meta: None,
-                        },
+                            .to_string(),
+                        ),
                     ],
                     ..Default::default()
                 })
@@ -1261,7 +1260,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
     fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
-                text_provider(
+                part_provider(
                     "cell-call-records",
                     typescript_block(
                         "const first = await tools.appLookup({});\n\
@@ -1364,7 +1363,7 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
     fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(rlm_core_builder_over(backend))
             .serve_test_llm_profile(
-                text_provider(
+                part_provider(
                     "cell-tool-records",
                     typescript_block(
                         "const first = await tools.appLookup({});\n\
@@ -1481,7 +1480,7 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
         let core = |backend: lash_execution_contracts::backend::Backend| {
             explicit_ephemeral_facets(rlm_core_builder_over(backend))
                 .serve_test_llm_profile(
-                    text_provider(
+                    part_provider(
                         "cancelled-cell-records",
                         typescript_block(
                             "const first = await tools.appLookup({});\n\
@@ -1594,7 +1593,7 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
-                text_provider(
+                part_provider(
                     "after-turn-cell-calls",
                     typescript_block(
                         "const found = await tools.appLookup({});\n\
@@ -1635,19 +1634,18 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
 }
 
 /// An executed cell is one typed record, and its assistant context is
-/// ordinary history, on both RLM channels (FIG-5527). The reply that ran the
+/// ordinary history, through native RLM calls (FIG-5527). The reply that ran the
 /// cell reads back from the durable transcript after a reopen as an
 /// assistant message naming the cell, with the native channel's
 /// `execute_code` call beside its prose; the cell reads back as the record
 /// its protocol committed, whose prints and result are the values the
 /// executor reported in the cell's completion activity. One decoder reads
-/// both channels.
+/// native execution.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_after_a_reopen()
 -> Result<()> {
     use lash::transcript::{CellOutcome, TranscriptBlock, TranscriptItem, TranscriptRole};
-    use lash_protocol_rlm::RlmChannel;
 
     const PROGRAM: &str = "console.log(\"counted\");\nawait control.finish(\"three\");";
     const PROSE: &str = "Counting first.";
@@ -1655,39 +1653,30 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
     fn native_arguments() -> String {
         serde_json::json!({ "code": PROGRAM }).to_string()
     }
-    fn core(
-        backend: lash_execution_contracts::backend::Backend,
-        channel: RlmChannel,
-    ) -> Result<LashCore> {
+    fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         let provider = lash::testing::TestProvider::builder()
             .kind("cell-record")
             .complete(move |_request| async move {
-                Ok(match channel {
-                    RlmChannel::NativeTool => LlmResponse {
-                        parts: vec![
-                            LlmOutputPart::Text {
-                                text: PROSE.to_string(),
-                                response_meta: None,
-                            },
-                            LlmOutputPart::ToolCall {
-                                call_id: "provider-call-1".to_string(),
-                                tool_name: "execute_code".to_string(),
-                                input_json: native_arguments(),
-                                replay: None,
-                            },
-                        ],
-                        ..LlmResponse::default()
-                    },
-                    RlmChannel::Cell => {
-                        text_response(&format!("{PROSE}\n{}", typescript_block(PROGRAM)))
-                    }
+                Ok(LlmResponse {
+                    parts: vec![
+                        LlmOutputPart::Text {
+                            text: PROSE.to_string(),
+                            response_meta: None,
+                        },
+                        LlmOutputPart::ToolCall {
+                            call_id: "provider-call-1".to_string(),
+                            tool_name: "execute_code".to_string(),
+                            input_json: native_arguments(),
+                            replay: None,
+                        },
+                    ],
+                    ..LlmResponse::default()
                 })
             })
             .build()
             .into_handle();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(channel)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
@@ -1699,13 +1688,11 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
             .build(lash_facade_tests::runtime_lease_owner())
     }
 
-    for (channel, name) in [
-        (RlmChannel::NativeTool, "cell-record-native"),
-        (RlmChannel::Cell, "cell-record-fenced"),
-    ] {
+    {
+        let name = "cell-record-native";
         let backend = sqlite_memory_store_backend().await;
         let session_id = id(name);
-        let running = core(backend.clone(), channel)?;
+        let running = core(backend.clone())?;
         let session = created_session(&running, session_id.clone())
             .await
             .open()
@@ -1733,7 +1720,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
         drop(session);
         running.shutdown().await?;
 
-        let reopened = core(backend, channel)?;
+        let reopened = core(backend)?;
         let transcript = reopened
             .session(session_id.clone())
             .open()
@@ -1809,12 +1796,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
                 _ => None,
             })
             .collect::<Vec<_>>();
-        match channel {
-            RlmChannel::NativeTool => {
-                assert_eq!(calls, [("execute_code", native_arguments())], "{name}");
-            }
-            RlmChannel::Cell => assert!(calls.is_empty(), "{name}: {calls:?}"),
-        }
+        assert_eq!(calls, [("execute_code", native_arguments())], "{name}");
         reopened.shutdown().await?;
     }
     Ok(())
@@ -1829,7 +1811,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
-                text_provider(
+                part_provider(
                     "finish-at-the-limit",
                     typescript_block(
                         "const found = await tools.appLookup({});\n\

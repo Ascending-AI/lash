@@ -217,7 +217,7 @@ impl Cell {
                  console.log([n, a]);"
             ),
         };
-        format!("<typescript>\n{body}\n</typescript>")
+        body.to_string()
     }
 }
 
@@ -576,7 +576,7 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                 } else {
                     cell.source()
                 };
-                if let Some(stream) = request.stream_events.as_ref() {
+                if answered && let Some(stream) = request.stream_events.as_ref() {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                         kind: StreamBlockKind::AssistantText,
                         block: StreamBlockIdentity::new("text:0", 0),
@@ -584,9 +584,13 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                     }));
                 }
                 Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: answer,
-                        response_meta: None,
+                    parts: vec![if answered {
+                        LlmOutputPart::Text {
+                            text: answer,
+                            response_meta: None,
+                        }
+                    } else {
+                        lash::testing::execute_code(answer)
                     }],
                     ..LlmResponse::default()
                 })
@@ -918,7 +922,6 @@ impl CellTurn {
             .get_or_insert_with(|| {
                 let factory = lash::rlm::RlmProtocolPluginFactory::new(
                     lash::rlm::RlmProtocolPluginConfig::builder()
-                        .channel(lash::rlm::RlmChannel::Cell)
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
@@ -1790,7 +1793,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
     // restored cell's second calls meet the recorded decisions, never the
     // redeployed resolver's.
     // The cell's logged output, before the prompt lists its variables.
-    let logged = last.split_once("output[0]").map_or("", |(_, rest)| {
+    let logged = last.split_once("Output:").map_or("", |(_, rest)| {
         rest.split("Available variables").next().unwrap_or(rest)
     });
     for recorded in [REFUSED_REASON, MISSING_NOTE] {

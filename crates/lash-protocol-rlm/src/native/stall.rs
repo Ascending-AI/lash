@@ -12,8 +12,7 @@ const NATIVE_PART_SEPARATOR: char = '\u{1f}';
 
 /// The digest of one native reply, over the reply and nothing else.
 ///
-/// The cell channel hashes its assistant text, which is prose and the cell
-/// together. A native reply says the same two things in separate parts — prose
+/// A reply carries separate parts — prose
 /// and the arguments of one `execute_code` call — so both are hashed, and
 /// nothing a provider varies between two identical answers is: reasoning
 /// summaries, the `reasoning_meta`/`response_meta` replay blobs, and the

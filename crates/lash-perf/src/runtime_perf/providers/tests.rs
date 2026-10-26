@@ -111,25 +111,6 @@ fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lash_vm() {
 }
 
 #[test]
-fn streamed_paired_lash_vm_profile_splits_tags_and_trailing_suffix() {
-    let profile = benchmark_stream_profile(RuntimePerfScenario::RlmStreamedPairedLashVm);
-    assert_eq!(profile.full_text.matches("<typescript>").count(), 1);
-    assert_eq!(profile.full_text.matches("</typescript>").count(), 1);
-    assert!(
-        profile
-            .full_text
-            .ends_with("This suffix must be ignored after the close tag.")
-    );
-    assert_eq!(profile.deltas.len(), 4);
-    assert!(profile.deltas[0].ends_with("<type"));
-    assert!(profile.deltas[1].starts_with("script>"));
-    assert!(profile.deltas[2].ends_with("</type"));
-    assert!(profile.deltas[3].starts_with("script>"));
-    assert!(profile.deltas[3].contains("This suffix must be ignored"));
-    assert!(profile.parts.is_empty());
-}
-
-#[test]
 fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     let mut unmarked_request = empty_request();
     unmarked_request
@@ -144,8 +125,8 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
         &unmarked_request,
     );
     assert_eq!(
-        unmarked_profile.full_text,
-        typescript_block(r#"console.log("checkpoint before projection");"#)
+        unmarked_profile.parts,
+        typescript_block(r#"console.log("checkpoint before projection");"#).parts
     );
 
     let mut marked_request = empty_request();
@@ -161,8 +142,8 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
         &marked_request,
     );
     assert_eq!(
-        marked_profile.full_text,
-        typescript_block(r#"await control.finish("runtime perf benchmark ok");"#)
+        marked_profile.parts,
+        typescript_block(r#"await control.finish("runtime perf benchmark ok");"#).parts
     );
 
     let mut historical_marker_request = marked_request;
@@ -178,8 +159,8 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
         &historical_marker_request,
     );
     assert_eq!(
-        historical_marker_profile.full_text,
-        typescript_block(r#"console.log("checkpoint before projection");"#)
+        historical_marker_profile.parts,
+        typescript_block(r#"console.log("checkpoint before projection");"#).parts
     );
 }
 
@@ -207,8 +188,8 @@ fn delegated_child_task_routing_ignores_parent_spawn_history() {
         child.messages.push(LlmMessage::text(LlmRole::User, TASK));
         let child_profile = benchmark_stream_profile_for_request(scenario, &child);
         assert_eq!(
-            child_profile.full_text,
-            typescript_block("await control.finish({ len: chunk.length });")
+            child_profile.parts,
+            typescript_block("await control.finish({ len: chunk.length });").parts
         );
 
         let mut parent = empty_request();
@@ -217,16 +198,14 @@ fn delegated_child_task_routing_ignores_parent_spawn_history() {
             .push(request_input("load-kind:child operation:0"));
         parent.messages.push(LlmMessage::text(
             LlmRole::Assistant,
-            format!(
-                "<typescript>const result = await agents.spawn({{ task: {TASK:?} }});</typescript>"
-            ),
+            format!("const result = await agents.spawn({{ task: {TASK:?} }});"),
         ));
         parent
             .messages
             .push(request_input("load-kind:child operation:1"));
         let parent_profile = benchmark_stream_profile_for_request(scenario, &parent);
         assert!(
-            parent_profile.full_text.contains("agents.spawn"),
+            parent_profile.parts.iter().any(|part| matches!(part, LlmOutputPart::ToolCall { input_json, .. } if input_json.contains("agents.spawn"))),
             "{} routed the parent's next turn as its child",
             scenario.name()
         );

@@ -49,6 +49,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     assert_eq!(
         messages
             .iter()
+            .filter(|message| !lash::rlm::is_rlm_protocol_output(message.origin.as_ref()))
             .map(|message| (message.role, message_text(message)))
             .collect::<Vec<_>>(),
         vec![
@@ -70,6 +71,14 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
             ),
         ],
         "each turn commits its input and its one reply"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| lash::rlm::is_rlm_protocol_output(message.origin.as_ref()))
+            .count(),
+        2,
+        "each native execution also retains its provider exchange"
     );
     // The runtime commits each value-finished turn's reply itself, marked
     // with its turn (FIG-1493 §5.5); no host writer is involved.
@@ -94,7 +103,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
                 requests
                     .lock_recover()
                     .push(serde_json::to_string(&request).expect("serialize the request"));
-                async { Ok(text_response(&finish_cell("resume answer three"))) }
+                async { Ok(code_response(&finish_cell("resume answer three"))) }
             })
             .build()
             .into_handle()

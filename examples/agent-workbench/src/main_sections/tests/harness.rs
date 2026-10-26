@@ -79,6 +79,11 @@ impl Workbench {
         Self::builder(replying_provider(reply)).build().await
     }
 
+    /// A workbench whose provider supplies the same native program on each call.
+    pub(crate) async fn executing(code: &'static str) -> Self {
+        Self::builder(replying_code_provider(code)).build().await
+    }
+
     /// A workbench whose provider must not be called.
     pub(crate) async fn silent() -> Self {
         Self::builder(silent_provider()).build().await
@@ -224,7 +229,6 @@ impl WorkbenchBuilder {
             .unwrap_or_else(|| Arc::new(TeeTraceSink::new([])) as Arc<dyn TraceSink>);
         let core = build_workbench_core(
             &stores,
-            workbench_rlm_channel().expect("the RLM channel"),
             workbench_context_window_tokens(),
             plugins,
             WorkbenchTracing {
@@ -265,7 +269,7 @@ impl WorkbenchBuilder {
     }
 }
 
-/// An RLM reply: one TypeScript cell.
+/// A plain prose response without execution.
 pub(crate) fn text_response(text: &str) -> lash::provider::LlmResponse {
     lash::provider::LlmResponse {
         parts: vec![lash::direct::LlmOutputPart::Text {
@@ -279,7 +283,7 @@ pub(crate) fn text_response(text: &str) -> lash::provider::LlmResponse {
 /// The cell that finishes a turn with `value` as its final string.
 pub(crate) fn finish_cell(value: &str) -> String {
     format!(
-        "<typescript>\nawait chat.reply({});\n</typescript>",
+        "await chat.reply({});",
         serde_json::to_string(value).expect("a string encodes")
     )
 }
@@ -303,7 +307,7 @@ pub(crate) fn scripted_cells_provider(cells: Vec<String>) -> ProviderHandle {
                 .get(call)
                 .cloned()
                 .unwrap_or_else(|| panic!("the scripted provider ran out of cells at {call}"));
-            async move { Ok(text_response(&cell)) }
+            async move { Ok(code_response(&cell)) }
         })
         .build()
         .into_handle()
@@ -328,11 +332,11 @@ pub(crate) struct GatedProvider {
 
 impl GatedProvider {
     pub(crate) fn new() -> Self {
-        Self::replying(|call| finish_cell(&format!("answer {call}")))
+        Self::replying(|call| code_response(&finish_cell(&format!("answer {call}"))))
     }
 
     /// A gated provider whose call `n` answers `reply(n)` once released.
-    pub(crate) fn replying(reply: impl Fn(usize) -> String + Send + Sync + 'static) -> Self {
+    pub(crate) fn replying(reply: impl Fn(usize) -> LlmResponse + Send + Sync + 'static) -> Self {
         let reply = Arc::new(reply);
         let (entered_tx, entered) = mpsc::unbounded_channel();
         let permits = Arc::new(tokio::sync::Semaphore::new(0));
@@ -353,7 +357,7 @@ impl GatedProvider {
                             .await
                             .expect("the gate stays open")
                             .forget();
-                        Ok(text_response(&reply))
+                        Ok(reply)
                     }
                 }
             })
@@ -634,3 +638,20 @@ impl TraceSink for RecordingTrace {
         Ok(())
     }
 }
+
+pub(crate) fn code_response(code: &str) -> lash::provider::LlmResponse {
+    lash::provider::LlmResponse {
+        parts: vec![lash::testing::execute_code(code)],
+        ..Default::default()
+    }
+}
+
+pub(crate) fn replying_code_provider(code: &'static str) -> ProviderHandle {
+    lash::testing::TestProvider::builder()
+        .kind("workbench-harness-code")
+        .complete(move |_| async move { Ok(code_response(code)) })
+        .build()
+        .into_handle()
+}
+
+pub(crate) use lash::provider::LlmResponse;
