@@ -121,7 +121,8 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match envelope.command {
+        let kind = envelope.command.kind();
+        let result = match envelope.command {
             // The registry operations commit their actor rows in their own
             // transactions: a start creates the actor ready, a cancel
             // records the first request with its mail, an await reads the
@@ -133,11 +134,23 @@ impl ActorContext {
                     crate::ProcessCommand::PublishDefinition { .. }
                         | crate::ProcessCommand::GetDefinition { .. }
                 ) {
-                    local.into_definition_execution()?.execute(*command).await?
+                    local
+                        .into_definition_execution()
+                        .map_err(|error| error.with_effect_kind(kind))?
+                        .execute(*command)
+                        .await
+                        .map_err(|error| error.with_effect_kind(kind))?
                 } else {
                     let receiver = envelope.invocation.execution_scope().clone();
                     // Boxed: the start and await state machines are large.
-                    Box::pin(local.into_process()?.execute(&receiver, *command)).await?
+                    Box::pin(
+                        local
+                            .into_process()
+                            .map_err(|error| error.with_effect_kind(kind))?
+                            .execute(&receiver, *command),
+                    )
+                    .await
+                    .map_err(|error| error.with_effect_kind(kind))?
                 };
                 Ok(crate::RuntimeEffectOutcome::Process { result })
             }
@@ -155,7 +168,8 @@ impl ActorContext {
                     format!("`{:?}` is not a process effect", other.kind()),
                 ),
             ),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 
     /// Whether the process this context runs has a committed cancellation.

@@ -430,8 +430,10 @@ pub mod facade_support {
     pub use lash_protocol_types::reasoning_part;
     pub use lash_protocol_types::shared_parts;
     pub use lash_protocol_types::visible_response_text_from_parts;
+    pub use lash_protocol_types::{
+        EffectRefusal, PluginStage, TurnErrorCause, TurnErrorCode, TurnStop,
+    };
     pub use lash_protocol_types::{ModelToolOutcome, ModelToolReturn};
-    pub use lash_protocol_types::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_sansio::EffectId;
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceDetailPolicy;

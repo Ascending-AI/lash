@@ -17,7 +17,8 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match &envelope.command {
+        let kind = envelope.command.kind();
+        let result = match &envelope.command {
             crate::RuntimeEffectCommand::ToolAttempt { .. }
             | crate::RuntimeEffectCommand::PresentToolResult { .. } => {
                 local.run_in_place(envelope).await
@@ -26,6 +27,7 @@ impl ActorContext {
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!("{:?} is not a tool effect", other.kind()),
             )),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 }

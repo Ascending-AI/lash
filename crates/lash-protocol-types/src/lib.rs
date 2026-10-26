@@ -85,10 +85,10 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, CompletionCandidate, CompletionDisposition,
-    ConversationRecord, DecidedCompletion, ErrorEnvelope, FailureCode, HostNamespace,
-    InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole,
-    MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, PluginStage,
-    ProtocolEvent, ProtocolPayload, RenderedPrompt, ReportedFailure, RetryProgress,
+    ConversationRecord, DecidedCompletion, EffectRefusal, ErrorEnvelope, FailureCode,
+    HostNamespace, InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message,
+    MessageRole, MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind,
+    PluginStage, ProtocolEvent, ProtocolPayload, RenderedPrompt, ReportedFailure, RetryProgress,
     SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StoredDataCorruption,
     StreamMessageKind, TerminationMode, TokenUsageOverflow, ToolCallLimitExceeded,
     ToolCallLimitScope, TurnBudget, TurnCancelMode, TurnCancelUndeliveredInputPolicy,

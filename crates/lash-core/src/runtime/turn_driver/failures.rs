@@ -24,13 +24,28 @@ impl RuntimeTurnDriver<'_> {
             Some(crate::RuntimeErrorCause::ControlPhaseExpired { expiry }) => Some(expiry.clone()),
             _ => None,
         };
-        let event = make_error_event(
+        let refusal = err.effect_kind.map(|kind| {
+            Box::new(crate::facade_support::EffectRefusal {
+                effect_kind: kind.as_str().to_owned(),
+                controller_code: crate::FailureCode::from(&err.code),
+                detail: lash_protocol_types::session_model::truncate_raw_error(
+                    &err.message,
+                    self.host.core.control.output_cuts.raw_error_max_chars,
+                ),
+            })
+        });
+        let mut event = make_error_event(
             crate::TurnFailureKind::RuntimeEffectController,
             Some(crate::FailureCode::from(&err.code)),
             err.message,
             raw,
             self.host.core.control.output_cuts,
         );
+        if let SessionStreamEvent::Error(failure) = &mut event
+            && let Some(envelope) = &mut failure.envelope
+        {
+            envelope.effect_refusal = refusal;
+        }
         let mut cause = crate::TurnErrorCause::runtime(match &event {
             SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
             _ => None,

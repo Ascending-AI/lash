@@ -921,6 +921,9 @@ impl SessionStateVersionRefusal {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct RuntimeError {
+    /// The innermost runtime effect that refused this operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_kind: Option<RuntimeEffectKind>,
     pub code: RuntimeErrorCode,
     pub message: String,
     /// Structured, content-free evidence for a replay mismatch. Boxed, like
@@ -1001,6 +1004,7 @@ impl RuntimeError {
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
+            effect_kind: None,
             message: message.into(),
             summary: None,
             cause: None,

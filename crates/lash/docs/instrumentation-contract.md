@@ -12,6 +12,8 @@ Openers carry no content: `LlmCallStarted` always carries an omitted request; ho
 
 `lash.provider.validation` on `invoke_agent` retains a failed turn's Lash-owned provider-validation check even when the model call completed. `empty_response` means assistant output contained neither visible text nor tool calls. It carries no provider text and needs no content opt-in.
 
+FIG-7426: `lash.effect.refused.kind`, `lash.effect.refused.controller_code` and `lash.effect.refused.detail` on `invoke_agent` retain the refused operation and the controller’s namespaced code and bounded diagnostic. The same `effect_refusal` is carried by the turn settlement, failure envelope and terminal trace record. No new opt-in is required.
+
 Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
 
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
@@ -118,6 +120,9 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.tool.provider_call_id` | String | Provenance | tool |
 | `lash.outcome` | String | Provenance | agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent |
 | `lash.turn.inputs` | Integer | Provenance | agent |
+| `lash.effect.refused.kind` | String | Provenance | agent |
+| `lash.effect.refused.controller_code` | String | Provenance | agent |
+| `lash.effect.refused.detail` | String | Provenance | agent |
 | `lash.provider.validation` | String | Provenance | agent |
 | `lash.cancel.origin` | String | Provenance | agent |
 | `gen_ai.system_instructions` | String | Provenance | model |
@@ -151,7 +156,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | Span kind | Attribute reserve |
 |---|---|
 | `producer` | 36 |
-| `agent` | 26 |
+| `agent` | 29 |
 | `model` | 47 |
 | `model_attempt` | 30 |
 | `tool` | 31 |

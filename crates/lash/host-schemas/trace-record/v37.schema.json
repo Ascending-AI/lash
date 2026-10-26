@@ -633,6 +633,29 @@
       "pattern": "^e:([0-9a-f]{2})+$",
       "type": "string"
     },
+    "EffectRefusal": {
+      "description": "The refused operation and the controller's own answer (FIG-7426).\nThis is controller diagnostic text, independent of provider error bodies.",
+      "properties": {
+        "controller_code": {
+          "$ref": "#/$defs/FailureCode",
+          "description": "The controller's code in its own namespace."
+        },
+        "detail": {
+          "description": "The controller's diagnostic, bounded by the runtime's error output cut.",
+          "type": "string"
+        },
+        "effect_kind": {
+          "description": "Stable runtime-effect kind, including kinds authored by newer builds.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect_kind",
+        "controller_code",
+        "detail"
+      ],
+      "type": "object"
+    },
     "ExecCodeFailureReason": {
       "description": "Why an `exec_code` effect failed before the executor produced a response.\n\nThis is the closed classification offline trace analysis keys on; the human\ndetail lives in [`ExecCodeFailure::message`]. Serialized snake_case on the\ndurable journal and trace surfaces.",
       "oneOf": [
@@ -5821,6 +5844,17 @@
           "properties": {
             "done_reason": {
               "$ref": "#/$defs/TraceTurnFailureReason"
+            },
+            "effect_refusal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EffectRefusal"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The refused operation and the controller's answer, as settled."
             },
             "provider_validation": {
               "anyOf": [

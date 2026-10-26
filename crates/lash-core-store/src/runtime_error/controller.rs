@@ -5,6 +5,9 @@ use super::*;
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]
 pub struct RuntimeEffectControllerError {
+    /// The innermost runtime effect that refused this operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_kind: Option<RuntimeEffectKind>,
     #[serde(skip)]
     pub(super) journal_disposition: EffectErrorJournalPolicy,
     pub code: RuntimeErrorCode,
@@ -35,6 +38,7 @@ impl RuntimeEffectControllerError {
         Self {
             journal_disposition: EffectErrorJournalPolicy::Terminal,
             code,
+            effect_kind: None,
             message: message.into(),
             summary: None,
             cause: None,
@@ -272,6 +276,14 @@ impl RuntimeEffectControllerError {
         self
     }
 
+    /// Attribute a refusal to its innermost effect. An enclosing effect must
+    /// preserve the nested operation's attribution.
+    #[must_use]
+    pub fn with_effect_kind(mut self, kind: RuntimeEffectKind) -> Self {
+        self.effect_kind.get_or_insert(kind);
+        self
+    }
+
     pub fn wrong_outcome(expected: RuntimeEffectKind, actual: RuntimeEffectKind) -> Self {
         Self::new(
             RuntimeErrorCode::RuntimeEffectWrongOutcome,
@@ -286,6 +298,7 @@ impl RuntimeEffectControllerError {
     pub fn into_runtime_error(self) -> RuntimeError {
         let Self {
             journal_disposition: _,
+            effect_kind,
             code,
             message,
             summary,
@@ -294,6 +307,7 @@ impl RuntimeEffectControllerError {
             foreign_cause,
         } = self;
         let mut runtime = RuntimeError::new(code, message);
+        runtime.effect_kind = effect_kind;
         runtime.summary = summary;
         runtime.foreign_cause = foreign_cause;
         match cause {
@@ -307,6 +321,7 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
         Self {
             journal_disposition: EffectErrorJournalPolicy::Terminal,
+            effect_kind: err.effect_kind,
             code: err.code,
             message: err.message,
             summary: err.summary,

@@ -27,7 +27,8 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match &envelope.command {
+        let kind = envelope.command.kind();
+        let result = match &envelope.command {
             crate::RuntimeEffectCommand::BeforeLlmCall { .. }
             | crate::RuntimeEffectCommand::LlmCall { .. }
             | crate::RuntimeEffectCommand::AssistantResponseHooks { .. }
@@ -38,7 +39,8 @@ impl ActorContext {
                 local.run_in_place(envelope).await
             }
             other => Err(not_in_group(other, "turn")),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 
     /// The session's own effects: `ResolveConfigTransaction`,
@@ -53,14 +55,16 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match &envelope.command {
+        let kind = envelope.command.kind();
+        let result = match &envelope.command {
             crate::RuntimeEffectCommand::ResolveConfigTransaction { .. }
             | crate::RuntimeEffectCommand::ReadSessionCommandRun { .. }
             | crate::RuntimeEffectCommand::CloseRunScope { .. } => {
                 local.run_in_place(envelope).await
             }
             other => Err(not_in_group(other, "session")),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 }
 

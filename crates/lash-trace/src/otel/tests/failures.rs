@@ -125,9 +125,33 @@ fn failure_attributes_preserve_typed_classes() {
                 outcome: TraceTurnOutcome::Failed {
                     done_reason: crate::TraceTurnFailureReason::ContextOverflow,
                     provider_validation: None,
+                    effect_refusal: None,
                 },
             },
             Some("context_overflow".to_owned()),
+        ),
+        (
+            TraceSpanKind::Agent,
+            TraceEvent::TurnCompleted {
+                output: Vec::new(),
+                input: Vec::new(),
+                inference_calls: None,
+                tool_calls: None,
+                inputs: 1,
+                outcome: TraceTurnOutcome::Failed {
+                    done_reason: crate::TraceTurnFailureReason::RuntimeError,
+                    provider_validation: None,
+                    effect_refusal: Some(Box::new(lash_protocol_types::EffectRefusal {
+                        effect_kind: "checkpoint".to_owned(),
+                        controller_code: lash_protocol_types::FailureCode::host(
+                            &lash_protocol_types::HostNamespace::new("host"),
+                            "authority_expired",
+                        ),
+                        detail: "the active run's authority expired".to_owned(),
+                    })),
+                },
+            },
+            Some("runtime_error".to_owned()),
         ),
         (TraceSpanKind::Model, model(None), Some("http".to_owned())),
         (
@@ -145,6 +169,7 @@ fn failure_attributes_preserve_typed_classes() {
         outcome: TraceTurnOutcome::Failed {
             done_reason: crate::TraceTurnFailureReason::ProviderError,
             provider_validation: Some(lash_protocol_types::TurnFailureCode::EmptyResponse),
+            effect_refusal: None,
         },
     };
     for (kind, event, expected) in events.into_iter().chain([(
@@ -169,6 +194,30 @@ fn failure_attributes_preserve_typed_classes() {
         adapter.append(&closing(kind, span, 1000, event)).unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
+        if expected.as_deref() == Some("runtime_error") {
+            // FIG-7426: exported diagnostics retain the controller's namespace
+            // and answer, independently of the generic runtime_error category.
+            for (key, value) in [
+                ("lash.effect.refused.kind", "checkpoint"),
+                (
+                    "lash.effect.refused.controller_code",
+                    "host:authority_expired",
+                ),
+                (
+                    "lash.effect.refused.detail",
+                    "the active run's authority expired",
+                ),
+            ] {
+                assert_eq!(
+                    span.attributes
+                        .iter()
+                        .find(|attribute| attribute.key.as_str() == key)
+                        .map(|attribute| attribute.value.to_string()),
+                    Some(value.to_owned()),
+                    "{key}"
+                );
+            }
+        }
         assert_eq!(
             matches!(span.status, Status::Error { .. }),
             expected.is_some()

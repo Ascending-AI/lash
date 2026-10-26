@@ -403,6 +403,9 @@ impl ConversationRecord {
 /// [`SessionHistoryRecord`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ErrorEnvelope {
+    /// The operation and controller answer behind an effect refusal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_refusal: Option<Box<EffectRefusal>>,
     /// Typed origin of the failure. Serializes as the same snake_case string
     /// the field carried when it was a bare `String`, and an unrecognized
     /// spelling decodes as [`TurnFailureKind::Unknown`] rather than failing.
@@ -882,12 +885,28 @@ impl TurnErrorCode {
     }
 }
 
-/// The error recorded with a stopped turn. Detail contains only Lash's typed
-/// error text, never provider bodies, headers, credentials or user content.
-/// Constructors use the same free-text redaction as journaled provider errors:
-/// discard foreign text and render the typed classification instead.
+/// The refused operation and the controller's own answer (FIG-7426).
+/// This is controller diagnostic text, independent of provider error bodies.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct EffectRefusal {
+    /// Stable runtime-effect kind, including kinds authored by newer builds.
+    pub effect_kind: String,
+    /// The controller's code in its own namespace.
+    pub controller_code: FailureCode,
+    /// The controller's diagnostic, bounded by the runtime's error output cut.
+    pub detail: String,
+}
+
+/// The error recorded with a stopped turn. The generic `detail` contains only
+/// Lash's typed error text; `effect_refusal` separately retains the controller's
+/// own bounded diagnostic. Provider bodies never populate either field.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnErrorCause {
+    /// The operation and controller answer behind an `effect_refused` stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_refusal: Option<Box<EffectRefusal>>,
     /// Typed timeout evidence for an unanswered plugin callback phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_phase_expired: Option<Box<crate::ControlPhaseExpired>>,
@@ -911,6 +930,7 @@ impl TurnErrorCause {
             detail: Some(code.detail().to_owned()),
             control_phase_expired: None,
             provider_validation: None,
+            effect_refusal: None,
         }
     }
 
@@ -945,7 +965,11 @@ impl TurnErrorCause {
             },
             None => TurnErrorCode::RuntimeRefused,
         };
-        Self::new(code)
+        let mut cause = Self::new(code);
+        if code == TurnErrorCode::EffectRefused {
+            cause.effect_refusal = envelope.and_then(|envelope| envelope.effect_refusal.clone());
+        }
+        cause
     }
 
     /// Classify a failed provider call without interpreting provider-owned
@@ -1172,6 +1196,7 @@ pub fn make_error_envelope(
 ) -> ErrorEnvelope {
     let user_message = user_message.into();
     ErrorEnvelope {
+        effect_refusal: None,
         kind,
         code,
         terminal_reason,
@@ -1296,6 +1321,7 @@ mod tests {
                 Some(TurnFailureCode::TokenUsageOverflow.into()),
             ] {
                 let envelope = ErrorEnvelope {
+                    effect_refusal: None,
                     kind: kind.clone(),
                     code,
                     user_message: "foreign secret message".to_owned(),

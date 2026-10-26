@@ -185,12 +185,14 @@ async fn a_failed_cell(
     fail_invocation: bool,
 ) -> Result<(lash::TurnOutput, Vec<serde_json::Value>)> {
     let received = Received::default();
+    let sink = Arc::new(lash::testing::RecordingTraceSink::new());
     let core = explicit_ephemeral_facets(
         LashCore::builder(sqlite_memory_store_backend().await).protocol_plugin(Arc::new(
             TestProtocolFactory(Arc::clone(&received), fail_invocation),
         )),
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .trace_sink(sink.clone())
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
         .session(
@@ -202,6 +204,32 @@ async fn a_failed_cell(
     let output = session.send(TurnInput::text("run code")).output().await?;
     drop(session);
     core.shutdown().await?;
+    if fail_invocation {
+        let expected = serde_json::json!({
+            "effect_kind": "process",
+            "controller_code": "lash:runtime_effect_local_executor_unavailable",
+            "detail": "the nested cell invocation failed",
+        });
+        let records = sink.json_records().expect("trace serializes");
+        let terminal = records
+            .iter()
+            .find(|record| record["type"] == "turn_completed")
+            .expect("turn terminal trace");
+        assert_eq!(
+            terminal.pointer("/outcome/effect_refusal"),
+            Some(&expected),
+            "FIG-7426: the trace identifies the same refusal as the settlement"
+        );
+        let failure = output
+            .activities
+            .iter()
+            .find_map(|activity| {
+                let value = serde_json::to_value(&activity.event).expect("activity serializes");
+                (value["type"] == "error").then_some(value)
+            })
+            .expect("effect refusal activity");
+        assert_eq!(failure.pointer("/envelope/effect_refusal"), Some(&expected));
+    }
     let received = received.lock_recover().clone();
     Ok((output, received))
 }
@@ -311,15 +339,20 @@ impl lash_core::plugin::CodeExecutorPlugin for FailedInvocation {
         ctx: lash_core::RuntimeExecutionContext<'_>,
         _: lash_core::ExecRequest,
     ) -> std::result::Result<lash_core::ExecResponse, lash_core::SessionError> {
-        ctx.record_nested_runtime_effect_error(lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-            "the nested cell invocation failed",
-        ));
+        ctx.record_nested_runtime_effect_error(
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                "the nested cell invocation failed",
+            )
+            .with_effect_kind(lash_core::runtime::RuntimeEffectKind::Process),
+        );
         Err(lash_core::SessionError::CodeExecutionUnavailable)
     }
 }
 
 /// S1: an invocation failure has no observed duration; an answered failure does.
+/// FIG-7426: a nested refusal retains its own operation, code and detail on
+/// the settlement, error activity and terminal trace.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cell_failure_activity_distinguishes_unmeasured_from_measured_duration() -> Result<()> {
     for invocation_failed in [true, false] {
@@ -333,6 +366,16 @@ async fn cell_failure_activity_distinguishes_unmeasured_from_measured_duration()
             })
             .expect("the failed cell publishes its completion");
         if invocation_failed {
+            let terminal = serde_json::to_value(&output.outcome)?;
+            assert_eq!(
+                terminal.pointer("/stopped/runtime_error/cause/effect_refusal"),
+                Some(&serde_json::json!({
+                    "effect_kind": "process",
+                    "controller_code": "lash:runtime_effect_local_executor_unavailable",
+                    "detail": "the nested cell invocation failed",
+                })),
+                "FIG-7426: a host can identify the refused effect and controller's answer"
+            );
             assert!(completion.get("duration_ms").is_none(), "{completion}");
             assert!(completion.get("prints").is_none(), "{completion}");
             assert!(completion.get("tool_call_ids").is_none(), "{completion}");

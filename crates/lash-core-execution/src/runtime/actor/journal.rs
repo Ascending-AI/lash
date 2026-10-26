@@ -174,7 +174,8 @@ impl ActorContext {
             None,
             self.trace_scope().cloned(),
         );
-        self.admit_journal_write_at(Some(envelope.invocation.effect_replay_key()))?;
+        self.admit_journal_write_at(Some(envelope.invocation.effect_replay_key()))
+            .map_err(|error| error.with_effect_kind(envelope.command.kind()))?;
         if let Some(guard) = &self.scope.journal_guard {
             // Only a dispatching effect is served only (FIG-3587, FIG-3725,
             // FIG-3779).

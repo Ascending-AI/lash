@@ -24,13 +24,15 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         _local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match envelope.command {
+        let kind = envelope.command.kind();
+        let result = match envelope.command {
             crate::RuntimeEffectCommand::Sleep { spec } => self.sleep(spec).await,
             other => Err(crate::RuntimeEffectControllerError::new(
                 RuntimeErrorCode::AwaitEventUnsupported,
                 format!("{:?} is not a wait effect", other.kind()),
             )),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 
     /// A durable sleep: a timer wait row whose deadline is the sleep's end,

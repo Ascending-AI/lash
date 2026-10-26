@@ -493,6 +493,7 @@ mod tests {
         let (row, read) = stored(TurnEvent::Error(ReportedFailure {
             message: "LLM error: quota".to_string(),
             envelope: Some(ErrorEnvelope {
+                effect_refusal: None,
                 kind: TurnFailureKind::LlmProvider,
                 code: Some(FailureCode::provider("insufficient_quota")),
                 terminal_reason: None,

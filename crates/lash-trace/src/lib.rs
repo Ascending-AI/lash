@@ -1034,6 +1034,9 @@ pub enum TraceTurnOutcome {
         /// The typed check retained by a provider-validation settlement.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_validation: Option<lash_protocol_types::TurnFailureCode>,
+        /// The refused operation and the controller's answer, as settled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effect_refusal: Option<Box<lash_protocol_types::EffectRefusal>>,
     },
 }
 

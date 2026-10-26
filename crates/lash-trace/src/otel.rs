@@ -1053,9 +1053,17 @@ impl<'a> Projection<'a> {
                 if let TraceTurnOutcome::Failed {
                     done_reason,
                     provider_validation,
+                    effect_refusal,
                 } = outcome
                 {
                     out.push(A::ErrorType.value(done_reason.wire_tag()));
+                    if let Some(refusal) = effect_refusal {
+                        out.push(A::RefusedEffectKind.value(refusal.effect_kind.clone()));
+                        out.push(
+                            A::EffectControllerCode.value(refusal.controller_code.to_string()),
+                        );
+                        out.push(A::EffectControllerDetail.value(refusal.detail.clone()));
+                    }
                     if let Some(check) = provider_validation {
                         out.push(A::ProviderValidation.value(check.as_str().to_owned()));
                     }

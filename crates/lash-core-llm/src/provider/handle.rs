@@ -1116,6 +1116,7 @@ fn announce_retry(
                 max_attempts: attempts as usize,
                 reason: failure.message.clone(),
                 envelope: Some(ErrorEnvelope {
+                    effect_refusal: None,
                     kind: crate::TurnFailureKind::LlmProvider,
                     code: failure.code.clone(),
                     terminal_reason: Some(failure.terminal_reason),

@@ -104,6 +104,7 @@ pub(super) fn outcome(
     let failed = |done_reason| TraceTurnOutcome::Failed {
         done_reason,
         provider_validation: None,
+        effect_refusal: None,
     };
     // An operator's control intent ended the turn: cancelled, its origin
     // the intent's kind.
@@ -142,10 +143,15 @@ pub(super) fn outcome(
                 TurnStop::ProviderError { cause } => TraceTurnOutcome::Failed {
                     done_reason: TraceTurnFailureReason::ProviderError,
                     provider_validation: cause.provider_validation.clone(),
+                    effect_refusal: cause.effect_refusal.clone(),
                 },
                 TurnStop::ContextOverflow => failed(TraceTurnFailureReason::ContextOverflow),
                 TurnStop::PluginAbort => failed(TraceTurnFailureReason::PluginAbort),
-                TurnStop::RuntimeError { .. } => failed(TraceTurnFailureReason::RuntimeError),
+                TurnStop::RuntimeError { cause } => TraceTurnOutcome::Failed {
+                    done_reason: TraceTurnFailureReason::RuntimeError,
+                    provider_validation: None,
+                    effect_refusal: cause.effect_refusal.clone(),
+                },
                 TurnStop::AgentFrameSwitchLimit => {
                     failed(TraceTurnFailureReason::AgentFrameSwitchLimit)
                 }

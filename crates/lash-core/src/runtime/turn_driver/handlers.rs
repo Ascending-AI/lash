@@ -184,7 +184,10 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(
+                    machine,
+                    err.with_effect_kind(RuntimeEffectKind::LlmCall),
+                )?;
                 return Ok(None);
             }
         };
@@ -310,13 +313,19 @@ impl RuntimeTurnDriver<'_> {
             {
                 Ok(response) => Ok(response),
                 Err(err) => {
-                    self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                    self.fail_or_abort_runtime_effect_controller(
+                        machine,
+                        err.with_effect_kind(RuntimeEffectKind::AssistantResponseHooks),
+                    )?;
                     return Ok(());
                 }
             },
             result => {
                 if let Err(err) = self.finish_recorded_stream(&capsule).await {
-                    self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                    self.fail_or_abort_runtime_effect_controller(
+                        machine,
+                        err.with_effect_kind(RuntimeEffectKind::AssistantResponseHooks),
+                    )?;
                     return Ok(());
                 }
                 result
@@ -527,7 +536,10 @@ impl RuntimeTurnDriver<'_> {
                 // A failed checkpoint delivers nothing. What it admitted was
                 // never bound: it stays open session mail.
                 self.pending_checkpoint_turn_inputs = None;
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(
+                    machine,
+                    err.with_effect_kind(RuntimeEffectKind::Checkpoint),
+                )?;
             }
         }
         Ok(())
@@ -631,7 +643,10 @@ impl RuntimeTurnDriver<'_> {
                         },
                     },
                 );
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(
+                    machine,
+                    err.with_effect_kind(RuntimeEffectKind::ExecCode),
+                )?;
                 return Ok(CellExit::Answered);
             }
         };
@@ -752,7 +767,10 @@ impl RuntimeTurnDriver<'_> {
                 if Self::aborts_turn(&err) {
                     return Err(err.into_runtime_error());
                 }
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(
+                    machine,
+                    err.with_effect_kind(RuntimeEffectKind::ExecCode),
+                )?;
                 return Ok(CellExit::Answered);
             }
         };

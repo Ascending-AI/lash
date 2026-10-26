@@ -395,7 +395,6 @@ pub use lash_core::facade_support::TurnCancelOutcome;
 pub use lash_core::facade_support::TurnCancelReceipt;
 pub use lash_core::facade_support::TurnCancelRequest;
 pub use lash_core::facade_support::TurnCancellationEvidence;
-pub use lash_core::facade_support::TurnErrorCause;
 pub use lash_core::facade_support::TurnErrorCode;
 pub use lash_core::facade_support::TurnExecutionMetrics;
 pub use lash_core::facade_support::TurnFinish;
@@ -404,6 +403,7 @@ pub use lash_core::facade_support::TurnOutcome;
 pub use lash_core::facade_support::TurnStop;
 pub use lash_core::facade_support::TurnTerminal;
 pub use lash_core::facade_support::TurnWorkDriver;
+pub use lash_core::facade_support::{EffectRefusal, TurnErrorCause};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,

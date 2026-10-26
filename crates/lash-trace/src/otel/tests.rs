@@ -1179,8 +1179,8 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
     }
 }
 
-/// Export preserves the typed class at each operation boundary, without
-/// exporting detail.
+/// Export preserves typed classes at operation boundaries and the controller's
+/// own diagnostic for refused runtime effects.
 mod failures;
 
 /// FIG-5728: host resource identity and Lash source identity accompany both

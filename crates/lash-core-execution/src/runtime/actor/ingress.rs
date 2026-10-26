@@ -25,7 +25,8 @@ impl ActorContext {
         envelope: crate::RuntimeEffectEnvelope,
         local: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
-        match &envelope.command {
+        let kind = envelope.command.kind();
+        let result = match &envelope.command {
             crate::RuntimeEffectCommand::AcceptTurnInput { .. }
             | crate::RuntimeEffectCommand::TransitionPlugins { .. }
             | crate::RuntimeEffectCommand::PluginCallbacks { .. } => {
@@ -35,7 +36,10 @@ impl ActorContext {
                         envelope.invocation.address().clone(),
                     )
                 });
-                let outcome = local.execute(envelope).await?;
+                let outcome = local
+                    .execute(envelope)
+                    .await
+                    .map_err(|error| error.with_effect_kind(kind))?;
                 // Callback state belongs to the caller's next committed cut,
                 // just as on the turn path. Publish it before returning the
                 // body's result, so the cut captures the accepted resolutions.
@@ -48,6 +52,7 @@ impl ActorContext {
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!("{} is not an ingress effect", other.kind().as_str()),
             )),
-        }
+        };
+        result.map_err(|error| error.with_effect_kind(kind))
     }
 }

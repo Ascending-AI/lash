@@ -83,7 +83,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self,
         envelope: RuntimeEffectEnvelope,
     ) -> crate::RecordedEffectExecution {
-        if let Some(refusal) = self.served_only_refusal() {
+        let kind = envelope.command.kind();
+        if let Some(refusal) = self
+            .served_only_refusal()
+            .map(|error| error.with_effect_kind(kind))
+        {
             return crate::RecordedEffectExecution {
                 outcome: Err(refusal),
                 attempt_fault: None,
@@ -97,8 +101,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             outcome = body => outcome,
         };
         crate::RecordedEffectExecution {
-            outcome,
-            attempt_fault: attempt.attempt_fault(),
+            outcome: outcome.map_err(|error| error.with_effect_kind(kind)),
+            attempt_fault: attempt
+                .attempt_fault()
+                .map(|error| error.with_effect_kind(kind)),
         }
     }
 
@@ -108,7 +114,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         effect_attempt: Option<crate::EffectAttempt>,
         controller: &crate::ActorContext,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if let Some(refusal) = self.served_only_refusal() {
+        let kind = envelope.command.kind();
+        if let Some(refusal) = self
+            .served_only_refusal()
+            .map(|error| error.with_effect_kind(kind))
+        {
             return Err(refusal);
         }
         // Nested model work has no independent journal command. Its body
@@ -119,7 +129,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             None,
             controller.trace_scope().cloned(),
         );
-        let outcome = Box::pin(executor.run_body(envelope, effect_attempt.clone())).await;
+        let outcome = Box::pin(executor.run_body(envelope, effect_attempt.clone()))
+            .await
+            .map_err(|error| error.with_effect_kind(kind));
         match (outcome, effect_attempt) {
             (Err(fault), Some(attempt)) if fault.is_attempt_fault() => {
                 match attempt.end_at(fault).await {}

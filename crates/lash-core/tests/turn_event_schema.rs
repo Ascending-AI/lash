@@ -557,6 +557,7 @@ fn turn_activity_envelope_flattens_event() {
 
 fn provider_failure_envelope() -> ErrorEnvelope {
     ErrorEnvelope {
+        effect_refusal: None,
         kind: TurnFailureKind::LlmProvider,
         code: Some(FailureCode::provider("insufficient_quota")),
         terminal_reason: Some(LlmTerminalReason::ProviderError),

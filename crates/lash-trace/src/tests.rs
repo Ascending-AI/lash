@@ -211,6 +211,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             outcome: TraceTurnOutcome::Failed {
                 done_reason,
                 provider_validation: None,
+                effect_refusal: None,
             },
         };
         assert!(event.is_failed(), "failed turn reason {case} was missed");
