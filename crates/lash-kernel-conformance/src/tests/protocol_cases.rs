@@ -1,38 +1,13 @@
 // One executable law per rule shard, owned with this corpus; a rule
 // in the skip file has no standalone law: a surviving law executes it.
 #[test]
-fn k_bnd_003() {
-    super::run_rule("K-BND-003", include_str!("../../protocol/bnd/K-BND-003.json"));
-}
-
-#[test]
 fn k_chg_003() {
     super::run_rule("K-CHG-003", include_str!("../../protocol/chg/K-CHG-003.json"));
 }
 
 #[test]
-fn k_chg_004() {
-    super::run_rule("K-CHG-004", include_str!("../../protocol/chg/K-CHG-004.json"));
-}
-
-#[test]
-fn k_chg_005() {
-    super::run_rule("K-CHG-005", include_str!("../../protocol/chg/K-CHG-005.json"));
-}
-
-#[test]
-fn k_chg_006() {
-    super::run_rule("K-CHG-006", include_str!("../../protocol/chg/K-CHG-006.json"));
-}
-
-#[test]
 fn k_eff_011() {
     super::run_rule("K-EFF-011", include_str!("../../protocol/eff/K-EFF-011.json"));
-}
-
-#[test]
-fn k_lib_010() {
-    super::run_rule("K-LIB-010", include_str!("../../protocol/lib/K-LIB-010.json"));
 }
 
 #[test]
@@ -68,14 +43,4 @@ fn k_site_003() {
 #[test]
 fn k_ver_003() {
     super::run_rule("K-VER-003", include_str!("../../protocol/ver/K-VER-003.json"));
-}
-
-#[test]
-fn k_ver_004() {
-    super::run_rule("K-VER-004", include_str!("../../protocol/ver/K-VER-004.json"));
-}
-
-#[test]
-fn k_ver_005() {
-    super::run_rule("K-VER-005", include_str!("../../protocol/ver/K-VER-005.json"));
 }

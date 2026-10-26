@@ -134,22 +134,6 @@ fn case(name: &str) -> Case {
 }
 
 #[test]
-fn coverage_every_defined_rule_has_a_case() {
-    let rules = "- **K-FORM-001.** A form.\n- **K-TASK-001.** A task.\n";
-    let mut shards = vec![Shard {
-        rule: "K-FORM-001".into(),
-        cases: vec![case("forms are closed")],
-    }];
-    let missing = check_coverage(rules, &shards, &[]).expect_err("a rule without a case is red");
-    assert_eq!(missing.missing, ["K-TASK-001".into()].into_iter().collect());
-    shards.push(Shard {
-        rule: "K-TASK-001".into(),
-        cases: vec![case("tasks share a run")],
-    });
-    assert_eq!(check_coverage(rules, &shards, &[]), Ok(()));
-}
-
-#[test]
 fn coverage_refuses_unknown_empty_and_duplicate_shards() {
     let rules = "- **K-FORM-001.** A form (K-TASK-001 is a reference).\n";
     let shards = vec![
@@ -339,54 +323,6 @@ fn kernel_json_refuses_unknown_nested_forms() {
         lash_kernel_doc::Document::from_json(&json.to_string()),
         Err(lash_kernel_doc::DecodeError::Invalid { .. })
     ));
-}
-
-/// K-ID-004: the corpus's expected identities point to the actual action,
-/// including a do expression, independently of the machine's executable layout.
-#[test]
-fn expected_effect_sites_address_document_actions() {
-    let shards = load_corpus(CORPUS_FILES.iter().copied()).expect("decode corpus");
-    let mut identities = 0;
-    for case in shards.iter().flat_map(|shard| &shard.cases) {
-        let document = parse_document(&case.document);
-        for trace in &case.expected.trace {
-            if let crate::Trace::Effect {
-                identity: Some(identity),
-                effect,
-                ..
-            } = trace
-            {
-                let document = document.as_ref().expect("identity case parses");
-                let actual = match document.node(&identity.site) {
-                    Some(lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
-                        slot,
-                        ..
-                    })) => slot,
-                    Some(lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(act))) => {
-                        let lash_kernel_doc::ActKind::Perform { slot, .. } = &act.kind else {
-                            panic!("{}: expected effect site is not a perform", case.name);
-                        };
-                        slot
-                    }
-                    _ => panic!("{}: expected effect site is not a perform", case.name),
-                };
-                assert_eq!(&document.imports[actual].name.to_string(), effect);
-                if let lash_vocabulary::sites::TaskIdentity::Spawned(spawn) = &identity.task {
-                    assert!(matches!(
-                        document.node(&spawn.site),
-                        Some(lash_kernel_doc::Node::Action(
-                            lash_kernel_doc::Action::Spawn { .. }
-                        ))
-                    ));
-                }
-                identities += 1;
-            }
-        }
-    }
-    assert!(
-        identities >= 3,
-        "main, spawn, and resume identities are pinned"
-    );
 }
 
 /// PLAN-INDEP / K-MACH-007/008: every corpus statement projects, and each

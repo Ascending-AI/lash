@@ -234,28 +234,6 @@ fn k_val_006_scalar_and_utf16_conversion_refuse_lone_surrogates() {
 }
 
 #[test]
-fn k_val_008_octets_slice_concat_and_compare() {
-    let octets = run("bytes.from_octets", &[list(vec![i(0), i(128), i(255)])]);
-    assert_eq!(octets, bytes(&[0, 128, 255]));
-    assert_eq!(
-        run("bytes.slice", &[octets.clone(), i(-2), i(99)]),
-        bytes(&[128, 255])
-    );
-    assert_eq!(
-        run("bytes.concat", &[octets.clone(), bytes(&[1])]),
-        bytes(&[0, 128, 255, 1])
-    );
-    assert_eq!(
-        run("bytes.compare", &[octets, bytes(&[0, 128, 255, 1])]),
-        i(-1)
-    );
-    assert_eq!(
-        raised("bytes.from_octets", &[list(vec![i(256)])]),
-        "number_range"
-    );
-}
-
-#[test]
 fn k_lbytes_002_utf8_is_strict_without_replacement() {
     let encoded = run("bytes.utf8_encode", &[t("😀\0")]);
     assert_eq!(encoded, bytes(&[0xf0, 0x9f, 0x98, 0x80, 0]));

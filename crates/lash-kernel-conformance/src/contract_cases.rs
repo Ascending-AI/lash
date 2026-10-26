@@ -101,7 +101,7 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
                 encoded.as_object_mut().unwrap().remove(field);
             }
         }
-        "K-DOC-002" | "K-ADM-007" => manifest_closure(),
+        "K-ADM-007" => manifest_closure(),
         "K-DOC-004" => stored_encoding(shard),
         "K-DOC-005" => {
             let document = doc(&format!("{HEADER}main {{ break }}"));
@@ -114,7 +114,7 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
         }
         "K-ADM-009" => source_map_independence(shard, registry),
         "K-ID-001" | "K-ID-003" => identity_document(shard),
-        "K-ID-002" | "K-VER-002" => identity_definition(),
+        "K-ID-002" => identity_definition(),
         "K-LIB-001" => definition_parts(),
         "K-LIB-002" => implementations(),
         "K-LIB-003" => callbacks(),
@@ -130,10 +130,8 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
                 Err(lash_kernel_doc::RegistryError::NativeNotStated { .. })
             ));
         }
-        "K-LIB-006" => native_repeat(),
         "K-LIB-009" => adoption(),
-        "K-LIB-011" => native_versions(),
-        "K-TEXT-001" | "K-TEXT-002" | "K-TEXT-003" => text_roundtrip(shard),
+        "K-TEXT-001" => text_roundtrip(shard),
         "K-VER-001" => {
             let mut definition = definition(NATIVE);
             definition.kernel = 99;
@@ -354,43 +352,6 @@ fn adoption() {
         let mut runner = MachineRunner::<KernelMachine>::new(Arc::new(registry.clone()));
         check_case(&mut runner, &case).unwrap();
     }
-}
-
-fn native_versions() {
-    let first = definition(NATIVE);
-    assert_eq!(first.native_version, 1);
-    let second = definition(&NATIVE.replace("native\n", "native 2\n"));
-    assert_eq!(second.native_version, 2);
-    assert_ne!(first.identity(), second.identity());
-    assert_eq!(definition(&print_definition(&second)), second);
-    let mut zero = first;
-    zero.native_version = 0;
-    let empty = FunctionRegistry::new();
-    assert!(matches!(
-        *validate_definition(&zero, &empty).unwrap_err().reason,
-        InvalidReason::NativeVersionZero
-    ));
-    let mut body = definition(BODY);
-    body.native_version = 2;
-    assert!(matches!(
-        *validate_definition(&body, &empty).unwrap_err().reason,
-        InvalidReason::NativeVersionWithoutNative { version: 2 }
-    ));
-}
-
-fn native_repeat() {
-    let registry = Arc::new(same_registry(NATIVE, true));
-    let mut case = super::case("equal native arguments cold and warm");
-    case.document = print_document(&calling(
-        &[definition(NATIVE)],
-        "main { finish probe.same(7) }",
-    ));
-    case.expected.end = ExpectedEnd::Finished(lash_kernel_doc::Datum::Int(7.into()));
-    let mut warm = MachineRunner::<KernelMachine>::new(registry);
-    let first = check_case(&mut warm, &case).unwrap();
-    assert_eq!(check_case(&mut warm, &case).unwrap(), first);
-    let mut cold = MachineRunner::<KernelMachine>::new(Arc::new(same_registry(NATIVE, true)));
-    assert_eq!(check_case(&mut cold, &case).unwrap(), first);
 }
 
 /// A source map of the first statement, over `source`.

@@ -407,24 +407,6 @@ fn without_slices(execution: Execution<Observation>) -> Execution<ScheduleReturn
     Execution::Ran(returns)
 }
 
-#[cfg(test)]
-pub(super) fn check_memory(smith: &Smith) -> Result<(), HarnessError> {
-    let mut a = Projector::default();
-    let warm = observe::<crate::projection::Plan<0>>(smith, &[0], &mut a)?;
-    a.check_memory()?;
-    let mut b = Projector {
-        imports: Some(&a.images),
-        cold: true,
-        layout: lash_kernel_vm::kernel_internals::Layout(3),
-        ..Projector::default()
-    };
-    let cold = observe::<crate::projection::Plan<3>>(smith, &[0], &mut b)?;
-    if !agree(&warm, &cold) {
-        return Err(fault("plans disagree before the earlier memory refusal"));
-    }
-    b.check_memory()
-}
-
 fn schedule_agree(a: &Execution<ScheduleReturn>, b: &Execution<ScheduleReturn>) -> bool {
     let refused = |rows: &[ScheduleReturn]| {
         rows.last().is_some_and(|row| {

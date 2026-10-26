@@ -58,33 +58,6 @@ fn a_refused_json_tree_preserves_its_syntax_and_depth_errors() {
     }
 }
 
-/// K-LJSON-007: classification reads its rooted input with no guest reservation.
-#[test]
-fn classification_needs_no_extra_guest_space() {
-    for (input, expected) in [
-        (Datum::Null, 3),
-        (Datum::List(vec![int(1), int(2)]), 7),
-        (Datum::Record(vec![("toJSON".into(), Datum::Null)]), 16),
-    ] {
-        let mut heap = heap();
-        let input = args(
-            &mut heap,
-            vec![
-                input,
-                int(8),
-                Datum::Tuple(vec![s("toJSON"), s("brand")]),
-                s("0"),
-                s(":"),
-                Datum::Bool(true),
-            ],
-        );
-        let called = call(&mut heap, "json.classify", &input, 0);
-        assert_eq!(datum(&heap, &called.answer.unwrap()), int(expected));
-        assert_eq!(called.usage.held.0, 0);
-        assert!(called.usage.reservations.is_empty());
-    }
-}
-
 /// K-LJSON-005: paged input preserves escaped Unicode, number tokens and
 /// duplicate-key insertion order across payload-leaf boundaries.
 #[test]

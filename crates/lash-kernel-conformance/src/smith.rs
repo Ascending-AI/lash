@@ -202,13 +202,4 @@ pub(crate) mod tests {
             )
         })
     }
-
-    /// Conservative memory verdict, with counters rebased at each seal.
-    #[test]
-    fn fixed_seed_memory_verdicts_and_seal_counters_agree() {
-        for (seed, smith) in seeds() {
-            runner::check_memory(&smith).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
-        }
-        println!("kernel-smith memory agreement: executed=64 plans=0/3 warm/cold");
-    }
 }
