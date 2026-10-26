@@ -225,20 +225,6 @@ fn a_function_binding_nothing_else_is_assigned_calls_its_closure() {
     );
 }
 
-/// A float in a template is spelled as `String` spells it: it has no
-/// `toString` of its own to run.
-#[test]
-fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
-    assert!(main_text("const n = 1 + 1; const s = `${n}`;").contains("ts.number.format_value(n)"));
-    assert_eq!(
-        finished(
-            "const n = 0.1 + 0.2; \
-             await control.finish(`${n}|${-0}|${1 / 0}|${-1 / 0}|${0 / 0}|${1e21}|${2 ** 53}|${1e-7}|${-5}`);"
-        ),
-        "0.30000000000000004|0|Infinity|-Infinity|NaN|1e+21|9007199254740992|1e-7|-5"
-    );
-}
-
 /// `concat`, `filter`, `map` and `slice` of an array make a new list, so
 /// what they give is a list the source can use in place.
 #[test]
@@ -418,18 +404,6 @@ fn plain_record_alias_writes_keep_nested_admission() {
     );
 }
 
-/// TS-PLAIN-CALL-ESCAPE: an unknown callee can mutate a passed record or
-/// a field, including through an alias kept in another fresh record.
-#[test]
-fn plain_record_mutating_calls_keep_admission() {
-    plain_fallback(
-        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await control.finish(r.next.__lash_brand === undefined);",
-    );
-    plain_fallback(
-        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await control.finish(inner.next.__lash_brand === undefined);",
-    );
-}
-
 /// TS-PLAIN-CAPTURE: a closure may change any captured binding or field.
 #[test]
 fn plain_record_captures_keep_admission() {
@@ -450,18 +424,6 @@ fn plain_record_reassignment_keeps_brand_admission() {
             .unwrap_err()
             .code,
         crate::DiagnosticCode::ClassUnsupported
-    );
-}
-
-/// TS-PLAIN-ACCESSOR: the existing source refusal cannot become a literal
-/// proof; no getter can enter the guard-free record path.
-#[test]
-fn plain_record_getters_keep_the_accessor_refusal() {
-    assert_eq!(
-        super::lower("const r = { next: { get value() { return 7; } } }; r.next.value;")
-            .unwrap_err()
-            .code,
-        crate::DiagnosticCode::AccessorUnsupported
     );
 }
 

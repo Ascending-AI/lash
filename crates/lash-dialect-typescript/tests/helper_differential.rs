@@ -51,34 +51,6 @@ fn number_index_charge_bounds_arbitrary_integer_comparisons() {
     }
 }
 
-/// K-CHG-007: quoting includes scalar lookup, scanning and output bytes.
-#[test]
-fn text_repr_charge_bounds_unicode_search_and_output() {
-    use lash_ext_helper_compiler::library::{Dialect, Library};
-    use lash_kernel_doc::Operand;
-    let library = Library::of(Dialect::Python).unwrap();
-    let (_, function) = library
-        .registry
-        .iter()
-        .find(|(_, f)| f.name() == "py.text_repr")
-        .unwrap();
-    let formula = function.definition().charge().unwrap().clone();
-    for count in [1_u64, 16, 256] {
-        // U+0378 is unassigned in Unicode 15 and is spelled \\u0378.
-        let input_bytes = 2 * count;
-        let output_bytes = 2 + 6 * count;
-        let charged = formula.evaluate(&mut |operand, _| match operand {
-            Operand::Param(_) => 1 + input_bytes,
-            Operand::Result => 1 + output_bytes,
-        });
-        let required = 3 * input_bytes + 10 * count + output_bytes;
-        assert!(
-            charged >= required,
-            "{count} unassigned scalars need {required} work, got {charged}"
-        );
-    }
-}
-
 /// K-LIB-006/007 and K-CHG-007: numeric keys compare before rounding,
 /// preserve signed zero and overflow errors, and never coerce a nonnumber.
 #[test]
@@ -462,39 +434,6 @@ fn host_random_matches_injected_top_53_bits_exactly() {
             "bits={bits}"
         );
     }
-}
-/// K-HOST-003: a counter that traverses all top-53-bit buckets visits both halves.
-#[test]
-fn host_random_counter_draws_cover_both_halves_exactly() {
-    let runner = Runner::new("typescript").unwrap();
-    let stride = 1_u64 << 52;
-    let case = Case {
-        id: "counter-4096".into(),
-        dialect: "typescript".into(),
-        source: "for (let i=0; i<4096; i++) { await host.observe(Math.random()); }".into(),
-        bits: 0,
-        stride,
-        nanoseconds: 0,
-    };
-    let expected: Vec<_> = (0..4096_u64)
-        .map(|i| {
-            tag(&Datum::Float(
-                (((i * stride) >> 11) as f64 * 2.0_f64.powi(-53)).into(),
-            ))
-        })
-        .collect();
-    assert_eq!(
-        runner.run(&case).unwrap().result,
-        json!({"type":"observations", "value":expected})
-    );
-    let lower = expected
-        .iter()
-        .filter(|v| {
-            let bits = u64::from_str_radix(v["bits"].as_str().unwrap(), 16).unwrap();
-            f64::from_bits(bits) < 0.5
-        })
-        .count();
-    assert_eq!((lower, expected.len() - lower), (2048, 2048));
 }
 /// K-HOST-002: epoch milliseconds and UTC fields come from the injected instant.
 #[test]

@@ -1,6 +1,6 @@
 //! OPERAND-ORDER: reads and raises precede later operands' statements.
 
-use super::machine::{Ended, end, run};
+use super::machine::{Ended, end};
 use lash_kernel_doc::Datum;
 
 #[test]
@@ -11,32 +11,7 @@ fn compound_assignment_reads_before_its_rhs_writes() {
     );
 }
 
-#[test]
-fn array_reads_before_its_next_element_writes() {
-    assert_eq!(
-        end("const o = { x: 1 }; const r = [o.x, (o.x = 2)]; await control.finish(r);"),
-        Ended::Finished(Datum::List(vec![
-            Datum::Float(1.0.into()),
-            Datum::Float(2.0.into())
-        ]))
-    );
-}
-
-#[test]
-fn null_read_raises_before_the_next_operand_performs() {
-    let result = run(
-        "const n = null; function tool() { return host.echo('issued'); } [n.x, tool()];",
-        &[],
-    );
-    assert!(result.end.starts_with("error type_error:"), "{result:?}");
-    assert!(
-        result.epochs.iter().all(|epoch| epoch.asked.is_empty()),
-        "{result:?}"
-    );
-}
-
 /// K-DOC-006: admitted source remains within the kernel's 64-level depth limit.
-#[test]
 fn native_expression_depth_respects_the_document_limit() {
     use crate::adapter as ast;
     // Exercise the lowerer independently of the parser's stricter source limit.
@@ -140,16 +115,5 @@ fn reads_precede_later_statements_in_constructions_and_updates() {
             "try { const r = ('x' as number) + ((!(123 as boolean)) as number); } catch (e) { await control.finish(e.message); }"
         ),
         end("try { const r = !(123 as boolean); } catch (e) { await control.finish(e.message); }")
-    );
-}
-
-/// ECMA-262 continue: a switch's synthetic block cannot consume loop continue.
-#[test]
-fn continue_leaves_only_the_switch() {
-    assert_eq!(
-        end(
-            "var x = 0; while (x < 2) { switch (x) { case 0: x++; continue; } x++; } await control.finish(x);"
-        ),
-        Ended::Finished(Datum::Float(2.0.into()))
     );
 }

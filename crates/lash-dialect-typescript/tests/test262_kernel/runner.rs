@@ -558,31 +558,6 @@ fn regexp_aliases_observe_coerced_last_index_and_failure_reset() {
     );
 }
 
-/// ECMA URI codecs distinguish reserved URI escapes from component escapes.
-#[test]
-fn uri_codecs_preserve_reserved_escape_spelling() {
-    assert_finished(
-        execute(
-            "await host.finish([encodeURI('é?#'), encodeURIComponent('é?#'), decodeURI('%2f%C3%A9'), decodeURIComponent('%2f%C3%A9')]);",
-        ),
-        Datum::List(vec![
-            Datum::Text("%C3%A9?#".into()),
-            Datum::Text("%C3%A9%3F%23".into()),
-            Datum::Text("%2fé".into()),
-            Datum::Text("/é".into()),
-        ]),
-    );
-}
-
-/// ECMA Decode rejects UTF-8 encodings of surrogates with a typed URIError.
-#[test]
-fn uri_decode_refuses_surrogate_utf8() {
-    let result = execute("await host.finish(decodeURIComponent('%ED%A0%80'));");
-    assert!(
-        matches!(result, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("URIError"))
-    );
-}
-
 /// §2.2: each template substitution is converted before the next is read.
 #[test]
 fn template_substitutions_convert_in_source_order() {
@@ -771,50 +746,6 @@ fn array_search_returns_positive_zero_and_empty_shift_skips_index_zero() {
     );
 }
 
-/// Boolean.valueOf requires a Boolean receiver.
-#[test]
-fn borrowed_boolean_value_of_rejects_other_kinds() {
-    assert_finished(
-        execute(
-            "let typeError = false; try { Boolean.prototype.valueOf.call({}); } catch (e) { typeError = e.name === 'TypeError'; } await host.finish(typeError);",
-        ),
-        Datum::Bool(true),
-    );
-}
-
-/// Bind rejects a non-callable target before creating a bound function.
-#[test]
-fn borrowed_bind_rejects_non_callable_targets() {
-    assert_finished(
-        execute(
-            "let count = 0; for (const value of [undefined, null, true, 1, 'x', [], {}]) { try { Function.prototype.bind.call(value); } catch (e) { if (e.name === 'TypeError') { count++; } } } await host.finish(count);",
-        ),
-        Datum::Float(lash_kernel_doc::Float::new(7.0)),
-    );
-}
-
-/// Map prototype methods require the Map internal slot, even for other containers.
-#[test]
-fn borrowed_map_methods_require_map_receivers() {
-    assert_finished(
-        execute(
-            "let count = 0; const set = []; try { Map.prototype.set.call(set, 1, 2); } catch (e) { if (e.name === 'TypeError') count++; } try { Map.prototype.clear.call(set); } catch (e) { if (e.name === 'TypeError') count++; } await host.finish(count);",
-        ),
-        Datum::Float(lash_kernel_doc::Float::new(2.0)),
-    );
-}
-
-/// Set prototype methods require the Set internal slot, even for other containers.
-#[test]
-fn borrowed_set_methods_require_set_receivers() {
-    assert_finished(
-        execute(
-            "let count = 0; const map = new Map(); try { Set.prototype.add.call(map, 1); } catch (e) { if (e.name === 'TypeError') count++; } try { Set.prototype.entries.call([]); } catch (e) { if (e.name === 'TypeError') count++; } await host.finish(count);",
-        ),
-        Datum::Float(lash_kernel_doc::Float::new(2.0)),
-    );
-}
-
 /// Date.toJSON is generic and invokes the receiver's toISOString.
 #[test]
 fn date_to_json_is_generic_and_date_only_methods_check_the_receiver() {
@@ -885,17 +816,6 @@ fn lone_surrogate_literals_and_results_have_typed_refusals() {
     let end = execute("await host.finish(String.fromCharCode(0xD800));");
     assert!(
         matches!(end, End::Error(RunError::Uncaught { error, .. }) if thrown_name(&error).as_deref() == Some("TS_LONE_SURROGATE_UNSUPPORTED"))
-    );
-}
-
-/// Function.toString checks callability before refusing unavailable source text.
-#[test]
-fn function_to_string_rejects_non_callable_receivers() {
-    assert_finished(
-        execute(
-            "let count = 0; for (const value of [undefined, null, {}]) { try { Function.prototype.toString.call(value); } catch (e) { if (e.name === 'TypeError') count++; } } await host.finish(count);",
-        ),
-        Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
 }
 

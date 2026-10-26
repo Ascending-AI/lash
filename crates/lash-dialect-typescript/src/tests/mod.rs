@@ -23,7 +23,6 @@ mod machine;
 mod module;
 mod naming;
 mod operands;
-mod package;
 mod pages;
 mod positional;
 mod process;

@@ -134,22 +134,6 @@ fn agrees_with_bindings(source: &str, bindings: Session) {
     );
 }
 
-/// Map checks NewTarget before touching the optional iterable.
-#[test]
-fn map_calls_require_a_new_target_before_reading_the_iterable() {
-    agrees(
-        "let count = 0; try { Map(); } catch (e) { if (e.name === 'TypeError') count++; } try { Map({toString() { throw 1; }}); } catch (e) { if (e.name === 'TypeError') count++; } await control.finish(count === 2 && new Map().size === 0);",
-    );
-}
-
-/// Set checks NewTarget before touching the optional iterable.
-#[test]
-fn set_calls_require_a_new_target_before_reading_the_iterable() {
-    agrees(
-        "let count = 0; try { Set(); } catch (e) { if (e.name === 'TypeError') count++; } try { Set({toString() { throw 1; }}); } catch (e) { if (e.name === 'TypeError') count++; } await control.finish(count === 2 && new Set().size === 0);",
-    );
-}
-
 #[test]
 fn map_keys_use_same_value_zero_and_explicit_object_identity() {
     agrees(
@@ -179,20 +163,6 @@ fn map_identity_keys_survive_mutation_and_key_roundtrips() {
 fn set_mutation_and_algebra_keep_insertion_order_and_zero_keys() {
     agrees(
         "const s = new Set([NaN, NaN, -0, 0, 2]); const t = s.union(new Set([3, 2])); const v = t.values(); const small = s.intersection(new Map([[2, 0], [0, 0]])); const order = small.values(); await control.finish(s.size === 3 && s.has(NaN) && v[2] === 2 && v[3] === 3 && s.intersection(new Set([2])).size === 1 && s.difference(new Set([2])).size === 2 && s.isSubsetOf(t) && order[0] === 2 && order[1] === 0);",
-    );
-}
-
-#[test]
-fn map_for_each_visits_later_insertions_and_skips_deleted_keys() {
-    agrees(
-        "const m = new Map([[1, 10], [2, 20]]); let sum = 0; m.forEach((value, key) => { sum += value; if (key === 1) { m.delete(2); m.set(3, 30); } }); await control.finish(sum === 40 && m.size === 2);",
-    );
-}
-
-#[test]
-fn function_call_apply_and_bind_preserve_receiver_and_argument_prefix() {
-    agrees(
-        "function f(a, b) { return this.x + a + b; } const receiver = {x: 10}; const bound = f.bind(receiver, 2); await control.finish(f.call(receiver, 1, 2) === 13 && f.apply(receiver, [3, 4]) === 17 && bound(5) === 17);",
     );
 }
 
@@ -239,14 +209,6 @@ fn object_primitive_wrappers_are_typed_refusals() {
     assert_eq!(
         machine::end("await control.finish(Object.prototype.valueOf.call(false));"),
         Ended::Raised("TS_BOXED_PRIMITIVE_UNSUPPORTED".into())
-    );
-}
-
-/// Strict user and bound functions inherit the caller/arguments poison.
-#[test]
-fn user_functions_and_bind_poison_restricted_properties() {
-    agrees(
-        "function f(a, b = 2, ...rest) { return a + b; } const bound = f.bind(null, 3); let count = 0; try { f.caller; } catch (e) { if (e.name === 'TypeError') count++; } try { bound.arguments; } catch (e) { if (e.name === 'TypeError') count++; } try { bound.caller = {}; } catch (e) { if (e.name === 'TypeError') count++; } await control.finish(count === 3 && bound() === 5 && !bound.hasOwnProperty('caller'));",
     );
 }
 

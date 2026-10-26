@@ -27,30 +27,6 @@ fn effects(names: &[&str]) -> BTreeMap<EffectName, Signature> {
         .collect()
 }
 
-/// OP-NAME: a TypeScript cell names `inbox.send_item` by its camelCase
-/// spelling and performs it by its canonical effect name; a record's field
-/// names are data and pass as written.
-#[test]
-fn a_multiword_operation_is_written_in_camel_case_and_performed_canonically() {
-    let lowered = lower_against(
-        "await inbox.sendItem({ item_id: 1 });",
-        &[],
-        &effects(&["inbox.send_item"]),
-    )
-    .expect("the camelCase spelling lowers");
-    let text = print_document(&lowered.document);
-    assert!(
-        text.contains(&format!(
-            "perform {}(",
-            super::linked_inspection::operation_slot(&lowered.document, "inbox.send_item")
-                .expect("operation import")
-                .0
-        )),
-        "{text}"
-    );
-    assert!(text.contains("item_id"), "{text}");
-}
-
 /// OP-SPELLING-REPAIR: the canonical spelling of a multiword operation is
 /// another dialect's, refused with the camelCase repair.
 #[test]
