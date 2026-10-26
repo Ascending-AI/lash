@@ -297,14 +297,8 @@
     "sqlite_memory::an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit": 7558
   },
   "//crates/lash-durable-test:pressure_frame_crash_proof__test": {
-    "a_pressure_frame_killed_at_every_label_opens_once_on_postgres": 15356,
-    "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file": 3108,
     "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory": 2356,
-    "a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage": 7734,
-    "an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed": 807,
-    "an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_postgres": 24731,
-    "an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_sqlite_file": 10747,
-    "an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_sqlite_memory": 9347
+    "a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage": 7734
   },
   "//crates/lash-durable-test:process_tool_call_crash_laws__test": {
     "postgres::an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash": 9281,
@@ -317,11 +311,7 @@
   "//crates/lash-durable-test:steering_crash_laws__test": {
     "a_steer_at_a_completion_candidate_killed_at_every_label_supersedes_once_on_sqlite_memory": 5961,
     "a_steer_at_a_completion_candidate_supersedes_it_and_the_turn_goes_on_on_sqlite_memory": 138,
-    "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_postgres": 44742,
-    "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_file": 10106,
     "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory": 10484,
-    "a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres": 37482,
-    "a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_file": 6955,
     "a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory": 5029
   },
   "//crates/lash-durable-test:tool_batches__test": {
@@ -394,35 +384,17 @@
   "//crates/lash-durable-test:turn_phases__test": {
     "a_call_whose_admitted_body_is_lost_settles_unsent": 211,
     "a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once": 515,
-    "a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_postgres": 1638,
-    "a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_sqlite_file": 362,
     "a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it": 931,
-    "a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_postgres": 35867,
-    "a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_sqlite_file": 1017,
     "a_cancelled_queued_input_is_withdrawn_and_never_runs": 558,
-    "a_cancelled_queued_input_is_withdrawn_and_never_runs_on_postgres": 1759,
-    "a_cancelled_queued_input_is_withdrawn_and_never_runs_on_sqlite_file": 458,
     "a_model_call_whose_pinned_deadline_passed_is_never_sent_again": 3314,
-    "a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_postgres": 6135,
-    "a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_sqlite_file": 1964,
     "a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from": 22,
-    "a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_postgres": 2763,
-    "a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_sqlite_file": 37,
     "a_turn_of_two_model_calls_resumes_at_every_label_without_replay": 3435,
-    "a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_postgres": 9572,
-    "a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_sqlite_file": 1897,
     "a_turn_whose_commit_collides_ends_refused_instead_of_looping": 34,
     "an_adapter_lowered_attachment_call_resends_its_template_through_the_runtime_store": 674,
     "an_admitted_calls_attachment_outlives_takeover_until_its_owner_settles": 301,
     "an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary": 2448,
-    "an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres": 7874,
-    "an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_sqlite_file": 1781,
     "an_attachment_call_resends_its_template_with_fresh_deliveries": 282,
-    "each_turn_terminal_reads_back_through_the_host_on_postgres": 1452,
-    "each_turn_terminal_reads_back_through_the_host_on_sqlite_file": 30,
     "each_turn_terminal_reads_back_through_the_host_on_sqlite_memory": 63,
-    "input_to_a_running_turn_is_admitted_on_postgres": 566,
-    "input_to_a_running_turn_is_admitted_on_sqlite_file": 59,
     "input_to_a_running_turn_is_admitted_on_sqlite_memory": 17,
     "parks::a_turn_whose_commit_meets_a_deployment_refusal_parks_instead_of_ending_refused": 163,
     "parks::an_undecodable_checkpoint_parks_the_session_after_the_budget": 27,
@@ -430,17 +402,9 @@
     "parks::an_undecodable_checkpoint_parks_the_session_after_the_budget_on_sqlite_file": 36
   },
   "//crates/lash-durable-test:vertical_crash_proof__test": {
-    "a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres": 1483,
-    "a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_file": 234,
     "a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_memory": 211,
-    "a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_postgres": 69623,
-    "a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_sqlite_file": 8247,
     "a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_sqlite_memory": 3059,
-    "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_postgres": 13151,
-    "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_file": 13634,
     "a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_memory": 2232,
-    "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_postgres": 3027,
-    "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_file": 2287,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory": 363
   },
   "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test": {

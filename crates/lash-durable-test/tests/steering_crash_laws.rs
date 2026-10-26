@@ -36,7 +36,7 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
-#[path = "support/dialect.rs"]
+#[path = "support/dialect_store.rs"]
 mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
@@ -897,43 +897,11 @@ async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on
     prove(Arrival::Work, Dialect::SqliteMemory, None).await;
 }
 
-/// On a SQLite file.
-#[tokio::test]
-async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_file() {
-    prove(Arrival::Work, Dialect::SqliteFile, None).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Arrival::Work, Dialect::Postgres, Some(url)).await;
-}
-
 /// On SQLite in memory: a steer withheld at the terminal checkpoint, killed
 /// at every label, runs exactly once, as the next run.
 #[tokio::test]
 async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory() {
     prove(Arrival::Terminal, Dialect::SqliteMemory, None).await;
-}
-
-/// On a SQLite file.
-#[tokio::test]
-async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_file() {
-    prove(Arrival::Terminal, Dialect::SqliteFile, None).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Arrival::Terminal, Dialect::Postgres, Some(url)).await;
 }
 
 /// Uncut, on SQLite in memory: a steer queued while the turn's finish

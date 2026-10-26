@@ -287,6 +287,7 @@
       "after_turn_crash_laws": [
         "tests/after_turn_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -320,6 +321,7 @@
       "cell_restore_laws": [
         "tests/cell_restore_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/packages.rs",
         "tests/support/sim.rs"
@@ -345,6 +347,7 @@
       "config_change_observer_laws": [
         "tests/config_change_observer_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -394,6 +397,7 @@
         "tests/declared_start_crash_laws.rs",
         "tests/declared_start_crash_laws/start_policy.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -401,12 +405,14 @@
       "deleted_session_crash_laws": [
         "tests/deleted_session_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs"
       ],
       "drain_by_release": [
         "tests/drain_by_release.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/scripted_steps.rs",
         "tests/support/sim.rs"
@@ -420,6 +426,7 @@
       "frame_switch_crash_proof": [
         "tests/frame_switch_crash_proof.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs"
       ],
@@ -440,6 +447,7 @@
         "tests/kernel_step_crash_laws/successor_pair.rs",
         "tests/support/callback_carry.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -455,6 +463,7 @@
       "live_stream_takeover": [
         "tests/live_stream_takeover.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
@@ -467,6 +476,7 @@
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/packages.rs",
         "tests/support/sim.rs"
       ],
@@ -481,6 +491,7 @@
         "tests/open_session_commands/model_retry.rs",
         "tests/open_session_commands/owner_retention.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -500,6 +511,7 @@
       "plugin_state_storage_laws": [
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
@@ -507,7 +519,7 @@
       ],
       "pressure_frame_crash_proof": [
         "tests/pressure_frame_crash_proof.rs",
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
@@ -533,6 +545,7 @@
       "process_ran_laws": [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -548,6 +561,7 @@
       "process_tool_call_crash_laws": [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -598,7 +612,7 @@
       ],
       "steering_crash_laws": [
         "tests/steering_crash_laws.rs",
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/sim.rs"
       ],
       "tool_activity": [
@@ -617,6 +631,7 @@
       ],
       "tool_crash_laws": [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/operations.rs",
         "tests/support/served.rs",
@@ -642,6 +657,7 @@
       ],
       "turn_callback_crash_laws": [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/failure_kind.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
@@ -654,6 +670,7 @@
       ],
       "turn_phases": [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/seed.rs",
         "tests/support/sim.rs",
@@ -682,7 +699,7 @@
         "tests/turn_trace_scope_laws.rs"
       ],
       "vertical_crash_proof": [
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/noted.rs",
         "tests/support/sim.rs",

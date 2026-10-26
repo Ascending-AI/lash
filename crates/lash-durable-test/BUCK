@@ -89,6 +89,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/after_turn_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
@@ -284,6 +285,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/cell_restore_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/packages.rs",
         "tests/support/sim.rs",
@@ -420,6 +422,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/config_change_observer_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
@@ -636,6 +639,7 @@ lash_rust_integration_test(
         "tests/declared_start_crash_laws.rs",
         "tests/declared_start_crash_laws/start_policy.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
@@ -673,6 +677,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/deleted_session_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
@@ -707,6 +712,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/drain_by_release.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/scripted_steps.rs",
         "tests/support/sim.rs",
@@ -776,6 +782,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/frame_switch_crash_proof.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
@@ -879,6 +886,7 @@ lash_rust_integration_test(
         "tests/kernel_step_crash_laws/successor_pair.rs",
         "tests/support/callback_carry.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -948,6 +956,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/live_stream_takeover.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
     ],
@@ -1014,6 +1023,7 @@ lash_rust_integration_test(
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/packages.rs",
         "tests/support/sim.rs",
     ],
@@ -1082,6 +1092,7 @@ lash_rust_integration_test(
         "tests/open_session_commands/model_retry.rs",
         "tests/open_session_commands/owner_retention.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
@@ -1183,6 +1194,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
@@ -1219,7 +1231,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/pressure_frame_crash_proof.rs",
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",
@@ -1354,6 +1366,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/process_ran_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -1423,6 +1436,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/process_tool_call_crash_laws.rs",
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/kernel_namespace.rs",
         "tests/support/kernel_process.rs",
         "tests/support/matrix.rs",
@@ -1721,7 +1735,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/steering_crash_laws.rs",
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -1854,6 +1868,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/operations.rs",
         "tests/support/served.rs",
@@ -1964,6 +1979,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/failure_kind.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
@@ -2032,6 +2048,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/seed.rs",
         "tests/support/sim.rs",
@@ -2171,7 +2188,7 @@ lash_rust_integration_test(
         "synthetic-next",
     ],
     srcs_patterns = [
-        "tests/support/dialect.rs",
+        "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/noted.rs",
         "tests/support/sim.rs",
@@ -2292,7 +2309,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_durable_test",
     manifest_dir = "crates/lash-durable-test",
     package_name = "lash-internal-durable-test",
-    srcs_patterns = ["tests/kernel_step_crash_laws.rs", "tests/kernel_step_crash_laws/carried_callback.rs", "tests/kernel_step_crash_laws/linked_carry.rs", "tests/kernel_step_crash_laws/paged_carry.rs", "tests/kernel_step_crash_laws/successor_pair.rs", "tests/support/callback_carry.rs", "tests/support/dialect.rs", "tests/support/kernel_namespace.rs", "tests/support/kernel_process.rs", "tests/support/matrix.rs", "tests/support/served.rs", "tests/support/sim.rs"],
+    srcs_patterns = ["tests/kernel_step_crash_laws.rs", "tests/kernel_step_crash_laws/carried_callback.rs", "tests/kernel_step_crash_laws/linked_carry.rs", "tests/kernel_step_crash_laws/paged_carry.rs", "tests/kernel_step_crash_laws/successor_pair.rs", "tests/support/callback_carry.rs", "tests/support/dialect.rs", "tests/support/dialect_store.rs", "tests/support/kernel_namespace.rs", "tests/support/kernel_process.rs", "tests/support/matrix.rs", "tests/support/served.rs", "tests/support/sim.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_79543a10)"},
     tags = [
         "feature-lane",

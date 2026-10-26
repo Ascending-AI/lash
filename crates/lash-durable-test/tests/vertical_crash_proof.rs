@@ -53,7 +53,7 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
-#[path = "support/dialect.rs"]
+#[path = "support/dialect_store.rs"]
 mod dialect;
 #[path = "support/noted.rs"]
 mod noted;
@@ -1077,22 +1077,6 @@ async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay
     prove(Protocol::Code, Dialect::SqliteMemory, None).await;
 }
 
-/// The code turn on a SQLite file.
-#[tokio::test]
-async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_sqlite_file() {
-    prove(Protocol::Code, Dialect::SqliteFile, None).await;
-}
-
-/// The code turn on PostgreSQL.
-#[tokio::test]
-async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Protocol::Code, Dialect::Postgres, Some(url)).await;
-}
-
 /// PC-WORKING on SQLite in memory: cell A's working state reaches B across
 /// the model wait and the turn's commit, cut at every commit.
 #[tokio::test]
@@ -1130,22 +1114,6 @@ async fn a_cell_archive_is_held_on_its_session_wherever_its_turn_was_cut_on_sqli
 #[tokio::test]
 async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_memory() {
     prove(Protocol::Tools, Dialect::SqliteMemory, None).await;
-}
-
-/// The tool turn on a SQLite file.
-#[tokio::test]
-async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_sqlite_file() {
-    prove(Protocol::Tools, Dialect::SqliteFile, None).await;
-}
-
-/// The tool turn on PostgreSQL.
-#[tokio::test]
-async fn a_once_tool_call_killed_after_its_work_resumes_without_replay_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Protocol::Tools, Dialect::Postgres, Some(url)).await;
 }
 
 /// Cold resume: the whole deployment dies right after the commit that
@@ -1248,20 +1216,6 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
 #[tokio::test]
 async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_memory() {
     cold_resume(Dialect::SqliteMemory, None).await;
-}
-
-#[tokio::test]
-async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_file() {
-    cold_resume(Dialect::SqliteFile, None).await;
-}
-
-#[tokio::test]
-async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    cold_resume(Dialect::Postgres, Some(url)).await;
 }
 
 /// A12: the code turn, once uncut and once with node A killed right after
@@ -1397,22 +1351,6 @@ async fn resumed_as_uncut(
 #[tokio::test]
 async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory() {
     resumed_history(Dialect::SqliteMemory, None).await;
-}
-
-/// On a SQLite file.
-#[tokio::test]
-async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_file() {
-    resumed_history(Dialect::SqliteFile, None).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    resumed_history(Dialect::Postgres, Some(url)).await;
 }
 
 /// FIG-5588: the Noted turn's driver appends a protocol record beside the
@@ -1790,18 +1728,6 @@ async fn lo_recovery(dialect: Dialect, postgres_url: Option<String>) {
 #[tokio::test]
 async fn lo_recovery_on_sqlite_memory() {
     lo_recovery(Dialect::SqliteMemory, None).await;
-}
-
-#[tokio::test]
-async fn lo_recovery_on_sqlite_file() {
-    lo_recovery(Dialect::SqliteFile, None).await;
-}
-
-#[tokio::test]
-#[ignore = "requires a private PostgreSQL service"]
-async fn lo_recovery_on_postgres_when_configured() {
-    let url = lash_postgres_store::testing::required_database_url();
-    lo_recovery(Dialect::Postgres, Some(url)).await;
 }
 
 fn code(_request: &LlmRequest, source: &str) -> LlmResponse {

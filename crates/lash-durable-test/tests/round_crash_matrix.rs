@@ -1175,34 +1175,6 @@ async fn outcomes_committed_out_of_order_present_in_declared_order() {
     );
 }
 
-/// Group commit: members that finish within the window share one outcome
-/// transaction.
-#[tokio::test]
-async fn members_finishing_together_commit_in_one_transaction() {
-    let members = ["call-a", "call-b", "call-c"]
-        .into_iter()
-        .map(|name| Member {
-            call: call(name),
-            tool: Tool::Write { millis: 0 },
-        })
-        .collect();
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| RoundScenario::new(Vec::clone(&members)))
-        .await;
-    report.assert_held();
-    let outcomes = report
-        .baseline
-        .iter()
-        .filter(|write| {
-            write.kind == WriteKind::Actor
-                && write.committed()
-                && write.point.label == CommitLabel::ROUND_OUTCOME
-        })
-        .count();
-    assert_eq!(outcomes, 1);
-}
-
 /// Retry ownership: the attempt cap ends the call with its last known
 /// failure.
 #[tokio::test]

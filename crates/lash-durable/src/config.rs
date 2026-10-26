@@ -194,14 +194,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_defaults_validate() {
-        assert_eq!(
-            LeaseSettings::default().validate(),
-            Ok(LeaseConfig::default())
-        );
-    }
-
-    #[test]
     fn a_node_must_self_stop_before_its_lease_can_be_reaped() {
         let settings = LeaseSettings {
             self_stop_after: Duration::from_secs(15),

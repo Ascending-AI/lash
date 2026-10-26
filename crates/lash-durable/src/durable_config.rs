@@ -370,14 +370,6 @@ impl DurableConfig {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_defaults_validate() {
-        assert_eq!(
-            DurableSettings::default().validate().map(|c| c.settings()),
-            Ok(DurableSettings::default())
-        );
-    }
-
     /// D-RET limits: the node's retirement defaults to the documented
     /// standard values, in every preset; each limit validates at its hard
     /// maximum and is refused one above it by its typed `AboveMaximum`

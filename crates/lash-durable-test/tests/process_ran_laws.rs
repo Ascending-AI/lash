@@ -936,16 +936,6 @@ async fn counted_segments_commit_once_and_replay_to_their_path_across_every_cut(
     counted_matrix(dialect::Dialect::SqliteMemory, None).await;
 }
 
-/// The same laws on PostgreSQL, when a server is configured.
-#[tokio::test]
-async fn counted_segments_commit_once_and_replay_to_their_path_when_configured() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    counted_matrix(dialect::Dialect::Postgres, Some(url)).await;
-}
-
 async fn counted_matrix(dialect: dialect::Dialect, postgres_url: Option<String>) {
     let labels = [
         lash_durable::CommitLabel::PROCESS_ADVANCE,

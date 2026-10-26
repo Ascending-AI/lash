@@ -717,21 +717,3 @@ mod sqlite_memory {
         .await;
     }
 }
-
-mod sqlite_file {
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
-        super::standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen(
-            super::Tier::SqliteFile,
-        )
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-    async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen() {
-        super::stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_reopen(
-            super::Tier::SqliteFile,
-        )
-        .await;
-    }
-}

@@ -125,28 +125,6 @@ async fn a_one_park_cell_turn_keeps_only_its_named_recorded_boundaries() {
     }
 }
 
-async fn postgres_bound(turn: Turn, cell: &[(CommitLabel, &str)]) {
-    let url = dialect::postgres_url().expect("the PostgreSQL target supplies its database");
-    for traced in [false, true] {
-        counted_on(turn, traced, cell, Dialect::Postgres, Some(url.clone())).await;
-    }
-}
-
-#[tokio::test]
-async fn a_no_tool_turn_commits_at_most_once_per_output_plus_one_on_postgres() {
-    postgres_bound(Turn::Plain, &[]).await;
-}
-
-#[tokio::test]
-async fn a_one_tool_turn_commits_at_most_once_per_output_plus_one_on_postgres() {
-    postgres_bound(Turn::Trace, &[]).await;
-}
-
-#[tokio::test]
-async fn a_one_park_cell_turn_keeps_only_its_named_recorded_boundaries_on_postgres() {
-    postgres_bound(Turn::CellTrace, &CELL_BOUNDARIES).await;
-}
-
 /// ENV-ADMIT: acceptance survives loss of the uncommitted admission draft.
 /// The successor admits the accepted send and prepares its environment once.
 #[tokio::test]

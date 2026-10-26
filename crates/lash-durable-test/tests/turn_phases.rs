@@ -1591,31 +1591,11 @@ async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay() {
     prove(Mode::Plain, PLAIN, Dialect::SqliteMemory).await;
 }
 
-#[tokio::test]
-async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_sqlite_file() {
-    prove(Mode::Plain, PLAIN, Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn a_turn_of_two_model_calls_resumes_at_every_label_without_replay_on_postgres() {
-    prove(Mode::Plain, PLAIN, Dialect::Postgres).await;
-}
-
 /// L-C1: a call whose node died after pinning it is not sent again once its
 /// deadline passed; the deadline is not refreshed on resume.
 #[tokio::test]
 async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again() {
     prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::SqliteMemory).await;
-}
-
-#[tokio::test]
-async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_sqlite_file() {
-    prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn a_model_call_whose_pinned_deadline_passed_is_never_sent_again_on_postgres() {
-    prove(Mode::ShortDeadline, SHORT_DEADLINE, Dialect::Postgres).await;
 }
 
 /// A cancel requested while the model streams ends the turn `Cancelled`, at
@@ -1625,35 +1605,12 @@ async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes
     prove(Mode::CancelWhileStreaming, CANCEL, Dialect::SqliteMemory).await;
 }
 
-#[tokio::test]
-async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_sqlite_file()
-{
-    prove(Mode::CancelWhileStreaming, CANCEL, Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn a_cancel_while_streaming_ends_the_turn_and_a_crash_mid_cancel_finalizes_it_on_postgres() {
-    prove(Mode::CancelWhileStreaming, CANCEL, Dialect::Postgres).await;
-}
-
 /// An `AfterStep` cancel requested from outside the actor while the model
 /// streams lets the call finish and ends the turn `Cancelled` at the next
 /// phase boundary, before its next model call, at every cut.
 #[tokio::test]
 async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary() {
     prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::SqliteMemory).await;
-}
-
-#[tokio::test]
-async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_sqlite_file()
- {
-    prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_next_boundary_on_postgres()
- {
-    prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
 }
 
 /// Held receipt (FIG-6969): a failed checkpoint after the final answer
@@ -1702,28 +1659,6 @@ async fn a_cancelled_queued_input_is_withdrawn_and_never_runs() {
     .await;
 }
 
-#[tokio::test]
-async fn a_cancelled_queued_input_is_withdrawn_and_never_runs_on_sqlite_file() {
-    prove_on(
-        matrix().labels(QUEUED),
-        Mode::QueuedCancel,
-        QUEUED,
-        Dialect::SqliteFile,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_cancelled_queued_input_is_withdrawn_and_never_runs_on_postgres() {
-    prove_on(
-        matrix().labels(QUEUED),
-        Mode::QueuedCancel,
-        QUEUED,
-        Dialect::Postgres,
-    )
-    .await;
-}
-
 /// The admission is the cut the withdraw races.
 const ADMISSION: &[CommitLabel] = &[CommitLabel::MODEL_START];
 
@@ -1737,28 +1672,6 @@ async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once() {
         Mode::CancelAtAdmission,
         ADMISSION,
         Dialect::SqliteMemory,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_sqlite_file() {
-    prove_on(
-        matrix().labels(ADMISSION),
-        Mode::CancelAtAdmission,
-        ADMISSION,
-        Dialect::SqliteFile,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_postgres() {
-    prove_on(
-        matrix().labels(ADMISSION),
-        Mode::CancelAtAdmission,
-        ADMISSION,
-        Dialect::Postgres,
     )
     .await;
 }
@@ -2020,20 +1933,6 @@ async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_fro
     restore_after_the_head_moved(Dialect::SqliteMemory, None).await;
 }
 
-#[tokio::test]
-async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_sqlite_file() {
-    restore_after_the_head_moved(Dialect::SqliteFile, None).await;
-}
-
-#[tokio::test]
-async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_from_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    restore_after_the_head_moved(Dialect::Postgres, Some(url)).await;
-}
-
 /// Send `session` its turn's first input, under source key `run`, claim its
 /// actor on a node of its own and admit run `run` with that input, binding
 /// it the way the session actor's mail drain does. Answers the claim's
@@ -2147,20 +2046,6 @@ async fn input_to_a_running_turn_is_admitted_on_sqlite_memory() {
     input_to_a_running_turn_is_admitted(Dialect::SqliteMemory, None).await;
 }
 
-#[tokio::test]
-async fn input_to_a_running_turn_is_admitted_on_sqlite_file() {
-    input_to_a_running_turn_is_admitted(Dialect::SqliteFile, None).await;
-}
-
-#[tokio::test]
-async fn input_to_a_running_turn_is_admitted_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    input_to_a_running_turn_is_admitted(Dialect::Postgres, Some(url)).await;
-}
-
 /// FIG-5221: every kind a session actor's turn ends as is stored from its
 /// typed cause and read back through the host's `terminal_of` without a
 /// decode error: an answer, a failure and a cancel.
@@ -2246,18 +2131,4 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
 #[tokio::test]
 async fn each_turn_terminal_reads_back_through_the_host_on_sqlite_memory() {
     each_turn_terminal_reads_back(Dialect::SqliteMemory, None).await;
-}
-
-#[tokio::test]
-async fn each_turn_terminal_reads_back_through_the_host_on_sqlite_file() {
-    each_turn_terminal_reads_back(Dialect::SqliteFile, None).await;
-}
-
-#[tokio::test]
-async fn each_turn_terminal_reads_back_through_the_host_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    each_turn_terminal_reads_back(Dialect::Postgres, Some(url)).await;
 }

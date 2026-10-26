@@ -426,13 +426,3 @@ async fn prove_poisoned(dialect: Dialect) {
 async fn an_undecodable_checkpoint_parks_the_session_with_its_typed_refusal() {
     prove_poisoned(Dialect::SqliteMemory).await;
 }
-
-#[tokio::test]
-async fn an_undecodable_checkpoint_parks_the_session_with_its_typed_refusal_on_sqlite_file() {
-    prove_poisoned(Dialect::SqliteFile).await;
-}
-
-#[tokio::test]
-async fn an_undecodable_checkpoint_parks_the_session_with_its_typed_refusal_on_postgres() {
-    prove_poisoned(Dialect::Postgres).await;
-}

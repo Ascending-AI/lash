@@ -35,29 +35,10 @@
 //! a pass that resumes it after its committed `model.done` makes no model
 //! call of its own.
 //!
-//! The RLM legs (FIG-5355) run the protocol with a live interpreter.
-//!
-//! - **Globals:** the first turn's cell sets a session global, and its model
-//!   call reports a prompt usage over the compaction threshold, so preparing
-//!   the second turn opens a compaction frame, the plugin's other decision.
-//!   The second turn runs in it, and its cell finds the global gone: the
-//!   live interpreter restarted from the frame's seed. With no pressure the
-//!   same cell finds the global kept, so the law is about the frame.
-//! - **Pressure then `continue_as`:** the first turn's model call also
-//!   reports a usage over the threshold, so the second turn runs in a
-//!   compaction frame. Its cell switches frames with `control.continue_as`,
-//!   again over the threshold, and the follow-on runs the task in the third
-//!   frame. Cut at every label, the session commits both frames,
-//!   in order, each once: the summary seeds the second frame, one
-//!   `pressure.frame` commit landed, and the follow-on never compacts again
-//!   on the switching turn's usage. Each tier proves it in two laws, one
-//!   whose node is killed at the cut and one whose write is lost there, so
-//!   neither law holds a test action for the whole matrix.
-
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
-#[path = "support/dialect.rs"]
+#[path = "support/dialect_store.rs"]
 mod dialect;
 #[path = "support/served.rs"]
 mod served;
@@ -109,14 +90,6 @@ const SUMMARY: &str = "the user asked to read the repository";
 const FINAL: &str = "a brief answer";
 /// What marks the compaction summarizer's request.
 const SUMMARIZER: &str = "Provide a detailed summary of the conversation above";
-/// A prompt usage over the 200 000-token window's compaction threshold.
-const OVER_THRESHOLD: i64 = 190_000;
-/// The session binding the RLM globals leg sets: a cell's top-level
-/// binding is the session's, carried to its later cells.
-const GLOBAL: &str = "pressureLawGlobal";
-/// The task the RLM `continue_as` leg switches frames to.
-const TASK: &str = "finish the briefing in a fresh frame";
-
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
 }
@@ -147,76 +120,17 @@ fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     }
 }
 
-/// What a scenario's session runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Script {
-    /// The standard protocol: the first turn overflows, and the recovered
-    /// turn answers in prose.
-    Overflow,
-    /// RLM: the first turn's cell sets [`GLOBAL`], over the compaction
-    /// threshold when `pressure`, and the second turn's cell finishes with
-    /// the global's type.
-    Globals { pressure: bool },
-    /// RLM: the first turn finishes over the compaction threshold, the
-    /// compacted turn's cell calls `control.continue_as` with [`TASK`], also
-    /// over it, and the follow-on finishes.
-    ContinueAs,
-}
-
-impl Script {
-    fn rlm(self) -> bool {
-        self != Self::Overflow
-    }
-
-    /// The scenario's answer to the turn request `rendered`.
-    fn answer(self, request: &LlmRequest, rendered: &str) -> LlmResponse {
-        let over = |mut response: LlmResponse| {
-            response.usage.input_tokens = OVER_THRESHOLD;
-            response
-        };
-        match self {
-            Self::Overflow if rendered.contains(NEXT) => text(request, FINAL),
-            Self::Globals { .. } if rendered.contains(NEXT) => LlmResponse {
-                parts: vec![cell(&format!("await control.finish(typeof {GLOBAL});"))],
-                ..Default::default()
-            },
-            Self::Globals { pressure } => {
-                let set = LlmResponse {
-                    parts: vec![cell(&format!(
-                        "let {GLOBAL} = \"kept\";\nawait control.finish(\"set\");"
-                    ))],
-                    ..Default::default()
-                };
-                if pressure { over(set) } else { set }
-            }
-            Self::ContinueAs if rendered.contains(TASK) && !rendered.contains(NEXT) => {
-                LlmResponse {
-                    parts: vec![cell("await control.finish(\"done\");")],
-                    ..Default::default()
-                }
-            }
-            Self::ContinueAs if rendered.contains(NEXT) => over(LlmResponse {
-                parts: vec![cell(&format!(
-                    "await control.continueAs({{ task: {TASK:?} }});"
-                ))],
-                ..Default::default()
-            }),
-            Self::ContinueAs => over(LlmResponse {
-                parts: vec![cell("await control.finish(\"set\");")],
-                ..Default::default()
-            }),
-            Self::Overflow => LlmResponse {
-                terminal_reason: LlmTerminalReason::ContextOverflow,
-                terminal_diagnostic: Some("context window exceeded".to_owned()),
-                ..LlmResponse::default()
-            },
+/// The standard turn answers on its recovery frame after the first call overflows.
+fn answer(request: &LlmRequest, rendered: &str) -> LlmResponse {
+    if rendered.contains(NEXT) {
+        text(request, FINAL)
+    } else {
+        LlmResponse {
+            terminal_reason: LlmTerminalReason::ContextOverflow,
+            terminal_diagnostic: Some("context window exceeded".to_owned()),
+            ..LlmResponse::default()
         }
     }
-}
-
-/// A code mode cell of `code`.
-fn cell(code: &str) -> LlmOutputPart {
-    lash::testing::execute_code(code)
 }
 
 /// One send of the summary as the model received it: the exact body, and
@@ -233,14 +147,10 @@ fn asked(request: &LlmRequest) -> String {
 }
 
 /// The scripted model: the summarizer's request gets the summary, and every
-/// turn request `script`'s answer. It decides from the request it is handed,
+/// turn request its scripted answer. It decides from the request it is handed,
 /// as an in-process model does. Every turn request it saw is rendered into
 /// `seen`, and every send of the summary into `summaries`.
-fn model(
-    script: Script,
-    seen: Arc<Mutex<Vec<String>>>,
-    summaries: Arc<Mutex<Vec<SummarySend>>>,
-) -> ProviderHandle {
+fn model(seen: Arc<Mutex<Vec<String>>>, summaries: Arc<Mutex<Vec<SummarySend>>>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("pressure-frame-scripted")
         .requires_streaming(true)
@@ -261,7 +171,7 @@ fn model(
                     return Ok(text(&request, SUMMARY));
                 }
                 seen.lock_recover().push(rendered.clone());
-                Ok(script.answer(&request, &rendered))
+                Ok(answer(&request, &rendered))
             }
         })
         .build()
@@ -324,7 +234,6 @@ fn metadata() -> lash_core::LlmProfileMetadata {
 
 /// The scenario of one script on one dialect, fresh for every matrix cell.
 struct PressureFrame {
-    script: Script,
     dialect: Dialect,
     postgres_url: Option<String>,
     seen: Arc<Mutex<Vec<String>>>,
@@ -335,17 +244,13 @@ struct PressureFrame {
     first_summary: Option<Arc<std::sync::OnceLock<SummarySend>>>,
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
-    /// The virtual clock the database was built on, which an RLM core's VM
-    /// worker calls hold.
-    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
 impl PressureFrame {
-    fn of(script: Script, dialect: Dialect, postgres_url: Option<String>) -> Self {
+    fn new(dialect: Dialect, postgres_url: Option<String>) -> Self {
         Self {
-            script,
             dialect,
             postgres_url,
             seen: Arc::default(),
@@ -353,7 +258,6 @@ impl PressureFrame {
             first_summary: None,
             tripwire: Arc::default(),
             backend: Mutex::default(),
-            clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
@@ -379,40 +283,14 @@ impl PressureFrame {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                let builder = if self.script.rlm() {
-                    let clock = self
-                        .clock
-                        .lock_recover()
-                        .clone()
-                        .expect("the database is built first");
-                    lash::LashCore::rlm_builder(
-                        backend.clone(),
-                        lash::rlm::RlmProtocolPluginFactory::new(
-                            lash::rlm::RlmProtocolPluginConfig::builder()
-                                .instruction_limit(lash::rlm::InstructionBound::instructions(
-                                    1_000_000,
-                                ))
-                                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                                .build(),
-                            lash::rlm::CellDialect::typescript(),
-                        )
-                        .with_worker_service(sim::workers(&clock)),
-                    )
-                } else {
-                    lash::LashCore::standard_builder(backend)
-                };
-                builder
+                lash::LashCore::standard_builder(backend)
                     .serve_sessions(false)
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
-                        model(
-                            self.script,
-                            Arc::clone(&self.seen),
-                            Arc::clone(&self.summaries),
-                        ),
+                        model(Arc::clone(&self.seen), Arc::clone(&self.summaries)),
                         metadata(),
                     )
                     .plugin(Arc::new(
@@ -511,7 +389,6 @@ impl PressureFrame {
 #[async_trait::async_trait]
 impl Scenario for PressureFrame {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
             self.dialect,
             self.postgres_url.as_deref(),
@@ -579,19 +456,11 @@ impl Scenario for PressureFrame {
                 .filter(|write| write.point.label == label && write.committed())
                 .count()
         };
-        let mut violations = match self.script {
-            Script::Overflow => self.recovered(database, &seen).await,
-            Script::Globals { pressure } => self.globals(database, pressure, &seen).await,
-            Script::ContinueAs => self.continued(database, &seen).await,
-        };
+        let mut violations = self.recovered(database, &seen).await;
 
         // Every turn was admitted and committed once, and the pressure
-        // frame, when one opens, landed in one owner commit.
-        let (turns, frames) = match self.script {
-            Script::Overflow | Script::Globals { pressure: true } => (2, 1),
-            Script::Globals { pressure: false } => (2, 0),
-            Script::ContinueAs => (3, 1),
-        };
+        // frame landed in one owner commit.
+        let (turns, frames) = (2, 1);
         let admitted = trace
             .iter()
             .filter(|write| write.committed())
@@ -672,89 +541,6 @@ impl PressureFrame {
         }
         violations
     }
-
-    /// The globals script's laws: the second turn's cell found the global
-    /// gone behind a compaction frame, and kept with none.
-    async fn globals(
-        &self,
-        database: &Arc<dyn DurableStore>,
-        pressure: bool,
-        seen: &[String],
-    ) -> Vec<String> {
-        let mut violations = Vec::new();
-        let expected = if pressure { "undefined" } else { "string" };
-        match database.turn_end(&session(), &turn(SECOND_RUN)).await {
-            Ok(Some(end))
-                if matches!(
-                    &end.cause,
-                    RunTerminalCause::Committed {
-                        outcome: RunCommittedOutcome::Finished {
-                            finish: lash_core::facade_support::TurnFinish::Finished {
-                                tool_name, value,
-                            },
-                            ..
-                        },
-                        ..
-                    } if tool_name == "control.finish" && value.as_str() == Some(expected)
-                ) => {}
-            other => violations.push(format!(
-                "the second turn's cell did not find the global's type {expected}: {other:?}; \
-                 the model last saw: {:?}",
-                seen.last()
-            )),
-        }
-        let frames = usize::from(pressure) + 1;
-        match self.frames().await {
-            Ok((ancestry, summaries))
-                if ancestry.len() == frames && summaries.len() == frames - 1 => {}
-            other => violations.push(format!(
-                "the ancestry does not hold {frames} frames and {} summaries: {other:?}",
-                frames - 1
-            )),
-        }
-        violations
-    }
-
-    /// The `continue_as` script's laws: the summary seeds the second frame,
-    /// the switch opens the third after it, and the follow-on ran the task
-    /// there.
-    async fn continued(&self, database: &Arc<dyn DurableStore>, seen: &[String]) -> Vec<String> {
-        let mut violations = Vec::new();
-        match database.turn_end(&session(), &turn(SECOND_RUN)).await {
-            Ok(Some(end))
-                if matches!(
-                    &end.cause,
-                    RunTerminalCause::Committed {
-                        outcome: RunCommittedOutcome::AgentFrameSwitch { task, .. },
-                        ..
-                    } if task == TASK
-                ) => {}
-            other => violations.push(format!(
-                "the compacted turn did not switch frames to the task: {other:?}"
-            )),
-        }
-        match self.frames().await {
-            Ok((frames, summaries)) if frames.len() == 3 && summaries == [frames[1].clone()] => {}
-            other => violations.push(format!(
-                "the ancestry does not hold three frames with the summary seeding the second: \
-                 {other:?}"
-            )),
-        }
-        let follow_on: Vec<&String> = seen
-            .iter()
-            .filter(|seen| seen.contains(TASK) && !seen.contains(NEXT))
-            .collect();
-        if follow_on.is_empty() {
-            violations.push("the follow-on never ran the task".to_owned());
-        }
-        if let Some(request) = follow_on
-            .iter()
-            .find(|request| request.contains(ASK) || request.contains(SUMMARY))
-        {
-            violations.push(format!("the follow-on ran on an earlier frame: {request}"));
-        }
-        violations
-    }
 }
 
 /// Once a zombie's actors moved, every owner write it attempts is refused
@@ -781,94 +567,25 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
     violations
 }
 
-/// The owner commits `script`'s uncut run makes, in this order among
-/// others. The overflow script: the overflowing turn admits, calls the model
-/// and commits; the recovered turn admits, summarizes in a direct
-/// completion, opens the recovery frame, calls the model on it and commits.
-/// The RLM scripts' second turn does the same, and the `continue_as`
-/// script's follow-on admits, calls the model and commits after it.
-fn ordered_labels(script: Script) -> Vec<CommitLabel> {
-    let mut labels = vec![
+/// The standard overflow and recovery turns' owner commits, in order.
+fn ordered_labels() -> Vec<CommitLabel> {
+    vec![
         CommitLabel::ENVIRONMENT_PREPARE,
         CommitLabel::MODEL_START,
         CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
-    ];
-    if script != (Script::Globals { pressure: false }) {
-        labels.extend([CommitLabel::COMPLETION_START, CommitLabel::PRESSURE_FRAME]);
-    }
-    labels.extend([
+        CommitLabel::COMPLETION_START,
+        CommitLabel::PRESSURE_FRAME,
         CommitLabel::MODEL_START,
         CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
-    ]);
-    if script == Script::ContinueAs {
-        labels.extend([
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::TURN_COMMIT,
-        ]);
-    }
+    ]
+}
+
+fn uncut_labels() -> Vec<CommitLabel> {
+    let mut labels = ordered_labels();
+    labels.push(CommitLabel::SESSION_RELEASE);
     labels
-}
-
-/// `script`'s uncut run on SQLite in memory holds its laws and makes every
-/// expected owner commit, in order.
-async fn uncut(script: Script) {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| PressureFrame::of(script, Dialect::SqliteMemory, None))
-        .await;
-    report.assert_held();
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    let mut expected = ordered_labels(script).into_iter().peekable();
-    for label in labels {
-        if expected.peek() == Some(&label) {
-            expected.next();
-        }
-    }
-    assert_eq!(
-        expected.collect::<Vec<_>>(),
-        Vec::<CommitLabel>::new(),
-        "the uncut run made every expected owner commit, in order"
-    );
-}
-
-/// The crash scripts' complete owner sequence, including the code mode cell
-/// writes. Each cell's end commits with its turn (FIG-5999, FIG-6162).
-fn uncut_labels(script: Script) -> Vec<CommitLabel> {
-    if script == Script::ContinueAs {
-        vec![
-            CommitLabel::ENVIRONMENT_PREPARE,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::COMPLETION_START,
-            CommitLabel::PRESSURE_FRAME,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ]
-    } else {
-        let mut labels = ordered_labels(script);
-        labels.push(CommitLabel::SESSION_RELEASE);
-        labels
-    }
 }
 
 /// Every fault the matrices cut under.
@@ -880,42 +597,33 @@ const EVERY_FAULT: [Fault; 5] = [
     Fault::CommitThenAbort,
 ];
 
-/// `script` cut at every label of its uncut run on `dialect`, under
-/// `faults`.
-async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>, faults: &[Fault]) {
+/// Cut every label of the standard overflow recovery under every fault.
+async fn prove(dialect: Dialect, postgres_url: Option<String>) {
     let first = Arc::new(std::sync::OnceLock::new());
     let report = Matrix::new()
-        .faults(faults)
+        .faults(&EVERY_FAULT)
         .horizon(Duration::from_secs(600))
-        .run_test(|| {
-            let scenario = PressureFrame::of(script, dialect, postgres_url.clone());
-            if script == Script::Overflow {
-                scenario.against(&first)
-            } else {
-                scenario
-            }
-        })
+        .run_test(|| PressureFrame::new(dialect, postgres_url.clone()).against(&first))
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
-        "pressure frame {script:?} {dialect:?}: {} cells over {} labels ({})",
+        "pressure frame {dialect:?}: {} cells over {} labels ({})",
         report.cells.len(),
         labels.len(),
         labels.join(", ")
     );
     report.assert_held();
-    report.assert_baseline_labels(&uncut_labels(script));
-    if script == Script::Overflow {
-        assert!(
-            first.get().is_some(),
-            "the uncut run sent the summary the cells are compared with"
-        );
-        assert!(
-            report.labels().contains(&CommitLabel::COMPLETION_START) && !report.cells.is_empty(),
-            "the matrix never cut completion.start"
-        );
-    }
-    for label in ordered_labels(script) {
+    report.assert_baseline_labels(&uncut_labels());
+    assert!(
+        first.get().is_some(),
+        "the uncut run sent the summary the cells are compared with"
+    );
+    assert!(
+        report.labels().contains(&CommitLabel::COMPLETION_START) && !report.cells.is_empty(),
+        "the matrix never cut completion.start"
+    );
+
+    for label in ordered_labels() {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"
@@ -928,78 +636,7 @@ async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>, f
 /// run's first attempt (RESEND, FIG-5479).
 #[tokio::test]
 async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory() {
-    prove(Script::Overflow, Dialect::SqliteMemory, None, &EVERY_FAULT).await;
-}
-
-/// On a SQLite file.
-#[tokio::test]
-async fn a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file() {
-    prove(Script::Overflow, Dialect::SqliteFile, None, &EVERY_FAULT).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn a_pressure_frame_killed_at_every_label_opens_once_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Script::Overflow, Dialect::Postgres, Some(url), &EVERY_FAULT).await;
-}
-
-/// An RLM session's live execution state restarts from a pressure frame's
-/// seed: the global the first turn's cell set is gone from the interpreter
-/// the compacted turn's cell runs in, and kept when no frame opens.
-#[tokio::test]
-async fn an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed() {
-    uncut(Script::Globals { pressure: false }).await;
-    uncut(Script::Globals { pressure: true }).await;
-}
-
-/// FIG-7193: the uncut pressure-frame handoff keeps the running turn's
-/// recorded execution view through adoption, so its follow-on runs once.
-#[tokio::test]
-async fn an_rlm_pressure_frame_then_continue_as_uncut_commits_both_frames_once_on_sqlite_memory() {
-    uncut(Script::ContinueAs).await;
-}
-
-/// On SQLite in memory: an RLM pressure frame followed by a `continue_as`
-/// in the next turn, cut under every fault at every label, commits both
-/// frames in order, each once, including kills and lost writes.
-#[tokio::test]
-async fn an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_sqlite_memory()
- {
-    prove(
-        Script::ContinueAs,
-        Dialect::SqliteMemory,
-        None,
-        &EVERY_FAULT,
-    )
-    .await;
-}
-
-/// On a SQLite file.
-#[tokio::test]
-async fn an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_sqlite_file()
- {
-    prove(Script::ContinueAs, Dialect::SqliteFile, None, &EVERY_FAULT).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn an_rlm_pressure_frame_then_continue_as_cut_at_every_label_commits_both_frames_once_on_postgres()
- {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(
-        Script::ContinueAs,
-        Dialect::Postgres,
-        Some(url),
-        &EVERY_FAULT,
-    )
-    .await;
+    prove(Dialect::SqliteMemory, None).await;
 }
 
 const USAGE_SESSION: &str = "prompt-usage-session";

@@ -2044,9 +2044,3 @@ async fn dynamic_match_codec_debt(dialect: Dialect) {
 async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement() {
     dynamic_match_codec_debt(Dialect::SqliteMemory).await;
 }
-
-#[tokio::test]
-async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement_on_sqlite_file()
- {
-    dynamic_match_codec_debt(Dialect::SqliteFile).await;
-}

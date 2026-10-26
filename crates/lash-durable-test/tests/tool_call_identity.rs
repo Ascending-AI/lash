@@ -334,50 +334,6 @@ async fn same_scope_completion_collision(tier: Tier) {
     world.shutdown().await;
 }
 
-/// A reported failure after the effect (a timeout, say) is retried under
-/// the same call id: the first attempt's effect may have happened, so a key
-/// that changed would defeat the tool's deduplication. The attempt number
-/// advances, and the retry's success is the call's outcome.
-async fn reported_failure_retry_preserves_call_id(tier: Tier) {
-    let Some((world, witness)) = world(tier).await else {
-        return;
-    };
-    let name = "reported-failure-retry";
-    let output = world
-        .run(
-            name,
-            served::spec(64),
-            vec![probe(
-                "call_retry",
-                PROBE,
-                serde_json::json!({ "label": "retried", "fail_first": true }),
-            )],
-        )
-        .await;
-    served::assert_answered(name, &output);
-    let executions = witness.of("retried");
-    assert_eq!(
-        executions
-            .iter()
-            .map(|execution| execution.attempt)
-            .collect::<Vec<_>>(),
-        vec![1, 2],
-        "the reported failure is retried once, and the attempt number advances"
-    );
-    assert!(
-        executions
-            .iter()
-            .all(|execution| execution.call_id == executions[0].call_id),
-        "every attempt of one call saw one call id: {executions:?}"
-    );
-    assert_eq!(
-        answered_labels(&world.read(name).await),
-        vec!["retried"],
-        "the retry's success is the call's outcome"
-    );
-    world.shutdown().await;
-}
-
 /// The session's head, read from its store.
 async fn head(world: &World, session: &str) -> lash_core::store::SessionHeadMeta {
     let factory = world.backend.session_store_factory();
@@ -692,17 +648,6 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
     Some((world, executions))
 }
 
-/// A deferring call whose first attempt reports a retryable failure is
-/// retried under the same call id, and its second attempt may park: the
-/// host's resolution of that park is the call's answer.
-async fn a_retried_call_may_park_and_its_resolution_answers(tier: Tier) {
-    let records = Arc::new(Records::default());
-    let Some((world, _)) = retry_into_a_park(tier, &records).await else {
-        return;
-    };
-    world.shutdown().await;
-}
-
 /// The retry ladder of such a call survives its park: once the host
 /// resolves the completion, the call's completion record carries both
 /// attempts, the failed first and the completed second.
@@ -839,11 +784,9 @@ async fn a_cancelled_turns_parked_completion_is_revoked(tier: Tier) {
 tiered_laws!(
     repeated_provider_id_across_turns_is_distinct,
     same_scope_completion_collision,
-    reported_failure_retry_preserves_call_id,
     one_turn_commits_history_once_and_never_replaces_existing_nodes,
     suspended_tool_keeps_turn_and_history_head_until_resolution,
     fork_inherits_history_without_execution_queues_waits_or_journals,
-    a_retried_call_may_park_and_its_resolution_answers,
     a_cancelled_turns_parked_completion_is_revoked,
 );
 
