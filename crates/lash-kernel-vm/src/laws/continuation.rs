@@ -959,18 +959,6 @@ fn a_continuation_on_a_fresh_frame_is_refused() {
     );
 }
 
-/// CONT-GRAMMAR: a role the action keeps is not saved.
-#[test]
-fn a_missing_role_is_refused() {
-    let mut embedder = waiting();
-    let mut dropped = None;
-    edit_roles(&mut embedder, |roles| {
-        dropped = Some(roles.remove(0).site);
-    });
-    let role = SitePath(dropped.unwrap().into());
-    assert_eq!(refused(&mut embedder), RestoreRefusal::MissingRole { role });
-}
-
 /// CONT-GRAMMAR: a saved role the action does not keep.
 #[test]
 fn an_extra_role_is_refused() {

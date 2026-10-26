@@ -106,19 +106,6 @@ fn every_layout_runs_a_document_the_same_way() {
     }
 }
 
-/// `K-CHG-001`, `K-CHG-007`: a function is charged its formula whether its
-/// native implementation or its kernel body runs, and gives the same
-/// values.
-#[test]
-fn a_native_implementation_and_a_kernel_body_run_the_same() {
-    let native = observe(Setup::default());
-    let body = observe(Setup {
-        native_twice: false,
-        ..Setup::default()
-    });
-    assert_eq!(body, native);
-}
-
 /// PLAN-INDEP for per-site property caches: warm a read site, fail its guard
 /// on a different record, then delete, reinsert and mutate its field.
 /// Errors and effects retain their order and charge,

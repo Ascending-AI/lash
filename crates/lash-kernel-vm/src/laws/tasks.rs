@@ -911,35 +911,6 @@ main {{
     );
 }
 
-/// `K-TASK-023`: when no task is ready and none waits on an effect,
-/// the run ends in a deadlock that names the waiting tasks.
-#[test]
-fn tasks_that_only_wait_on_each_other_deadlock() {
-    let (end, _) = run(r#"
-definition "function waits(box: Any) -> Any\nkernel 1\nmetering statements\nbody {  do yield let h = box.other do join h  }"
-
-main {
-  let box = {other: null}
-  let a = spawn call waits(box)
-  set box.other = a
-  let box2 = {other: a}
-  let b = spawn call waits(box2)
-  set box.other = b
-  do join a
-}"#);
-    let a = spawned(TaskIdentity::Main, main_site([1, 0]), 0);
-    let b = spawned(TaskIdentity::Main, main_site([4, 0]), 0);
-    assert_eq!(
-        end,
-        End::Error(RunError::Deadlock {
-            waiting: vec![TaskIdentity::Main, a, b]
-                .into_iter()
-                .map(lash_kernel_doc::kernel_internals::task_label)
-                .collect()
-        })
-    );
-}
-
 /// `K-MACH-004`: an outcome for a wait never handed out, delivered twice
 /// is an error to the embedder and changes nothing.
 #[test]

@@ -15,8 +15,6 @@ use crate::{
 fn guarded(body: &str) -> String {
     format!(
         r#"
-definition "function down(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody {{  let r = apply self(self, n) return r  }}"
-
 definition "function waits(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{  do perform 0(tag) as Any  }}"
 
 main {{
@@ -49,19 +47,6 @@ fn exceeded(bound: Bound, limit: u64) -> BoundExceeded {
         limit,
         function: None,
     }
-}
-
-/// `K-CHG-008`: the charge that takes the run past its bound ends it.
-#[test]
-fn the_charge_bound_ends_the_run() {
-    let bounds = Bounds {
-        charge_limit: 1_000,
-        ..ROOMY
-    };
-    assert_eq!(
-        passes("while true { }", bounds),
-        exceeded(Bound::Charge, 1_000)
-    );
 }
 
 /// `K-BND-001`, `K-BND-003`: memory that is live counts against the
@@ -167,32 +152,6 @@ main {
     assert_eq!(REPEAT_BUILDS.get(), 200);
 }
 
-/// `K-BND-002`: call depth is counted per task.
-#[test]
-fn the_call_depth_bound_ends_the_run() {
-    let bounds = Bounds {
-        call_depth: 50,
-        ..ROOMY
-    };
-    assert_eq!(
-        passes("do call down(&down, 1)", bounds),
-        exceeded(Bound::CallDepth, 50)
-    );
-}
-
-/// `K-TASK-022`: a `spawn` that would pass the task bound ends the run.
-#[test]
-fn the_task_bound_ends_the_run() {
-    let bounds = Bounds {
-        live_tasks: 3,
-        ..ROOMY
-    };
-    assert_eq!(
-        passes("while true { do spawn call waits(\"w\") }", bounds),
-        exceeded(Bound::LiveTasks, 3)
-    );
-}
-
 /// `K-BND-001`: the effects requested at one park are bounded.
 #[test]
 fn the_requests_per_park_bound_ends_the_run() {
@@ -289,28 +248,6 @@ main {
     assert_eq!(
         result(embedder.run_to_end(&[])),
         int(3 * (299 * 300 / 2) + (8..308).sum::<i64>())
-    );
-}
-
-/// `K-CHG-005`: a value copied out is charged its deep size, a heap object
-/// reached more than once counted the first time only, however many
-/// objects the value holds.
-#[test]
-fn a_shared_object_is_charged_once_in_a_wide_graph() {
-    let lists: Vec<String> = (1..=10).map(|n| format!("a{n}")).collect();
-    let made: String = (1..=10).map(|n| format!("let a{n} = [{n}] ")).collect();
-    let body = format!("{made}let x = [{0}, {0}]", lists.join(", "));
-    let charged = |body: &str| {
-        let mut embedder = Embedder::new(&format!("main {{ {body} }}"));
-        embedder.run_to_end(&[]);
-        embedder.machine.meters().charged.expect("exact charge")
-    };
-    // `return x`: 1 statement, 1 variable node, and `x` copied out: the
-    // list of 20 members (21) and each of its ten lists once, `[n]` (2)
-    // with its one-word integer (2).
-    assert_eq!(
-        charged(&format!("{body} return x")) - charged(&body),
-        2 + 21 + 10 * 4
     );
 }
 

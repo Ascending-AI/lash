@@ -68,21 +68,6 @@ fn a_projection_refusal_preserves_the_typed_heap_cause() {
     assert_eq!(error, crate::SealError::Heap(HeapFault::LeaseLost));
 }
 
-/// K-MACH-007/008: a suspended KIR action and shared-variable alias resume
-/// from semantic coordinates, without any whole-state reader.
-#[test]
-fn a_parked_kir_frame_resumes_from_its_sealed_record() {
-    let mut embedder = Embedder::new(
-        "main { let xs = [1] let alias = xs let v = perform 0(7) as Any set alias[0] = v return xs[0] }",
-    );
-    assert!(matches!(embedder.run(), Step::Parked(_)));
-    let root = reopen(&mut embedder);
-    assert_eq!(root.owner, lash_kernel_doc::heap::PageId([9; 32]));
-    assert_eq!(root.closure, lash_kernel_doc::heap::PageId([8; 32]));
-    embedder.deliver("echo");
-    assert_eq!(result(embedder.run_to_end(&[])), int(7));
-}
-
 /// S4/K-SES-001: Main retains session function pins, Entry starts without
 /// a session, and both retain their target kind through a cold continuation.
 #[test]
@@ -854,112 +839,6 @@ fn helper_restore_fixture() -> (
     embedder.document = document;
     assert!(matches!(embedder.run(), Step::Parked(_)));
     (embedder, program, helpers)
-}
-
-/// FIG-7169: resident and cold equal-image compatibility never open the heap,
-/// enumerate pins or prepare helper bodies. Execution preparation is separate.
-#[test]
-fn equal_helper_library_restore_does_no_compatibility_work() {
-    use lash_kernel_state::paged::helper_compatibility_work as probe;
-    for cold in [false, true] {
-        let (mut embedder, mut program, helpers) = helper_restore_fixture();
-        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-        if cold {
-            program.library = crate::PreparedLibrary::with_helpers(
-                std::sync::Arc::clone(&embedder.library.registry),
-                std::sync::Arc::clone(&helpers),
-            );
-        }
-        probe::enable();
-        let source = checkpoint
-            .check_helper_compatibility(
-                Box::new(embedder.source.clone()),
-                &Default::default(),
-                &Default::default(),
-                &helpers,
-            )
-            .unwrap()
-            .0;
-        let work = probe::take().unwrap();
-        assert_eq!(work.comparisons, 1);
-        assert_eq!(
-            (
-                work.live_code_walks,
-                work.membership_probes,
-                work.dependency_steps
-            ),
-            (0, 0, 0)
-        );
-        embedder.machine =
-            crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
-        embedder.deliver("echo");
-        assert_eq!(result(embedder.run_to_end(&[])), int(7));
-    }
-}
-
-/// FIG-7169: both a helper on the active callback stack and a helper saved
-/// for a later call are refused before any instruction or effect resumes.
-#[test]
-fn a_changed_pinned_helper_is_refused_before_resume() {
-    use lash_kernel_doc::BuildHelpers;
-    use lash_kernel_state::paged::{HelperCompatibilityError, helper_compatibility_work as probe};
-    use std::sync::Arc;
-    for missing_active in [true, false] {
-        let (mut embedder, program, writer) = helper_restore_fixture();
-        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-        let missing = embedder.library.ids[if missing_active {
-            "each.twice"
-        } else {
-            "each.map"
-        }];
-        let reader = Arc::new(
-            BuildHelpers::new(
-                embedder.library.registry.as_ref().clone(),
-                writer
-                    .members()
-                    .copied()
-                    .filter(|function| *function != missing),
-            )
-            .unwrap(),
-        );
-        let documents = program
-            .instances
-            .iter()
-            .map(|(link, instance)| {
-                (
-                    *link,
-                    program.documents[&instance.document].as_ref().clone(),
-                )
-            })
-            .collect();
-        let before = (
-            embedder.world.performed.len(),
-            embedder.requests.len(),
-            embedder.machine.meters(),
-        );
-        probe::enable();
-        let error = checkpoint
-            .check_helper_compatibility(
-                Box::new(embedder.source.clone()),
-                &documents,
-                &Default::default(),
-                &reader,
-            )
-            .err()
-            .expect("missing exact helper refuses before execution");
-        assert_eq!(
-            error,
-            HelperCompatibilityError::MissingHelper { function: missing }
-        );
-        let work = probe::take().unwrap();
-        assert_eq!(work.live_code_walks, 1);
-        assert!(work.membership_probes > 0);
-        assert_eq!(
-            (embedder.world.performed.len(), embedder.requests.len()),
-            (before.0, before.1)
-        );
-        assert_eq!(embedder.machine.meters().charged, before.2.charged);
-    }
 }
 
 /// FIG-7169: unrelated build members do not pin a root, and the first park

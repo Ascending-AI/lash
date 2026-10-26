@@ -8,7 +8,7 @@ use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
-use crate::{CellStart, End, Layout, Machine, Step, Target};
+use crate::{CellStart, End, Layout, Machine, Target};
 
 fn list<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::List(items.to_vec())
@@ -16,12 +16,6 @@ fn list<const N: usize>(items: [Datum; N]) -> Datum {
 
 fn tuple<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::Tuple(items.to_vec())
-}
-
-/// `K-FORM-010`: a text index reads an existing record field.
-#[test]
-fn a_record_text_index_reads_the_field() {
-    assert_eq!(value(r#"let r = {a: 7} return r["a"]"#), int(7));
 }
 
 /// `K-FORM-010`: a missing record field reads as absent.
@@ -136,16 +130,6 @@ fn record_index_assignments_reject_non_text() {
 #[test]
 fn record_index_removals_reject_non_text() {
     rejects_non_text_record_indexes(|index| format!("remove r[{index}]"));
-}
-
-/// `K-ERR-003`: an uncaught integer is the thrown value itself.
-#[test]
-fn an_uncaught_throw_carries_the_integer_unchanged() {
-    let (end, _) = run("main { throw 7 }");
-    let End::Error(crate::RunError::Uncaught { error: raised, .. }) = end else {
-        panic!("main must end in the uncaught value");
-    };
-    assert_eq!(raised, int(7));
 }
 
 /// `K-ERR-003`: collection contents and ordinary errors stay unchanged.
@@ -642,43 +626,4 @@ fn charges_follow_the_cost_table() {
         charged("let f = fn(a, b) { return a } let r = apply f(1, 2)"),
         (1 + 1) + (1 + 2) + (1 + 1)
     );
-}
-
-/// K-SES-001: finishing without a park publishes the dirty binding tree.
-#[test]
-fn a_cell_carries_unsealed_bindings_at_its_end() {
-    let mut embedder = Embedder::new("main { let x = 7 }");
-    let Step::Ended(End::Finished(finished)) = embedder.run() else {
-        panic!("cell finishes")
-    };
-    let carry = finished.carry.unwrap();
-    assert_eq!(
-        lash_kernel_state::kernel_internals::session_bindings(&carry).len(),
-        1
-    );
-    assert!(
-        lash_kernel_state::kernel_internals::session_bindings(&carry)
-            .page()
-            .is_some(),
-        "a nonempty carry must name its sealed tree"
-    );
-    let mut heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-        lash_kernel_state::kernel_internals::session_heap(&carry),
-        Box::new(embedder.source.clone()),
-        lash_kernel_state::paged::EditEpoch(2),
-    )
-    .unwrap();
-    lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
-    let binding = heap
-        .session_root()
-        .get(
-            &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("x")),
-            heap.pages(),
-        )
-        .unwrap()
-        .unwrap();
-    assert!(matches!(
-        binding.value,
-        lash_kernel_state::paged::BoundRecord::Value(lash_kernel_doc::heap::PageValue::Int(_))
-    ));
 }

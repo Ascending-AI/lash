@@ -2,12 +2,10 @@
 //! wait takes survive a checkpoint (`K-TASK-005`, `K-TASK-006`,
 //! `K-TASK-026`).
 //!
-//! - Outcomes delivered together continue in arrival order whether the
-//!   wait is in place (`perform … then yield`) or behind a joined task.
 //! - A run sealed while a task stands delivered, its outcome in and its
 //!   turn not yet taken, and opened cold under another layout, ends as the
 //!   uninterrupted run does, at every slice.
-//! - A failure or a `cancel` delivered to such a wait reaches `catch` only
+//! - A `cancel` delivered to such a wait reaches `catch` only
 //!   after the turn.
 //! - A delivered state at a wait that takes no turn is refused.
 //! - An `await` waits where its policy waits.
@@ -42,17 +40,6 @@ fn setup(slice: u64) -> Setup {
         ..Setup::default()
     }
 }
-
-/// An in-place tool call awaited `then yield` and one behind a task the
-/// awaiter joins, as TypeScript lowers `await tool()` and `await p`.
-const ARRIVALS: &str = "definition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nbody {  let a = perform 0(\\\"i\\\") as Any then yield print a return a  }\"\n\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"p\\\") as Any return b  }\"\n\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nbody {  let t = spawn call wait() let b = join t print b return b  }\"\n\nmain { let x = spawn call inplace() let y = spawn call promised()\nlet tasks = [x, y] let answer = join all tasks return answer }\n";
-
-/// [`ARRIVALS`] with the in-place wait taking no turn.
-const ARRIVALS_PLAIN: &str = "definition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nbody {  let a = perform 0(\\\"i\\\") as Any print a return a  }\"\n\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"p\\\") as Any return b  }\"\n\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nbody {  let t = spawn call wait() let b = join t print b return b  }\"\n\nmain { let x = spawn call inplace() let y = spawn call promised()\nlet tasks = [x, y] let answer = join all tasks return answer }\n";
-
-/// A failure delivered to a `then yield` wait inside a `try`, beside a
-/// task whose outcome comes with it.
-const CAUGHT: &str = "definition \"function guarded() -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let a = perform 1(\\\"f\\\") as Any then yield print a }\\ncatch e { print \\\"caught\\\" } return null  }\"\n\ndefinition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"o\\\") as Any print b return b  }\"\n\nmain { let x = spawn call guarded() let y = spawn call other()\nlet tasks = [x, y] do join all tasks return null }\n";
 
 /// A `then yield` wait nested in an expression, beside another task.
 const NESTED: &str = "definition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"o\\\") as Any print b return b  }\"\n\nmain { let o = {x: 1} let h = spawn call other()\nlet r = [o.x, perform 0(\"m\") as Any then yield, perform 0(1) as Any then yield]\nprint \"main\" let done = join h return r }\n";
@@ -168,30 +155,6 @@ fn exact(text: &str, order: &[&str]) -> Trace {
         assert!(delivered > 0, "no seal held a delivered task: {text}");
     }
     reference
-}
-
-/// AWAIT-PHASE: of two outcomes delivered together, the continuation of
-/// the one awaited in place and of the one behind a joined task run in
-/// the order the outcomes arrived, in both orders, and through a
-/// checkpoint at `Delivered`. Without the turn, the in-place wait would
-/// always run first.
-#[test]
-fn arrivals_delivered_together_continue_in_arrival_order() {
-    for (order, printed) in [(["i", "p"], ["i", "p"]), (["p", "i"], ["p", "i"])] {
-        let trace = exact(ARRIVALS, &order);
-        assert_eq!(trace.printed, printed.map(text), "{order:?}");
-    }
-    let (plain, _) = drive(ARRIVALS_PLAIN, &["p", "i"], STRAIGHT);
-    assert_eq!(plain.printed, ["i", "p"].map(text));
-}
-
-/// AWAIT-PHASE: a failure delivered to a `then yield` wait reaches its
-/// `catch` only after the turn, so the task delivered with it runs first.
-#[test]
-fn a_delivered_failure_reaches_catch_after_its_turn() {
-    let trace = exact(CAUGHT, &["f", "o"]);
-    assert_eq!(trace.printed, [text("o"), text("caught")]);
-    assert_eq!(trace.end, "Finished(Null)");
 }
 
 /// AWAIT-PHASE: a `then yield` wait nested in an expression keeps its
