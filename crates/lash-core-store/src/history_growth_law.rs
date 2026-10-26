@@ -225,6 +225,59 @@ fn acknowledging_prepared_timestamps_does_not_copy_held_history() {
     );
 }
 
+/// FIG-7382: a frame keeps a protocol payload's JSON bytes, rather than an
+/// expanded object tree for every tiny field of every completed turn.
+#[test]
+fn protocol_payload_retention_is_bounded_by_its_json_bytes() {
+    let value = serde_json::Value::Object(
+        (0..24)
+            .map(|index| {
+                (
+                    format!("field_{index}"),
+                    serde_json::json!({"value": index, "ok": true}),
+                )
+            })
+            .collect(),
+    );
+    let wire = serde_json::to_vec(&value).unwrap();
+    let measurement = allocation_counter::Measurement::start();
+    let payloads: Vec<_> = (0..256)
+        .map(|_| lash_protocol_types::ProtocolPayload::new(value.clone()))
+        .collect();
+    for payload in &payloads {
+        // Typed projection and an owned trace copy need the tree only while read.
+        let fields = payload.derived(|value| value.as_object().unwrap().len());
+        assert_eq!(*fields, 24);
+        let observed = payload.clone().into_value();
+        assert_eq!(serde_json::to_vec(&observed).unwrap(), wire);
+        assert_eq!(serde_json::to_vec(payload).unwrap(), wire);
+    }
+    let counts = measurement.finish();
+    let live = counts.allocated.saturating_sub(counts.deallocated);
+    assert!(
+        live <= 256 * wire.len() + 128 * 1024,
+        "payload JSON trees outlive their publication: {live} live bytes for {} JSON bytes",
+        256 * wire.len()
+    );
+
+    // Constructed values beyond the text parser's depth still keep their value,
+    // and numeric equality keeps Value's signed-zero semantics.
+    let mut deep = serde_json::Value::Null;
+    for _ in 0..256 {
+        deep = serde_json::json!([deep]);
+    }
+    let payload = lash_protocol_types::ProtocolPayload::new(deep.clone());
+    assert_eq!(payload.value(), &deep);
+    assert_eq!(
+        serde_json::to_vec(&payload).unwrap(),
+        serde_json::to_vec(&deep).unwrap()
+    );
+    assert_eq!(
+        lash_protocol_types::ProtocolPayload::new(serde_json::json!(-0.0)),
+        lash_protocol_types::ProtocolPayload::new(serde_json::json!(0.0)),
+    );
+}
+
 pub(crate) mod allocation_counter {
     //! Allocation requests on the measuring thread.
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -234,6 +287,7 @@ pub(crate) mod allocation_counter {
     pub(crate) struct Counts {
         pub(crate) allocated: usize,
         pub(crate) allocations: usize,
+        pub(crate) deallocated: usize,
     }
 
     thread_local! {
@@ -273,12 +327,24 @@ pub(crate) mod allocation_counter {
         }
 
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            let _ = COUNTS.try_with(|cell| {
+                if let Some(mut counts) = cell.get() {
+                    counts.deallocated += layout.size();
+                    cell.set(Some(counts));
+                }
+            });
             // SAFETY: Allocations came from System with the same layout.
             unsafe { System.dealloc(ptr, layout) }
         }
 
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
             charge(new_size);
+            let _ = COUNTS.try_with(|cell| {
+                if let Some(mut counts) = cell.get() {
+                    counts.deallocated += layout.size();
+                    cell.set(Some(counts));
+                }
+            });
             // SAFETY: The pointer, layout and new size keep the caller's contract.
             unsafe { System.realloc(ptr, layout, new_size) }
         }

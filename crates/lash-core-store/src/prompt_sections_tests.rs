@@ -377,3 +377,82 @@ fn lo_prefix_tail_work_matches_full_render() {
         "prefix visits must not allocate per retained message: {measured:?}"
     );
 }
+
+/// FIG-7382: a fresh rendering of every prior turn must not retain a separate
+/// source, lowered body and decoded message population for every send.
+#[test]
+fn rerendered_frame_retains_only_one_copy_of_unchanged_messages() {
+    use crate::history_growth_law::allocation_counter::Measurement;
+    use lash_protocol_types::llm::types::{
+        LlmMessage, LlmRequest, LlmRequestScope, LlmRole, LlmToolChoice, ProviderRouteIdentity,
+        RecordedRequestTemplate, RetainedLlmRequest,
+    };
+    use std::sync::Arc;
+
+    let envelope = LlmRequest {
+        instructions: None,
+        model: crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
+            crate::LlmProfileKey::new("frame-memory"),
+            lash_protocol_types::llm_profile::LlmProfileMetadata::builder("frame-memory")
+                .context_window_tokens(32000)
+                .cache_retention(lash_protocol_types::llm::capability::CacheRetention::Short)
+                .build()
+                .unwrap(),
+        )),
+        messages: Vec::new(),
+        tools: Arc::new(Vec::new()),
+        tool_choice: LlmToolChoice::None,
+        attachment_acceptance: Arc::default(),
+        generation: Default::default(),
+        scope: LlmRequestScope::new("frame-memory", "frame", "call"),
+        output_spec: None,
+        stream_events: None,
+        provider_trace: None,
+        attempt_control: Default::default(),
+    };
+    let route = ProviderRouteIdentity::new("frame-memory", "frame-memory", "frame-memory");
+    let mut owner = OwnerPromptState::default();
+    let mut appended_bytes = 0;
+    let measurement = Measurement::start();
+    for turn in 0..256 {
+        let mut draft = owner.draft();
+        // Like RLM's chronological renderer, each call reconstructs its values.
+        let messages: Vec<_> = (0..=turn)
+            .flat_map(|prior| {
+                [
+                    LlmMessage::text(LlmRole::User, format!("history turn {prior}")),
+                    LlmMessage::text(LlmRole::Assistant, format!("checked total {prior}")),
+                ]
+            })
+            .chain([LlmMessage::text(LlmRole::User, format!("iteration {turn}"))])
+            .collect();
+        appended_bytes += serde_json::to_vec(&messages[messages.len() - 3..messages.len() - 1])
+            .unwrap()
+            .len();
+        let mut flat = envelope.clone();
+        flat.messages = messages;
+        let request = RetainedLlmRequest::from_request(flat);
+        let shared = draft.retain_request(&request);
+        let template = RecordedRequestTemplate::of_retained_request(
+            route.clone(),
+            &shared,
+            draft.lowering_cache(),
+        )
+        .unwrap();
+        // Sending decodes canonical items and memoizes them beside their segments.
+        let sent = template.canonical_request().unwrap();
+        assert_eq!(
+            serde_json::to_vec(&sent.messages).unwrap(),
+            serde_json::to_vec(request.messages()).unwrap()
+        );
+        draft.chunk(&template);
+        owner = draft;
+    }
+    let counts = measurement.finish();
+    let live = counts.allocated.saturating_sub(counts.deallocated);
+    eprintln!("256 scripted turns: retained={live}, appended={appended_bytes}");
+    assert!(
+        live <= appended_bytes + 8 * 1024 * 1024,
+        "unchanged rendered turns must be retained once: {live} live bytes, {appended_bytes} appended bytes"
+    );
+}

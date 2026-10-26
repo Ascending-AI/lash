@@ -252,3 +252,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 "crates/lash-protocol-types/src/llm/provider_body/canonical.rs#of_retained_request" = { reads = 4, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
 
 "crates/lash-durable-test/tests/open_session_commands/owner_retention.rs#send" = { reads = 0, outputs = 1, kind = "output-read", reason = "LO-EVICT checks the settled assistant reply after activation and idle eviction (FIG-7124)." }
+
+"crates/lash-core-store/src/prompt_sections/owner.rs#retain_request" = { reads = 4, outputs = 0, kind = "projection-core", reason = "FIG-7382 reconciles the exact rendered request prefix with the acknowledged prompt owner before lowering; it preserves all messages and selects no transcript reply." }
+
+"crates/lash-core-store/src/prompt_sections_tests.rs#rerendered_frame_retains_only_one_copy_of_unchanged_messages" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-7382 compares each canonical request against freshly rendered messages while counting retained prefix bytes across scripted turns." }

@@ -3,6 +3,7 @@ use super::history::TurnCost;
 use lash_core_ids::perf_witness::history::{Component, Cost};
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const LIMIT: f64 = 1.05;
 #[derive(Debug, Serialize)]
@@ -29,8 +30,8 @@ pub(super) struct Sawtooth {
     pub after_frame: String,
     pub switch_turn: Option<usize>,
     pub switch_request_held_bytes: Option<usize>,
-    pub sql_before: BTreeMap<String, Cost>,
-    pub sql_after: BTreeMap<String, Cost>,
+    pub sql_before: BTreeMap<Arc<str>, Arc<Cost>>,
+    pub sql_after: BTreeMap<Arc<str>, Arc<Cost>>,
     pub held_bytes_before: usize,
     pub held_bytes_after: usize,
     pub before: BTreeMap<Component, Cost>,
@@ -129,7 +130,7 @@ pub(super) fn evaluate(turns: &[TurnCost], reset_every: Option<usize>) -> anyhow
                 median(
                     window
                         .iter()
-                        .map(|t| pick(&t.sql.get(&family).copied().unwrap_or_default()))
+                        .map(|t| pick(&t.sql.get(&family).map(|cost| **cost).unwrap_or_default()))
                         .collect(),
                 )
             };
@@ -460,10 +461,10 @@ mod tests {
                 row.vm.insert("vm_steps".into(), 100);
                 row.sql.insert(
                     "fixture family".into(),
-                    Cost {
+                    Arc::new(Cost {
                         vm_steps: 10,
                         ..Cost::default()
-                    },
+                    }),
                 );
                 row
             })
@@ -471,7 +472,7 @@ mod tests {
         assert!(evaluate(&turns, Some(100)).unwrap().pass);
         for row in &mut turns[200..] {
             row.vm.insert("vm_steps".into(), 106);
-            row.sql.get_mut("fixture family").unwrap().vm_steps = 11;
+            Arc::make_mut(row.sql.get_mut("fixture family").unwrap()).vm_steps = 11;
         }
         let verdict = evaluate(&turns, Some(100)).unwrap();
         assert!(!verdict.pass);

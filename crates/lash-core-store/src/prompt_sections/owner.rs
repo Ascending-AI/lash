@@ -168,6 +168,7 @@ impl PreparedPrefix {
 #[derive(Clone, Debug, Default)]
 pub struct OwnerPromptState {
     lowering: lash_protocol_types::llm::types::SegmentCache,
+    source: std::sync::Arc<lash_protocol_types::llm::types::RequestMessages>,
     items: lash_protocol_types::llm::types::RequestItems,
     opening: Option<lash_protocol_types::llm::types::RequestSegment>,
     prepared: PreparedPrefix,
@@ -175,6 +176,30 @@ pub struct OwnerPromptState {
     opening_leaves: usize,
 }
 impl OwnerPromptState {
+    /// Reconcile a fresh rendering against this frame's acknowledged messages.
+    /// Equal values keep their original identities, so provider lowering and
+    /// decoding retain one prefix rather than another copy on every send.
+    /// The candidate belongs to this private draft until admission adopts it.
+    pub fn retain_request(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+    ) -> lash_protocol_types::llm::types::RetainedLlmRequest {
+        let shared = self.source.shared_prefix(request.messages());
+        let shared = shared
+            + self
+                .source
+                .iter_from(shared)
+                .zip(request.messages().iter_from(shared))
+                .take_while(|(before, now)| before == now)
+                .count();
+        self.source = std::sync::Arc::new(if shared == 0 {
+            request.messages().clone()
+        } else {
+            let tail: Vec<_> = request.messages().iter_from(shared).cloned().collect();
+            self.source.prefix(shared).append(&tail)
+        });
+        request.with_messages(self.source.as_ref().clone())
+    }
     /// Observe the exact prepared prefix directory without keeping it alive.
     #[cfg(any(test, feature = "testing"))]
     pub fn prepared_source_for_testing(&self) -> Option<std::sync::Weak<dyn Send + Sync>> {

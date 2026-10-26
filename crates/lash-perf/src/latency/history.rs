@@ -10,6 +10,7 @@ use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::SessionId;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -136,8 +137,38 @@ pub(super) struct TurnCost {
     pub held_messages: usize,
     pub frame: String,
     pub components: BTreeMap<Component, Cost>,
-    pub sql: BTreeMap<String, Cost>,
+    pub sql: BTreeMap<Arc<str>, Arc<Cost>>,
     measurement_cpu_ns: u64,
+}
+
+#[derive(Default)]
+struct SqlFacts {
+    names: BTreeSet<Arc<str>>,
+    counters: BTreeMap<String, Arc<Cost>>,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "counter keys serialize only integer fields"
+)]
+fn retain_sql(sql: BTreeMap<String, Cost>, facts: &mut SqlFacts) -> BTreeMap<Arc<str>, Arc<Cost>> {
+    sql.into_iter()
+        .map(|(name, cost)| {
+            let name = facts.names.get(name.as_str()).cloned().unwrap_or_else(|| {
+                let name: Arc<str> = name.into();
+                facts.names.insert(name.clone());
+                name
+            });
+            // Project every counter field through the source owner's encoding.
+            let key = serde_json::to_string(&cost).expect("integer counters serialize");
+            let cost = facts
+                .counters
+                .entry(key)
+                .or_insert_with(|| Arc::new(cost))
+                .clone();
+            (name, cost)
+        })
+        .collect()
 }
 #[cfg(test)]
 impl TurnCost {
@@ -209,6 +240,7 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         .await?;
     let session = core.session(session_id).open().await?;
     let mut turns = Vec::with_capacity(run.turns);
+    let mut sql_families = SqlFacts::default();
     for turn in 1..=run.turns {
         if turn > 1
             && run
@@ -291,7 +323,7 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         );
         components.entry(Component::Other).or_default().cpu_ns =
             cpu_ns - attributed - measurement_cpu_ns;
-        let sql = attribution.take_sql();
+        let sql = retain_sql(attribution.take_sql(), &mut sql_families);
         let durable = components.entry(Component::DurableCommitSql).or_default();
         durable.statements = sql.values().map(|c| c.statements).sum();
         durable.vm_steps = sql.values().map(|c| c.vm_steps).sum();
@@ -478,6 +510,47 @@ impl lash::tracing::TraceSink for DiscardTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// FIG-7382: the observer must retain each SQL family spelling once,
+    /// even though every turn keeps all its own counters and report keys.
+    #[test]
+    fn sql_family_names_are_retained_once_for_all_turns() {
+        let family = "a measured SQL family ".repeat(16);
+        let expected: BTreeMap<_, _> = [(family.clone(), Cost::default())].into();
+        let mut families = SqlFacts::default();
+        let rows: Vec<_> = (0..128)
+            .map(|_| retain_sql(expected.clone(), &mut families))
+            .collect();
+        let allocations: BTreeMap<_, _> = rows
+            .iter()
+            .flat_map(|row| row.keys().map(|key| (key.as_ptr(), key.len())))
+            .collect();
+        let live_name_bytes: usize = allocations.values().sum();
+        assert_eq!(
+            live_name_bytes,
+            family.len(),
+            "repeated SQL names are observer overhead"
+        );
+        let counter_allocations: std::collections::BTreeSet<_> = rows
+            .iter()
+            .flat_map(|row| {
+                row.values().map(|cost| {
+                    let cost: &Cost = std::borrow::Borrow::borrow(cost);
+                    std::ptr::from_ref(cost)
+                })
+            })
+            .collect();
+        assert_eq!(
+            counter_allocations.len(),
+            1,
+            "equal counters are retained once"
+        );
+        for row in rows {
+            assert_eq!(
+                serde_json::to_vec(&row).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+        }
+    }
     // FIG-7226: the matrix admits continue_as only for RLM and one reset owner.
     #[test]
     fn continue_as_requires_rlm_and_excludes_compaction() {

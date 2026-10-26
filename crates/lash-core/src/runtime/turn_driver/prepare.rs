@@ -104,6 +104,7 @@ impl RuntimeTurnDriver<'static> {
                 self.turn_id.clone(),
             );
             request.edit_envelope(|request| request.scope = scope);
+            request = self.prompt_state.retain_request(&request);
             match self.lower_call(&request).await? {
                 Ok(template) => Ok(PreparedCall::Admit(Box::new(ComposedCall {
                     request: Arc::new(request),
