@@ -155,7 +155,8 @@ processes ([ADR 0123](0123-model-code-runs-in-resettable-worker-processes.md)),
 and the broker commits every park with the admission of the effects it
 requested. `scripts/check-kernel-boundary.py` holds three rules: the kernel
 set reaches nothing else in lash; no language-neutral crate (a kernel crate,
-a lash core crate or a store) links a dialect; and no dialect links the
+a lash core crate or a store) links a dialect, except the composition crate
+`lash-kernel-engine`; and no dialect links the
 machine or its parked state outside its tests.
 
 ## Consequences

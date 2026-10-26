@@ -1,5 +1,9 @@
 # VM workers
 
+Helper/native installation is shared with `lash-kernel-engine` through
+`embedding::install`. The worker retains process isolation, wire pages,
+cancellation and resets; standalone callers can use the engine in process.
+
 A worker hosts one kernel machine (`lash_kernel_vm::KernelMachine`) for one
 execution between resets, and lowers and prints dialect source. The parent's
 pool, framing, queue admission and opaque state client live in

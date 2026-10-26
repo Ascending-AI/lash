@@ -96,22 +96,24 @@ pub fn lower_with_limits(
     match mode {
         Mode::Cell(_) => {
             let program = adapter::parse_with_limits(source, limits)?;
-            lower::lower(
+            lower::lower_result(
                 &program,
                 source,
                 environment,
                 mode,
                 limits.implicit_text_conversion(),
+                limits.cell_result(),
             )
         }
         Mode::Module => {
             let program = adapter::parse_workflow(source, limits)?;
-            lower::lower(
+            lower::lower_result(
                 &program,
                 source,
                 environment,
                 mode,
                 limits.implicit_text_conversion(),
+                limits.cell_result(),
             )
         }
     }
@@ -185,12 +187,13 @@ impl Parser {
             return lower_with_limits(source, environment, mode, self.parser.limits());
         };
         let program = self.parser.parse(source)?;
-        lower::lower(
+        lower::lower_result(
             &program,
             source,
             environment,
             mode,
             self.parser.limits().implicit_text_conversion(),
+            self.parser.limits().cell_result(),
         )
     }
 }

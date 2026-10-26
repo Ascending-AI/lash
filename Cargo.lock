@@ -1997,6 +1997,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-engine-hello"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-engine",
+]
+
+[[package]]
 name = "lash-dialect-python"
 version = "0.0.0-dev"
 dependencies = [
@@ -3201,14 +3208,11 @@ dependencies = [
  "dhat",
  "lash-dialect-python",
  "lash-dialect-typescript",
- "lash-ext-date-ecma",
  "lash-ext-helper-compiler",
  "lash-ext-py-core",
  "lash-ext-py-helpers",
- "lash-ext-regex-ecma",
  "lash-ext-ts-core",
  "lash-ext-ts-helpers",
- "lash-ext-url-whatwg",
  "lash-internal-core-execution",
  "lash-internal-core-store",
  "lash-internal-durable",
@@ -3225,7 +3229,7 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-lib",
+ "lash-kernel-engine",
  "lash-kernel-migrate",
  "lash-kernel-package",
  "lash-kernel-releases",
@@ -3291,6 +3295,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-edit",
+ "lash-kernel-engine",
  "lash-kernel-exec",
  "lash-kernel-lib",
  "lash-kernel-package",
@@ -3346,6 +3351,29 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-engine"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-dialect-python",
+ "lash-dialect-typescript",
+ "lash-ext-date-ecma",
+ "lash-ext-py-core",
+ "lash-ext-regex-ecma",
+ "lash-ext-ts-core",
+ "lash-ext-url-whatwg",
+ "lash-kernel-check",
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-lib",
+ "lash-kernel-package",
+ "lash-kernel-releases",
+ "lash-kernel-state",
+ "lash-kernel-value",
+ "lash-kernel-vm",
  "thiserror",
 ]
 

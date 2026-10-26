@@ -15,7 +15,8 @@ entry it inherits, and two over their Rust sources:
    dialect: the `lash-kernel-*` crates and lash's core and store crates may
    not link a `lash-dialect-*` crate, through their normal and build
    dependencies (optional ones included) and those of every crate they
-   reach. Their tests may drive the facade with a dialect selected.
+   reach. Only the composition crate `lash-kernel-engine` may link dialects.
+   Their tests may drive the facade with a dialect selected.
 3. A dialect does not run the machine. A `lash-dialect-*` crate may not have
    a normal or build dependency on `lash-kernel-vm` or `lash-kernel-state`;
    its tests may run documents through a dev-dependency.
@@ -46,7 +47,7 @@ KERNEL_SET = re.compile(r"^lash-(kernel|dialect|ext)-")
 # Crates that move with the set under their own names: `lash-regress` is the
 # ECMAScript matcher under `lash-ext-regex-ecma`, and `kernel-embedder` is the
 # minimal embedder outside lash (docs/kernel/design.md §9, rule 8).
-MOVES_WITH_SET = frozenset({"lash-regress", "kernel-embedder"})
+MOVES_WITH_SET = frozenset({"lash-regress", "kernel-embedder", "kernel-engine-hello"})
 # Language-neutral: the kernel's own crates, lash's core crates and its stores.
 LANGUAGE_NEUTRAL = re.compile(
     r"^lash-(kernel-[a-z-]+|core|core-[a-z-]+|sansio|durable|store-sql|sqlite-store"
@@ -176,7 +177,7 @@ def dialect_reach(workspace: Workspace, directory: Path) -> list[tuple[str, list
 def crate_roles(workspace: Workspace) -> list[str]:
     found = []
     for directory in sorted(workspace.names):
-        if not LANGUAGE_NEUTRAL.match(directory.name):
+        if directory.name == "lash-kernel-engine" or not LANGUAGE_NEUTRAL.match(directory.name):
             continue
         for table, path in dialect_reach(workspace, directory):
             found.append(

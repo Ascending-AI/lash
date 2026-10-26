@@ -53,10 +53,17 @@ pub const MAX_SOURCE_BYTES: usize = 1 << 20;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceLimits {
     pub max_bytes: usize,
+    cell_result: bool,
     max_nesting: usize,
     max_annotation_nodes: usize,
 }
 impl SourceLimits {
+    /// Return a cell's last expression as its result. Module lowering ignores it.
+    pub fn with_cell_result(mut self) -> Self {
+        self.cell_result = true;
+        self
+    }
+
     /// Bound each annotation's expanded structural nodes (default 4096).
     /// Structural depth uses `max_nesting` (default 96).
     pub fn with_annotation_nodes(mut self, max_nodes: usize) -> Self {
@@ -66,6 +73,7 @@ impl SourceLimits {
 
     pub const fn standard() -> Self {
         Self {
+            cell_result: false,
             max_bytes: MAX_SOURCE_BYTES,
             max_nesting: 96,
             max_annotation_nodes: 4096,
@@ -79,6 +87,7 @@ impl SourceLimits {
             ));
         }
         Ok(Self {
+            cell_result: false,
             max_bytes,
             max_nesting,
             max_annotation_nodes: 4096,

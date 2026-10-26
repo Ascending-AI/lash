@@ -6,6 +6,7 @@ use super::{Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEP
 /// The 28-level nesting hard maximum protects recursive tree conversion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceLimits {
+    cell_result: bool,
     max_bytes: usize,
     max_nesting: usize,
     annotation_depth: usize,
@@ -13,9 +14,18 @@ pub struct SourceLimits {
     implicit_text_conversion: lash_kernel_dialect::workflow::ImplicitTextConversionPolicy,
 }
 impl SourceLimits {
+    /// Return a cell's last expression as its result. Module lowering ignores it.
+    pub fn with_cell_result(mut self) -> Self {
+        self.cell_result = true;
+        self
+    }
+    pub(crate) fn cell_result(&self) -> bool {
+        self.cell_result
+    }
     pub const HARD_MAX_BYTES: usize = 128 * 1024;
     pub const fn standard() -> Self {
         Self {
+            cell_result: false,
             max_bytes: MAX_SOURCE_BYTES,
             max_nesting: MAX_SOURCE_NESTING_DEPTH,
             annotation_depth: 64,
@@ -40,6 +50,7 @@ impl SourceLimits {
             ));
         }
         Ok(Self {
+            cell_result: false,
             max_bytes,
             max_nesting,
             annotation_depth: 64,

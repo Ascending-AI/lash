@@ -122,6 +122,13 @@ PACKAGE_DEPS = {
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         }
     },
+    "kernel-engine-hello": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine"
+        }
+    },
     "lash-dialect-python": {
         "build": {},
         "dev": {
@@ -1427,9 +1434,7 @@ PACKAGE_DEPS = {
         }
     },
     "lash-internal-vm-worker": {
-        "build": {
-            "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases"
-        },
+        "build": {},
         "dev": {
             "async_trait": "//third-party/rust:p0016",
             "blake3": "//third-party/rust:p0032",
@@ -1437,6 +1442,8 @@ PACKAGE_DEPS = {
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_ext_helper_compiler": "//crates/lash-ext-helper-compiler:lash-ext-helper-compiler",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_services": "//crates/lash-kernel-services:lash-kernel-services",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
@@ -1461,17 +1468,12 @@ PACKAGE_DEPS = {
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_execution_contracts": "//crates/lash-execution-contracts:lash-execution-contracts",
-            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
-            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_py_helpers": "//crates/lash-ext-py-helpers:lash-ext-py-helpers",
-            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
-            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_ts_helpers": "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers",
-            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine",
             "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
@@ -1531,6 +1533,7 @@ PACKAGE_DEPS = {
             "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
             "lash_kernel_services": "//crates/lash-kernel-services:lash-kernel-services",
@@ -1599,6 +1602,31 @@ PACKAGE_DEPS = {
             "schemars": "//third-party/rust:p0305",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318",
+            "thiserror": "//third-party/rust:p0371"
+        }
+    },
+    "lash-kernel-engine": {
+        "build": {
+            "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases"
+        },
+        "dev": {},
+        "normal": {
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
+            "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "thiserror": "//third-party/rust:p0371"
         }
     },

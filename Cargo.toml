@@ -57,6 +57,8 @@ members = [
     "crates/lash-vm-broker",
     "crates/lash-vm-worker",
     "crates/lash-kernel-releases",
+    "crates/lash-kernel-engine",
+    "examples/kernel-engine-hello",
     "crates/lash-ext-ts-helpers",
     "crates/lash-ext-py-helpers",
     "crates/lash-vm-client",
@@ -260,6 +262,7 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
+lash-kernel-engine = { path = "crates/lash-kernel-engine" }
 lash-kernel-value = { path = "crates/lash-kernel-value", version = "=0.0.0-dev" }
 lash-vocabulary = { package = "lash-internal-vocabulary", path = "crates/lash-vocabulary", version = "=0.0.0-dev" }
 foldhash = "0.2.0"

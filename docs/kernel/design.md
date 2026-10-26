@@ -259,6 +259,13 @@ Dialect packages sit beside them: `lash-dialect-typescript` and `lash-dialect-py
 7. **Small public surfaces.** Each crate exports a short, documented facade. Code outside `crates/lash-kernel-*` uses the machine's embedding API and the kernel's semantic readers (a session's pages, bound names and notes, the helper probe heap, a cell's saving context), never the paged heap's or the machine's internals: those are crate-private, and what one kernel crate builds on in another is exported only through its `#[doc(hidden)]` `kernel_internals` module, which `scripts/check-kernel-boundary.py` keeps inside the kernel (FIG-6688). The one diagnostic seam outside it, `lash_kernel_vm::perf_witness`, sits behind the `perf-witness` feature and never ships in production.
 8. **Embedding is tested.** A minimal embedder outside lash (load a document, run it, answer effects from a table, park and resume) is part of the kernel's tests.
 
+`lash-kernel-engine` is the one composition exception to the dialect dependency
+rule. It may link the selected dialects, while every language-neutral kernel,
+core and store crate retains the transitive prohibition. It depends only on the
+kernel set. Its `embedding::install` binds helper/native images for both the
+standalone source API and Lash's workers. See its crate README for limits,
+in-memory snapshots and the host's effect-ledger responsibilities.
+
 **What stays in lash.** The worker pool, protocol and client; the broker; the process engine integration; the RLM protocol; tools, plugins and tracing.
 
 ## 10. Rulings

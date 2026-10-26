@@ -364,9 +364,11 @@ pub(crate) struct Lowerer<'a> {
     /// The captions of the module's entries, their parameters and their
     /// types' fields.
     declared_captions: Vec<lash_kernel_doc::CaptionEntry>,
+    cell_result_at: Option<usize>,
 }
 
 /// Lowers a parsed program under the host's module admission policy.
+#[cfg(test)]
 pub(crate) fn lower(
     program: &ast::Program,
     source: &str,
@@ -374,11 +376,23 @@ pub(crate) fn lower(
     mode: Mode<'_>,
     policy: workflow::ImplicitTextConversionPolicy,
 ) -> Lowering<Lowered> {
+    lower_result(program, source, environment, mode, policy, false)
+}
+
+pub(crate) fn lower_result(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    policy: workflow::ImplicitTextConversionPolicy,
+    cell_result: bool,
+) -> Lowering<Lowered> {
+    let cell_result = cell_result && matches!(mode, Mode::Cell(_));
     let policy = match mode {
         Mode::Cell(_) => workflow::ImplicitTextConversionPolicy::Allow,
         Mode::Module => policy,
     };
-    lower_beside(program, source, environment, mode, &[], policy)
+    lower_beside_result(program, source, environment, mode, &[], policy, cell_result)
 }
 
 /// Lower with the words of adjacent generated source reserved from fresh names.
@@ -390,6 +404,18 @@ pub(crate) fn lower_beside(
     mode: Mode<'_>,
     beside: &[String],
     policy: workflow::ImplicitTextConversionPolicy,
+) -> Lowering<Lowered> {
+    lower_beside_result(program, source, environment, mode, beside, policy, false)
+}
+
+fn lower_beside_result(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    beside: &[String],
+    policy: workflow::ImplicitTextConversionPolicy,
+    cell_result: bool,
 ) -> Lowering<Lowered> {
     let implicit_text_conversion = policy;
     let (cell, module) = match mode {
@@ -486,6 +512,23 @@ pub(crate) fn lower_beside(
         written: None,
         spelled: &program.captions,
         declared_captions: Vec::new(),
+        cell_result_at: if cell_result {
+            program
+                .statements
+                .iter()
+                .rev()
+                .find(|stmt| !matches!(stmt.unspanned(), ast::Stmt::Empty))
+                .and_then(|stmt| match stmt {
+                    ast::Stmt::Spanned(span, inner)
+                        if matches!(inner.unspanned(), ast::Stmt::Expr(_)) =>
+                    {
+                        Some(span.start)
+                    }
+                    _ => None,
+                })
+        } else {
+            None
+        },
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);

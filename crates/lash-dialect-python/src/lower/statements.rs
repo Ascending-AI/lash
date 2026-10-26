@@ -74,6 +74,11 @@ impl Lowerer<'_> {
         }
         match statement {
             PyStmt::Expr(expression) => {
+                if self.in_module() && Some(expression.start().to_usize()) == self.cell_result_at {
+                    let value = self.expr(&expression.value)?;
+                    self.return_value(value);
+                    return Ok(());
+                }
                 // A docstring and any other bare constant does nothing.
                 if expression.value.is_literal_expr() {
                     return Ok(());

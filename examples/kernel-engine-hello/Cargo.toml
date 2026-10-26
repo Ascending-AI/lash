@@ -1,0 +1,23 @@
+[package]
+name = "kernel-engine-hello"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "A minimal standalone embedder of the kernel machine."
+publish = false
+
+[[bin]]
+name = "kernel-engine-hello"
+path = "src/main.rs"
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-engine = { workspace = true, features = ["dialect-typescript", "dialect-python"] }

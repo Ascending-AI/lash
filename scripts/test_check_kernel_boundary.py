@@ -14,12 +14,13 @@ WORKSPACE = """\
 [workspace]
 members = [
     "crates/lash-kernel-doc", "crates/lash-kernel-vm", "crates/lash-ext-regex", "crates/lash-regress",
-    "crates/lash-core", "crates/lash-sqlite-store", "crates/lash-dialect-python", "crates/lash",
+    "crates/lash-core", "crates/lash-sqlite-store", "crates/lash-dialect-python", "crates/lash", "crates/lash-kernel-engine",
 ]
 
 [workspace.dependencies]
 serde = "1"
 lash-kernel-doc = { path = "crates/lash-kernel-doc" }
+lash-kernel-engine = { path = "crates/lash-kernel-engine" }
 lash-regress = { path = "crates/lash-regress" }
 lash-core = { package = "lash-internal-core", path = "crates/lash-core" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm" }
@@ -33,6 +34,8 @@ def manifest(name: str, body: str = "") -> str:
 
 
 CLEAN = {
+    # Only the composition crate may link a dialect.
+    "crates/lash-kernel-engine": manifest("lash-kernel-engine", "[dependencies]\nlash-dialect-python = { workspace = true }\n"),
     "crates/lash-kernel-doc": manifest("lash-kernel-doc", "[dependencies]\nserde = { workspace = true }\n"),
     "crates/lash-kernel-vm": manifest(
         "lash-kernel-vm",
@@ -106,7 +109,7 @@ class KernelBoundary(unittest.TestCase):
             "build": "[build-dependencies]\nlash-core = { workspace = true }\n",
             "target": "[target.'cfg(unix)'.dependencies]\nlash-core = { workspace = true }\n",
         }
-        for crate in ("lash-kernel-vm", "lash-ext-regex", "lash-regress"):
+        for crate in ("lash-kernel-vm", "lash-ext-regex", "lash-regress", "lash-kernel-engine"):
             for label, body in cases.items():
                 with self.subTest(crate=crate, case=label):
                     result = self.run_check({f"crates/{crate}": manifest(crate, body)})
@@ -116,6 +119,7 @@ class KernelBoundary(unittest.TestCase):
 
     def test_a_language_neutral_crate_linking_a_dialect_is_refused(self) -> None:
         cases = {
+            "crates/lash-kernel-vm": manifest("lash-kernel-vm", "[dependencies]\nlash-kernel-engine = { workspace = true }\n"),
             # Directly, optional or not.
             "crates/lash-core": manifest(
                 "lash-internal-core",

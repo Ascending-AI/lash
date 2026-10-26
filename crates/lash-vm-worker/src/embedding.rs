@@ -341,35 +341,23 @@ impl Embedder {
             return Err(EmbedError::NoDialect);
         }
         let [image, index, positions, _] = library.indexes()?;
-        let mut registry = FunctionRegistry::over_frame(image)
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        registry
-            .bind_native_tables(
-                positions,
-                crate::native_tables::native_tables(),
-                &self.natives,
-            )
-            .map_err(EmbedError::from)?;
-        #[cfg(feature = "dialect-typescript")]
-        registry
-            .bind_frame_plans(positions, lash_ext_ts_core::PLANS)
-            .map_err(EmbedError::from)?;
-        #[cfg(feature = "dialect-python")]
-        registry
-            .bind_frame_plans(positions, lash_ext_py_core::PLANS)
-            .map_err(EmbedError::from)?;
-        let registry = Arc::new(registry);
-        let names = NamedLibrary::resolving(&registry, |id| library.roots().contains(id))
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        let prepared =
-            PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
-                .map_err(|error| EmbedError::Registry(error.to_string()))?
-                .with_helper_handle(Arc::clone(library.helpers()));
+        let installed = lash_kernel_engine::embedding::install(
+            image,
+            index,
+            positions,
+            library.roots(),
+            Arc::clone(library.helpers()),
+            &self.natives,
+        )
+        .map_err(|error| match error {
+            lash_kernel_engine::embedding::InstallError::Registry(error) => EmbedError::from(error),
+            other => EmbedError::Registry(other.to_string()),
+        })?;
         Ok(Embedding {
             documents: Default::default(),
-            library: names,
-            written: registry,
-            prepared: OnceLock::from(prepared),
+            library: installed.names,
+            written: installed.registry,
+            prepared: OnceLock::from(installed.prepared),
             dialects: self.dialects,
             held: library.clone(),
             stored: lash_vm_broker::kernel::loader::Definitions::default(),

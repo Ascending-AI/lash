@@ -192,6 +192,15 @@ impl Lowerer<'_> {
             }
             ast::Stmt::Empty | ast::Stmt::TypeAlias { .. } | ast::Stmt::Function { .. } => Ok(()),
             ast::Stmt::Expr(expr) => {
+                if self.in_main()
+                    && self
+                        .span
+                        .is_some_and(|span| Some(span.start) == self.cell_result_at)
+                {
+                    let value = self.lower_expr(expr)?;
+                    self.emit(Stmt::Return { value: value.expr });
+                    return Ok(());
+                }
                 // Only the outer call has no consumer. Calls in its receiver
                 // and arguments still lower as expressions with their result.
                 let value = match expr {

@@ -179,6 +179,7 @@ struct Found {
 }
 
 pub(crate) struct Lowerer<'a> {
+    cell_result_at: Option<usize>,
     source: &'a str,
     calls: Option<&'a mut BTreeSet<String>>,
     imported: BTreeMap<String, Vec<String>>,
@@ -399,6 +400,13 @@ pub(crate) fn lower_with_calls(
         captured: std::cell::RefCell::new(None),
         captions: spelled.captions,
         declared_captions: Vec::new(),
+        cell_result_at: if limits.cell_result && matches!(mode, Mode::Cell(_)) {
+            module.body.last().and_then(|stmt| {
+                matches!(stmt, ast::Stmt::Expr(_)).then_some(stmt.start().to_usize())
+            })
+        } else {
+            None
+        },
         typed_dicts,
         brands: Vec::new(),
     };

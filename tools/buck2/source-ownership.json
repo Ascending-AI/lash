@@ -1166,5 +1166,13 @@
     "compile_data": [
       "src/helpers/*.kernel"
     ]
+  },
+  "examples/kernel-engine-hello": {
+    "compile_data": [
+      "hello.ts",
+      "hello.py",
+      "snippet.ts",
+      "snippet.py"
+    ]
   }
 }

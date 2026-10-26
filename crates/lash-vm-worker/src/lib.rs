@@ -28,10 +28,6 @@ pub mod core_support {
 mod heap_profile;
 #[cfg(all(unix, feature = "testing"))]
 pub mod in_process;
-/// lash's own packages: the natives of each, by its path, as
-/// `lash-kernel-releases`' build defines them.
-#[path = "../../lash-kernel-releases/src/library.rs"]
-mod library;
 #[cfg(all(test, unix))]
 mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
@@ -118,7 +114,3 @@ pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embeddin
 
 #[cfg(all(unix, feature = "testing"))]
 pub use entry::worker_entry_with_hook;
-
-mod native_tables {
-    include!(concat!(env!("OUT_DIR"), "/native_tables.rs"));
-}

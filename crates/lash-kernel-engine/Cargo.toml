@@ -1,0 +1,44 @@
+[package]
+name = "lash-kernel-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Standalone source compilation and resumable kernel execution."
+readme = "README.md"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+dialect-typescript = ["dep:lash-dialect-typescript", "dep:lash-ext-ts-core", "dep:lash-ext-date-ecma", "dep:lash-ext-regex-ecma", "dep:lash-ext-url-whatwg", "lash-kernel-releases/dialect-typescript"]
+dialect-python = ["dep:lash-dialect-python", "dep:lash-ext-py-core", "lash-kernel-releases/dialect-python"]
+synthetic-next = ["lash-kernel-releases/synthetic-next", "lash-kernel-vm/synthetic-next"]
+
+[dependencies]
+lash-kernel-check.workspace = true
+lash-kernel-package.workspace = true
+lash-kernel-doc.workspace = true
+lash-kernel-value.workspace = true
+lash-kernel-dialect.workspace = true
+lash-kernel-state.workspace = true
+lash-kernel-vm.workspace = true
+lash-kernel-lib.workspace = true
+lash-kernel-releases.workspace = true
+thiserror.workspace = true
+lash-dialect-typescript = { workspace = true, optional = true }
+lash-dialect-python = { workspace = true, optional = true }
+lash-ext-ts-core = { workspace = true, optional = true }
+lash-ext-py-core = { workspace = true, optional = true }
+lash-ext-date-ecma = { workspace = true, optional = true }
+lash-ext-regex-ecma = { workspace = true, optional = true }
+lash-ext-url-whatwg = { workspace = true, optional = true }
+
+[build-dependencies]
+lash-kernel-releases.workspace = true

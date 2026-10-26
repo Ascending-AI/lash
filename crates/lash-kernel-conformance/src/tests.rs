@@ -116,6 +116,229 @@ fn embedder_fan_out_parks_and_resumes() {
     assert_eq!(report.requests.len(), 2);
     assert_eq!(report.parks, 1);
     assert_eq!(report.resumes, 1);
+    facade_delivery_contract();
+}
+
+/// The facade must retain run identity, reject duplicate batches before delivery,
+/// and remove withdrawn calls from its host-facing pending ledger (K-MACH-004).
+fn facade_delivery_contract() {
+    use lash_kernel_engine::{Answer, Dialect, Engine, External, Fault, Limits, Progress, Value};
+    use lash_kernel_value::{ContractId, Name, Param, Signature, Type};
+    let limits = Limits::default();
+    let engine = Engine::new(limits.clone()).expect("standalone engine");
+    let external = External {
+        name: "host.echo".into(),
+        contract: ContractId::new("test"),
+        signature: Signature {
+            params: vec![Param {
+                name: Name::new("x"),
+                ty: Type::Any,
+                optional: false,
+            }],
+            result: Type::Any,
+        },
+    };
+    let program = engine.compile_snippet(Dialect::TypeScript,
+        "const a = host.echo(1); const b = host.echo(2); const xs = await Promise.all([a, b]); xs;",
+        &[external]).expect("fan-out snippet");
+    let start = || {
+        let Progress::Paused {
+            calls, snapshot, ..
+        } = engine.run(&program, vec![]).expect("start").state
+        else {
+            panic!("expected park");
+        };
+        assert_eq!(calls.len(), 2);
+        (calls, snapshot)
+    };
+    let value =
+        |n: i64| Value::new(Datum::Int(n.into()), limits.value_bytes).expect("bounded integer");
+    let (_, snapshot) = start();
+    let (foreign, _) = start();
+    assert!(matches!(
+        engine.resume(
+            snapshot,
+            vec![Answer {
+                id: foreign[0].id.clone(),
+                result: Ok(value(99))
+            }]
+        ),
+        Err(Fault::UnknownAnswer)
+    ));
+    let (duplicates, snapshot) = start();
+    assert!(matches!(
+        engine.resume(
+            snapshot,
+            vec![
+                Answer {
+                    id: duplicates[0].id.clone(),
+                    result: Ok(value(10))
+                },
+                Answer {
+                    id: duplicates[0].id.clone(),
+                    result: Ok(value(20))
+                }
+            ]
+        ),
+        Err(Fault::DuplicateAnswer)
+    ));
+    let (calls, snapshot) = start();
+    let turn = engine
+        .resume(
+            snapshot,
+            vec![Answer {
+                id: calls[1].id.clone(),
+                result: Ok(value(20)),
+            }],
+        )
+        .expect("partial out-of-order answer");
+    let Progress::Paused {
+        calls: new,
+        snapshot,
+        ..
+    } = turn.state
+    else {
+        panic!("one answer remains");
+    };
+    assert!(new.is_empty(), "resume does not reissue admitted calls");
+    assert_eq!(
+        snapshot
+            .pending()
+            .iter()
+            .map(|call| &call.id)
+            .collect::<Vec<_>>(),
+        vec![&calls[0].id]
+    );
+    let turn = engine
+        .resume(
+            snapshot,
+            vec![Answer {
+                id: calls[0].id.clone(),
+                result: Ok(value(10)),
+            }],
+        )
+        .expect("remaining answer");
+    let Progress::Complete(Ok(result)) = turn.state else {
+        panic!("fan-out completes");
+    };
+    assert_eq!(
+        result.data(),
+        &Datum::List(vec![Datum::Int(10.into()), Datum::Int(20.into())])
+    );
+    let (calls, snapshot) = start();
+    let turn = engine
+        .resume(
+            snapshot,
+            vec![Answer {
+                id: calls[0].id.clone(),
+                result: Ok(value(10)),
+            }],
+        )
+        .expect("first answer");
+    let Progress::Paused { snapshot, .. } = turn.state else {
+        panic!("remaining call");
+    };
+    assert!(matches!(
+        engine.resume(
+            snapshot,
+            vec![Answer {
+                id: calls[0].id.clone(),
+                result: Ok(value(99))
+            }]
+        ),
+        Err(Fault::UnknownAnswer)
+    ));
+
+    // Reuse the existing withdrawal corpus input; the extra oracle is the
+    // facade's pending/withdrawn ledger, which the machine corpus cannot see.
+    let corpus: serde_json::Value =
+        serde_json::from_str(include_str!("../corpus/mach/K-MACH-004.json")).unwrap();
+    let document =
+        lash_kernel_doc::parse_document(corpus["cases"][1]["document"].as_str().unwrap()).unwrap();
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
+                panic!("operation fixture");
+            };
+            (
+                *slot,
+                lash_kernel_value::Fill::Operation(lash_kernel_value::OperationRequirement::new(
+                    signature.clone(),
+                    ContractId::new("test"),
+                )),
+            )
+        })
+        .collect();
+    let link = lash_kernel_value::Link {
+        document: document.identity(),
+        fills,
+    };
+    let content = lash_kernel_package::LinkedContent {
+        documents: std::collections::BTreeMap::from([(
+            document.identity(),
+            std::sync::Arc::new(document),
+        )]),
+        links: std::collections::BTreeMap::from([(link.identity(), link.clone())]),
+        packages: Default::default(),
+    };
+    let program = engine
+        .prepare(link.identity(), &content, lash_kernel_vm::Target::Main)
+        .unwrap();
+    let Progress::Paused {
+        calls, snapshot, ..
+    } = engine.run(&program, vec![]).unwrap().state
+    else {
+        panic!("initial park");
+    };
+    assert_eq!(calls.len(), 2);
+    let slow = calls[0].id.clone();
+    let turn = engine
+        .resume(
+            snapshot,
+            vec![Answer {
+                id: calls[1].id.clone(),
+                result: Ok(value(2)),
+            }],
+        )
+        .unwrap();
+    let Progress::Paused {
+        calls,
+        withdrawn,
+        snapshot,
+    } = turn.state
+    else {
+        panic!("cancelled wait and next call");
+    };
+    assert_eq!(withdrawn, vec![slow.clone()]);
+    assert_eq!(
+        snapshot
+            .pending()
+            .iter()
+            .map(|call| &call.id)
+            .collect::<Vec<_>>(),
+        vec![&calls[0].id]
+    );
+    let turn = engine
+        .resume(
+            snapshot,
+            vec![
+                Answer {
+                    id: slow,
+                    result: Ok(value(999)),
+                },
+                Answer {
+                    id: calls[0].id.clone(),
+                    result: Ok(value(3)),
+                },
+            ],
+        )
+        .unwrap();
+    let Progress::Complete(Ok(result)) = turn.state else {
+        panic!("withdrawn answer must be dropped");
+    };
+    assert_eq!(result.data(), &Datum::Text("cancelled".into()));
 }
 
 fn case(name: &str) -> Case {

@@ -14,11 +14,6 @@ description = "Credential-free VM worker entry and bounded resettable process po
 name = "lash_vm_worker"
 doctest = false
 
-# `src/lib.rs` pulls in `../lash-kernel-releases/src/library.rs` with `#[path]`;
-# cargo-shear cannot see that file, the only user of `lash-kernel-lib` here.
-[package.metadata.cargo-shear]
-ignored = ["lash-kernel-lib"]
-
 [[bin]]
 name = "lash-vm-worker"
 path = "src/main.rs"
@@ -30,16 +25,13 @@ test = false
 # it ships with, and its helper releases, and nothing of another's.
 dialect-typescript = [
     "dep:lash-dialect-typescript",
-    "dep:lash-ext-date-ecma",
-    "dep:lash-ext-regex-ecma",
-    "dep:lash-ext-url-whatwg",
-    "dep:lash-ext-ts-core",
     "lash-kernel-releases/dialect-typescript",
+    "lash-kernel-engine/dialect-typescript",
 ]
 dialect-python = [
     "dep:lash-dialect-python",
-    "dep:lash-ext-py-core",
     "lash-kernel-releases/dialect-python",
+    "lash-kernel-engine/dialect-python",
 ]
 dhat-heap = ["dep:dhat", "lash-vm-client/dhat-heap"]
 synthetic-next = [
@@ -51,6 +43,7 @@ synthetic-next = [
     "lash-kernel-state/synthetic-next",
     "lash-kernel-vm/synthetic-next",
     "lash-kernel-releases/synthetic-next",
+    "lash-kernel-engine/synthetic-next",
 ]
 testing = ["dep:tokio", "lash-vm-client/testing", "lash-core-execution/perf-witness", "lash-core-store/perf-witness", "lash-kernel-vm/perf-witness"]
 
@@ -64,6 +57,7 @@ test = false
 workspace = true
 
 [dependencies]
+lash-kernel-engine.workspace = true
 lash-ext-py-helpers = { workspace = true }
 lash-ext-ts-helpers = { workspace = true }
 lash-protocol-types.workspace = true
@@ -80,7 +74,6 @@ lash-core-store = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-check = { workspace = true }
-lash-kernel-lib = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-dialect = { workspace = true }
@@ -88,11 +81,6 @@ lash-kernel-package = { workspace = true }
 lash-kernel-releases = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }
 lash-dialect-python = { workspace = true, optional = true }
-lash-ext-date-ecma = { workspace = true, optional = true }
-lash-ext-regex-ecma = { workspace = true, optional = true }
-lash-ext-url-whatwg = { workspace = true, optional = true }
-lash-ext-ts-core = { workspace = true, optional = true }
-lash-ext-py-core = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 rmp-serde = { workspace = true }
@@ -103,6 +91,8 @@ tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
 libc = { workspace = true }
 
 [dev-dependencies]
+lash-ext-ts-core.workspace = true
+lash-ext-py-core.workspace = true
 lash-kernel-services = { workspace = true }
 stats_alloc = "0.1"
 sha2 = { workspace = true }
@@ -133,9 +123,6 @@ path = "tests/pool_laws.rs"
 [[test]]
 name = "fresh_embedding"
 path = "tests/fresh_embedding.rs"
-
-[build-dependencies]
-lash-kernel-releases = { workspace = true }
 
 [[example]]
 name = "kernel_perf"
