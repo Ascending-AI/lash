@@ -118,6 +118,7 @@ impl Writer {
 
 /// One queued write transaction: a batch member.
 pub(crate) struct Member {
+    turn_queue: Option<Box<lash_core_ids::operational_metrics::turn::Wait>>,
     writer: Arc<Writer>,
     window: Option<Window>,
     body: Box<dyn Body>,
@@ -139,9 +140,14 @@ impl Member {
     {
         Self {
             writer: Arc::clone(writer),
+            turn_queue: lash_core_ids::operational_metrics::turn::Context::current().map(|_| {
+                Box::new(lash_core_ids::operational_metrics::turn::Wait::start(
+                    "store queue wait",
+                ))
+            }),
             #[cfg(feature = "perf-witness")]
             origin: std::any::type_name::<F>(),
-            window: Window::current(),
+            window: Window::current().map(|_| Window::new(std::any::type_name::<F>(), "sqlite")),
             body: Box::new(Typed {
                 body: Some(f),
                 result: None,
@@ -343,6 +349,9 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
         if let Some(timing) = member.timing.as_mut() {
             timing.start_service();
         }
+    }
+    for member in &mut members {
+        drop(member.turn_queue.take());
     }
     // The batch's own statements count in its first member's window, so a
     // batch of one reports exactly what a plain write transaction does.

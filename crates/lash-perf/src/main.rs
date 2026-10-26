@@ -177,6 +177,15 @@ enum Command {
     OfferedLoad(lash_perf::offered_load::Args),
     /// Replay standard sessions end to end and write their counted receipt.
     Replay(lash_perf::replay::ReplayArgs),
+    /// Attribute one replay turn to phases and SQL store origins.
+    ProfileTurn(lash_perf::replay::turn_profile::Args),
+    /// Kill and resume a SQLite host owner at a committed mid-turn prefix.
+    ProfileRecovery {
+        #[arg(long)]
+        store_dir: std::path::PathBuf,
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
     /// Compare identical plain and code-mode tool work, including owner recovery.
     CodeModeControl(lash_perf::replay::control::Args),
     #[command(hide = true)]
@@ -440,6 +449,15 @@ fn run_main() -> anyhow::Result<()> {
                 .enable_all()
                 .build()?;
             return runtime.block_on(lash_perf::replay::control::sample(options));
+        }
+        Some(Command::ProfileRecovery { store_dir, out }) => {
+            return lash_perf::replay::control::profile_recovery(store_dir, out);
+        }
+        Some(Command::ProfileTurn(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(lash_perf::replay::turn_profile::run(options));
         }
         Some(Command::Replay(options)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()

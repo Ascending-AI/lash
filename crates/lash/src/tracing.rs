@@ -132,3 +132,8 @@ pub(crate) fn refused(error: &crate::EmbedError) -> ProducerOutcome {
         ),
     }
 }
+
+pub use lash_trace::{TurnPhaseInterval, TurnProfile, TurnSqlWork, TurnStoreWrite};
+
+#[doc(hidden)]
+pub use lash_core::operational_metrics::turn::Context as TurnProfileContext;

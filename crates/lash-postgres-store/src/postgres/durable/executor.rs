@@ -595,7 +595,7 @@ impl Call {
 
 /// The call's SQL.
 pub(super) static CALL: LazyLock<String> = LazyLock::new(|| {
-    let params: Vec<String> = (1..=24).map(|index| format!("${index}")).collect();
+    let params: Vec<String> = (1..=25).map(|index| format!("${index}")).collect();
     format!("SELECT * FROM {FUNCTION}({})", params.join(", "))
 });
 
@@ -688,7 +688,8 @@ impl PostgresDurableStore {
             .bind(call.release)
             .bind(call.due)
             .bind(injected.map(|now| now.0))
-            .bind(tx.requires().map(lash_durable::encode_requires));
+            .bind(tx.requires().map(lash_durable::encode_requires))
+            .bind(lash_core_ids::operational_metrics::turn::Context::current().is_some());
         #[cfg(any(test, feature = "testing"))]
         let loses_answer = match self.commit_fault.as_deref() {
             Some(fault) => fault.take_call(&mut connection).await,
@@ -747,6 +748,24 @@ impl PostgresDurableStore {
         let fleet: i32 = get(&row, 2).map_err(Attempt::Failed)?;
         if let Ok(fleet) = u32::try_from(fleet) {
             self.fence.observe(fleet);
+        }
+        if lash_core_ids::operational_metrics::turn::Context::current().is_some() {
+            let inserted: Option<Vec<Vec<u8>>> = get(&row, 12).map_err(Attempt::Failed)?;
+            for digest in inserted.into_iter().flatten() {
+                if let Some(index) = call.digests.iter().position(|id| *id == digest) {
+                    let bytes = &call.contents[index];
+                    if let Ok(envelope) =
+                        lash_core_store::checkpoint_graph::parse_envelope(bytes, None)
+                    {
+                        let kind = envelope.kind.spec().map_or("unknown", |s| s.name);
+                        lash_core_ids::operational_metrics::turn::installed_kind(
+                            lash_core_ids::operational_metrics::sql::Window::current().as_ref(),
+                            kind,
+                            bytes.len() as u64,
+                        );
+                    }
+                }
+            }
         }
         let installed: i64 = get(&row, 4).map_err(Attempt::Failed)?;
         if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {

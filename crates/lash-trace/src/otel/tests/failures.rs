@@ -117,6 +117,7 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
+                profile: None,
                 output: Vec::new(),
                 input: Vec::new(),
                 inference_calls: None,
@@ -133,6 +134,7 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
+                profile: None,
                 output: Vec::new(),
                 input: Vec::new(),
                 inference_calls: None,
@@ -161,6 +163,7 @@ fn failure_attributes_preserve_typed_classes() {
         ),
     ];
     let validation = TraceEvent::TurnCompleted {
+        profile: None,
         input: Vec::new(),
         output: Vec::new(),
         inference_calls: None,

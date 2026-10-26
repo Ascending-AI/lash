@@ -177,6 +177,37 @@ fn slow_record_snapshots_bounded_preceding_records_in_order() {
     assert_eq!(snapshots.len(), 2); // Both triggers still produce one snapshot.
     assert_eq!(snapshots[1].evicted_records, 1);
     assert!(snapshots[1].slow && snapshots[1].failed);
+    drop(snapshots);
+    let (turn_sink, turn_snapshots, _) = recorder(
+        FlightRecorderSettings::new(3, Some(Duration::from_secs(5)), Duration::ZERO, false)
+            .unwrap(),
+    );
+    let terminal = record(
+        "turn",
+        9000,
+        TraceEvent::TurnCompleted {
+            profile: Some(crate::TurnProfile {
+                elapsed_ns: 6_000_000_000,
+                ..Default::default()
+            }),
+            input: vec![],
+            output: vec![],
+            inference_calls: None,
+            tool_calls: None,
+            inputs: 1,
+            outcome: TraceTurnOutcome::Completed {
+                done_reason: crate::TraceTurnCompletionReason::AssistantMessage,
+            },
+        },
+    );
+    turn_sink.append(&terminal).unwrap();
+    assert!(
+        turn_snapshots
+            .lock_recover()
+            .last()
+            .is_some_and(|s| s.slow && !s.failed),
+        "a slow successful turn terminal triggers capture"
+    );
 }
 
 #[test]

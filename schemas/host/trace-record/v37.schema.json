@@ -5987,6 +5987,237 @@
     "TurnFailureCode": {
       "type": "string"
     },
+    "TurnPhaseInterval": {
+      "properties": {
+        "depth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "start_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phase",
+        "start_ns",
+        "end_ns",
+        "depth"
+      ],
+      "type": "object"
+    },
+    "TurnProfile": {
+      "description": "Bounded phases. Intervals overlap when one phase calls another; consumers\nmust use the deepest active interval for an exclusive wall-time table.",
+      "properties": {
+        "dml": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elapsed_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "link_payloads": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "manifests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted_intervals": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted_sql_keys": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/TurnPhaseInterval"
+          },
+          "type": "array"
+        },
+        "snapshots": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sql": {
+          "items": {
+            "$ref": "#/$defs/TurnSqlWork"
+          },
+          "type": "array"
+        },
+        "started_at_unix_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statements": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "store_bytes_written": {
+          "description": "Newly installed canonical graph bytes, not WAL or filesystem bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transactions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "writes": {
+          "items": {
+            "$ref": "#/$defs/TurnStoreWrite"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "elapsed_ns",
+        "started_at_unix_ns",
+        "phases",
+        "sql",
+        "writes",
+        "statements",
+        "dml",
+        "transactions",
+        "store_bytes_written",
+        "snapshots",
+        "manifests",
+        "link_payloads",
+        "omitted_intervals",
+        "omitted_sql_keys"
+      ],
+      "type": "object"
+    },
+    "TurnSqlWork": {
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "bound_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "owner_commit": {
+          "type": "boolean"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "result_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rows_affected": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows_returned": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shape": {
+          "type": "string"
+        },
+        "statements": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phase",
+        "origin",
+        "shape",
+        "backend",
+        "owner_commit",
+        "statements",
+        "rows_returned",
+        "rows_affected",
+        "bound_bytes",
+        "result_bytes"
+      ],
+      "type": "object"
+    },
+    "TurnStoreWrite": {
+      "description": "Canonical graph nodes physically inserted in an attempt, committed on success.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "nodes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "kind",
+        "nodes",
+        "bytes"
+      ],
+      "type": "object"
+    },
     "Unit": {
       "description": "The code a node belongs to.",
       "oneOf": [
@@ -7242,6 +7473,17 @@
             "$ref": "#/$defs/TraceLlmMessage"
           },
           "type": "array"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TurnProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Physical work in the terminal owner attempt; prior owners are not replayed."
         },
         "tool_calls": {
           "description": "Tool calls admitted by the turn and its cells, including failures.\nThe terminal owner reads the stored count plus acknowledged appends;\nabsent only for a record with no known execution counts.",

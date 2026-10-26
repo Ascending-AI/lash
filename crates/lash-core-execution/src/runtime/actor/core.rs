@@ -602,9 +602,13 @@ impl ActorContext {
         Fut: std::future::Future<Output = Result<ActorCommit, DurableError>> + Send + 'a,
     {
         Box::pin(async move {
-            let committed = self
-                .commit_owned(tx, label, owing, resolution, commit)
-                .await?;
+            let revision = tx.revision().0;
+            let committed = lash_core_ids::operational_metrics::turn::phase(
+                "commit",
+                Some(revision),
+                self.commit_owned(tx, label, owing, resolution, commit),
+            )
+            .await?;
             if let Some(boundary) = &self.first_commit {
                 boundary.committed();
             }

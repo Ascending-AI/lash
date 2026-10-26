@@ -25,6 +25,7 @@ where
 {
     #[cfg(feature = "perf-witness")]
     sizes::record("task.spawn", &future);
+    let future = crate::operational_metrics::turn::carry(future);
     // Lash's frame is the innermost wrapper: it enters after the `tracing`
     // span, so the host's current context during each poll is the position.
     match lash_trace::AmbientFrame::current() {

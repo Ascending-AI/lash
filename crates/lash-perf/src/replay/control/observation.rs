@@ -232,6 +232,7 @@ impl Observation {
             return;
         }
         if self.phase == Phase::Resume && state.resume.is_none() {
+            super::recovery_event("first progress");
             state.resume = Some(Resume {
                 latency_ms: state.started.elapsed().as_secs_f64() * 1000.0,
                 bytes_read: state.bytes_read,
@@ -376,6 +377,7 @@ impl Observation {
             reason = "raise SIGKILL in this benchmark owner at its prefix cut"
         )]
         unsafe {
+            super::recovery_event("kill");
             libc::raise(libc::SIGKILL);
         }
         std::process::exit(1);

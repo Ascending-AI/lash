@@ -899,16 +899,21 @@ fn worker(error: PoolError) -> KernelFailure {
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, PoolError> + Send + 'static,
 ) -> Result<T, KernelFailure> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|error| {
-            worker(PoolError::breach(
-                lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
-                    detail: lash_protocol_types::engine_fault::Detail::new(error),
-                },
-            ))
-        })?
-        .map_err(worker)
+    let context = lash_core_execution::facade_support::turn::Context::current();
+    tokio::task::spawn_blocking(move || match context {
+        Some(context) => context
+            .sync(|| lash_core_execution::facade_support::turn::sync_phase("worker IPC", work)),
+        None => work(),
+    })
+    .await
+    .map_err(|error| {
+        worker(PoolError::breach(
+            lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
+                detail: lash_protocol_types::engine_fault::Detail::new(error),
+            },
+        ))
+    })?
+    .map_err(worker)
 }
 
 /// Count the complete Start as it crosses alone. A checkout has not chosen its

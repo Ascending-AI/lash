@@ -133,6 +133,7 @@ mod tests {
                 sessions: 2,
                 setup: false,
                 traffic: None,
+                session_wall_ms: Vec::new(),
                 metrics: BTreeMap::from([("wall_ms".to_owned(), 100.0 + depth as f64 * 100.0)]),
             })
             .collect();

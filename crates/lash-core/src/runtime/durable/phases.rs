@@ -87,15 +87,17 @@ fn encode_phase(
     drive: &mut dyn TurnDrive,
     delta: CheckpointDelta<HostTurnProtocol>,
 ) -> Result<StagedPhase, TurnError> {
-    let checkpoint = PhaseCheckpoint {
-        saved: delta.saved,
-        delivered: drive.delivered_inputs(),
-        before_turn: drive.before_turn(),
-        trace: drive.trace_scope(),
-        config: drive.run_config(),
-        cell: drive.cell_start(),
-    };
-    StagedPhase::of(&checkpoint, &delta.held, &delta.links).map_err(TurnError::Exec)
+    lash_core_ids::operational_metrics::turn::sync_phase("checkpoint encode", || {
+        let checkpoint = PhaseCheckpoint {
+            saved: delta.saved,
+            delivered: drive.delivered_inputs(),
+            before_turn: drive.before_turn(),
+            trace: drive.trace_scope(),
+            config: drive.run_config(),
+            cell: drive.cell_start(),
+        };
+        StagedPhase::of(&checkpoint, &delta.held, &delta.links).map_err(TurnError::Exec)
+    })
 }
 
 /// The plugin namespaces `drive`'s run changed that its rows do not record
@@ -608,7 +610,13 @@ async fn phase_loop(
                         // The machine waits on the request that carries it,
                         // so the checkpoint names it.
                         let call = calls.saturating_add(1);
-                        match drive.prepare_call(cx, id, call, request).await? {
+                        match lash_core_ids::operational_metrics::turn::phase(
+                            "prompt/environment build",
+                            None,
+                            drive.prepare_call(cx, id, call, request),
+                        )
+                        .await?
+                        {
                             PreparedCall::Admit(composed) => {
                                 let ComposedCall {
                                     request,
@@ -914,7 +922,11 @@ async fn phase_loop(
                     drop(tx);
                 }
                 let ran = {
-                    let cell = drive.exec_cell(cx, id, CodeCell { language, code });
+                    let cell = lash_core_ids::operational_metrics::turn::phase(
+                        "cell execution",
+                        None,
+                        drive.exec_cell(cx, id, CodeCell { language, code }),
+                    );
                     let stopped = held.as_ref().map(|(response, _)| response.clone());
                     tokio::select! {
                         biased;
@@ -1004,7 +1016,13 @@ async fn phase_loop(
                     unsettled: &mut unsettled,
                     receipt: held,
                 };
-                match Box::pin(tool_round::run(cx, drive.as_mut(), row, id, calls, done)).await? {
+                match Box::pin(lash_core_ids::operational_metrics::turn::phase(
+                    "tool calls",
+                    None,
+                    tool_round::run(cx, drive.as_mut(), row, id, calls, done),
+                ))
+                .await?
+                {
                     RoundExit::Answered { present, outcome } => {
                         carry = present;
                         boundary.set(outcome);

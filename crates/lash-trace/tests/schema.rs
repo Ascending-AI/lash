@@ -561,6 +561,7 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::TurnCompleted {
+            profile: None,
             output: vec![lash_trace::TraceLlmMessage {
                 role: "assistant".into(),
                 blocks: vec![lash_trace::TraceContentBlock::Text {
@@ -1150,6 +1151,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
     };
     vec![
         TraceEvent::TurnCompleted {
+            profile: None,
             output: vec![lash_trace::TraceLlmMessage {
                 role: "assistant".into(),
                 blocks: vec![lash_trace::TraceContentBlock::Text {

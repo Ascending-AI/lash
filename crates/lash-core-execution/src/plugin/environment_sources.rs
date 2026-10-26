@@ -564,6 +564,7 @@ impl EnvironmentSource for ProviderSource {
         }
         for (key, provider) in &self.packages {
             if self.tools.is_empty() {
+                lash_core_ids::operational_metrics::turn::callbacks(1, 0, 0);
                 let observation = provider.environment_snapshot(
                     config,
                     &self.domain,

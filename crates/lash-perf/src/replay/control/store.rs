@@ -32,8 +32,11 @@ impl DurableStore for ObservedStore {
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
-        self.observe("register_node", self.inner.register_node(spec))
-            .await
+        let node = self
+            .observe("register_node", self.inner.register_node(spec))
+            .await?;
+        super::recovery_event("ready");
+        Ok(node)
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
@@ -65,7 +68,11 @@ impl DurableStore for ObservedStore {
     }
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
-        self.observe("claim", self.inner.claim(node, limit)).await
+        let claimed = self.observe("claim", self.inner.claim(node, limit)).await?;
+        if !claimed.is_empty() {
+            super::recovery_event("claim");
+        }
+        Ok(claimed)
     }
 
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {

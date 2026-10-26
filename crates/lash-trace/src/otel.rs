@@ -325,6 +325,36 @@ impl OtelTelemetry {
         }
         let end = position.ended_at.unwrap_or(record.timestamp);
         span.end_with_timestamp(end.to_system_time());
+        if let TraceEvent::TurnCompleted {
+            profile: Some(profile),
+            ..
+        } = &record.event
+        {
+            let parent = Context::new().with_remote_span_context(own.clone());
+            let base =
+                std::time::UNIX_EPOCH + std::time::Duration::from_nanos(profile.started_at_unix_ns);
+            for phase in &profile.phases {
+                let mut attributes = vec![KeyValue::new("lash.turn.phase", phase.phase.clone())];
+                if let Some(revision) = phase.revision {
+                    attributes.push(KeyValue::new("lash.owner.revision", revision));
+                }
+                let builder = SpanBuilder::from_name(format!(
+                    "lash.turn.{}",
+                    phase.phase.replace([' ', '/'], "_")
+                ))
+                .with_start_time(base + std::time::Duration::from_nanos(phase.start_ns))
+                .with_attributes(attributes);
+                let mut child = {
+                    let _preset = provider::PresetGuard::set(
+                        SpanId::from_bytes(self.span_id().to_bytes()),
+                        None,
+                        own.trace_state().clone(),
+                    );
+                    self.tracer.build_with_context(builder, &parent)
+                };
+                child.end_with_timestamp(base + std::time::Duration::from_nanos(phase.end_ns));
+            }
+        }
     }
 }
 
@@ -1036,8 +1066,26 @@ impl<'a> Projection<'a> {
                 }
             }
             TraceEvent::TurnCompleted {
-                outcome, inputs, ..
+                outcome,
+                inputs,
+                profile,
+                ..
             } => {
+                if let Some(profile) = profile {
+                    for (key, count) in [
+                        (A::TurnStatements, profile.statements),
+                        (A::TurnDml, profile.dml),
+                        (A::TurnTransactions, profile.transactions),
+                        (A::TurnStoreBytes, profile.store_bytes_written),
+                        (A::TurnSnapshots, profile.snapshots),
+                        (A::TurnManifests, profile.manifests),
+                        (A::TurnLinkPayloads, profile.link_payloads),
+                        (A::TurnOmittedIntervals, profile.omitted_intervals),
+                        (A::TurnOmittedSqlKeys, profile.omitted_sql_keys),
+                    ] {
+                        out.push(key.value(i64::try_from(count).unwrap_or(i64::MAX)));
+                    }
+                }
                 out.push(A::TurnInputs.value(i64::try_from(*inputs).unwrap_or(i64::MAX)));
                 out.push(A::Outcome.value(match outcome {
                     TraceTurnOutcome::Completed { .. } => "completed",

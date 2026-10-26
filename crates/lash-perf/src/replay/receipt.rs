@@ -37,6 +37,8 @@ pub struct Identity {
     pub compiler: String,
     pub executable_sha256: Option<String>,
     pub sql_shapes: bool,
+    #[serde(default)]
+    pub turn_profile: bool,
     pub traffic: bool,
     pub heap_window: Option<[usize; 2]>,
 }
@@ -71,6 +73,7 @@ impl Identity {
                 .ok()
                 .and_then(|path| crate::perf_support::git::artifact_sha256(&path)),
             sql_shapes: false,
+            turn_profile: false,
             traffic: false,
             heap_window: None,
         }
@@ -126,6 +129,9 @@ pub struct RoundRecord {
     /// A setup turn: counted in totals, left out of medians and slopes.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub setup: bool,
+    /// Individual send-through-outcome latencies; empty in older receipts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_wall_ms: Vec<f64>,
     pub metrics: BTreeMap<String, f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traffic: Option<super::traffic::Report>,
@@ -341,6 +347,17 @@ pub fn table(receipt: &ReplayReceipt) -> String {
             "  metric                  unit         median(round-average) p95(round-average) max(round-average)  \
              lsq-slope/history-turn  robust/history-turn  robust/frame-turn steady_rounds history_depths frame_depths\n",
         );
+        let mut sessions: Vec<_> = workload
+            .rounds
+            .iter()
+            .filter(|r| !r.setup)
+            .flat_map(|r| r.session_wall_ms.iter().copied())
+            .collect();
+        sessions.sort_by(f64::total_cmp);
+        if !sessions.is_empty() {
+            let p95 = sessions[(sessions.len() * 95).div_ceil(100).saturating_sub(1)];
+            out.push_str(&format!("  session-turn wall_ms: n={} p95={:.3} max={:.3} (individual sessions, send through outcome)\n", sessions.len(), p95, sessions[sessions.len()-1]));
+        }
         for (name, summary) in &workload.summary {
             out.push_str(&format!(
                 "  {name:<23} {:<12} {:>12} {:>11} {:>11} {:>22} {:>20} {:>18} {:>13} {:>14} {:>12}\n",
@@ -400,6 +417,7 @@ mod tests {
                 sessions: 2,
                 setup: depth == 0,
                 traffic: None,
+                session_wall_ms: Vec::new(),
                 metrics: BTreeMap::from([("store_bytes_written".to_owned(), 2.0 * value(depth))]),
             })
             .collect()

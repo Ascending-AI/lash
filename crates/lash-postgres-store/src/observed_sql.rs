@@ -62,7 +62,9 @@ pub(crate) async fn checkout(
     let started = Instant::now();
     #[cfg(feature = "perf-witness")]
     let mut timing = lash_core_ids::perf_witness::queues::Timer::enqueue("postgres.pool_checkout");
-    let connection = pool.acquire().await;
+    let connection =
+        lash_core_ids::operational_metrics::turn::phase("store pool wait", None, pool.acquire())
+            .await;
     #[cfg(feature = "perf-witness")]
     if let Some(timing) = &mut timing {
         timing.complete();
@@ -187,7 +189,7 @@ impl Statement {
         #[cfg(test)]
         round_trip();
         let state = CURRENT.try_with(Arc::clone).ok();
-        let window = sql::Window::current();
+        let window = sql::Window::current().map(|_| sql::Window::new(site.to_string(), "postgres"));
         #[cfg(feature = "perf-witness")]
         let recording = lash_core_ids::perf_witness::queues::is_recording();
         #[cfg(not(feature = "perf-witness"))]

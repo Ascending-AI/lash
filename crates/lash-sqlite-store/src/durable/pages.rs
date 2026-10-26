@@ -277,6 +277,18 @@ fn install_nodes(
         for (index, node) in chunk.iter().enumerate() {
             insert.raw_bind_parameter(index * 2 + 1, node.id.0.as_slice())?;
             insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
+            if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current()
+                .filter(|w| w.turn_context().is_some())
+                && let Ok(envelope) =
+                    lash_core_store::checkpoint_graph::parse_envelope(&node.bytes, Some(node.id))
+            {
+                let kind = envelope.kind.spec().map_or("unknown", |s| s.name);
+                lash_core_ids::operational_metrics::turn::installed_kind(
+                    Some(&window),
+                    kind,
+                    node.bytes.len() as u64,
+                );
+            }
             installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
             installed.new_nodes += 1;
             installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);

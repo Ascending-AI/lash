@@ -110,6 +110,7 @@ pub async fn serve(
     }
     redrive_session_parks(backend).await;
     let mut decodes = formats.session_decodes();
+    let turn_profiles = serve.sessions.observes_physical_turns();
     let activation: Arc<dyn Activation> = match serve.processes {
         Some(process) => {
             decodes = formats.decodes();
@@ -136,6 +137,7 @@ pub async fn serve(
         },
         activation,
     )
+    .with_turn_profiles(turn_profiles)
     .with_hints(backend.hints().clone())
     .with_drain(serve.drain)
     .with_registration(serve.registration);

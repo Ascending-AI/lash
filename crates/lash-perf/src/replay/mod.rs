@@ -17,6 +17,7 @@ pub mod runner;
 pub mod script;
 mod sql_work;
 pub mod traffic;
+pub mod turn_profile;
 mod workers;
 
 pub use workers::python_worker_entry;
@@ -69,6 +70,8 @@ pub struct ReplayArgs {
     /// Attribute physical SQLite writes and VM transport kinds in the receipt.
     #[arg(long)]
     pub traffic: bool,
+    #[arg(long)]
+    pub turn_report: Option<PathBuf>,
     /// Bounded host-clock effect/worker phase JSONL (one SQLite workload).
     #[arg(long, conflicts_with = "history")]
     pub effect_phases: Option<PathBuf>,
@@ -109,19 +112,32 @@ pub struct GateArgs {
     pub bless: Option<PathBuf>,
 }
 
+#[derive(Default)]
+struct Observers<'a> {
+    sql_shapes: Option<&'a std::path::Path>,
+    turn_report: Option<&'a std::path::Path>,
+    traffic: bool,
+    effect_phases: Option<(&'a std::path::Path, bool)>,
+}
+
 /// Run `workloads` in order, rewriting the receipt at `out` after each one so
 /// a later failure keeps the finished workloads' evidence.
 async fn run_workloads(
     workloads: &[(script::Workload, Option<usize>)],
     store: &StoreChoice,
     out: &std::path::Path,
-    sql_shapes: Option<&std::path::Path>,
     heap: &ReplayHeapArgs,
-    traffic: bool,
-    effect_phases: Option<(&std::path::Path, bool)>,
+    observers: Observers<'_>,
 ) -> Result<ReplayReceipt> {
+    let Observers {
+        sql_shapes,
+        turn_report,
+        traffic,
+        effect_phases,
+    } = observers;
     let mut identity = Identity::current();
     identity.sql_shapes = sql_shapes.is_some();
+    identity.turn_profile = turn_report.is_some();
     identity.traffic = traffic;
     identity.heap_window = heap
         .profile_turn
@@ -139,6 +155,7 @@ async fn run_workloads(
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
             heap: heap.clone(),
+            turn_report: turn_report.map(std::path::Path::to_path_buf),
             traffic,
             effect_phases: effect_phases.map(|(path, _)| path.to_path_buf()),
             effect_phases_off: effect_phases.is_some_and(|(_, off)| off),
@@ -181,7 +198,11 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         .iter()
         .map(|name| Ok((script::resolve(name)?, args.turns)))
         .collect::<Result<Vec<_>>>()?;
-    if args.sql_shapes.is_some() || args.heap.dhat_out.is_some() || args.effect_phases.is_some() {
+    if args.sql_shapes.is_some()
+        || args.turn_report.is_some()
+        || args.heap.dhat_out.is_some()
+        || args.effect_phases.is_some()
+    {
         anyhow::ensure!(
             workloads.len() == 1,
             "attribution selects exactly one workload"
@@ -224,12 +245,16 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         &workloads,
         &store,
         &args.out,
-        args.sql_shapes.as_deref(),
         &args.heap,
-        args.traffic,
-        args.effect_phases
-            .as_deref()
-            .map(|path| (path, args.effect_phases_off)),
+        Observers {
+            sql_shapes: args.sql_shapes.as_deref(),
+            turn_report: args.turn_report.as_deref(),
+            traffic: args.traffic,
+            effect_phases: args
+                .effect_phases
+                .as_deref()
+                .map(|path| (path, args.effect_phases_off)),
+        },
     )
     .await?;
     print!("{}", receipt::table(&receipt));
@@ -259,10 +284,8 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
         &workloads,
         &StoreChoice::SqliteFile(args.store_dir.clone()),
         &args.out,
-        None,
         &ReplayHeapArgs::default(),
-        false,
-        None,
+        Observers::default(),
     )
     .await?;
     print!("{}", receipt::table(&receipt));

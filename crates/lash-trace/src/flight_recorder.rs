@@ -303,6 +303,11 @@ impl FlightRecorderRecord {
 
 fn operation_duration(record: &TraceRecord) -> Option<Duration> {
     match &record.event {
+        TraceEvent::TurnCompleted { profile, .. } => record
+            .position
+            .as_ref()
+            .map(|position| record.timestamp.duration_since(position.started_at))
+            .or_else(|| profile.as_ref().map(|p| Duration::from_nanos(p.elapsed_ns))),
         TraceEvent::ToolCallCompleted { duration_ms, .. }
         | TraceEvent::ExecCodeCompleted { duration_ms, .. }
         | TraceEvent::ExecCodeDiscarded { duration_ms, .. } => {

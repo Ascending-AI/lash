@@ -513,6 +513,7 @@ fn content_shapes_validate_against_the_pinned_semconv_schemas() {
 #[test]
 fn turn_closer_input_obeys_capture_redaction_and_bounds() {
     let event = || TraceEvent::TurnCompleted {
+        profile: None,
         output: Vec::new(),
         inference_calls: None,
         tool_calls: None,
@@ -587,6 +588,7 @@ fn a_content_hook_selects_a_completed_tools_result_by_name() {
 #[test]
 fn turn_closer_output_obeys_capture_redaction_and_bounds() {
     let event = || TraceEvent::TurnCompleted {
+        profile: None,
         input: Vec::new(),
         output: vec![TraceLlmMessage {
             role: "assistant".into(),
@@ -673,6 +675,7 @@ fn semantic_views_preserve_encoded_shapes() {
         ],
     }];
     let event = TraceEvent::TurnCompleted {
+        profile: None,
         input: messages,
         output: vec![],
         inputs: 1,

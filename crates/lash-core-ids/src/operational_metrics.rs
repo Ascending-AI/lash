@@ -4,6 +4,7 @@
 //! observations use a construction-time store observer without a permit.
 
 pub mod sql;
+pub mod turn;
 
 pub use lash_trace::telemetry::metrics::DurableCommitCost;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
@@ -47,7 +48,10 @@ impl StoreObserver {
                 false
             }
         };
-        self.metrics.is_some() || self.sql_sink.is_some() || joined
+        self.metrics.is_some()
+            || self.sql_sink.is_some()
+            || joined
+            || turn::Context::current().is_some()
     }
 
     /// Host-owned physical SQL summaries. Operation identities are carried in

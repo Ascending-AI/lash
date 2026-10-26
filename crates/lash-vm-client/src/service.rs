@@ -778,15 +778,23 @@ pub mod runtime_ops {
         ) -> Result<Response, PoolError> {
             let service = self.clone();
             let _held = CallHeld::of(Some(self));
-            tokio::task::spawn_blocking(move || service.request_blocking(request, for_run))
-                .await
-                .map_err(|error| {
-                    PoolError::breach(
-                        lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
-                            detail: lash_protocol_types::engine_fault::Detail::new(error),
-                        },
-                    )
-                })?
+            let context = lash_core_execution::facade_support::turn::Context::current();
+            tokio::task::spawn_blocking(move || match context {
+                Some(context) => context.sync(|| {
+                    lash_core_execution::facade_support::turn::sync_phase("worker IPC", || {
+                        service.request_blocking(request, for_run)
+                    })
+                }),
+                None => service.request_blocking(request, for_run),
+            })
+            .await
+            .map_err(|error| {
+                PoolError::breach(
+                    lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
+                        detail: lash_protocol_types::engine_fault::Detail::new(error),
+                    },
+                )
+            })?
         }
 
         fn request_blocking(&self, request: Request, for_run: bool) -> Result<Response, PoolError> {

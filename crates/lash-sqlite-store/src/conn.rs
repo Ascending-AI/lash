@@ -790,10 +790,17 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
-        let window = lash_core_ids::operational_metrics::sql::Window::current();
+        let window = lash_core_ids::operational_metrics::sql::Window::current().map(|_| {
+            lash_core_ids::operational_metrics::sql::Window::new(
+                std::any::type_name::<F>(),
+                "sqlite",
+            )
+        });
         #[cfg(feature = "perf-witness")]
         let reader = self.reader;
+        let queue = lash_core_ids::operational_metrics::turn::Wait::start("store queue wait");
         let f = move |c: &mut Connection| {
+            drop(queue);
             crate::observed_sql::physical_scope(std::any::type_name::<F>(), || {
                 #[cfg(feature = "perf-witness")]
                 let _busy = lash_core_ids::perf_witness::latency::Busy::enter(reader);
@@ -1101,14 +1108,16 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
 }
 
 fn timed_gate<T>(f: impl FnOnce() -> T) -> T {
-    #[cfg(feature = "perf-witness")]
-    {
-        lash_core_ids::perf_witness::latency::gate(f)
-    }
-    #[cfg(not(feature = "perf-witness"))]
-    {
-        f()
-    }
+    lash_core_ids::operational_metrics::turn::worker_wait("store gate wait", || {
+        #[cfg(feature = "perf-witness")]
+        {
+            lash_core_ids::perf_witness::latency::gate(f)
+        }
+        #[cfg(not(feature = "perf-witness"))]
+        {
+            f()
+        }
+    })
 }
 
 #[cfg(test)]

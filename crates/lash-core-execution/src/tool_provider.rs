@@ -1132,6 +1132,7 @@ pub trait ToolProvider: Send + Sync + 'static {
         )>,
     ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
     {
+        lash_core_ids::operational_metrics::turn::callbacks(0, 1, 0);
         let mut tools = Vec::new();
         for manifest in self.tool_manifests(config)? {
             let contract = self
@@ -1142,6 +1143,7 @@ pub trait ToolProvider: Send + Sync + 'static {
                         operation: manifest.tool(),
                     }
                 })?;
+            lash_core_ids::operational_metrics::turn::callbacks(0, 0, 1);
             let payload = self
                 .link_payload(&manifest, config)
                 .map(

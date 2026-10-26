@@ -840,3 +840,69 @@ cannot interleave lines. Override `flush` for the host's durability contract
 ring and host callback, with no output destination of its own. The
 [process observation guide](../observing-processes.md) explains product graphs,
 which reconstruct on replay through a separate `ProductObservationSink`.
+
+## Turn physical profiles
+
+An observed session owner attaches a bounded `TurnCompleted.profile` to its
+terminal. It describes this physical owner attempt, including admission work
+in its pass. Recovery does not recreate the measurements of an owner that
+died. The logical `invoke_agent` duration still spans the retained admission
+through settlement; its physical counters must not be read as durable billing
+or as totals across every owner.
+
+The profile records monotonic phase intervals and SQL statements, DML,
+transaction starts, installed canonical graph bytes, and provider snapshot,
+manifest and link-payload callback entries. SQL keys contain normalized shapes
+and compiled store origins, never bound values. The terminal exports
+`lash.turn.sql.statements`, `lash.turn.sql.dml`, `lash.turn.sql.transactions`,
+`lash.turn.store.bytes_written`, `lash.turn.snapshots`, `lash.turn.manifests`
+and `lash.turn.link_payloads` on `invoke_agent`. Graph bytes count insertions
+in attempts and exclude WAL, filesystem bytes and protocol framing. Callback
+entries do not imply store writes. Manifest/link callback counters cover the
+default provider snapshot implementation; custom snapshot implementations own
+their internal callbacks.
+
+The adapter exports `lash.turn.<phase>` children under that turn for admission,
+prompt/environment build, model call, tool calls, cell execution, checkpoint
+encode, commit, connection queue/gate waits, pool checkout and worker checkout
+or IPC when reached. Names use underscores in place of spaces and slashes.
+Commit children carry `lash.owner.revision`. These are physical spans, published
+with the terminal, and inherit its sampling choice. Nested intervals overlap.
+Use the deepest active interval to partition the wall clock; adding their
+inclusive durations double-counts work. A phase span measures elapsed time,
+including scheduling, rather than CPU time.
+
+Each owner attempt retains at most 512 intervals, 512 SQL keys and 512 semantic
+graph-write keys. Omission counters accompany the profile and the turn span.
+Counters retain totals when SQL keys overflow; detailed reports refuse a
+truncated profile. Hosts that need durable capture still own sink retention
+and export failure policy. A crash before terminal publication loses this
+attempt's physical profile.
+
+`just profile-turn chat-short --turn 3` and
+`just profile-turn ts-codemode --turn 3` join the owner profile to facade
+admission and outcome-readback measurements. The report conserves statement
+counts and uses exclusive wall shares. PostgreSQL requires `kiln gate` and
+reports attempted statement round trips, excluding pool checks and protocol
+control. SQLite gate/queue and PostgreSQL checkout waits are separate when
+observed; neither backend exposes a per-turn fsync clock through these APIs.
+A resident hot owner performs no lease claim in the measured window. Lease
+wait remains unknown rather than inferred from idle wall time.
+
+`just profile-recovery` SIGKILLs the host owner after a committed cell prefix,
+re-executes it over the same FULL SQLite store and reports kill, parent-process
+detection, re-exec, node registration readiness, claim, first fixture progress
+and successful outcome. It uses turn 4 of the committed `crash-resume` corpus and the replay control's host-kill seam.
+The timestamps use the same host's realtime clock across processes. This
+measures local restart and lease recovery, not an external health detector.
+
+The flight recorder applies its configured slow threshold to a turn terminal's
+retained start/end duration. It needs no unbounded start map. The normal ring,
+minimum interval and failure-trigger policies still apply.
+
+Cold owners carry the successful physical claim into their first owner pass.
+The `claim` child measures that store operation, rather than inventing lease
+wait from a turn's unexplained wall time. A batch claim's SQL is assigned once,
+to its first actor; every member can retain the shared claim wall. Warm resident
+turns have no claim. A cold profile can begin before facade send acceptance;
+the replay reader joins by the durable turn id and reports that full wall.

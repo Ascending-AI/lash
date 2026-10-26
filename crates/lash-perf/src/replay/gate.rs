@@ -195,6 +195,7 @@ impl Baseline {
         );
         ensure!(
             !receipt.identity.sql_shapes
+                && !receipt.identity.turn_profile
                 && !receipt.identity.traffic
                 && receipt.identity.heap_window.is_none(),
             "counted baselines require ordinary replay observation"
@@ -305,13 +306,17 @@ fn counted_identity_refusal(
     identity: &super::receipt::Identity,
     baseline: &Baseline,
 ) -> Option<CountedIdentityRefusal> {
-    if identity.sql_shapes || identity.traffic || identity.heap_window.is_some() {
+    if identity.sql_shapes
+        || identity.turn_profile
+        || identity.traffic
+        || identity.heap_window.is_some()
+    {
         return Some(CountedIdentityRefusal::Mismatch {
             dimension: CountedIdentityDimension::Observer,
             baseline: "ordinary replay observation".to_owned(),
             candidate: format!(
-                "sql_shapes={};traffic={};heap_window={:?}",
-                identity.sql_shapes, identity.traffic, identity.heap_window
+                "sql_shapes={};turn_profile={};traffic={};heap_window={:?}",
+                identity.sql_shapes, identity.turn_profile, identity.traffic, identity.heap_window
             ),
         });
     }
@@ -548,6 +553,7 @@ mod tests {
                 sessions: 1,
                 setup: false,
                 traffic: None,
+                session_wall_ms: Vec::new(),
                 metrics: BTreeMap::from([(
                     "sql_bytes_written".to_owned(),
                     40_000.0 + bytes_per_prior_turn * depth as f64,
@@ -637,9 +643,10 @@ mod tests {
     fn counted_baselines_refuse_mixed_observer_modes() {
         let candidate = receipt(0.0);
         let baseline = Baseline::bless(&candidate).unwrap();
-        for mode in 0..3 {
+        for mode in 0..4 {
             let mut observed = candidate.clone();
             observed.identity.sql_shapes = mode == 0;
+            observed.identity.turn_profile = mode == 3;
             observed.identity.traffic = mode == 1;
             observed.identity.heap_window = (mode == 2).then_some([1, 2]);
             assert!(Baseline::bless(&observed).is_err());

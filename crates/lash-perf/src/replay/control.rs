@@ -39,6 +39,8 @@ pub struct SampleArgs {
     #[arg(long, value_enum)]
     pub phase: Phase,
     #[arg(long)]
+    pub recovery_workload: bool,
+    #[arg(long)]
     pub dir: PathBuf,
     #[arg(long)]
     pub out: PathBuf,
@@ -183,9 +185,23 @@ fn workload(n: usize, leg: Leg) -> Workload {
 /// Run one measured owner. Prefix owners die at the committed-outcome boundary.
 pub async fn sample(args: &SampleArgs) -> Result<()> {
     ensure!(args.n > 0, "N must be positive");
-    let workload = workload(args.n, args.leg);
-    let turn = workload.expand(0, None).remove(0);
+    let workload = if args.recovery_workload {
+        super::script::resolve("crash-resume")?
+    } else {
+        workload(args.n, args.leg)
+    };
+    let mut expanded = workload.expand(0, None);
+    let selected = if args.recovery_workload { 3 } else { 0 };
+    let turn = expanded.remove(selected);
     let mut book = ScriptBook::new();
+    let setup: Vec<_> = expanded
+        .into_iter()
+        .take(selected)
+        .map(|turn| {
+            let input = book.register(0, &turn);
+            (turn, input)
+        })
+        .collect();
     let input = book.register(0, &turn);
     let book = Arc::new(book);
     let observation = Arc::new(Observation::new(args, Arc::clone(&book))?);
@@ -256,6 +272,23 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("open session: {e}"))?;
     if args.phase != Phase::Resume {
+        for (turn, input) in setup {
+            let output = session
+                .send(lash::TurnInput::text(input))
+                .id(lash_vocabulary::identity::TurnId::try_from(format!(
+                    "recovery-setup-{}",
+                    turn.ordinal
+                ))?)
+                .output()
+                .await
+                .map_err(|e| anyhow::anyhow!("recovery setup: {e}"))?;
+            ensure!(output.is_success(), "recovery setup failed");
+            let calls = book.take_calls(0, turn.ordinal);
+            ensure!(
+                calls.scripted == turn.replies.len() && calls.past_script == 0,
+                "recovery setup left its script"
+            );
+        }
         cleanup.settle().await?;
         observation.start()?;
     }
@@ -274,11 +307,14 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .context("control turn timed out")?
         .map_err(|e| anyhow::anyhow!("outcome: {e}"))?;
     observation.stop_instructions()?;
+    if args.phase == Phase::Resume {
+        recovery_event("outcome");
+    }
     ensure!(
         outcome.output().is_some_and(|output| output.is_success()),
         "turn failed: {outcome:?}"
     );
-    let calls = book.take_calls(0, 1);
+    let calls = book.take_calls(0, turn.ordinal);
     ensure!(
         calls.past_script == 0,
         "script deviation: {:?}",
@@ -354,12 +390,26 @@ pub(super) fn write(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 fn invoke(n: usize, leg: Leg, phase: Phase, dir: &Path, out: &Path) -> Result<Sample> {
+    invoke_timed(n, leg, phase, dir, out, None)
+}
+fn invoke_timed(
+    n: usize,
+    leg: Leg,
+    phase: Phase,
+    dir: &Path,
+    out: &Path,
+    timeline: Option<&Path>,
+) -> Result<Sample> {
     let phase_name = match phase {
         Phase::Fresh => "fresh",
         Phase::Prefix => "prefix",
         Phase::Resume => "resume",
     };
-    let status = std::process::Command::new(std::env::current_exe()?)
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    if let Some(path) = timeline {
+        command.env("LASH_RECOVERY_TIMELINE", path);
+    }
+    command
         .args([
             "code-mode-control-sample",
             "--n",
@@ -372,8 +422,11 @@ fn invoke(n: usize, leg: Leg, phase: Phase, dir: &Path, out: &Path) -> Result<Sa
         ])
         .arg(dir)
         .arg("--out")
-        .arg(out)
-        .status()?;
+        .arg(out);
+    if timeline.is_some() {
+        command.arg("--recovery-workload");
+    }
+    let status = command.status()?;
     if phase == Phase::Prefix {
         use std::os::unix::process::ExitStatusExt as _;
         ensure!(
@@ -565,4 +618,90 @@ fn summarize(samples: &[Sample]) -> BTreeMap<String, Distribution> {
             (key, Distribution { median, p90 })
         })
         .collect()
+}
+
+/// Profile a real host-owner death at a committed cell prefix on SQLite.
+pub fn profile_recovery(dir: &Path, out: &Path) -> Result<()> {
+    ensure!(!dir.exists(), "recovery requires a fresh store directory");
+    std::fs::create_dir_all(dir)?;
+    let timeline = dir.join("recovery.jsonl");
+    let prefix = invoke_timed(
+        2,
+        Leg::CellResumeAtPrefix,
+        Phase::Prefix,
+        dir,
+        &dir.join("prefix.json"),
+        Some(&timeline),
+    )?;
+    recovery_event_at(Some(&timeline), "detection")?;
+    recovery_event_at(Some(&timeline), "re-exec")?;
+    let resumed = invoke_timed(
+        2,
+        Leg::CellResumeAtPrefix,
+        Phase::Resume,
+        dir,
+        &dir.join("resumed.json"),
+        Some(&timeline),
+    )?;
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&timeline)?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let kill = events
+        .iter()
+        .find(|e| e["phase"] == "kill")
+        .and_then(|e| e["unix_ns"].as_u64())
+        .context("missing owner kill timestamp")?;
+    println!("recovery phase       since_kill_ms");
+    for name in [
+        "kill",
+        "detection",
+        "re-exec",
+        "ready",
+        "claim",
+        "first progress",
+        "outcome",
+    ] {
+        let event = events
+            .iter()
+            .find(|e| e["phase"] == name && e["unix_ns"].as_u64().is_some_and(|at| at >= kill))
+            .with_context(|| format!("missing recovery {name}"))?;
+        let at = event["unix_ns"]
+            .as_u64()
+            .context("invalid recovery clock")?;
+        println!("{name:<20} {:>13.3}", at.saturating_sub(kill) as f64 / 1e6);
+    }
+    write(
+        out,
+        &serde_json::json!({"kind":"lash.profile-recovery", "clock":"CLOCK_REALTIME; same host across exec", "cut":"SIGKILL owner after first committed tool of crash-resume corpus turn 4", "events":events, "prefix":prefix, "resumed":resumed}),
+    )?;
+    Ok(())
+}
+
+pub(super) fn recovery_event(phase: &str) {
+    if let Some(path) = std::env::var_os("LASH_RECOVERY_TIMELINE")
+        && let Err(error) = recovery_event_at(Some(Path::new(&path)), phase)
+    {
+        eprintln!("recovery clock: {error:#}");
+    }
+}
+fn recovery_event_at(path: Option<&Path>, phase: &str) -> Result<()> {
+    use std::io::Write as _;
+    if let Some(path) = path {
+        let unix_ns = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos(),
+        )?;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({"phase":phase,"unix_ns":unix_ns,"pid":std::process::id()})
+        )?;
+    }
+    Ok(())
 }

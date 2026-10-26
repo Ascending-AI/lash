@@ -286,61 +286,64 @@ pub(super) async fn send(
     admitted: &lash_protocol_types::llm::types::AdmittedSend,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {
-    let (pin, limit, resent) = match start {
-        ModelStart::Expired { pin } => {
-            drive.model_unsent(cx, id, timed_out(pin)).await?;
-            return Ok(true);
-        }
-        ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
-    };
-    if resent {
-        drive.restart_live_stream(cx, id, pin).await?;
-    }
-    cx.note_due(DueSource::ModelDeadline, pin.deadline);
-    let now = cx.durable_now().await?;
-    let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
-    {
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let stop_error = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let call = drive.model_call(
-            cx,
-            id,
-            request,
-            admitted,
-            super::session::ModelCallAttempt {
-                ordinal: pin.attempt,
-                limit,
-                cancel: cancel.clone(),
-                stop_error: std::sync::Arc::clone(&stop_error),
-            },
-        );
-        tokio::pin!(call);
-        let expiry = cx.clock().sleep(remaining);
-        tokio::pin!(expiry);
-        tokio::select! {
-            biased;
-            answered = &mut call => answered?,
-            () = &mut expiry => {
-                // Stop the dispatched call with its typed deadline cause,
-                // retaining its sealed attempts before settling the turn.
-                *stop_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                    Some(timed_out(pin));
-                cancel.cancel();
-                call.await?;
+    lash_core_ids::operational_metrics::turn::phase("model call", None, async {
+        let (pin, limit, resent) = match start {
+            ModelStart::Expired { pin } => {
+                drive.model_unsent(cx, id, timed_out(pin)).await?;
+                return Ok(true);
             }
-            stopped = super::turn_cancel::wait_for_immediate(cx) => {
-                stopped?;
-                cancel.cancel();
-                // A live cancellation settles the provider call before
-                // the turn terminal; dropping it discards sealed attempts.
-                call.await?;
-                cx.clear_due(DueSource::ModelDeadline);
-                return Ok(false);
-            }
+            ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
+        };
+        if resent {
+            drive.restart_live_stream(cx, id, pin).await?;
         }
-    };
-    cx.clear_due(DueSource::ModelDeadline);
-    Ok(true)
+        cx.note_due(DueSource::ModelDeadline, pin.deadline);
+        let now = cx.durable_now().await?;
+        let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
+        {
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let stop_error = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let call = drive.model_call(
+                cx,
+                id,
+                request,
+                admitted,
+                super::session::ModelCallAttempt {
+                    ordinal: pin.attempt,
+                    limit,
+                    cancel: cancel.clone(),
+                    stop_error: std::sync::Arc::clone(&stop_error),
+                },
+            );
+            tokio::pin!(call);
+            let expiry = cx.clock().sleep(remaining);
+            tokio::pin!(expiry);
+            tokio::select! {
+                biased;
+                answered = &mut call => answered?,
+                () = &mut expiry => {
+                    // Stop the dispatched call with its typed deadline cause,
+                    // retaining its sealed attempts before settling the turn.
+                    *stop_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some(timed_out(pin));
+                    cancel.cancel();
+                    call.await?;
+                }
+                stopped = super::turn_cancel::wait_for_immediate(cx) => {
+                    stopped?;
+                    cancel.cancel();
+                    // A live cancellation settles the provider call before
+                    // the turn terminal; dropping it discards sealed attempts.
+                    call.await?;
+                    cx.clear_due(DueSource::ModelDeadline);
+                    return Ok(false);
+                }
+            }
+        };
+        cx.clear_due(DueSource::ModelDeadline);
+        Ok(true)
+    })
+    .await
 }
 
 /// The settlement of a call whose pinned deadline passed:

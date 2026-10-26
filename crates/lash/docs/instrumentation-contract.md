@@ -119,6 +119,15 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.tool.attempts` | Integer | Provenance | tool |
 | `lash.tool.provider_call_id` | String | Provenance | tool |
 | `lash.outcome` | String | Provenance | agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent |
+| `lash.turn.sql.statements` | Integer | Provenance | agent |
+| `lash.turn.sql.dml` | Integer | Provenance | agent |
+| `lash.turn.sql.transactions` | Integer | Provenance | agent |
+| `lash.turn.store.bytes_written` | Integer | Provenance | agent |
+| `lash.turn.snapshots` | Integer | Provenance | agent |
+| `lash.turn.manifests` | Integer | Provenance | agent |
+| `lash.turn.link_payloads` | Integer | Provenance | agent |
+| `lash.turn.profile.omitted_intervals` | Integer | Provenance | agent |
+| `lash.turn.profile.omitted_sql_keys` | Integer | Provenance | agent |
 | `lash.turn.inputs` | Integer | Provenance | agent |
 | `lash.effect.refused.kind` | String | Provenance | agent |
 | `lash.effect.refused.controller_code` | String | Provenance | agent |
@@ -156,7 +165,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | Span kind | Attribute reserve |
 |---|---|
 | `producer` | 36 |
-| `agent` | 29 |
+| `agent` | 38 |
 | `model` | 47 |
 | `model_attempt` | 30 |
 | `tool` | 31 |
@@ -203,3 +212,42 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.obligations.stalled` | Gauge | `` | Gauge |
 
 GenAI histograms supply advisory semconv boundaries. Durations in seconds: `[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]`. Token and call counts: `[1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0]`. Host meter-provider views take precedence.
+
+## Turn physical work
+
+`TurnCompleted.profile` carries bounded content-free physical owner-attempt
+measurements. `invoke_agent` exports these integer attributes:
+
+| Attribute | Unit | Meaning |
+|---|---|---|
+| `lash.turn.sql.statements` | statements | attempted SQL executions |
+| `lash.turn.sql.dml` | statements | INSERT, UPDATE, DELETE and REPLACE executions |
+| `lash.turn.sql.transactions` | transactions | BEGIN executions |
+| `lash.turn.store.bytes_written` | bytes | newly installed canonical graph bytes, committed only on success |
+| `lash.turn.snapshots` | calls | provider environment snapshot entries |
+| `lash.turn.manifests` | calls | manifest collection in the default provider snapshot |
+| `lash.turn.link_payloads` | calls | link-payload entries in the default provider snapshot |
+| `lash.turn.profile.omitted_intervals` | intervals | phase intervals beyond the capture bound |
+| `lash.turn.profile.omitted_sql_keys` | observations | detail beyond the SQL/write key bound |
+
+Phase children are `lash.turn.claim`, `lash.turn.readback`, `lash.turn.admission`, `lash.turn.owner_orchestration`,
+`lash.turn.prompt_environment_build`, `lash.turn.model_call`,
+`lash.turn.tool_calls`, `lash.turn.cell_execution`,
+`lash.turn.checkpoint_encode`, `lash.turn.commit`,
+`lash.turn.store_queue_wait`, `lash.turn.store_gate_wait`,
+`lash.turn.store_pool_wait`, `lash.turn.worker_checkout_wait` and
+`lash.turn.worker_IPC`, when reached. Each has `lash.turn.phase`; commits also
+have `lash.owner.revision`. They parent to `invoke_agent` and follow its
+sampling decision. Nested spans overlap; exclusive shares require an interval
+union with precedence for the deepest active phase. No additional metric
+labels contain SQL shapes, origins, revisions, session ids or turn ids.
+
+Cold owners carry their successful physical claim into the first pass. Shared
+batch SQL is assigned once to the first claimed actor; each member retains its
+shared wall. Warm resident turns have no claim.
+
+The profile retains at most 512 intervals, 512 SQL shape/origin keys and 512
+graph-write kind keys per attempt. SQL literals are redacted. Physical totals
+are distinct from logical lifecycle counters and do not survive owner death.
+The flight recorder can trigger on a slow turn terminal using its retained
+logical duration and the configured threshold.

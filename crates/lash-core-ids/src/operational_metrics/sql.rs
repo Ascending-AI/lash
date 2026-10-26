@@ -119,6 +119,7 @@ pub async fn with_owner<T>(
 #[derive(Clone)]
 pub struct Window {
     started: std::time::Instant,
+    turn: Option<super::turn::Context>,
     receipt: Arc<Mutex<Receipt>>,
     parent: Option<Box<Window>>,
 }
@@ -131,6 +132,8 @@ impl Window {
         let parent_operation = parent.as_ref().map(|p| p.snapshot().operation);
         Self {
             started: std::time::Instant::now(),
+            turn: super::turn::Context::current()
+                .or_else(|| parent.as_ref().and_then(|p| p.turn.clone())),
             receipt: Arc::new(Mutex::new(Receipt {
                 owner: OWNER.try_with(Clone::clone).ok(),
                 elapsed_nanos: 0,
@@ -180,6 +183,9 @@ impl Window {
             .ok()
             .or_else(|| WORKER.with(|slot| slot.borrow().clone()))
     }
+    pub fn turn_context(&self) -> Option<super::turn::Context> {
+        self.turn.clone()
+    }
     /// Correlation fields without cloning the operation's shape map.
     pub fn identity(&self) -> (Option<OwnerIdentity>, String) {
         let receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
@@ -210,10 +216,12 @@ impl Window {
     }
     pub fn statement(&self, sql: &str) {
         let key = ShapeKey::of(sql);
+        self.turn_work(&key, 1, 0, 0, 0, 0);
         self.record(&key, true, false, None);
     }
     pub fn row(&self, sql: &str) {
         let key = ShapeKey::of(sql);
+        self.turn_work(&key, 0, 1, 0, 0, 0);
         self.record(&key, false, true, None);
     }
     pub fn work(&self, sql: &str, work: SqliteWork) {
@@ -222,7 +230,34 @@ impl Window {
     }
     /// Physical payload counters, propagated through nested operation windows.
     pub fn payload(&self, sql: &str, rows_affected: u64, bound_bytes: u64, result_bytes: u64) {
-        self.add_payload(&ShapeKey::of(sql), rows_affected, bound_bytes, result_bytes);
+        let key = ShapeKey::of(sql);
+        self.turn_work(&key, 0, 0, rows_affected, bound_bytes, result_bytes);
+        self.add_payload(&key, rows_affected, bound_bytes, result_bytes);
+    }
+    fn turn_work(
+        &self,
+        key: &ShapeKey,
+        statements: u64,
+        rows: u64,
+        affected: u64,
+        bound: u64,
+        result: u64,
+    ) {
+        if let Some(turn) = super::turn::Context::current().or_else(|| self.turn.clone()) {
+            let receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+            turn.sql(lash_trace::TurnSqlWork {
+                owner_commit: receipt.owner.is_some(),
+                origin: receipt.operation.clone(),
+                backend: receipt.backend.into(),
+                shape: key.shape.to_string(),
+                statements,
+                rows_returned: rows,
+                rows_affected: affected,
+                bound_bytes: bound,
+                result_bytes: result,
+                ..Default::default()
+            });
+        }
     }
     fn add_payload(&self, key: &ShapeKey, rows_affected: u64, bound_bytes: u64, result_bytes: u64) {
         if let Some(parent) = &self.parent {
@@ -254,8 +289,14 @@ impl Window {
         }
     }
     pub fn installed_graph(&self, bytes: u64) {
+        if let Some(turn) = &self.turn {
+            turn.installed(bytes);
+        }
+        self.add_installed_graph(bytes);
+    }
+    fn add_installed_graph(&self, bytes: u64) {
         if let Some(parent) = &self.parent {
-            parent.installed_graph(bytes);
+            parent.add_installed_graph(bytes);
         }
         self.receipt
             .lock()

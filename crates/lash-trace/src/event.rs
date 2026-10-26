@@ -282,6 +282,9 @@ pub enum TraceEvent {
         step: crate::StepBodyStarted,
     },
     TurnCompleted {
+        /// Physical work in the terminal owner attempt; prior owners are not replayed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<crate::TurnProfile>,
         /// Admitted input messages, captured by the terminal owner from durable input.
         input: Vec<crate::TraceLlmMessage>,
         /// The assistant answer this turn settled with, governed as OutputMessages.

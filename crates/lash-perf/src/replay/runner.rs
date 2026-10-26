@@ -34,6 +34,7 @@ pub struct RunOptions {
     /// Separate Python-worker heap profiles beside the replay receipt.
     pub worker_profile_dir: std::path::PathBuf,
     pub sql_shapes: Option<std::path::PathBuf>,
+    pub turn_report: Option<std::path::PathBuf>,
     pub traffic: bool,
     pub effect_phases: Option<std::path::PathBuf>,
     pub effect_phases_off: bool,
@@ -110,6 +111,17 @@ pub(crate) fn build_core(
     workers: Option<&lash::vm::WorkerService>,
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> Result<lash::LashCore> {
+    build_core_with_sink(workload, backend, book, workers, tools, None)
+}
+
+fn build_core_with_sink(
+    workload: &Workload,
+    backend: &lash::Backend,
+    book: Arc<ScriptBook>,
+    workers: Option<&lash::vm::WorkerService>,
+    tools: Arc<dyn lash_core::ToolProvider>,
+    sink: Option<Arc<lash::testing::RecordingTraceSink>>,
+) -> Result<lash::LashCore> {
     let builder = match (workload.protocol, workers) {
         (Protocol::Standard, _) => {
             let builder = lash::LashCore::standard_builder(backend.clone());
@@ -146,6 +158,11 @@ pub(crate) fn build_core(
             .with_worker_service(workers.clone()),
         ),
         (_, None) => bail!("code mode needs a worker service"),
+    };
+    let builder = if let Some(sink) = sink {
+        builder.trace_sink(sink)
+    } else {
+        builder
     };
     builder
         .serve_sessions(true)
@@ -205,6 +222,7 @@ async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> R
 pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadReceipt> {
     ensure!(
         options.identity.sql_shapes == options.sql_shapes.is_some()
+            && options.identity.turn_profile == options.turn_report.is_some()
             && options.identity.traffic == options.traffic
             && options.identity.heap_window
                 == options
@@ -241,7 +259,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut experiment = options.identity.experiment(serde_json::json!({
         "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
         "sessions": workload.sessions, "compact_every": workload.compact_every,
-        "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
+        "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic, "turn_profile": options.identity.turn_profile,
         "heap_window": options.identity.heap_window, "heap_frames": options.heap.dhat_frames,
         "window": "round first send through last successful outcome; counters at settled cuts",
         "sql_work_window": options.sql_shapes.as_ref().map(|_| "node startup through core shutdown; start/finish phase cuts; includes unowned and cross-window SQL"),
@@ -347,12 +365,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         Some(host) => host.counted(&capability_counts),
         None => provider::fixtures()?,
     };
-    let core = build_core(
+    let turn_sink = options
+        .turn_report
+        .as_ref()
+        .map(|_| Arc::new(lash::testing::RecordingTraceSink::new()));
+    let core = build_core_with_sink(
         workload,
         &backend,
         Arc::clone(&book),
         workers.as_ref(),
         tools,
+        turn_sink.clone(),
     )?;
     // Registration follows package holding. Finish both before session and
     // turn cuts, so install SQL belongs to startup even on a slow store.
@@ -367,6 +390,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     .map_err(|error| anyhow::anyhow!("the replay node's registration: {error}"))?;
     let (node_after, node_shapes, _) = meter.read_with_shapes(0).await;
     let mut shape_rounds = Vec::new();
+    let mut turn_profiles = Vec::new();
     if let (Some(before), Some(after)) = (start_shapes, node_shapes) {
         let mut row = sql_shape_round(0, before, after, &difference(&start_before, &node_after))?;
         row["phase"] = serde_json::json!("node_start");
@@ -479,23 +503,67 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
-            futures_util::future::join_all(
-                lanes
-                    .iter()
-                    .map(|lane| send(lane, turn, phase_capture.is_some(), host_tools.as_deref())),
-            ),
+            futures_util::future::join_all(lanes.iter().map(|lane| async {
+                let started = Instant::now();
+                let client = options
+                    .turn_report
+                    .as_ref()
+                    .map(|_| lash_core_ids::operational_metrics::turn::Context::default());
+                let future = send(lane, turn, phase_capture.is_some(), host_tools.as_deref());
+                let outcome = match &client {
+                    Some(context) => {
+                        context
+                            .within(async {
+                                let window = lash_core_ids::operational_metrics::sql::Window::new(
+                                    "facade", "mixed",
+                                );
+                                window.within(future).await
+                            })
+                            .await
+                    }
+                    None => future.await,
+                };
+                (
+                    outcome,
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    client.map(|c| c.snapshot()),
+                )
+            })),
         )
         .await
         .with_context(|| format!("{} turn {} never settled", workload.name, turn + 1))?;
         let wall_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let mut result_digests = Vec::new();
         let mut oracle_values = Vec::new();
-        for (lane, outcome) in lanes.iter().zip(outcomes) {
-            let (digest, oracle_value) = outcome.with_context(|| {
+        let mut session_wall_ms = Vec::new();
+        for (lane, (outcome, session_ms, client)) in lanes.iter().zip(outcomes) {
+            if let Some(client) = client {
+                turn_profiles.push(client);
+            }
+            session_wall_ms.push(session_ms);
+            let (digest, oracle_value, run) = outcome.with_context(|| {
                 format!("{} session {} turn {}", workload.name, lane.index, turn + 1)
             })?;
             if let Some(digest) = digest {
                 result_digests.push(digest);
+            }
+            if let (Some(sink), Some(client)) = (&turn_sink, turn_profiles.last_mut()) {
+                core.flush_trace_sink()
+                    .map_err(|error| anyhow::anyhow!("flush turn report: {error}"))?;
+                for record in sink.records() {
+                    if record
+                        .context
+                        .turn_id
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == run)
+                        && let lash::tracing::TraceEvent::TurnCompleted {
+                            profile: Some(owner),
+                            ..
+                        } = record.event
+                    {
+                        super::turn_profile::merge(client, owner);
+                    }
+                }
             }
             let (scripted, _) = &lane.inputs[turn];
             let calls = book.take_calls(lane.index, scripted.ordinal);
@@ -592,6 +660,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             frame_depth,
             sessions: lanes.len(),
             setup: lanes[0].inputs[turn].0.setup,
+            session_wall_ms,
             traffic: traffic_after
                 .zip(traffic_before)
                 .map(|(after, before)| after.difference(&before, &metrics))
@@ -626,6 +695,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 frame_depth,
                 sessions: lanes.len(),
                 setup: false,
+                session_wall_ms: Vec::new(),
                 traffic: traffic_after
                     .zip(traffic_before)
                     .map(|(after, before)| after.difference(&before, &metrics))
@@ -682,6 +752,12 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             (&work, &reference),
         )?;
     }
+    if let (Some(path), Some(sink)) = (&options.turn_report, turn_sink) {
+        core.flush_trace_sink()
+            .map_err(|error| anyhow::anyhow!("flush turn report: {error}"))?;
+        drop(sink);
+        std::fs::write(path, serde_json::to_vec_pretty(&turn_profiles)?)?;
+    }
     drop(meter);
     drop(keep);
     Ok(WorkloadReceipt {
@@ -711,7 +787,7 @@ async fn send(
     turn: usize,
     observe_result: bool,
     host_tools: Option<&super::capabilities::HostTools>,
-) -> Result<(Option<String>, Option<serde_json::Value>)> {
+) -> Result<(Option<String>, Option<serde_json::Value>, String)> {
     let (scripted, input) = &lane.inputs[turn];
     let mut input = lash::TurnInput::text(input.clone());
     if scripted.capability_turn == Some(super::script::CapabilityTurn::FreshDocument) {
@@ -742,14 +818,19 @@ async fn send(
     } else {
         send
     };
-    let handle = send
-        .into_future()
-        .await
-        .map_err(|error| anyhow::anyhow!("send: {error}"))?;
-    let outcome = handle
-        .outcome()
-        .await
-        .map_err(|error| anyhow::anyhow!("outcome: {error}"))?;
+    let handle =
+        lash_core_ids::operational_metrics::turn::phase("admission", None, send.into_future())
+            .await
+            .map_err(|error| anyhow::anyhow!("send: {error}"))?;
+    let outcome =
+        lash_core_ids::operational_metrics::turn::phase("readback", None, handle.outcome())
+            .await
+            .map_err(|error| anyhow::anyhow!("outcome: {error}"))?;
+    let run = outcome
+        .run()
+        .context("successful turn has no durable run id")?
+        .turn_id()
+        .to_string();
     match outcome.output() {
         Some(output) if output.is_success() => {
             let oracle_value = lane.inputs[turn]
@@ -766,7 +847,7 @@ async fn send(
             } else {
                 None
             };
-            Ok((digest, oracle_value))
+            Ok((digest, oracle_value, run))
         }
         Some(output) => bail!(
             "the turn did not answer: {:?}; issues: {:?}",

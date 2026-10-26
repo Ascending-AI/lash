@@ -224,6 +224,15 @@ attributes! {
             K::Agent, K::Model, K::ModelAttempt, K::Tool, K::Cell, K::Process, K::Workflow,
             K::WorkflowNode, K::ToolIntent,
         ])),
+        TurnStatements => ("lash.turn.sql.statements", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnDml => ("lash.turn.sql.dml", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnTransactions => ("lash.turn.sql.transactions", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnStoreBytes => ("lash.turn.store.bytes_written", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnSnapshots => ("lash.turn.snapshots", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnManifests => ("lash.turn.manifests", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnLinkPayloads => ("lash.turn.link_payloads", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnOmittedIntervals => ("lash.turn.profile.omitted_intervals", Integer, TraceSpanKindSet::of(&[K::Agent])),
+        TurnOmittedSqlKeys => ("lash.turn.profile.omitted_sql_keys", Integer, TraceSpanKindSet::of(&[K::Agent])),
         TurnInputs => ("lash.turn.inputs", Integer, TraceSpanKindSet::of(&[K::Agent])),
         RefusedEffectKind => ("lash.effect.refused.kind", String, TraceSpanKindSet::of(&[K::Agent])),
         EffectControllerCode => ("lash.effect.refused.controller_code", String, TraceSpanKindSet::of(&[K::Agent])),
@@ -443,6 +452,46 @@ pub fn contract_markdown() -> String {
         "\nGenAI histograms supply advisory semconv boundaries. Durations in seconds: `{:?}`. Token and call counts: `{:?}`. Host meter-provider views take precedence.",
         DURATION_BOUNDARIES, COUNT_BOUNDARIES,
     );
+    out.push_str(r#"
+## Turn physical work
+
+`TurnCompleted.profile` carries bounded content-free physical owner-attempt
+measurements. `invoke_agent` exports these integer attributes:
+
+| Attribute | Unit | Meaning |
+|---|---|---|
+| `lash.turn.sql.statements` | statements | attempted SQL executions |
+| `lash.turn.sql.dml` | statements | INSERT, UPDATE, DELETE and REPLACE executions |
+| `lash.turn.sql.transactions` | transactions | BEGIN executions |
+| `lash.turn.store.bytes_written` | bytes | newly installed canonical graph bytes, committed only on success |
+| `lash.turn.snapshots` | calls | provider environment snapshot entries |
+| `lash.turn.manifests` | calls | manifest collection in the default provider snapshot |
+| `lash.turn.link_payloads` | calls | link-payload entries in the default provider snapshot |
+| `lash.turn.profile.omitted_intervals` | intervals | phase intervals beyond the capture bound |
+| `lash.turn.profile.omitted_sql_keys` | observations | detail beyond the SQL/write key bound |
+
+Phase children are `lash.turn.claim`, `lash.turn.readback`, `lash.turn.admission`, `lash.turn.owner_orchestration`,
+`lash.turn.prompt_environment_build`, `lash.turn.model_call`,
+`lash.turn.tool_calls`, `lash.turn.cell_execution`,
+`lash.turn.checkpoint_encode`, `lash.turn.commit`,
+`lash.turn.store_queue_wait`, `lash.turn.store_gate_wait`,
+`lash.turn.store_pool_wait`, `lash.turn.worker_checkout_wait` and
+`lash.turn.worker_IPC`, when reached. Each has `lash.turn.phase`; commits also
+have `lash.owner.revision`. They parent to `invoke_agent` and follow its
+sampling decision. Nested spans overlap; exclusive shares require an interval
+union with precedence for the deepest active phase. No additional metric
+labels contain SQL shapes, origins, revisions, session ids or turn ids.
+
+Cold owners carry their successful physical claim into the first pass. Shared
+batch SQL is assigned once to the first claimed actor; each member retains its
+shared wall. Warm resident turns have no claim.
+
+The profile retains at most 512 intervals, 512 SQL shape/origin keys and 512
+graph-write kind keys per attempt. SQL literals are redacted. Physical totals
+are distinct from logical lifecycle counters and do not survive owner death.
+The flight recorder can trigger on a slow turn terminal using its retained
+logical duration and the configured threshold.
+"#);
     out
 }
 

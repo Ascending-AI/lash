@@ -71,8 +71,7 @@ agent-frame-switch outcomes remain distinct. Cancellation alone does not trigger
 Reported durations come from tool, code, model-call and prompt-composition
 completions. Domain completions use their retained start and the record timestamp;
 provider-attempt completions use the observation's start and end. Missing or
-reversed endpoints yield no duration. Events without timing evidence, including
-turn terminals, do not gain inferred durations: the recorder maintains no separate
+reversed endpoints yield no duration. Events without timing evidence do not gain inferred durations: the recorder maintains no separate
 start map. Provider/stream elapsed times are stream progress, not operation
 completions, and do not trigger slow-operation snapshots.
 
@@ -91,3 +90,7 @@ synchronously outside the lock after the inner append, even if that append fails
 its cost therefore adds to append latency. Use a bounded queue for expensive
 exports and choose a policy for queue saturation. The wrapper returns the inner
 append/flush result unchanged and introduces no files, threads, timers or IO.
+
+A slow successful `TurnCompleted` terminal also triggers duration capture, using
+its retained trace position or its physical profile when no position exists.
+The host-configured slow threshold and minimum interval apply unchanged.

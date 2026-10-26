@@ -203,6 +203,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
     ] {
         let case = done_reason.wire_tag();
         let event = TraceEvent::TurnCompleted {
+            profile: None,
             output: Vec::new(),
             input: Vec::new(),
             inference_calls: None,
@@ -221,6 +222,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "completed turn",
             TraceEvent::TurnCompleted {
+                profile: None,
                 output: Vec::new(),
                 input: Vec::new(),
                 inference_calls: None,
@@ -234,6 +236,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "cancelled turn",
             TraceEvent::TurnCompleted {
+                profile: None,
                 output: Vec::new(),
                 input: Vec::new(),
                 inference_calls: None,

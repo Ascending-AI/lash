@@ -1357,8 +1357,10 @@ impl Lifecycle {
                 result,
             }
         };
-        self.running
-            .spawn(attempt.instrument(tracing::Span::current()));
+        self.running.spawn(
+            lash_core_ids::operational_metrics::turn::carry(attempt)
+                .instrument(tracing::Span::current()),
+        );
     }
 
     /// Record one finished attempt on `tx`: its final outcome with its

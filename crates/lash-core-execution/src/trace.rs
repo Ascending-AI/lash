@@ -538,6 +538,7 @@ mod span_identity_tests {
                 (
                     TraceContext::default(),
                     TraceEvent::TurnCompleted {
+                        profile: None,
                         output: Vec::new(),
                         input: Vec::new(),
                         inference_calls: None,

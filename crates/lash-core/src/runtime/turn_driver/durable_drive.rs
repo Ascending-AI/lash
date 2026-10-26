@@ -1076,24 +1076,27 @@ impl TurnDrive for RuntimeDrive {
     }
 
     async fn phase_committed(&mut self, cx: &ActorContext) -> Result<(), TurnError> {
-        if let Some(projection) = cx.session_projection().await? {
-            self.driver.prompt_state = projection.prompt.draft();
-        }
-        self.driver.publish_committed_model_calls(&self.observer);
-        let Some(staged) = self.staged_working.take() else {
-            return Ok(());
-        };
-        self.working = Some(staged);
-        self.driver.session_pages = working_pages(
-            &self.driver.scoped_effect_controller,
-            &self.driver.session_id,
-            &self.driver.turn_id,
-            staged,
-        );
-        if let Some(code_executor) = self.driver.session.plugins().code_executor() {
-            code_executor.acknowledge_execution_state_capture().await;
-        }
-        Ok(())
+        lash_core_ids::operational_metrics::turn::phase("readback", None, async {
+            if let Some(projection) = cx.session_projection().await? {
+                self.driver.prompt_state = projection.prompt.draft();
+            }
+            self.driver.publish_committed_model_calls(&self.observer);
+            let Some(staged) = self.staged_working.take() else {
+                return Ok(());
+            };
+            self.working = Some(staged);
+            self.driver.session_pages = working_pages(
+                &self.driver.scoped_effect_controller,
+                &self.driver.session_id,
+                &self.driver.turn_id,
+                staged,
+            );
+            if let Some(code_executor) = self.driver.session.plugins().code_executor() {
+                code_executor.acknowledge_execution_state_capture().await;
+            }
+            Ok(())
+        })
+        .await
     }
 
     fn code_executor(&self) -> Option<std::sync::Arc<dyn crate::plugin::CodeExecutorPlugin>> {

@@ -424,6 +424,18 @@ async fn install_nodes(
     let inserted = graph::insert_absent(tx, &absent).await?;
     for (node, hash) in &absent {
         if inserted.contains(*hash) {
+            if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current()
+                .filter(|w| w.turn_context().is_some())
+                && let Ok(envelope) =
+                    lash_core_store::checkpoint_graph::parse_envelope(&node.bytes, Some(node.id))
+            {
+                let kind = envelope.kind.spec().map_or("unknown", |s| s.name);
+                lash_core_ids::operational_metrics::turn::installed_kind(
+                    Some(&window),
+                    kind,
+                    node.bytes.len() as u64,
+                );
+            }
             installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
             installed.new_nodes += 1;
             installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);

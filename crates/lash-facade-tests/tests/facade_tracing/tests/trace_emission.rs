@@ -31,6 +31,8 @@ pub(super) struct Observed {
     metrics: InMemoryMetricExporter,
     meter: SdkMeterProvider,
     _tracer: lash::tracing::LashTracerProvider,
+    sql: Arc<StdMutex<Vec<lash::tracing::sql::Receipt>>>,
+    sql_root: Arc<StdMutex<Option<lash::tracing::sql::Window>>>,
 }
 
 impl Observed {
@@ -57,6 +59,8 @@ impl Observed {
                 metrics,
                 meter,
                 _tracer: tracer,
+                sql: Arc::default(),
+                sql_root: Arc::default(),
             },
             builder,
         )
@@ -181,12 +185,40 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
         reasoning_output_tokens: 1,
         unknown_calls: 0,
     };
+    let sql = Arc::new(StdMutex::new(Vec::new()));
+    let receipts = Arc::clone(&sql);
+    let sql_root = Arc::new(StdMutex::new(None));
+    let root = Arc::clone(&sql_root);
+    let mut options = lash_sqlite_store::SqliteStoreSetOptions::memory();
+    options.observer = lash::tracing::StoreObserver::default().with_sql_sink(move |receipt, _| {
+        let mut recorded = receipts.lock_recover();
+        recorded.push(receipt.clone());
+        if receipt.operation == "turn.commit"
+            && let Some(window) = lash::tracing::sql::Window::current()
+        {
+            *root.lock_recover() = Some(window);
+        }
+    });
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
+        .expect("memory stores"),
+    );
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let builder = explicit_ephemeral_facets(LashCore::standard_builder(
-        sqlite_memory_store_backend().await,
+        lash_conformance::backend_over(stores),
     ))
     .serve_test_llm_profile(mock_provider(calls).into_handle(), mock_llm_profile_spec())
     .tools(lash::tool_provider_key!("tools"), Arc::new(EchoTool));
-    let (observed, builder) = Observed::install(builder);
+    let (mut observed, builder) = Observed::install(builder);
+    observed.sql = sql;
+    observed.sql_root = sql_root;
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
@@ -406,9 +438,87 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
         1,
         "one terminal across both sends: {completed:#?}"
     );
+    let lash_trace::TraceEvent::TurnCompleted {
+        profile: Some(profile),
+        ..
+    } = &completed[0].event
+    else {
+        panic!("observed owner emits a turn profile")
+    };
+    assert!(profile.statements > 0);
+    assert_eq!(
+        profile.sql.iter().map(|r| r.statements).sum::<u64>(),
+        profile.statements
+    );
+    assert_eq!(
+        profile.exclusive_ns().values().sum::<u64>(),
+        profile.elapsed_ns
+    );
+    // Independent observer windows count SQL at the store boundary, before
+    // the owner projects phase/counter attributes onto its terminal.
+    {
+        let independent = observed.sql.lock_recover();
+        let commits: Vec<_> = independent
+            .iter()
+            .filter(|r| {
+                r.owner
+                    .as_ref()
+                    .is_some_and(|o| o.actor.contains(TURN_SESSION))
+            })
+            .collect();
+        assert!(
+            !commits.is_empty(),
+            "independent SQL observer saw owner commits"
+        );
+        let reference: u64 = commits.iter().map(|r| r.statements).sum();
+        let measured: u64 = profile
+            .sql
+            .iter()
+            .filter(|r| r.phase == "commit" && r.owner_commit)
+            .map(|r| r.statements)
+            .sum();
+        assert_eq!(
+            measured, reference,
+            "phase SQL conserves independent owner commit windows"
+        );
+        let root = observed
+            .sql_root
+            .lock_recover()
+            .as_ref()
+            .expect("terminal commit retains the independent parent SQL window")
+            .snapshot();
+        let claim_statements: u64 = profile
+            .sql
+            .iter()
+            .filter(|r| r.phase == "claim")
+            .map(|r| r.statements)
+            .sum();
+        assert_eq!(
+            profile.statements - claim_statements,
+            root.statements,
+            "owner-pass statements equal the independent SQL window; the preceding shared claim has its own window"
+        );
+    }
+    for name in [
+        "admission",
+        "prompt/environment build",
+        "model call",
+        "tool calls",
+        "checkpoint encode",
+        "commit",
+        "readback",
+    ] {
+        assert!(
+            profile.phases.iter().any(|p| p.phase == name),
+            "missing phase {name}"
+        );
+        let children = observed.spans(&format!("lash.turn.{}", name.replace([' ', '/'], "_")));
+        assert!(!children.is_empty(), "missing exported phase {name}");
+    }
     assert_eq!(
         completed[0].event,
         lash_trace::TraceEvent::TurnCompleted {
+            profile: Some(profile.clone()),
             output: Vec::new(),
             input: Vec::new(),
             inference_calls: Some(2),
@@ -426,6 +536,28 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
         attribute(span, "lash.outcome").as_deref(),
         Some("completed")
     );
+    for (key, value) in [
+        ("lash.turn.sql.statements", profile.statements),
+        ("lash.turn.sql.dml", profile.dml),
+        ("lash.turn.sql.transactions", profile.transactions),
+        ("lash.turn.store.bytes_written", profile.store_bytes_written),
+        ("lash.turn.snapshots", profile.snapshots),
+        ("lash.turn.manifests", profile.manifests),
+        ("lash.turn.link_payloads", profile.link_payloads),
+    ] {
+        assert_eq!(
+            attribute(span, key),
+            Some(value.to_string()),
+            "counter {key}"
+        );
+    }
+    for phase in observed
+        .exported()
+        .iter()
+        .filter(|s| s.name.starts_with("lash.turn."))
+    {
+        assert_eq!(phase.parent_span_id, span.span_context.span_id());
+    }
     assert_eq!(attribute(span, "lash.turn.id").as_deref(), Some(TURN));
     assert_eq!(
         attribute(span, "lash.session.id").as_deref(),

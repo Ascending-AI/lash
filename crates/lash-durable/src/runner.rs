@@ -401,9 +401,16 @@ pub struct Owned {
     drain: Drain,
     liveness: Liveness,
     acknowledged_commits: std::sync::atomic::AtomicU64,
+    turn_profile: Option<lash_core_ids::operational_metrics::turn::Context>,
 }
 
 impl Owned {
+    /// Measurements of the physical claim that gave this owner its actor.
+    #[doc(hidden)]
+    pub fn turn_profile(&self) -> Option<&lash_core_ids::operational_metrics::turn::Context> {
+        self.turn_profile.as_ref()
+    }
+
     /// Successful writes acknowledged through this grant. Idle reads do not
     /// reset an activation's immediate conflict-retry allowance.
     #[doc(hidden)]
@@ -665,6 +672,7 @@ pub enum Wake {
 
 /// One node's serving loop.
 pub struct Runner {
+    turn_profiles: bool,
     store: Arc<dyn DurableStore>,
     clock: Arc<dyn Clock>,
     config: RunnerConfig,
@@ -699,6 +707,13 @@ async fn next_node_wake(feed: &mut Option<Box<dyn NodeWakeFeed>>) -> NodeWakeEve
 }
 
 impl Runner {
+    /// Enable physical claim profiles for a host that observes its turns.
+    #[must_use]
+    pub fn with_turn_profiles(mut self, enabled: bool) -> Self {
+        self.turn_profiles = enabled;
+        self
+    }
+
     #[must_use]
     pub fn new(
         store: Arc<dyn DurableStore>,
@@ -717,6 +732,7 @@ impl Runner {
             drain: Drain::default(),
             liveness,
             registration: NodeRegistration::default(),
+            turn_profiles: false,
         }
     }
 
@@ -906,13 +922,13 @@ impl Runner {
         let mut marked_draining = false;
         let stopped = 'serve: loop {
             while !self.drain.started() && active.len() < capacity {
-                let Some((claimed, woke)) = pending.pop_front() else {
+                let Some((claimed, woke, profile)) = pending.pop_front() else {
                     break;
                 };
                 self.activate(
                     &mut active,
                     &mut claims,
-                    claimed,
+                    (claimed, profile),
                     &lease.capabilities,
                     woke,
                     retention.idle,
@@ -938,7 +954,7 @@ impl Runner {
                 abandoned.extend(
                     pending
                         .drain(..)
-                        .map(|(claim, _)| (claim.actor, claim.epoch)),
+                        .map(|(claim, _, _)| (claim.actor, claim.epoch)),
                 );
                 if !marked_draining {
                     let mark = self.store.mark_draining(&lease);
@@ -1170,10 +1186,15 @@ impl Runner {
             // The room this claim may fill; an adoption takes what this boot
             // already owns, whatever the room.
             let mut room = 0;
+            let profile = self
+                .turn_profiles
+                .then(lash_core_ids::operational_metrics::turn::Context::default);
             let claimed = if adopt {
-                match self
-                    .bounded(&mut stop, &ended, self.store.owned(&lease))
-                    .await
+                match lash_core_ids::operational_metrics::turn::claim(
+                    profile.as_ref(),
+                    self.bounded(&mut stop, &ended, self.store.owned(&lease)),
+                )
+                .await
                 {
                     Ok(owned) => owned.map(|owned| {
                         owned
@@ -1191,9 +1212,11 @@ impl Runner {
                 if room == 0 {
                     continue;
                 }
-                match self
-                    .bounded(&mut stop, &ended, self.store.claim(&lease, room))
-                    .await
+                match lash_core_ids::operational_metrics::turn::claim(
+                    profile.as_ref(),
+                    self.bounded(&mut stop, &ended, self.store.claim(&lease, room)),
+                )
+                .await
                 {
                     Ok(claimed) => claimed,
                     Err(stopped) => break stopped,
@@ -1210,7 +1233,13 @@ impl Runner {
                         self.hints.owe_claim();
                         next_claim = Some(now + settings.claim_backoff);
                     }
-                    pending.extend(claimed.into_iter().map(|claimed| (claimed, woke)));
+                    pending.extend(claimed.into_iter().enumerate().map(|(index, claimed)| {
+                        (
+                            claimed,
+                            woke,
+                            profile.as_ref().map(|p| p.claimed_actor(index == 0)),
+                        )
+                    }));
                 }
                 Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
                 // A claim whose reply is lost may have taken actors: adopt
@@ -1335,11 +1364,15 @@ impl Runner {
         &self,
         active: &mut JoinSet<Exit>,
         claims: &mut HashMap<tokio::task::Id, (ActorKey, Epoch)>,
-        claimed: Claimed,
+        profiled: (
+            Claimed,
+            Option<lash_core_ids::operational_metrics::turn::Context>,
+        ),
         capabilities: &crate::NodeCapabilities,
         claimed_on: Wake,
         idle: std::time::Duration,
     ) {
+        let (claimed, turn_profile) = profiled;
         let actor = claimed.actor.clone();
         let claim = (claimed.actor.clone(), claimed.epoch);
         let owned = Owned {
@@ -1355,6 +1388,7 @@ impl Runner {
             drain: self.drain.clone(),
             liveness: self.liveness.clone(),
             acknowledged_commits: std::sync::atomic::AtomicU64::new(0),
+            turn_profile,
         };
         let activation = Arc::clone(&self.activation);
         let running = Running {

@@ -1371,10 +1371,10 @@ CREATE OR REPLACE FUNCTION lash_owner_commit(
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
-    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
+    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT, p_profile BOOLEAN)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB)
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB, o_inserted BYTEA[])
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -2809,7 +2809,7 @@ BEGIN
              );
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
-        v_session_heads;
+        v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END;
 END
 $lash_owner_commit$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(

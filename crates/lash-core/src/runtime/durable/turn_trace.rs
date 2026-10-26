@@ -316,6 +316,8 @@ pub(super) fn ended(
                 (
                     context(&row.session, &row.run, row.admission.input_ids().first()),
                     TraceEvent::TurnCompleted {
+                        profile: lash_core_ids::operational_metrics::turn::Context::current()
+                            .map(|c| c.snapshot()),
                         input: content.0,
                         output: content.1,
                         inference_calls: Some(counts.0),

@@ -201,6 +201,7 @@ impl ToolRegistry {
             .providers
             .get(key)
             .ok_or_else(|| PluginError::Registration(format!("unknown tool provider {key}")))?;
+        lash_core_ids::operational_metrics::turn::callbacks(1, 0, 0);
         let snapshot = provider.environment_snapshot(key, source, revision, config, namespace)?;
         let mut ids = std::collections::BTreeSet::new();
         for entry in &snapshot.fragment.tools {

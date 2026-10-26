@@ -684,6 +684,7 @@ impl TraceEvent {
                 duration_ms: _,
             } => text(C::Code, "code", code, f),
             Self::TurnCompleted {
+                profile: _,
                 inference_calls: _,
                 tool_calls: _,
                 input,

@@ -351,6 +351,9 @@ impl std::fmt::Debug for SessionActivation {
 }
 
 impl SessionActivation {
+    pub(super) fn observes_physical_turns(&self) -> bool {
+        self.services.tracing().is_some_and(|t| t.is_observed())
+    }
     /// The activation of sessions over `backend`, running turns with
     /// `services` and reporting to `probe` (`NoProbe` in production).
     #[must_use]
@@ -409,112 +412,139 @@ impl SessionActivation {
         release: bool,
         heads: &mut SessionOwner,
         carry_checked: &mut bool,
+        initial_profile: Option<lash_core_ids::operational_metrics::turn::Context>,
     ) -> Result<Pass, TurnError> {
-        // A turn's scope whose cascade a crash cut short is marked to its end
-        // before anything else (L6b).
-        continue_scope_ends(cx, session).await?;
-        let mut tx = match close_pass(cx, session, self.services.tracing()).await? {
-            Closing::Ran(pass) => return Ok(pass),
-            Closing::Not(tx) => *tx,
-        };
-        // Admission owns the answer to an unreadable head. Do not hydrate
-        // that head before the queued sender has a run that can be refused.
-        let mut open = match cx.session_projection().await? {
-            Some(projection) => projection.turn,
-            None => cx.durable_reads()?.turn(session).await?,
-        };
-        if let Some(row) = &mut open {
-            row.cancel = tx.turn_cancel().cloned();
-        }
-        let Some(row) = open else {
-            // No unfinished turn: the mailbox says what runs next (L3s).
-            let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
-            // An idle session an earlier build left is carried to this
-            // build's formats, once per claim, before it is let go: the
-            // operator's sweep wakes it for this (FIG-5787).
-            if drain.admit.is_none() && !*carry_checked {
-                *carry_checked = true;
-                if cx.holds_carried_session().await? {
-                    drop(tx);
-                    let carried = self.services.carry_session(cx, session).await;
-                    *carry_checked = carried.is_ok();
-                    carried?;
-                    heads.acknowledged(cx, session).await?;
-                    return Ok(Pass::Again);
-                }
-            }
-            // A lost terminal publication leaves no open turn to hydrate
-            // the head. Discover it only after mail admission, so an
-            // unreadable head cannot preempt a queued sender's refusal.
-            if drain.admit.is_none() {
-                heads.discover(cx, session).await;
-                self.services.announce_head(cx, session).await;
-            }
-            return match drain.admit {
-                Some(admitted) if admitted.admission.is_turn() => {
-                    // The turn's trace scope is retained by its admission:
-                    // every owner that runs the turn reads the scope back
-                    // and names its span from it (FIG-5395).
-                    let trace = self
-                        .services
-                        .turn_trace_scope(cx, &admitted.run, &admitted.causes);
-                    let inputs = admitted.admission.input_ids().len();
-                    let send = admitted.admission.input_ids().first().cloned();
-                    let admitted = AdmittedInputs {
-                        admission: admitted.admission.with_trace(trace.clone()),
-                        ..admitted
-                    };
-                    let run = admitted.run.clone();
-                    let row = admit_turn(cx, &mut tx, admitted).await?;
-                    // Admission and the first owner boundary share one commit.
-                    // Until then, acceptance alone is durable: a crash leaves
-                    // the send open and the next owner derives admission again.
-                    // The same commit stamps this build's session format.
-                    tx.stamp_formats(cx.backend().formats().session().clone());
-                    let services = Arc::clone(&self.services);
-                    let admitted_session = session.clone();
-                    let cx = cx.with_first_commit(tx, move || {
-                        turn_trace::started(
-                            services.tracing(),
-                            &admitted_session,
-                            &run,
-                            trace.as_ref(),
-                            inputs,
-                            send.as_ref(),
-                        );
-                    });
-                    // The admission is owed to its sender. Work that ends
-                    // before the turn's first owner commit (a failed pass,
-                    // a panic) hands it on alone, so the input stays bound
-                    // to its run: a cancel of it then ends that run (FIG-7351).
-                    let ran = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
-                        self.run_turn(&cx, session, heads, row),
-                    ))
-                    .await;
-                    if let Err(error) = cx.commit_pending_first(CommitLabel::TURN_ADMIT).await {
-                        tracing::debug!(%error, "the turn's admission was not handed on");
-                    }
-                    ran.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-                }
-                // A command run binds nothing: the commit that applies it
-                // settles its row, and until then every drain hands it out
-                // again.
-                Some(admitted) => {
-                    drop(tx);
-                    self.services.apply_commands(cx, &admitted).await?;
-                    heads.acknowledged(cx, session).await?;
-                    Ok(Pass::Again)
-                }
-                None if release => {
-                    tx.give_up(Release::Idle);
-                    cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
-                    Ok(Pass::Released)
-                }
-                None => Ok(Pass::Idle),
+        let profile = self
+            .services
+            .tracing()
+            .filter(|t| t.is_observed())
+            .map(|_| initial_profile.unwrap_or_default());
+        let work = Box::pin(async {
+            // A turn's scope whose cascade a crash cut short is marked to its end
+            // before anything else (L6b).
+            continue_scope_ends(cx, session).await?;
+            let mut tx = match close_pass(cx, session, self.services.tracing()).await? {
+                Closing::Ran(pass) => return Ok(pass),
+                Closing::Not(tx) => *tx,
             };
-        };
-        drop(tx);
-        self.run_turn(cx, session, heads, row).await
+            // Admission owns the answer to an unreadable head. Do not hydrate
+            // that head before the queued sender has a run that can be refused.
+            let mut open = match cx.session_projection().await? {
+                Some(projection) => projection.turn,
+                None => cx.durable_reads()?.turn(session).await?,
+            };
+            if let Some(row) = &mut open {
+                row.cancel = tx.turn_cancel().cloned();
+            }
+            let Some(row) = open else {
+                // No unfinished turn: the mailbox says what runs next (L3s).
+                let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
+                // An idle session an earlier build left is carried to this
+                // build's formats, once per claim, before it is let go: the
+                // operator's sweep wakes it for this (FIG-5787).
+                if drain.admit.is_none() && !*carry_checked {
+                    *carry_checked = true;
+                    if cx.holds_carried_session().await? {
+                        drop(tx);
+                        let carried = self.services.carry_session(cx, session).await;
+                        *carry_checked = carried.is_ok();
+                        carried?;
+                        heads.acknowledged(cx, session).await?;
+                        return Ok(Pass::Again);
+                    }
+                }
+                // A lost terminal publication leaves no open turn to hydrate
+                // the head. Discover it only after mail admission, so an
+                // unreadable head cannot preempt a queued sender's refusal.
+                if drain.admit.is_none() {
+                    heads.discover(cx, session).await;
+                    self.services.announce_head(cx, session).await;
+                }
+                return match drain.admit {
+                    Some(admitted) if admitted.admission.is_turn() => {
+                        // The turn's trace scope is retained by its admission:
+                        // every owner that runs the turn reads the scope back
+                        // and names its span from it (FIG-5395).
+                        let trace =
+                            self.services
+                                .turn_trace_scope(cx, &admitted.run, &admitted.causes);
+                        let inputs = admitted.admission.input_ids().len();
+                        let send = admitted.admission.input_ids().first().cloned();
+                        let admitted = AdmittedInputs {
+                            admission: admitted.admission.with_trace(trace.clone()),
+                            ..admitted
+                        };
+                        let run = admitted.run.clone();
+                        let row = admit_turn(cx, &mut tx, admitted).await?;
+                        // Admission and the first owner boundary share one commit.
+                        // Until then, acceptance alone is durable: a crash leaves
+                        // the send open and the next owner derives admission again.
+                        // The same commit stamps this build's session format.
+                        tx.stamp_formats(cx.backend().formats().session().clone());
+                        let services = Arc::clone(&self.services);
+                        let admitted_session = session.clone();
+                        let cx = cx.with_first_commit(tx, move || {
+                            turn_trace::started(
+                                services.tracing(),
+                                &admitted_session,
+                                &run,
+                                trace.as_ref(),
+                                inputs,
+                                send.as_ref(),
+                            );
+                        });
+                        // The admission is owed to its sender. Work that ends
+                        // before the turn's first owner commit (a failed pass,
+                        // a panic) hands it on alone, so the input stays bound
+                        // to its run: a cancel of it then ends that run (FIG-7351).
+                        let ran = futures_util::FutureExt::catch_unwind(
+                            std::panic::AssertUnwindSafe(self.run_turn(&cx, session, heads, row)),
+                        )
+                        .await;
+                        if let Err(error) = cx.commit_pending_first(CommitLabel::TURN_ADMIT).await {
+                            tracing::debug!(%error, "the turn's admission was not handed on");
+                        }
+                        ran.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                    }
+                    // A command run binds nothing: the commit that applies it
+                    // settles its row, and until then every drain hands it out
+                    // again.
+                    Some(admitted) => {
+                        drop(tx);
+                        self.services.apply_commands(cx, &admitted).await?;
+                        heads.acknowledged(cx, session).await?;
+                        Ok(Pass::Again)
+                    }
+                    None if release => {
+                        tx.give_up(Release::Idle);
+                        cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
+                        Ok(Pass::Released)
+                    }
+                    None => Ok(Pass::Idle),
+                };
+            };
+            drop(tx);
+            self.run_turn(cx, session, heads, row).await
+        });
+        match profile {
+            Some(profile) => {
+                profile
+                    .within(async {
+                        let sql = lash_core_ids::operational_metrics::sql::Window::new(
+                            "turn.owner",
+                            "mixed",
+                        );
+                        sql.within(lash_core_ids::operational_metrics::turn::phase(
+                            "admission",
+                            None,
+                            work,
+                        ))
+                        .await
+                    })
+                    .await
+            }
+            None => work.await,
+        }
     }
 }
 
@@ -636,6 +666,7 @@ impl Activation for SessionActivation {
                 let mut idle_since = None;
                 // The owner cache of the session's head, for this claim's epoch.
                 let mut heads = SessionOwner::default();
+                let mut initial_profile = owned.turn_profile().cloned();
                 // Whether this claim asked if its idle session is to be carried to
                 // this build's formats (FIG-5787).
                 let mut carry_checked = false;
@@ -664,6 +695,7 @@ impl Activation for SessionActivation {
                                 release,
                                 &mut heads,
                                 &mut carry_checked,
+                                initial_profile.take(),
                             ))
                             .await
                         }

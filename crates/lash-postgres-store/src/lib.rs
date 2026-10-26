@@ -133,7 +133,9 @@ async fn acquire_runtime_connection(
     #[cfg(feature = "perf-witness")]
     let perf_started_at = std::time::Instant::now();
     let metrics_started_at = observer.is_observed().then(std::time::Instant::now);
-    let connection = pool.acquire().await;
+    let connection =
+        lash_core_ids::operational_metrics::turn::phase("store pool wait", None, pool.acquire())
+            .await;
     if let Some(started_at) = metrics_started_at {
         observer.pool_acquire_wait(
             started_at.elapsed(),
