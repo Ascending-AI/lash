@@ -124,7 +124,7 @@ fn source(python: bool, variant: Variant, payload: usize) -> String {
         "await tools.benchRead({previous: r})"
     };
     let final_value = format!("{}:{}", variant.count(), "x".repeat(payload));
-    let body = if python {
+    if python {
         (if variant == Variant::Mixed {
             format!(
                 "r = \"seed\"\nr = {call}\nawait tools.bench_write({{\"previous\": r}})\nr = {call}\n"
@@ -143,9 +143,7 @@ fn source(python: bool, variant: Variant, payload: usize) -> String {
             "if (r !== {}) {{ throw new Error(\"bad chain\"); }}\nconsole.log(r.length);",
             json!(final_value)
         )
-    };
-    let dialect = if python { "python" } else { "typescript" };
-    format!("<{dialect}>\n{body}\n</{dialect}>")
+    }
 }
 
 type ReadStores = (
@@ -425,9 +423,13 @@ async fn measure_with_stores(
                     .iter()
                     .any(|m| m.role == lash_core::llm::types::LlmRole::Assistant);
                 Ok(lash_core::llm::types::LlmResponse {
-                    parts: vec![lash_core::LlmOutputPart::Text {
-                        text: if answered { "Done.".into() } else { code },
-                        response_meta: None,
+                    parts: vec![if answered {
+                        lash_core::LlmOutputPart::Text {
+                            text: "Done.".into(),
+                            response_meta: None,
+                        }
+                    } else {
+                        lash::testing::execute_code(code)
                     }],
                     ..Default::default()
                 })

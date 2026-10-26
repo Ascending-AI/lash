@@ -319,7 +319,7 @@ fn source(scenario: &str, h: usize, cell: usize) -> String {
         "next-cell" => String::new(),
         _ => "kept[0] = -1; if (kept[0] !== -1) throw new Error(\"mutation\");".to_owned(),
     };
-    let body = if scenario == "next-cell" {
+    if scenario == "next-cell" {
         if cell == 0 {
             format!("{seed} await tools.heapGate({{phase:0}}); console.log(\"heap-seeded\");")
         } else {
@@ -335,8 +335,7 @@ fn source(scenario: &str, h: usize, cell: usize) -> String {
         }
         body.push_str("console.log(\"heap-ok\");");
         body
-    };
-    format!("/*heap-cell:{cell}*/\n{body}")
+    }
 }
 fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
     let scenario = scenario.to_owned();
@@ -348,7 +347,7 @@ fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
             async move {
                 let cells = request.messages.iter().filter(|message| message.role == LlmRole::Assistant)
                     .flat_map(|message| message.blocks.iter()).filter(|block| matches!(block,
-                        lash_core::llm::types::LlmContentBlock::Text { text, .. } if text.contains("/*heap-cell:"))).count();
+                        lash_core::llm::types::LlmContentBlock::ToolCall { tool_name, .. } if tool_name == "execute_code")).count();
                 let total = if scenario == "next-cell" { 2 } else { 1 };
                 let text = if cells < total { source(&scenario, h, cells) } else {
                     let feedback = serde_json::to_string(&request.messages.iter().filter(|message| message.role == LlmRole::User).collect::<Vec<_>>()).unwrap_or_default();
