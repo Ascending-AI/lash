@@ -1009,7 +1009,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let floor = self.construction_floor(kind, *members);
                 self.transient = self.transient.saturating_sub(floor);
                 frame.transient = frame.transient.saturating_sub(floor);
-                let values = items.iter().map(|reg| regs[*reg as usize]).collect();
+                let values = items.iter().map(|reg| regs[*reg as usize]);
                 let answer = self.make(*make, values);
                 frame.transient += self.transient.saturating_sub(before);
                 regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
@@ -1029,7 +1029,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
                 self.transient = self.transient.saturating_sub(floor);
                 frame.transient = frame.transient.saturating_sub(floor);
-                let values = values.iter().map(|reg| regs[*reg as usize]).collect();
+                let values = values.iter().map(|reg| regs[*reg as usize]);
                 let answer = self.record(names, values);
                 frame.transient += self.transient.saturating_sub(before);
                 regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;

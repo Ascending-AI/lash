@@ -13,6 +13,16 @@ pub(super) struct HeapAnswer {
     events: Option<Vec<Weight>>,
 }
 
+impl HeapAnswer {
+    pub(super) fn resident(value: Value, units: u64) -> Self {
+        Self {
+            value,
+            units,
+            events: None,
+        }
+    }
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Keep the ordered event owner out of the scalar operator's live frame.
     #[inline(never)]
@@ -204,6 +214,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return None;
         }
+        if operator
+            && matches!(args.first(), Some(Value::Record(_)))
+            && let Some(answer) = self.resident_write(function, args, before, checked)
+        {
+            return Some(answer);
+        }
         let answer = self.heap(before, strict, |cx| {
             let value = if operator && function.prepared.is_some() {
                 cx.operate_on(function, args, Fresh::default())
@@ -332,7 +348,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// The semantic heap context's room test for an operation that has
     /// no formula, temporary work or staged write. Tapes and observations
     /// retain that context as the reference; tight entries decline there.
-    fn resident_room(&self, bytes: u64) -> bool {
+    pub(super) fn resident_room(&self, bytes: u64) -> bool {
         #[cfg(test)]
         if self.scratch.chilled {
             return false;
@@ -383,9 +399,25 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn make(
         &mut self,
         make: crate::compile::expr::Make,
-        values: Vec<Value>,
+        values: impl ExactSizeIterator<Item = Value>,
     ) -> Option<Value> {
         use crate::compile::expr::Make;
+        // Small argument lists already fit the register executor's operand
+        // allowance. Build their inline arena sequence without a temporary Vec.
+        if make == Make::List
+            && values.len() <= MAX_ARGS
+            && self.resident_room(self.arena.sequence_bound(values.len()))
+        {
+            let count = values.len();
+            let mut items = [Value::Absent; MAX_ARGS];
+            for (to, value) in items.iter_mut().zip(values) {
+                *to = value;
+            }
+            #[cfg(test)]
+            super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+            return Some(self.arena.create_list(&items[..count]));
+        }
+        let values = values.collect::<Vec<_>>();
         if matches!(make, Make::List | Make::Tuple)
             && self.resident_room(self.arena.sequence_bound(values.len()))
         {
@@ -441,7 +473,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.arena.tuple(Vec::new(), self.limits.value_depth()).ok()
     }
 
-    pub(super) fn record(&mut self, names: &[Value], values: Vec<Value>) -> Option<Value> {
+    pub(super) fn record(
+        &mut self,
+        names: &[Value],
+        values: impl ExactSizeIterator<Item = Value>,
+    ) -> Option<Value> {
         if self.resident_room(self.arena.table_bound(values.len())) {
             #[cfg(test)]
             super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
@@ -486,6 +522,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     let field = self.stream.fields.get(field)?;
                     let key = lash_kernel_doc::arena::ShortText::new(&field.name)?;
                     let slot = field.site.and_then(|site| self.sites.slot(site));
+                    if let Some(slot) = slot
+                        && crate::compile::write_property(self.arena, record, slot, &key, value)
+                            .ok()?
+                    {
+                        #[cfg(test)]
+                        super::DIRECT_COLLECTIONS.with(|n| n.set(n.get() + 1));
+                        return Some(());
+                    }
                     let (_, found) = find_property(self.arena, record, slot, &field.key).ok()?;
                     if let Some(site) = field.site {
                         self.sites.keep(site, found);

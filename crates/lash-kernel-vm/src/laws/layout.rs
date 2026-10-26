@@ -714,7 +714,7 @@ pub(super) use helpers::{HELPERS, helper_probes};
 /// K-MACH-008 / K-CHG-001: construction, native allocation and member
 /// writes keep their source operands and first-refusal event prefix.
 pub(super) const ALLOCATING: &str = r#"
-definition "function allocate(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let xs = [x, 2] let rec = {item: xs} let m = map{\"k\": rec} let seen = set{x, 2} do invoke law.put(xs, 0, 7) set rec.item = [xs[0], seen[x]] set m[\"other\"] = rec.item let text = text.concat(\"abcdefghij\", \"klmnopqrst\") let filled = work.fill(3) return (m[\"other\"], text, filled, seen[2], invoke law.box(xs[0])) }"
+definition "function allocate(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let xs = [x, 2] let rec = {item: xs} let alias = rec do invoke law.put(alias, \"item\", xs) do invoke law.put(alias, \"extra\", x) remove rec.extra do invoke law.put(rec, \"extra\", xs) try { do invoke law.put(rec, 0, x) } catch err { print err.kind } let m = map{\"k\": rec} let seen = set{x, 2} do invoke law.put(xs, 0, 7) set rec.item = [xs[0], seen[x]] set m[\"other\"] = rec.item let text = text.concat(\"abcdefghij\", \"klmnopqrst\") let filled = work.fill(3) return (m[\"other\"], text, filled, seen[2], invoke law.box(xs[0])) }"
 main {
   do perform 0("before") as Any
   let answer = call allocate(1)
@@ -748,6 +748,21 @@ fn allocating_operations_agree() {
             .is_some_and(|statements| *statements > 0),
         "observed allocating bodies execute in the register program: {census:?}"
     );
+    for record in [false, true] {
+        let reference = observe_scalar(ALLOCATING, Layout(0), record, false, false);
+        for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
+            assert_eq!(
+                observe_scalar(ALLOCATING, layout, record, false, false),
+                reference,
+                "allocating {layout:?}, tape={record}"
+            );
+            assert_eq!(
+                observe_scalar(ALLOCATING, layout, record, true, false),
+                reference,
+                "cold allocating {layout:?}, tape={record}"
+            );
+        }
+    }
 }
 
 /// The same bodies and public signatures are authoritative for their

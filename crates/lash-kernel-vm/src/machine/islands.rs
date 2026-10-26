@@ -35,6 +35,7 @@ mod execute;
 mod heap;
 mod native;
 mod observing;
+mod resident;
 mod scheduling;
 use observing::{Projection, StatementFact, Watching};
 
