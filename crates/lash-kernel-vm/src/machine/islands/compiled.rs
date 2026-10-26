@@ -15,7 +15,7 @@ use crate::compile::{
 #[path = "program.rs"]
 mod program;
 use program::Build;
-pub(super) use program::{Instruction, Op, Read};
+pub(super) use program::{GuardedPath, Instruction, Op, Read};
 
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
@@ -147,6 +147,9 @@ pub(super) struct OperatorSite {
     /// A body-only helper exposes its frame to work observation.
     pub(super) body_when_observed: bool,
     pub(super) depth: Depth,
+    /// The call depth any of its entry's paths needs, heap paths included
+    /// ([`Entry::deepest`]): resolved by its first heap answer and kept.
+    pub(super) deepest: std::sync::OnceLock<u32>,
 }
 
 /// A prepared heap operation keeps the same semantic call coordinates.
@@ -170,9 +173,19 @@ pub(super) struct NativeSite {
     pub(super) reg: u32,
     /// The depth its prepared entry's template checks.
     pub(super) depth: Depth,
-    /// What the call charges where it is `list.len`, whose answer on a
-    /// resident list is read from the arena ([`crate::compile::Lib::length_read`]).
-    pub(super) length: Option<u64>,
+    /// The answer it reads from the arena, where it has one.
+    pub(super) direct: Option<Direct>,
+}
+
+/// A native whose answer an island reads from the arena.
+#[derive(Clone, Copy)]
+pub(super) enum Direct {
+    /// `list.len`, and what the call charges: a resident list's length
+    /// ([`crate::compile::Lib::length_read`]).
+    Length(u64),
+    /// The membership test of this table
+    /// ([`crate::compile::Lib::membership`]).
+    Member(lash_kernel_doc::plan::Table),
 }
 
 /// A compiled test `same(x, ())` of a value against the empty tuple,
@@ -434,6 +447,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         root: None,
         body_when_observed: act.is_some() && matches!(function.run, LibRun::Body(_)),
         depth,
+        deepest: std::sync::OnceLock::new(),
     };
     Some(site)
 }

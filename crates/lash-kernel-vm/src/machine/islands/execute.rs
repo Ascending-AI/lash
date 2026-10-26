@@ -11,6 +11,7 @@ use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
 
 mod boundary;
+mod guarded;
 
 enum Position {
     Block(usize, usize),
@@ -1301,7 +1302,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
             Op::Effect(pc) => return Err(self.at(*pc)),
             Op::Return { reg, pc } => {
-                if frame.recovery || (self.public_return && self.depth == 1 && frame.may_clean) {
+                // A public root return copies its value out of the run in
+                // its source statement, which raises a value that is no data
+                // at that statement's coordinate (FIG-7377).
+                if frame.recovery || (self.public_return && self.depth == 1) {
                     return Err(self.at(*pc));
                 }
                 let value = regs[*reg as usize];
@@ -1345,6 +1349,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 return Err(self.at(*pc));
             }
             Op::Cold(pc) => return Err(self.at(*pc)),
+            Op::Guarded(site) => return self.guarded(frame, site),
         }
         Ok(Next::Continue)
     }

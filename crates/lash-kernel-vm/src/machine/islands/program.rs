@@ -245,7 +245,37 @@ pub(in crate::machine::islands) enum Op {
     Wait(u32),
     Cancel(u32),
     Cold(u32),
+    /// A kind test that heads a guarded read ([`GuardedPath`]).
+    Guarded(Box<GuardedPath>),
 }
+
+/// A guarded read (FIG-7372): an `if` headed by a kind test whose true
+/// arms run only pure instructions (constants, locals, kind tests, length
+/// and membership natives, scalar operators, field and index reads,
+/// closes and branches into each arm's first statement) up to the write
+/// that ends the path. Those instructions own every coordinate and charge;
+/// the path runs them whole where each of their checks is proven first,
+/// and otherwise its kind test runs alone, having committed nothing.
+pub(in crate::machine::islands) struct GuardedPath {
+    /// The head's kind test and its operand, as its `DirectKind` held them.
+    pub(in crate::machine::islands) kind: Box<KindTest>,
+    pub(in crate::machine::islands) reads: Box<[Read]>,
+    /// The instructions after the head whose values or answers the path
+    /// takes, the write last.
+    pub(in crate::machine::islands) path: Box<[usize]>,
+    /// The coordinate of its write, the path's last.
+    pub(in crate::machine::islands) write: usize,
+    /// What the path charges whatever it reads: each statement's unit
+    /// after the head's and every close.
+    pub(in crate::machine::islands) fixed: u64,
+    /// The statements it begins after the head's.
+    pub(in crate::machine::islands) statements: u64,
+    /// The arms it enters, outermost first.
+    pub(in crate::machine::islands) arms: Box<[usize]>,
+}
+
+/// The most arms a guarded read enters.
+pub(in crate::machine::islands) const GUARDED_ARMS: usize = 4;
 
 pub(in crate::machine::islands) struct StatementEntry {
     pub(in crate::machine::islands) id: StmtId,
@@ -818,6 +848,7 @@ impl<'e> Build<'e> {
                 then_,
                 else_,
             } => {
+                let head = self.ops.len();
                 self.expr(cond)?;
                 self.close(*close, *reg);
                 self.open = None;
@@ -838,6 +869,7 @@ impl<'e> Build<'e> {
                     opens: [then_entry, else_entry],
                 };
                 self.ops[jump].op = Op::Jump(self.ops.len());
+                self.guard(head);
             }
             StatementKind::Cold => {
                 self.emit(Op::Cold(self.exe.stmt(statement.id).ops.start));
@@ -1055,7 +1087,11 @@ impl<'e> Build<'e> {
                     } else {
                         Depth::None
                     },
-                    length: self.exe.lib(*lib).length_read(),
+                    direct: {
+                        let lib = self.exe.lib(*lib);
+                        (lib.length_read().map(Direct::Length))
+                            .or_else(|| lib.membership().map(Direct::Member))
+                    },
                 };
                 self.site(site.depth, false);
                 if closes.len() <= 1
@@ -1349,6 +1385,82 @@ impl<'e> Build<'e> {
             self.registers = self.registers.max(read.reg() as usize + 1);
         }
         Some(reads)
+    }
+
+    /// Makes the kind test at `head`, an `if`'s first instruction, a
+    /// guarded read ([`GuardedPath`]) where its true arms have that shape.
+    fn guard(&mut self, head: usize) {
+        if !matches!(
+            self.ops.get(head).map(|op| &op.op),
+            Some(Op::DirectKind { .. })
+        ) {
+            return;
+        }
+        let (mut path, mut arms, mut fixed, mut statements) = (Vec::new(), Vec::new(), 0, 0);
+        let total = |close: Option<Close>| close.map_or(0, |close| u64::from(close.total));
+        for (p, instruction) in self.ops.iter().enumerate().skip(head + 1) {
+            let pure = |site: &OperatorSite| {
+                site.counted.is_none() && !site.checked && site.root.is_none()
+            };
+            if instruction.begin.is_some() {
+                fixed += 1;
+                statements += 1;
+            }
+            match &instruction.op {
+                Op::Close { close, .. } => {
+                    fixed += u64::from(close.total);
+                    continue;
+                }
+                Op::Constant { .. }
+                | Op::Local { .. }
+                | Op::Field { .. }
+                | Op::Index { .. }
+                | Op::DirectKind { .. } => {}
+                Op::DirectNative { site, .. } if site.direct.is_some() => {
+                    fixed += total(site.close);
+                }
+                Op::Operator { site, args, .. } if pure(site) && args.len() <= 3 => {
+                    fixed += site.fixed;
+                }
+                Op::DirectOperator { site, .. } if pure(site) => fixed += site.fixed,
+                Op::Branch {
+                    opens: [Some(block), _],
+                    ..
+                } if arms.len() < GUARDED_ARMS
+                    && self.blocks[*block].starts.first() == Some(&(p + 1)) =>
+                {
+                    arms.push(*block);
+                }
+                Op::Write { site }
+                    if !arms.is_empty() && !site.bind && !site.shared && !site.accumulates =>
+                {
+                    fixed += total(site.close);
+                    path.push(p);
+                    break;
+                }
+                _ => return,
+            }
+            path.push(p);
+        }
+        let Some(&write) = path
+            .last()
+            .filter(|p| matches!(self.ops[**p].op, Op::Write { .. }))
+        else {
+            return;
+        };
+        let op = std::mem::replace(&mut self.ops[head].op, Op::Jump(head + 1));
+        let Op::DirectKind { site, reads } = op else {
+            unreachable!("a guarded read's head is a kind test");
+        };
+        self.ops[head].op = Op::Guarded(Box::new(GuardedPath {
+            kind: site,
+            reads,
+            write,
+            path: path.into(),
+            fixed,
+            statements,
+            arms: arms.into(),
+        }));
     }
 
     fn root_checked(&self) -> bool {

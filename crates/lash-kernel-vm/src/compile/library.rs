@@ -62,6 +62,29 @@ impl Lib {
             && self.charge.measurements().is_empty())
         .then(|| self.charge.evaluate(|_, _| 0))
     }
+
+    /// The table whose membership test it is (FIG-6820): `map.contains`,
+    /// `set.contains` and `record.contains`, unguarded, with no prepared
+    /// entry. Its answer is a lookup that builds and reserves nothing, so
+    /// an island answers it from the arena, as the native's own call looks
+    /// the key up, and charges its formula measured on the values. `None`
+    /// for every other function.
+    pub(crate) fn membership(&self) -> Option<lash_kernel_doc::plan::Table> {
+        use lash_kernel_doc::plan::Table;
+        if !matches!(self.run, LibRun::Native { .. })
+            || self.arity != 2
+            || self.limit.is_some()
+            || self.prepared.is_some()
+        {
+            return None;
+        }
+        match self.header.name.as_str() {
+            "map.contains" => Some(Table::Map),
+            "set.contains" => Some(Table::Set),
+            "record.contains" => Some(Table::Record),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) enum LibRun {

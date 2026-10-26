@@ -704,6 +704,7 @@ fn call_probes(
     probes
 }
 
+mod guarded;
 mod helpers;
 mod windows;
 

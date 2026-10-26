@@ -53,7 +53,7 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{Depth, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
+use compiled::{Depth, Direct, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS};
@@ -226,6 +226,12 @@ pub(super) struct Scratch {
     /// Each session binding read, by its name in the stream, at its
     /// resident value: nothing writes a binding while an island runs.
     sessions: Vec<(u32, Value)>,
+    /// The heap operations' operand stack, reused rather than rebuilt by
+    /// each operation; empty between them.
+    arguments: super::registers::Arguments,
+    /// The last record key a membership test found absent, with the
+    /// record's version then ([`cx::probe`]).
+    absent: Option<cx::Absent>,
     exit: Exit,
     /// Diagnostic activation for this machine's census; never persisted.
     pub(super) counting: bool,
@@ -361,18 +367,26 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 ),
             };
             let Some(value) = value else {
-                #[cfg(any(test, feature = "perf-witness"))]
-                {
-                    self.scratch.exit.reason = Some(Reason::ResidentRead);
-                }
-                for (read, value) in reads.iter().zip(values).take(index) {
-                    self.scratch.exit.regs.push((read.reg(), value));
-                }
-                return Err(self.at(miss));
+                return Err(self.read_miss(&reads[..index], &values[..index], miss));
             };
             values[index] = value;
         }
         Ok(values)
+    }
+
+    /// The stop of a read that missed at op `miss`, keeping the operands
+    /// `reads` had already read in `values`.
+    #[cold]
+    #[inline(never)]
+    fn read_miss(&mut self, reads: &[Read], values: &[Value], miss: u32) -> Stop {
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.scratch.exit.reason = Some(Reason::ResidentRead);
+        }
+        for (read, value) in reads.iter().zip(values) {
+            self.scratch.exit.regs.push((read.reg(), *value));
+        }
+        self.at(miss)
     }
 
     /// A stop at op `pc`, which the reference runs.
@@ -961,13 +975,15 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         given: usize,
     ) -> Answer {
         let args = &padded[..given];
-        let length = match (site.length, padded[0]) {
-            (Some(units), Value::List(list)) => self.arena.len(list).ok().map(|len| {
-                (
-                    Value::Int(len as i64),
-                    if self.charging { units } else { 0 },
-                )
-            }),
+        let length = match (site.direct, padded[0]) {
+            (Some(Direct::Length(units)), Value::List(list)) => {
+                self.arena.len(list).ok().map(|len| {
+                    (
+                        Value::Int(len as i64),
+                        if self.charging { units } else { 0 },
+                    )
+                })
+            }
             _ => None,
         };
         if length.is_some()
@@ -977,23 +993,25 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             watching.formula_enter();
             watching.formula_leave();
         }
-        let charge = length.or_else(|| {
-            let function = self.exe.lib(site.lib);
-            let (entry, fast) = function.prepared.as_ref()?;
-            self.depth_fits(site.depth).then_some(())?;
-            let answer = self.answered(
-                function,
-                fast,
-                &padded[..function.arity],
-                entry.answer(&padded[..function.arity], self.charging)?,
-            );
-            if answer.is_some()
-                && let Some(watching) = &self.projection()
-            {
-                watching.prepared();
-            }
-            answer
-        });
+        let charge = length
+            .or_else(|| self.membership(site, padded))
+            .or_else(|| {
+                let function = self.exe.lib(site.lib);
+                let (entry, fast) = function.prepared.as_ref()?;
+                self.depth_fits(site.depth).then_some(())?;
+                let answer = self.answered(
+                    function,
+                    fast,
+                    &padded[..function.arity],
+                    entry.answer(&padded[..function.arity], self.charging)?,
+                );
+                if answer.is_some()
+                    && let Some(watching) = &self.projection()
+                {
+                    watching.prepared();
+                }
+                answer
+            });
         if let Some((value, units)) = charge {
             if !self.admit_native(units) {
                 return Err(self.at_operands(site.pc, site.reg, args));
@@ -1002,6 +1020,61 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             return Ok(value);
         }
         self.native_heap(site, padded, given)
+    }
+
+    /// A membership test's answer ([`crate::compile::Lib::membership`]),
+    /// looked up as the native's call looks the key up and charged its
+    /// formula measured on the values, as its general call charges it;
+    /// `None`, having committed nothing, where the lookup must leave to
+    /// that call. A record's short key found absent keeps its proof
+    /// across operations ([`cx::probe`]).
+    #[inline(always)]
+    pub(super) fn membership(
+        &mut self,
+        site: &NativeSite,
+        padded: &[Value; MAX_ARGS],
+    ) -> Option<(Value, u64)> {
+        let Some(Direct::Member(table)) = site.direct else {
+            return None;
+        };
+        self.member_answer(site, table, padded)
+    }
+
+    /// [`Self::membership`] of `table`, out of line: most natives are none.
+    #[inline(never)]
+    fn member_answer(
+        &mut self,
+        site: &NativeSite,
+        table: lash_kernel_doc::plan::Table,
+        padded: &[Value; MAX_ARGS],
+    ) -> Option<(Value, u64)> {
+        if self.projection().is_some() {
+            return None;
+        }
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return None;
+        }
+        let found = cx::probe(
+            self.arena,
+            self.limits,
+            &mut self.scratch.absent,
+            table,
+            padded[0],
+            padded[1],
+        )?;
+        let value = Value::Bool(found.is_some());
+        let units = if self.charging {
+            measured_formula(
+                self.arena,
+                &self.exe.lib(site.lib).charge,
+                &padded[..2],
+                Some(&value),
+            )?
+        } else {
+            0
+        };
+        Some((value, units))
     }
 
     #[inline(always)]
@@ -1164,7 +1237,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 pc: site.miss,
                 reg: site.reg,
                 depth: Depth::None,
-                length: None,
+                direct: None,
             };
             let mut args = [Value::Absent; MAX_ARGS];
             args[0] = value;
@@ -1439,6 +1512,8 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
 thread_local! {
     /// Real iterations executed in unboxed typed registers.
     pub(crate) static TYPED_REPEATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Guarded reads taken whole.
+    pub(crate) static GUARDED_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The callee `cache` holds at `at`, when it was resolved in the scope

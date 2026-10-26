@@ -22,6 +22,15 @@ impl Arguments {
         }
     }
 
+    /// Releases every window an earlier operation left open, so that a
+    /// reused stack starts empty.
+    #[inline(always)]
+    pub(crate) fn reset(&mut self) {
+        if self.extent != 0 {
+            self.release(0);
+        }
+    }
+
     pub(crate) fn window(&mut self, count: usize) -> Option<std::ops::Range<usize>> {
         let end = self.extent.checked_add(count)?;
         if end > Self::CAPACITY {
@@ -39,6 +48,12 @@ impl Arguments {
     pub(crate) fn release(&mut self, extent: usize) {
         self.values[extent..self.extent].fill(Value::Null);
         self.extent = extent;
+    }
+}
+
+impl Default for Arguments {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

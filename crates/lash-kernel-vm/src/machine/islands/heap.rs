@@ -25,10 +25,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(answer) = (self.admits(site)
             && counted.is_none_or(|at| self.counters.can_advance(&[at])))
         .then(|| {
+            let (exe, entry) = (self.exe, &site.entry);
+            let deepest = *site
+                .deepest
+                .get_or_init(|| entry.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)));
             self.heap_answer(
                 site.lib,
                 args,
-                true,
+                Some(deepest),
                 site.checked,
                 before,
                 site.root.is_some() && self.accounting,
@@ -52,7 +56,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(answer) = self.heap_answer(
             site.lib,
             &padded[..self.exe.lib(site.lib).arity],
-            false,
+            None,
             false,
             0,
             false,
@@ -101,13 +105,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if self.scratch.chilled {
             return None;
         }
+        self.scratch.arguments.reset();
         let mut cx = Cx {
             native_observer: self
                 .projection()
                 .map(|watching| watching as &dyn crate::observe::NativeObservation),
             meter: Meter::new(self.tape.is_some()),
             charging: self.charging,
-            args: super::super::registers::Arguments::new(),
+            args: &mut self.scratch.arguments,
             exe: self.exe,
             arena: self.arena,
             sites: self.sites,
@@ -121,10 +126,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             held: None,
             accumulator: self.accumulator.take(),
             keyed: None,
-            absent: None,
+            absent: self.scratch.absent.take(),
         };
         let answer = operation(&mut cx);
         self.accumulator = cx.accumulator.take();
+        self.scratch.absent = cx.absent.take();
         let events = if self.tape.is_some() {
             let mut events = Vec::new();
             for taken in &cx.meter.taken {
@@ -169,7 +175,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         &mut self,
         lib: crate::compile::LibId,
         args: &[Value],
-        operator: bool,
+        deepest: Option<u32>,
         checked: bool,
         before: u64,
         strict: bool,
@@ -179,8 +185,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         let function = self.exe.lib(lib);
         let signature = &function.header.signature;
-        if operator && let Some((entry, _)) = &function.prepared {
-            let extra = entry.deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
+        let operator = deepest.is_some();
+        if let Some(extra) = deepest
+            && function.prepared.is_some()
+        {
             let running = self.base + u64::from(self.depth);
             if (function.operation() && running > self.call_depth)
                 || running.saturating_add(u64::from(extra)) > self.call_depth
@@ -274,7 +282,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(answer) = self.heap_answer(
             site.lib,
             args,
-            true,
+            // The depth its template checks, its prepared entry's deepest.
+            Some(match site.depth {
+                Depth::Operation(extra) | Depth::Template(extra) => extra,
+                Depth::None => 0,
+            }),
             site.checked,
             before,
             site.root.is_some() && self.accounting,

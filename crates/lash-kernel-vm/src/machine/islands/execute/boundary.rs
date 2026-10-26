@@ -212,7 +212,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     | Op::DirectOperator { .. }
                     | Op::Unit { .. }
                     | Op::Kind { .. }
-                    | Op::DirectKind { .. } => Reason::Operator,
+                    | Op::DirectKind { .. }
+                    | Op::Guarded(_) => Reason::Operator,
                     Op::Native { .. } | Op::DirectNative { .. } | Op::Heap { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {

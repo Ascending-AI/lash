@@ -45,7 +45,8 @@ pub(crate) struct Cx<'a> {
     /// Whether the run is charged: a paced one measures no formula, and
     /// its prepared entries answer by their value-only guards.
     pub(crate) charging: bool,
-    pub(crate) args: Arguments,
+    /// The island's reused operand stack, empty between operations.
+    pub(crate) args: &'a mut Arguments,
     pub(crate) exe: &'a Executable,
     pub(crate) arena: &'a mut Arena,
     pub(crate) sites: &'a mut SiteCaches,
@@ -84,6 +85,7 @@ pub(crate) struct Cx<'a> {
     /// The short text a membership test last found absent from a record,
     /// in the record's version then: a later test of it there answers
     /// absent without hashing it while the record is still that version.
+    /// The island keeps it across operations ([`probe`]).
     pub(crate) absent: Option<Absent>,
 }
 
@@ -320,78 +322,16 @@ impl Cx<'_> {
         Some(value)
     }
 
-    /// [`Self::entry`], a record's short key answered absent by the proof
-    /// of the last test that found it absent from this version of the
-    /// record, and that proof kept where the record holds no entry under
-    /// it.
     #[inline(always)]
     fn probe(&mut self, table: Table, target: Value, key: Value) -> Option<Option<Value>> {
-        match (table, target, key) {
-            (Table::Record, Value::Record(record), Value::Text(text)) => self.probed(record, text),
-            _ => self.entry(table, target, key),
-        }
-    }
-
-    /// [`Self::probe`] of record `record`'s short key `text`, out of line
-    /// so that the other tables' lookups stay [`Self::entry`]'s.
-    #[inline(never)]
-    fn probed(&mut self, record: ArenaHandle, text: ShortText) -> Option<Option<Value>> {
-        if let Some(absent) = self.absent
-            && absent.table == record
-            && absent.key == text
-            && !self.arena.any_cold()
-            && self.arena.table_is(record, absent.version)
-        {
-            return Some(None);
-        }
-        let found = self.entry(Table::Record, Value::Record(record), Value::Text(text))?;
-        if found.is_none()
-            && let Ok(Some(version)) = self.arena.table_version(record)
-        {
-            self.absent = Some(Absent {
-                table: record,
-                key: text,
-                version,
-            });
-        }
-        Some(found)
-    }
-
-    /// `target`'s entry under `key`, looked up as `<table>.contains`'s call
-    /// looks it up, through the same views, without its call: it builds and
-    /// reserves nothing. `Some(None)` where the table holds no `key`, and a
-    /// set's member is `true`, as `target[key]` reads them; `None` where
-    /// the call raises or must decode first.
-    fn entry(&self, table: Table, target: Value, key: Value) -> Option<Option<Value>> {
-        if !matches!(
-            (table, target),
-            (Table::Map, Value::Map(_))
-                | (Table::Set, Value::Set(_))
-                | (Table::Record, Value::Record(_))
-        ) {
-            return None;
-        }
-        // A short text is a legal key of every table, and its own key.
-        if let (Value::Text(text), Some(handle)) = (key, target.handle()) {
-            let found = self.arena.table_get_text(handle, &text).ok()?;
-            return Some(found.map(|value| match table {
-                Table::Set => Value::Bool(true),
-                Table::Map | Table::Record => value,
-            }));
-        }
-        let semantics = self.arena.semantics().with_limits(self.limits);
-        let args = Args::new(&[], self.arena.objects(), &semantics);
-        let view = args.table(&target).ok()??;
-        match table {
-            Table::Record if !matches!(key, Value::Text(_) | Value::LongText(_)) => return None,
-            Table::Record => {}
-            Table::Map | Table::Set => legal_key(&args, &key)?,
-        }
-        let found = args.lookup(view, &key).ok()?;
-        Some(found.map(|value| match table {
-            Table::Set => Value::Bool(true),
-            Table::Map | Table::Record => *value,
-        }))
+        probe(
+            self.arena,
+            self.limits,
+            &mut self.absent,
+            table,
+            target,
+            key,
+        )
     }
 
     /// `call` on a window holding `values`, released after it.
@@ -725,6 +665,108 @@ impl Cx<'_> {
             Charge::Plan(plan) => self.formula(plan, args, Some(result)),
         }
     }
+}
+
+/// [`entry`], a record's short key answered absent by the proof in
+/// `absent` of the last test that found it absent from this version of the
+/// record, and that proof kept where the record holds no entry under it.
+/// The proof names the record's identity token and revision, so it stays
+/// sound across operations and collections.
+#[inline(always)]
+pub(crate) fn probe(
+    arena: &Arena,
+    limits: KernelDataLimits,
+    absent: &mut Option<Absent>,
+    table: Table,
+    target: Value,
+    key: Value,
+) -> Option<Option<Value>> {
+    match (table, target, key) {
+        (Table::Record, Value::Record(record), Value::Text(text)) => {
+            probed(arena, limits, absent, record, text)
+        }
+        _ => entry(arena, limits, table, target, key),
+    }
+}
+
+/// [`probe`] of record `record`'s short key `text`, out of line so that
+/// the other tables' lookups stay [`entry`]'s.
+#[inline(never)]
+fn probed(
+    arena: &Arena,
+    limits: KernelDataLimits,
+    absent: &mut Option<Absent>,
+    record: ArenaHandle,
+    text: ShortText,
+) -> Option<Option<Value>> {
+    if let Some(proof) = *absent
+        && proof.table == record
+        && proof.key == text
+        && !arena.any_cold()
+        && arena.table_is(record, proof.version)
+    {
+        return Some(None);
+    }
+    let found = entry(
+        arena,
+        limits,
+        Table::Record,
+        Value::Record(record),
+        Value::Text(text),
+    )?;
+    if found.is_none()
+        && let Ok(Some(version)) = arena.table_version(record)
+    {
+        *absent = Some(Absent {
+            table: record,
+            key: text,
+            version,
+        });
+    }
+    Some(found)
+}
+
+/// `target`'s entry under `key`, looked up as `<table>.contains`'s call
+/// looks it up, through the same views, without its call: it builds and
+/// reserves nothing. `Some(None)` where the table holds no `key`, and a
+/// set's member is `true`, as `target[key]` reads them; `None` where the
+/// call raises or must decode first.
+fn entry(
+    arena: &Arena,
+    limits: KernelDataLimits,
+    table: Table,
+    target: Value,
+    key: Value,
+) -> Option<Option<Value>> {
+    if !matches!(
+        (table, target),
+        (Table::Map, Value::Map(_))
+            | (Table::Set, Value::Set(_))
+            | (Table::Record, Value::Record(_))
+    ) {
+        return None;
+    }
+    // A short text is a legal key of every table, and its own key.
+    if let (Value::Text(text), Some(handle)) = (key, target.handle()) {
+        let found = arena.table_get_text(handle, &text).ok()?;
+        return Some(found.map(|value| match table {
+            Table::Set => Value::Bool(true),
+            Table::Map | Table::Record => value,
+        }));
+    }
+    let semantics = arena.semantics().with_limits(limits);
+    let args = Args::new(&[], arena.objects(), &semantics);
+    let view = args.table(&target).ok()??;
+    match table {
+        Table::Record if !matches!(key, Value::Text(_) | Value::LongText(_)) => return None,
+        Table::Record => {}
+        Table::Map | Table::Set => legal_key(&args, &key)?,
+    }
+    let found = args.lookup(view, &key).ok()?;
+    Some(found.map(|value| match table {
+        Table::Set => Value::Bool(true),
+        Table::Map | Table::Record => *value,
+    }))
 }
 
 /// What `plan` charges a call of `args` that gave `result`, measured in
