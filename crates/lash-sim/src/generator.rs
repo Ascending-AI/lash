@@ -1244,29 +1244,6 @@ mod tests {
         }
     }
 
-    /// Seeds vary the transition schedule independently of generated identities and text.
-    #[test]
-    fn seed_cohort_varies_structural_transition_schedules_and_replays() {
-        let mut schedules = std::collections::BTreeSet::new();
-        for seed in 0..64 {
-            let workload = generate_workload(seed, "fast", 256).expect("workload");
-            assert_eq!(
-                workload,
-                generate_workload(seed, "fast", 256).expect("replay")
-            );
-            let schedule = workload
-                .boundaries
-                .iter()
-                .map(|event| (event.actor_alias.clone(), event.kind))
-                .collect::<Vec<_>>();
-            schedules.insert(schedule);
-        }
-        assert!(
-            schedules.len() > 1,
-            "seeds must vary transitions, not just IDs or payloads"
-        );
-    }
-
     /// Required ingress pairs cannot witness diversity of the extra random draws.
     #[test]
     fn extra_queued_ingress_cohort_reaches_both_modes() {

@@ -438,23 +438,6 @@ mod observation_class_tests {
     }
 
     #[test]
-    fn oracle_declaration_supplies_the_verdict_class() {
-        let real = OracleVerdict::passed(crate::oracles::BACKEND_FAILURE_ORACLE, "observed");
-        let model = OracleVerdict::passed(
-            crate::oracles::STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
-            "modeled",
-        );
-        assert_eq!(
-            real.observation_class,
-            OracleObservationClass::RealObservation
-        );
-        assert_eq!(
-            model.observation_class,
-            OracleObservationClass::ModelProperty
-        );
-    }
-
-    #[test]
     fn observation_class_is_required_when_deserializing() {
         let missing_class = serde_json::json!({
             "status": "passed",

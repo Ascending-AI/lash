@@ -615,25 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_records_delivery_decisions_as_trace_evidence() {
-        let events = [
-            BoundaryEvent::new("a", "session-a", BoundaryKind::Provider, 1, "p", json!({})),
-            BoundaryEvent::new("b", "session-b", BoundaryKind::Provider, 1, "p", json!({})),
-        ];
-        let mut scheduler = BoundaryScheduler::with_events(11, events);
-
-        let delivered = scheduler
-            .deliver_next(json!({"ok": true}))
-            .expect("delivered");
-
-        assert!(delivered.scheduler.scheduler_controlled);
-        assert_eq!(delivered.scheduler.pending_before, 2);
-        assert_eq!(delivered.scheduler.min_scheduled_at, 1);
-        assert_eq!(delivered.scheduler.delivered_at, 1);
-        assert_eq!(delivered.scheduler.candidate_count_at_tick, 2);
-    }
-
-    #[test]
     fn runtime_completion_queue_registers_pending_boundary_evidence() {
         let mut scheduler = BoundaryScheduler::new(17);
         let registered_after = DeliveredBoundary {

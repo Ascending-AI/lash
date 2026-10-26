@@ -606,14 +606,6 @@ pub(super) fn llm_output_parts_contract_summary(parts: &[LlmOutputPart]) -> Vec<
         .collect()
 }
 
-#[cfg(test)]
-pub(super) fn response_text_part(response: &LlmResponse) -> Option<&str> {
-    response.parts.iter().find_map(|part| match part {
-        LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-        _ => None,
-    })
-}
-
 fn standard_llm_error(message: &str) -> lash_core::LlmCallError {
     lash_core::LlmCallError {
         message: message.to_string(),

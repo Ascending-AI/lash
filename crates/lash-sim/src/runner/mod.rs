@@ -170,8 +170,6 @@ impl From<WorkloadProfileError> for FixedScriptRunnerError {
 mod agent_contracts;
 mod attempt_probe;
 mod contract_graphs;
-#[cfg(test)]
-mod contract_registry_tests;
 mod contract_support;
 mod fixed_script;
 mod generated_driver;

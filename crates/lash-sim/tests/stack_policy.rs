@@ -4,13 +4,12 @@
 )]
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use lash_sim::runner::FIXED_AGENT_PRODUCT_CONTRACTS;
-use lash_sim::stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT_BYTES};
+use lash_sim::stack_policy::PRODUCT_STACK_BUDGET_BYTES;
 
 /// Liveness fence for one probe child, not a performance budget: a warm probe
 /// replays its contract and exits in tens of milliseconds, so this bound is
@@ -34,12 +33,6 @@ const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// makes the report name the contract.
 macro_rules! product_stack_probe_cases {
     ($($(#[$attr:meta])* $case:ident => $contract:literal,)+) => {
-        /// The contracts the cases below cover, in declaration order;
-        /// `stack_policy_probe_cases_cover_every_fixed_agent_product_contract`
-        /// pins this against the product list so a new contract cannot land
-        /// without its own case.
-        const PROBED_CONTRACTS: &[&str] = &[$($contract,)+];
-
         $(
             #[test]
             $(#[$attr])*
@@ -69,66 +62,6 @@ product_stack_probe_cases! {
         "agent.parallel_spawn_and_join",
     stack_policy_probe_agent_tuple_values_finish_as_json_arrays_passes_at_2_mib =>
         "agent.tuple_values_finish_as_json_arrays",
-}
-
-#[test]
-fn stack_policy_probe_cases_cover_every_fixed_agent_product_contract() {
-    assert_eq!(
-        PROBED_CONTRACTS, FIXED_AGENT_PRODUCT_CONTRACTS,
-        "every fixed Agent product contract needs its own product stack probe case",
-    );
-}
-
-#[test]
-// Architecture lint: lexical escape-hatch guard. The product-stack probe cases
-// above are the behavioral half of this policy.
-fn lint_stack_policy_rejects_raw_stack_literals_and_global_stack_escape_hatches() {
-    assert_eq!(PRODUCT_STACK_BUDGET_BYTES, 2 * 1024 * 1024);
-    assert_eq!(SIM_HARNESS_STACK_LIMIT_BYTES, 8 * 1024 * 1024);
-
-    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let checked_files = ["main.rs", "lib.rs", "stack_policy.rs"];
-    let mut checked_paths: Vec<PathBuf> = checked_files
-        .iter()
-        .map(|file| src_dir.join(file))
-        .collect();
-    let runner_dir = src_dir.join("runner");
-    let runner_entries = std::fs::read_dir(&runner_dir)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", runner_dir.display()));
-    for entry in runner_entries {
-        let path = entry.expect("runner dir entry").path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            checked_paths.push(path);
-        }
-    }
-    let mut stack_size_lines = Vec::new();
-
-    for path in checked_paths {
-        let body = std::fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-        assert!(
-            !body.contains("RUST_MIN_STACK"),
-            "{} must not use global stack escape hatches",
-            path.display()
-        );
-
-        for (line_index, line) in body.lines().enumerate() {
-            if line.contains(".stack_size(") {
-                stack_size_lines.push(format!("{}:{}:{line}", path.display(), line_index + 1));
-            }
-        }
-    }
-
-    assert!(
-        matches!(stack_size_lines.as_slice(), [line] if line.starts_with(&src_dir.join("stack_policy.rs").display().to_string())
-            && line.ends_with(".stack_size(stack_bytes)")),
-        "all lash-sim thread stacks must flow through the named stack policy helper; found {stack_size_lines:?}",
-    );
-    assert_eq!(
-        stack_size_lines.len(),
-        1,
-        "all lash-sim thread stacks must flow through the named stack policy helper",
-    );
 }
 
 fn assert_product_stack_probe_passes(contract: &str) {

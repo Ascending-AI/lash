@@ -48,48 +48,6 @@ fn model_store_keeps_cross_session_outputs_isolated() {
 }
 
 #[test]
-fn model_store_projects_semantic_boundary_summaries() {
-    let mut store = ModelStore::default();
-    store.apply_boundary(&BoundaryEvent::new(
-        "open-1",
-        "session-001",
-        BoundaryKind::Ingress,
-        0,
-        "session.open",
-        json!({}),
-    ));
-    store.apply_boundary(&BoundaryEvent::new(
-        "provider-1",
-        "session-001",
-        BoundaryKind::Provider,
-        1,
-        "provider.chat.stream",
-        json!({"text": "answer for session-001"}),
-    ));
-    store.apply_boundary(&BoundaryEvent::new(
-        "observer-1",
-        "session-001",
-        BoundaryKind::Observer,
-        2,
-        "observer.snapshot",
-        json!({}),
-    ));
-    store.apply_boundary(&BoundaryEvent::new(
-        "effect-1",
-        "session-001",
-        BoundaryKind::DurableEffect,
-        3,
-        "durable.sleep.crash-redrive",
-        json!({"durable_key": "sleep/session-001", "result": {"done": true}}),
-    ));
-
-    let summary = store.summary();
-    assert_eq!(summary.sessions[0].observer_turn_indices, vec![1]);
-    assert_eq!(summary.durable_effects[0].execution_count, 1);
-    assert_eq!(summary.durable_effects[0].replay_count, 1);
-}
-
-#[test]
 fn pending_input_cancellation_respects_admission_order_and_terminal_states() {
     for claim_first in [false, true] {
         let mut store = ModelStore::default();

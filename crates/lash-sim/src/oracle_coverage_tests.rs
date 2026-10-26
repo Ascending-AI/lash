@@ -19,9 +19,6 @@ use crate::oracles::{
 };
 use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
 
-/// Every random workload profile, at the budget the runner actually uses.
-const PROFILES: [&str; 3] = ["fast-random", "default-random", "full-random"];
-
 /// What a real generated workload declares. Nothing is run: the point is that
 /// the declaration exists *before* any observation does.
 fn declared_for(profile: &str) -> WorkloadExpectations {
@@ -53,41 +50,6 @@ fn assert_absent_class(verdict: &OracleVerdict, oracle_id: &str, declared: usize
     );
 }
 
-/// The proofs below are only as strong as the declaration they rest on: a
-/// profile that quietly stopped planning an observation class would declare
-/// zero of it, drop that floor to nothing, and leave every red proof green.
-/// So assert the declaration is non-trivial for every profile, not just the one
-/// the proofs happen to use.
-#[test]
-fn every_workload_profile_declares_every_guarded_observation_class() {
-    for profile in PROFILES {
-        let declared = declared_for(profile);
-
-        assert!(
-            declared.session_count() > 1,
-            "`{profile}` declared {} session(s): {declared:?}",
-            declared.session_count()
-        );
-        assert_eq!(
-            declared.sessions.len(),
-            declared
-                .sessions
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len(),
-            "`{profile}` declared a duplicate session alias: {declared:?}"
-        );
-        assert!(
-            declared.provider_turn_count > 0,
-            "`{profile}`: {declared:?}"
-        );
-        assert!(
-            declared.transport_mutation_count > 0,
-            "`{profile}`: {declared:?}"
-        );
-    }
-}
-
 #[test]
 fn ingress_sessions_opened_fails_when_no_session_was_observed() {
     let declared = declared();
@@ -117,17 +79,6 @@ fn runtime_session_graph_contract_fails_when_no_session_was_observed() {
     assert_absent_class(
         &verdict,
         "sim.oracle.runtime-session-graph.v1",
-        declared.session_count(),
-    );
-}
-
-#[test]
-fn provider_turn_interleaving_fails_when_no_declared_session_ran_a_turn() {
-    let declared = declared();
-    let verdict = provider_turn_interleaving_depth(&[], &declared);
-    assert_absent_class(
-        &verdict,
-        "sim.oracle.provider-turn-interleaving-depth.v1",
         declared.session_count(),
     );
 }

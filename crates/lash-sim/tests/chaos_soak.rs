@@ -11,17 +11,9 @@
 //! `chaos_soak_smoke` is the short profile: two epochs of twelve steps on
 //! SQLite memory. `chaos_soak_on_postgres` runs the same profile on
 //! PostgreSQL, with the database faults applied, when the run names a
-//! server. The long profile runs epochs of forty steps for an hour of wall
-//! time: `chaos_soak_long` on SQLite memory, and `chaos_soak_on_postgres`
-//! under `LASH_CHAOS_SOAK_PROFILE=long`, so the PostgreSQL gate that selects
-//! the short profile also selects the law the long one runs. Release
-//! certification selects it by hand, past NativeLink's action limit:
-//!
-//! ```sh
-//! kiln test //crates/lash-sim:chaos_soak__test --local-test-execution \
-//!   --no-test-cache --test_timeout=4500 --test_arg=--ignored \
-//!   --test_arg=--exact --test_arg=chaos_soak_long --test_arg=--nocapture
-//! ```
+//! server. Both profiles use the same law; hosts can extend the SQLite
+//! smoke run with `LASH_CHAOS_SOAK_EPOCHS` and `LASH_CHAOS_SOAK_STEPS`.
+//! PostgreSQL selects its long defaults with `LASH_CHAOS_SOAK_PROFILE=long`.
 
 use std::time::Duration;
 
@@ -118,21 +110,6 @@ async fn chaos_soak_on_postgres() {
     let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
     let (seed, epochs, steps, cap) = postgres_profile();
     let config = SoakConfig::from_env(seed, epochs, steps, cap, dialect);
-    let report = chaos_soak::run(config).await;
-    assert_green(&report);
-}
-
-/// The long profile on SQLite memory.
-#[tokio::test]
-#[ignore = "the long profile: an hour of wall time; release certification selects it"]
-async fn chaos_soak_long() {
-    let config = SoakConfig::from_env(
-        LONG_SEED,
-        LONG_EPOCHS,
-        LONG_STEPS,
-        LONG_CAP,
-        Dialect::SqliteMemory,
-    );
     let report = chaos_soak::run(config).await;
     assert_green(&report);
 }

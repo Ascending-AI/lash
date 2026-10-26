@@ -339,54 +339,6 @@ pub(super) fn contract_execution_payload<E>(
     }))
 }
 
-#[cfg(test)]
-pub(super) fn fixed_texts_provider(
-    kind: &'static str,
-    responses: Vec<&'static str>,
-) -> ProviderHandle {
-    let responses = Arc::new(tokio::sync::Mutex::new(
-        responses
-            .into_iter()
-            .map(str::to_string)
-            .collect::<VecDeque<_>>(),
-    ));
-    lash_core::testing::TestProvider::builder()
-        .kind(kind)
-        .complete(move |_request| {
-            let responses = Arc::clone(&responses);
-            async move {
-                let Some(text) = responses.lock().await.pop_front() else {
-                    // A fixed contract that asks for one more completion than it
-                    // scripted is a defect in the contract, never a flaky
-                    // transport. Classifying it retryable is what turned that
-                    // defect into a turn-driver backoff against the simulated
-                    // clock -- which no contract advances -- and so into an
-                    // unbounded hang instead of a named failure.
-                    return Err(LlmTransportError::new(format!(
-                        "{kind} provider exhausted its fixed response"
-                    ))
-                    .with_retry_verdict(
-                        lash_transport_failure::TransportRetryVerdict::NotRetryable,
-                    ));
-                };
-                let expected_text = text.clone();
-                let response = text_llm_response(text);
-                let response_part_text = response_text_part(&response);
-                if response.full_text() != expected_text
-                    || response_part_text != Some(expected_text.as_str())
-                {
-                    return Err(LlmTransportError::new(format!(
-                        "{kind} fixed response shape changed: expected full_text and text part {:?}, got full_text {:?} parts {:?}",
-                        expected_text, response.full_text(), response.parts
-                    )));
-                }
-                Ok(response)
-            }
-        })
-        .build()
-        .into_handle()
-}
-
 pub(super) struct ContractAppTools;
 
 #[async_trait::async_trait]

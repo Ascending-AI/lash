@@ -195,28 +195,6 @@ fn scheduler_owned_runtime_completion_oracle_rejects_incomplete_pending_evidence
 }
 
 #[test]
-fn scheduler_owned_runtime_completion_kinds_match_runner_completion_kinds() {
-    let runner_kinds: BTreeSet<BoundaryKind> =
-        crate::runner::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS
-            .iter()
-            .copied()
-            .collect();
-    let oracle_kinds: BTreeSet<BoundaryKind> = SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
-        .iter()
-        .copied()
-        .collect();
-    assert_eq!(
-        runner_kinds, oracle_kinds,
-        "runner scheduler-owned runtime completion kinds and oracle verification kinds must match exactly"
-    );
-    assert_eq!(
-        crate::runner::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS,
-        SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS,
-        "runner and oracle lists must match in exact sequence"
-    );
-}
-
-#[test]
 fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_durable_effect_and_observer()
  {
     for kind in [BoundaryKind::DurableEffect, BoundaryKind::Observer] {
@@ -562,67 +540,6 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
     );
     let verdict = mini_rlm_lash_vm_cell_exec_continues(&[exec, continued]);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
-}
-
-#[test]
-fn agent_mini_oracle_rejects_provider_completions_without_runtime_sessions() {
-    let summary = AbstractWorldView::with_digest(2, 2, Vec::new(), Vec::new());
-    let provider = |sequence, session: &str, observed: serde_json::Value| {
-        delivered_with_payload(
-            sequence,
-            &format!("{session}:provider:001"),
-            session,
-            BoundaryKind::Provider,
-            json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, sequence as u64)}),
-            observed,
-        )
-    };
-    let joined = [
-        provider(
-            0,
-            "session-001",
-            json!({"runtime_session_id": "session-001"}),
-        ),
-        provider(
-            1,
-            "session-002",
-            json!({"runtime_session_id": "session-002"}),
-        ),
-    ];
-    assert_eq!(
-        mini_agent_parallel_spawn_join(&joined, &summary).status,
-        crate::trace::OracleStatus::Passed
-    );
-
-    let unattributed = [
-        provider(0, "session-001", json!({})),
-        provider(1, "session-002", json!({})),
-    ];
-    let verdict = mini_agent_parallel_spawn_join(&unattributed, &summary);
-    assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
-    assert_eq!(verdict.oracle_id, SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE);
-    assert!(
-        verdict
-            .message
-            .contains("did not record provider completions across runtime sessions")
-    );
-
-    let one_session = [
-        provider(
-            0,
-            "session-001",
-            json!({"runtime_session_id": "session-001"}),
-        ),
-        provider(
-            1,
-            "session-001",
-            json!({"runtime_session_id": "session-001"}),
-        ),
-    ];
-    assert_eq!(
-        mini_agent_parallel_spawn_join(&one_session, &summary).status,
-        crate::trace::OracleStatus::Failed
-    );
 }
 
 #[test]

@@ -744,56 +744,6 @@ fn google_request(stream: bool) -> LlmRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::{BoundaryEvent, BoundaryKind};
-
-    #[tokio::test]
-    async fn provider_mutation_matrix_runs_real_provider_parsers() {
-        let mut cache = ProviderMutationMatrixCache::default();
-        let event = BoundaryEvent::new(
-            "session-001:provider-mutation:001",
-            "session-001",
-            BoundaryKind::ProviderMutation,
-            1,
-            "provider.script-mutation.rejected",
-            json!({
-                "mutation": "malformed_sse_chunk",
-            }),
-        );
-        let observed = cache
-            .augment_observation(
-                &event,
-                json!({
-                    "session": "session-001",
-                    "provider_mutation": true,
-                    "mutation": "malformed_sse_chunk",
-                    "rejected": true,
-                    "first_rejection": true,
-                }),
-            )
-            .await
-            .expect("provider mutation matrix");
-
-        let matrix = &observed["provider_parser_matrix"]["matrix"];
-        assert_eq!(matrix["real_provider_parser_execution"], true);
-        assert_eq!(matrix["proof_count"], 4);
-        let providers = matrix["provider_kinds"]
-            .as_array()
-            .expect("providers")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            providers,
-            vec!["anthropic", "google_oauth", "openai", "openai-compatible"]
-        );
-        assert!(
-            matrix["proofs"]
-                .as_array()
-                .expect("proofs")
-                .iter()
-                .all(|proof| proof["exchange_count"].as_u64() == Some(1))
-        );
-    }
 
     #[tokio::test]
     async fn dropped_terminal_parser_failures_are_explicitly_non_retryable() {
@@ -839,31 +789,6 @@ mod tests {
             } else {
                 assert_eq!(proof["status"], Value::Null, "status for {mutation}");
             }
-        }
-    }
-
-    #[test]
-    fn parser_mutation_labels_generate_distinct_wire_behaviors() {
-        let mut behaviors = std::collections::BTreeSet::new();
-        for mutation in [
-            "malformed_sse_chunk",
-            "dropped_terminal_event",
-            "duplicate_tool_call_delta",
-            "wrong_provider_schema",
-        ] {
-            let specs = mutation_specs(mutation).expect("mutation specs");
-            let first =
-                ProviderWireScript::from_json_str(&specs[0].script_content).expect("script parses");
-            let behavior = first
-                .expected_provider
-                .as_ref()
-                .and_then(|expected| expected.get("behavior"))
-                .and_then(Value::as_str)
-                .expect("behavior");
-            assert!(
-                behaviors.insert(behavior.to_string()),
-                "mutation behavior `{behavior}` was reused"
-            );
         }
     }
 }

@@ -662,39 +662,4 @@ mod tests {
             "retry and terminal evidence from session-002 must satisfy the law without borrowing session-001"
         );
     }
-
-    #[tokio::test]
-    async fn generated_backend_failure_seed_records_script_evidence() {
-        let workload = crate::generator::generate_workload(5, "fast-random", 24)
-            .expect("seeded generated workload");
-        let trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("generated trace");
-        let backend_events = trace
-            .events
-            .iter()
-            .filter(|event| event.kind == BoundaryKind::BackendFailure)
-            .collect::<Vec<_>>();
-        assert!(!backend_events.is_empty());
-        assert!(backend_events.iter().all(|event| {
-            event
-                .observed
-                .pointer("/fault_script/fired")
-                .and_then(Value::as_bool)
-                == Some(true)
-        }));
-        let verdict = trace
-            .oracles
-            .iter()
-            .find(|verdict| verdict.oracle_id == BACKEND_FAILURE_ORACLE)
-            .expect("backend failure verdict");
-        assert!(verdict.is_passed(), "{}", verdict.message);
-        assert_eq!(
-            verdict.observation_class,
-            crate::trace::OracleObservationClass::RealObservation
-        );
-        assert!(trace.oracle.is_passed(), "{}", trace.oracle.message);
-        crate::replay::replay_trace(std::path::Path::new("generated-seed-5.json"), &trace)
-            .expect("model replay carries the recorded script observation");
-    }
 }

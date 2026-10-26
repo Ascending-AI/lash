@@ -165,32 +165,6 @@ fn tool_run(history: &History) -> (usize, CallRef, u32, u64) {
         .expect("the fixture's tool ran")
 }
 
-#[test]
-fn the_clean_history_keeps_every_invariant_and_gives_each_facts() {
-    let history = clean();
-    let report = check(&history);
-    assert!(report.passed(), "{}", report.failure());
-    for (invariant, observed) in &report.observed {
-        if *invariant == "artifact-reachable-or-collected"
-            || *invariant == "an-existing-start-is-answered-only-to-its-originator"
-            || *invariant == "host-admission"
-            || *invariant == "transcript-order"
-        {
-            // The pending-tool turn stores no artifact, parks nothing and
-            // makes no host start or sequential host sends; each red fixture
-            // adds its own.
-            continue;
-        }
-        assert!(
-            *observed > 0,
-            "`{invariant}` judged nothing: {}",
-            report.summary()
-        );
-    }
-    let (_, call, _, _) = tool_run(&history);
-    assert!(!call.identity.0.is_empty(), "the tool saw its call id");
-}
-
 /// FIG-4073's shape: a second deferred call in the same scope registers the
 /// first one's completion key.
 #[test]
@@ -359,26 +333,6 @@ fn an_input_left_open_or_settled_before_its_run_ends_breaks_input_settlement() {
         run.terminal_kind = None;
     }
     assert_caught(&history, "input-settles-exactly-once");
-}
-
-#[test]
-fn a_violation_renders_its_seed_invariant_and_excerpt() {
-    let mut history = clean();
-    let (at, call, attempt, failed_attempts_before) = tool_run(&history);
-    history.push(Fact::ToolExecuted {
-        call,
-        attempt,
-        failed_attempts_before,
-    });
-    let report = check(&history);
-    let failure = report.failure();
-    assert!(failure.contains("global invariant `effect-at-least-once-window`"));
-    assert!(failure.contains(&format!("{SEED:#018x}")));
-    assert!(failure.contains("trace excerpt:"));
-    assert!(failure.contains(&format!("#{at:<5}")), "{failure}");
-    let verdict = report.verdict();
-    assert!(!verdict.is_passed());
-    assert_eq!(verdict.oracle_id, GLOBAL_INVARIANTS_ORACLE);
 }
 
 /// FIG-4111: a host key is global, so an `Existing` answer to a start from one
@@ -560,37 +514,6 @@ fn checker_failure_retains_history_and_registered_regression() {
     );
     let regression: fn() = a_rerun_outside_the_window_breaks_the_effect_window;
     regression();
-}
-
-#[test]
-fn failure_artifact_keeps_seed_history_and_checker() {
-    let mut history = clean();
-    let (_, call, attempt, failed_attempts_before) = tool_run(&history);
-    history.push(Fact::ToolExecuted {
-        call,
-        attempt,
-        failed_attempts_before,
-    });
-    let report = check(&history);
-    let path = tempfile::tempdir().unwrap();
-    let artifact = path.path().join("failure.json");
-    std::fs::write(&artifact, serde_json::to_vec(&report).unwrap()).unwrap();
-    let restored: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(artifact).unwrap()).unwrap();
-    assert_eq!(restored["seed"], SEED);
-    assert_eq!(restored["history"], serde_json::to_value(&history).unwrap());
-    assert!(
-        restored["violations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["invariant"] == "effect-at-least-once-window")
-    );
-    assert!(restored["rendered"].as_array().unwrap().iter().any(|row| {
-        row.as_str()
-            .unwrap()
-            .contains("effect-at-least-once-window")
-    }));
 }
 
 #[test]

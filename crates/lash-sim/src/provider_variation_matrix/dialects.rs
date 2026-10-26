@@ -26,10 +26,3 @@ pub(super) fn dialect_path(dialect: &str) -> &'static str {
 pub(super) fn matrix_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("provider-scripts/variation-matrix/v1")
 }
-
-pub(super) fn matrix_generator() -> PathBuf {
-    matrix_dir()
-        .parent()
-        .expect("version directory has generator parent")
-        .join("generate.py")
-}

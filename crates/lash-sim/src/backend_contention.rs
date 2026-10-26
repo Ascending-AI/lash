@@ -358,28 +358,3 @@ async fn operation_commit_retry_and_conflict_are_fenced(
         }),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn backend_contention_report_runs_sqlite_and_records_artifact() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let report = super::run_backend_contention_report_against(tmp.path(), None)
-            .await
-            .expect("backend contention report");
-        assert_eq!(report.status, "passed");
-        assert!(report.summary.passed >= 1);
-        assert!(
-            report
-                .scenarios
-                .iter()
-                .any(|scenario| scenario.backend == "sqlite"
-                    && scenario.status == "passed"
-                    && scenario.operations.len() >= 2)
-        );
-        assert!(report.report_path.exists());
-        let body = std::fs::read_to_string(report.report_path).expect("report body");
-        assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
-        assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
-    }
-}

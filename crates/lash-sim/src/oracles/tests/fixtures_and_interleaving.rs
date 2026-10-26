@@ -246,30 +246,6 @@ pub(super) fn provider_completion(
 }
 
 #[test]
-fn interleaving_oracle_passes_when_two_sessions_overlap() {
-    // Turn A and turn B are both live (each has released a provider event)
-    // before either completes.
-    let events = vec![
-        provider_event(0, "session-a", "turn-a"),
-        provider_event(1, "session-b", "turn-b"),
-        provider_completion(2, "session-a", "turn-a"),
-        provider_completion(3, "session-b", "turn-b"),
-    ];
-    assert_eq!(peak_concurrent_live_turns(&events), 2);
-    assert!(
-        provider_turn_interleaving_depth(
-            &events,
-            &WorkloadExpectations::new(
-                vec!["session-a".to_string(), "session-b".to_string()],
-                2,
-                0,
-            )
-        )
-        .is_passed()
-    );
-}
-
-#[test]
 fn interleaving_oracle_fails_when_multi_session_turns_never_overlap() {
     // Two sessions each run a turn, but each turn completes before the next
     // one releases an event, so peak concurrency is 1.

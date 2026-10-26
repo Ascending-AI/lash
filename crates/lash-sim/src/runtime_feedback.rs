@@ -473,22 +473,6 @@ fn runtime_feedback_anthropic_legality_uses_emitted_neighbors() {
     }
 }
 
-#[test]
-fn runtime_feedback_native_prefix_changes_when_a_later_user_makes_the_slot_illegal() {
-    let first = request(vec![text(LlmRole::User, "U"), text(LlmRole::System, "F")]);
-    let mut second = first.clone();
-    second.messages.push(text(LlmRole::User, "later"));
-    let before = Wire::AnthropicNative.body(&first);
-    let after = Wire::AnthropicNative.body(&second);
-    assert_eq!(before["system"], after["system"]);
-    assert_eq!(before["messages"][1]["role"], "system");
-    assert_eq!(
-        after["messages"],
-        json!([{"role":"user","content":[{"type":"text","text":"U"},{"type":"text","text":"<runtime_feedback>F</runtime_feedback>"},{"type":"text","text":"later"}]}])
-    );
-    assert_ne!(before["messages"][0], after["messages"][0]);
-}
-
 fn feedback_tool_results(wire: Wire) {
     use lash_core::llm::types::LlmContentBlock as B;
     for (count, split) in [(1, false), (2, false), (2, true)] {

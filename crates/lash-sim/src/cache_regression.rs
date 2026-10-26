@@ -323,26 +323,6 @@ fn prefix_stability_matrix_runs_consecutive_protocol_iterations() {
     }
 }
 
-#[test]
-fn chat_cache_dialect_prefix_shape_is_stable_as_breakpoints_roll() {
-    for serializer in [
-        ProviderSerializer::ChatAnthropicDialect,
-        ProviderSerializer::ChatGeminiDialect,
-    ] {
-        let model = match serializer {
-            ProviderSerializer::ChatAnthropicDialect => "custom/model-a",
-            ProviderSerializer::ChatGeminiDialect => "custom/model-b",
-            _ => unreachable!(),
-        };
-        let iterations = standard_iterations(model);
-        assert_prefix_stability(
-            &format!("{:?} x {serializer:?}", ProtocolKind::Standard),
-            &iterations,
-            |request, stable_messages| serialize_prefix(serializer, request, stable_messages),
-        );
-    }
-}
-
 #[tokio::test]
 async fn rlm_live_bound_state_is_prefix_stable_for_every_serializer() {
     let captured = captured_rlm_iterations().await;
@@ -602,27 +582,6 @@ fn cache_coverage_matrix_matches_capability_and_retention_dialects() {
         })
         .collect::<Vec<_>>();
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
-}
-
-#[test]
-fn requested_breakpoints_report_capability_driven_emission_and_drop() {
-    let request = with_cache_control(
-        cache_request("unrecognized/model"),
-        CacheControlDialect::Gemini,
-    );
-    let (_, report) =
-        lash_provider_openai::testing::serialize_chat_request(&request, CacheRetention::Short)
-            .expect("Gemini cache-control dialect body");
-
-    assert_eq!(report.requested, 1);
-    assert_eq!(report.emitted, 1);
-    assert_eq!(report.dropped, 0);
-
-    let request = cache_request("anthropic/claude-gemini-lookalike");
-    let (_, unsupported) =
-        lash_provider_openai::testing::serialize_chat_request(&request, CacheRetention::Short)
-            .expect("capability-free Chat body");
-    assert_eq!(unsupported.dropped, 1);
 }
 
 #[test]

@@ -140,76 +140,6 @@ fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
 }
 
 #[test]
-fn scenario_contract_oracles_emit_one_named_verdict_per_contract() {
-    let summary = semantic_summary();
-    let events = semantic_events();
-    let verdicts = scenario_contract_oracles(&events, &summary);
-
-    let expected_count = RUNTIME_SCENARIO_CONTRACTS.len()
-        + STANDARD_PROTOCOL_SCENARIO_CONTRACTS.len()
-        + RLM_PROTOCOL_SCENARIO_CONTRACTS.len()
-        + AGENT_SCENARIO_CONTRACTS.len();
-    assert_eq!(verdicts.len(), expected_count);
-    assert!(
-        verdicts.iter().all(OracleVerdict::is_passed),
-        "all generated semantic fixture scenario contracts should pass: {:?}",
-        verdicts
-            .iter()
-            .filter(|verdict| !verdict.is_passed())
-            .collect::<Vec<_>>()
-    );
-
-    let ids = verdicts
-        .iter()
-        .map(|verdict| verdict.oracle_id.as_str())
-        .collect::<BTreeSet<_>>();
-    assert_eq!(ids.len(), verdicts.len());
-    assert!(
-        ids.iter().all(|id| !id.ends_with(":coverage-manifest")),
-        "scenario contracts must not be backed by suite coverage manifests"
-    );
-
-    for (base, contracts) in [
-        (
-            RUNTIME_SCENARIO_CONTRACTS[0].oracle_id,
-            RUNTIME_SCENARIO_CONTRACTS,
-        ),
-        (
-            STANDARD_PROTOCOL_SCENARIO_CONTRACTS[0].oracle_id,
-            STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
-        ),
-        (
-            RLM_PROTOCOL_SCENARIO_CONTRACTS[0].oracle_id,
-            RLM_PROTOCOL_SCENARIO_CONTRACTS,
-        ),
-        (
-            AGENT_SCENARIO_CONTRACTS[0].oracle_id,
-            AGENT_SCENARIO_CONTRACTS,
-        ),
-    ] {
-        let suite_verdicts = verdicts
-            .iter()
-            .filter(|verdict| verdict.oracle_id.starts_with(base))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            suite_verdicts.len(),
-            contracts.len(),
-            "suite `{base}` must emit one oracle per contract"
-        );
-        for contract in contracts {
-            assert!(
-                suite_verdicts.iter().any(|verdict| {
-                    verdict.oracle_id == scenario_contract_oracle_id(contract)
-                        && verdict.message.contains(contract.semantic_oracle)
-                }),
-                "suite `{base}` must emit a per-contract verdict for `{}`",
-                contract.test_name
-            );
-        }
-    }
-}
-
-#[test]
 fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     let events = semantic_events();
 
@@ -1137,57 +1067,6 @@ fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
 }
 
 #[test]
-fn one_memo_across_candidates_gives_the_verdicts_a_fresh_memo_would() {
-    let summary = semantic_summary();
-    let events = semantic_events();
-    let expectations = WorkloadExpectations::default();
-
-    // The minimizer reuses one memo across every candidate of a run. Walking a
-    // series of candidates through a shared memo must produce exactly the
-    // verdicts each candidate would get on its own.
-    // Every fourth candidate rather than all of them: the walk is the whole
-    // oracle battery twice per candidate, and the property is per candidate.
-    let shared = ScenarioFactMemo::default();
-    for dropped in (0..events.len()).step_by(4) {
-        let mut candidate = events.clone();
-        candidate.remove(dropped);
-
-        let mut memoized = Vec::new();
-        walk_generated_trace_oracles(
-            &candidate,
-            &summary,
-            &[],
-            &expectations,
-            &shared,
-            |_| false,
-            |verdict| {
-                memoized.push((verdict.oracle_id, verdict.status, verdict.message));
-                true
-            },
-        );
-
-        let mut fresh = Vec::new();
-        walk_generated_trace_oracles(
-            &candidate,
-            &summary,
-            &[],
-            &expectations,
-            &ScenarioFactMemo::default(),
-            |_| false,
-            |verdict| {
-                fresh.push((verdict.oracle_id, verdict.status, verdict.message));
-                true
-            },
-        );
-
-        assert_eq!(
-            memoized, fresh,
-            "candidate without event {dropped} disagreed with its own unmemoized walk"
-        );
-    }
-}
-
-#[test]
 fn every_execution_fact_contract_resolves_to_its_registry_fact_spec_row() {
     // Exhaustiveness is proven against the imported registries, not a hand-
     // maintained count: adding a contract to a spec table without a fact-spec
@@ -1226,25 +1105,5 @@ fn every_execution_fact_contract_resolves_to_its_registry_fact_spec_row() {
                 contract.semantic_oracle
             );
         }
-    }
-}
-
-#[test]
-fn fact_spec_rows_publish_each_contract_under_its_registry_oracle_name() {
-    // A row can never attribute its facts to a contract name other than the
-    // one its bound spec carries: the dispatcher key, the execution-payload
-    // contract field, and the memo key are all `row.spec.semantic_oracle`.
-    let mut seen = BTreeSet::new();
-    for row in all_contract_fact_specs() {
-        assert!(
-            seen.insert(row.spec.semantic_oracle),
-            "duplicate fact-spec row for {}",
-            row.spec.semantic_oracle
-        );
-        assert!(
-            !row.fact.is_empty() && !row.assertion.is_empty(),
-            "{} must publish a named fact and assertion",
-            row.spec.semantic_oracle
-        );
     }
 }

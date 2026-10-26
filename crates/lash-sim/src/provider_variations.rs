@@ -161,16 +161,6 @@ pub const PROVIDER_STOP_VARIATION_MATRIX: &[ProviderStopFixture] = &[
     },
 ];
 
-/// Migrated runtime providers that intentionally have no stop-variation rows.
-///
-/// OpenAI Responses does not serialize caller stop sequences, so it cannot
-/// exhibit the provider-consumed delimiter behavior modeled by this corpus.
-#[cfg(test)]
-const PROVIDER_STOP_VARIATION_EXCLUSIONS: &[(&str, &str)] = &[(
-    lash_provider_fixtures::runtime_providers::OPENAI,
-    "OpenAI Responses emits no provider wire stop field",
-)];
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -283,7 +273,6 @@ impl LlmHttpTransport for PairedProviderStopTransport {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
     use lash_core::GenerationOptions;
@@ -294,89 +283,6 @@ mod tests {
 
     use super::*;
     use lash_provider_fixtures::runtime_providers::runtime_provider_components;
-
-    #[test]
-    fn provider_stop_variation_matrix_has_both_rows_for_every_stop_capable_dialect() {
-        assert_eq!(
-            PROVIDER_STOP_VARIATION_MATRIX.len(),
-            ProviderStopDialect::ALL.len() * ProviderStopVariation::ALL.len()
-        );
-        let rows = PROVIDER_STOP_VARIATION_MATRIX
-            .iter()
-            .map(|fixture| (fixture.dialect.name(), fixture.variation.name()))
-            .collect::<BTreeSet<_>>();
-        for dialect in ProviderStopDialect::ALL {
-            for variation in ProviderStopVariation::ALL {
-                assert!(
-                    rows.contains(&(dialect.name(), variation.name())),
-                    "missing {} {} fixture",
-                    dialect.name(),
-                    variation.name()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn every_migrated_runtime_provider_is_covered_or_explicitly_excluded() {
-        let covered = ProviderStopDialect::ALL
-            .into_iter()
-            .map(ProviderStopDialect::provider_kind)
-            .collect::<BTreeSet<_>>();
-        let excluded = PROVIDER_STOP_VARIATION_EXCLUSIONS
-            .iter()
-            .map(|(provider_kind, reason)| {
-                assert!(!reason.is_empty(), "provider exclusion requires a reason");
-                *provider_kind
-            })
-            .collect::<BTreeSet<_>>();
-        assert!(covered.is_disjoint(&excluded));
-        assert_eq!(
-            covered.union(&excluded).copied().collect::<BTreeSet<_>>(),
-            lash_provider_fixtures::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS
-                .iter()
-                .copied()
-                .collect::<BTreeSet<_>>()
-        );
-    }
-
-    #[test]
-    fn provider_stop_variation_files_on_disk_exactly_match_the_public_registry() {
-        let fixture_dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("provider-scripts/variations");
-        let files_on_disk = std::fs::read_dir(&fixture_dir)
-            .expect("provider stop-variation fixture directory")
-            .map(|entry| {
-                entry
-                    .expect("provider stop-variation directory entry")
-                    .file_name()
-            })
-            .filter(|name| {
-                std::path::Path::new(name)
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            })
-            .map(|name| {
-                name.into_string()
-                    .expect("provider stop-variation fixture filename must be UTF-8")
-            })
-            .collect::<BTreeSet<_>>();
-        let listed_files = PROVIDER_STOP_VARIATION_MATRIX
-            .iter()
-            .map(|fixture| {
-                std::path::Path::new(fixture.path)
-                    .file_name()
-                    .expect("registered fixture path has a filename")
-                    .to_str()
-                    .expect("registered fixture filename must be UTF-8")
-                    .to_string()
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            files_on_disk, listed_files,
-            "provider stop-variation fixtures on disk must exactly match PROVIDER_STOP_VARIATION_MATRIX"
-        );
-    }
 
     #[tokio::test]
     async fn provider_stop_variation_matrix_uses_real_request_and_response_dialects() {

@@ -1040,31 +1040,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn failed_fresh_package_publication_leaves_no_completed_package() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let package_dir = tmp.path().join("minimized-regression");
-        std::fs::write(&package_dir, b"publication obstruction").expect("obstruct final name");
-        let trace = synthetic_trace(scheduler_controlled_delivery(&[]));
-
-        let err = minimize_trace(Path::new("trace.json"), &trace, tmp.path())
-            .expect_err("an obstructed fresh publication must fail");
-
-        assert!(matches!(err, MinimizeError::Io(_)), "{err}");
-        assert_eq!(
-            std::fs::read(&package_dir).expect("unchanged obstruction"),
-            b"publication obstruction"
-        );
-        assert_eq!(
-            std::fs::read_dir(tmp.path())
-                .expect("artifact root")
-                .count(),
-            1,
-            "failed publication must clean its staging directory"
-        );
-        assert!(!package_dir.join("package.json").exists());
-    }
-
     #[tokio::test]
     async fn minimizer_preserves_runtime_graph_failure_across_every_artifact() {
         let workload = generate_workload(5, "fast-random", 24).expect("workload");

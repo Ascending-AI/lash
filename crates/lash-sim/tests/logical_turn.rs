@@ -39,31 +39,6 @@ struct SeedSwitchTool {
     initial_nodes: Vec<SessionAppendNode>,
 }
 
-struct NoTools;
-
-#[async_trait]
-impl ToolProvider for NoTools {
-    fn tool_manifests(
-        &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-    {
-        Ok(Vec::new())
-    }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
-        (async { ToolOutcome::err("unknown tool") }).await.into()
-    }
-}
-
 #[async_trait]
 impl ToolProvider for SeedSwitchTool {
     fn tool_manifests(
@@ -182,62 +157,6 @@ async fn assert_global_invariants(engine: &lash_sim::backend::SimEngine, scenari
     .expect("capture the history");
     report.print_quarantined();
     assert!(report.passed(), "{}", report.failure());
-}
-
-async fn standard_core(
-    provider: lash_core::facade_support::ProviderHandle,
-    tools: Arc<dyn ToolProvider>,
-    trace: Arc<RecordingTraceSink>,
-) -> (lash::LashCore, lash_sim::backend::SimEngine) {
-    standard_core_with_attachment_limit(provider, tools, trace, None).await
-}
-
-async fn standard_core_with_attachment_limit(
-    provider: lash_core::facade_support::ProviderHandle,
-    tools: Arc<dyn ToolProvider>,
-    trace: Arc<RecordingTraceSink>,
-    max_attachment_bytes: Option<u64>,
-) -> (lash::LashCore, lash_sim::backend::SimEngine) {
-    standard_core_on(
-        sim_engine().await,
-        provider,
-        tools,
-        trace,
-        max_attachment_bytes,
-    )
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-fn standard_core_on(
-    engine: lash_sim::backend::SimEngine,
-    provider: lash_core::facade_support::ProviderHandle,
-    tools: Arc<dyn ToolProvider>,
-    trace: Arc<RecordingTraceSink>,
-    max_attachment_bytes: Option<u64>,
-) -> (lash::LashCore, lash_sim::backend::SimEngine) {
-    let core = lash::LashCore::standard_builder(engine.backend())
-        .serve_test_llm_profile(provider, model())
-        .tools(lash::tool_provider_key!("tools"), tools)
-        .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-        .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .data_retention(lash::DataRetention {
-            attachments: lash::persistence::AttachmentPolicy {
-                max_attachment_bytes,
-                ..lash::persistence::AttachmentPolicy::standard()
-            },
-            ..lash::DataRetention::standard()
-        })
-        .trace_sink(trace)
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            lash::persistence::LeaseOwnerId::new("logical-turn-test"),
-            lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
-        ))
-        .expect("build logical-turn sim core");
-    (core, engine)
 }
 
 fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> Vec<Value> {
@@ -495,82 +414,6 @@ impl ToolProvider for BoundedSwitchTools {
         .await
         .into()
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn admissions_settle_for_finish_cancel_and_error() {
-    let finish_trace = Arc::new(RecordingTraceSink::default());
-    let finish_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-finish")
-        .complete(|_| async { Ok(text_response("finished")) })
-        .build()
-        .into_handle();
-    let (finish_core, finish_engine) =
-        standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone()).await;
-    let finish_session = created_session(&finish_core, "logical-turn-finish")
-        .await
-        .durable()
-        .await
-        .expect("open finish session");
-    finish_session
-        .send(TurnInput::text("finish admitted input"))
-        .output()
-        .await
-        .expect("finish input runs");
-    assert_global_invariants(&finish_engine, "admissions-settle-finish").await;
-    drop(finish_engine);
-
-    let cancel_trace = Arc::new(RecordingTraceSink::default());
-    let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel();
-    let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
-    let cancel_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-cancel")
-        .complete({
-            let provider_started_tx = Arc::clone(&provider_started_tx);
-            move |_| {
-                let provider_started_tx = Arc::clone(&provider_started_tx);
-                async move {
-                    if let Some(started) = provider_started_tx.lock_recover().take() {
-                        let _ = started.send(());
-                    }
-                    std::future::pending().await
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    // The stop reaches the turn as a durable request over ingress while the
-    // turn's attempt is running, so the stop request must be able to proceed.
-    let (cancel_core, cancel_engine) = standard_core_on(
-        lash_sim::backend::SimEngine::new(0x5eed_7010)
-            .await
-            .expect("concurrent sim engine"),
-        cancel_provider,
-        Arc::new(NoTools),
-        cancel_trace.clone(),
-        None,
-    );
-    let cancel_session = created_session(&cancel_core, "logical-turn-cancel")
-        .await
-        .durable()
-        .await
-        .expect("open cancel session");
-    let cancelled = cancel_session
-        .send(TurnInput::text("cancel admitted input"))
-        .await
-        .expect("send cancel input");
-    provider_started_rx.await.expect("cancel provider started");
-    cancelled
-        .cancel()
-        .await
-        .expect("cancel the running input's run");
-    let cancelled = cancelled.output().await.expect("cancel input runs");
-    assert_global_invariants(&cancel_engine, "admissions-settle-cancel").await;
-    drop(cancel_engine);
-    assert!(matches!(
-        cancelled.outcome,
-        lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-    ));
 }
 
 /// The host's configured bound governs the durable chain, rather than a

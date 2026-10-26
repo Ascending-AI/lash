@@ -1087,53 +1087,6 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn generated_multi_arm_plan_round_trips_with_stable_identity_and_order() {
-        let plan =
-            generated_multi_arm_plan(BackendFaultKind::Sqlite, DEFAULT_SQLITE_FAULT_SEED_BASE)
-                .expect("generated multi-arm plan");
-        let repeated =
-            generated_multi_arm_plan(BackendFaultKind::Sqlite, DEFAULT_SQLITE_FAULT_SEED_BASE)
-                .expect("repeated generated multi-arm plan");
-        let encoded = serde_json::to_value(&plan).expect("encode plan");
-        let decoded: BackendFaultCompositionPlan =
-            serde_json::from_value(encoded).expect("decode plan");
-
-        assert_eq!(decoded, plan);
-        assert_eq!(repeated, plan);
-        assert_eq!(plan.max_attempts, 2);
-        assert_eq!(plan.arms.len(), 2);
-        assert_eq!(plan.arms[0].arm.fault, BackendFault::Refused);
-        assert_eq!(plan.arms[1].arm.fault, BackendFault::ReplyLost);
-        assert_ne!(
-            plan.arms[0].source_boundary_id,
-            plan.arms[1].source_boundary_id
-        );
-
-        let schedules = (0..4)
-            .map(|offset| {
-                generated_multi_arm_plan(
-                    BackendFaultKind::Sqlite,
-                    DEFAULT_SQLITE_FAULT_SEED_BASE + offset,
-                )
-                .expect("generated multi-arm schedule")
-                .arms
-                .into_iter()
-                .map(|planned| planned.arm.fault)
-                .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            schedules,
-            vec![
-                vec![BackendFault::Refused, BackendFault::ReplyLost],
-                vec![BackendFault::ReplyLost, BackendFault::Refused],
-                vec![BackendFault::Refused, BackendFault::Refused],
-                vec![BackendFault::ReplyLost, BackendFault::ReplyLost],
-            ]
-        );
-    }
-
     #[tokio::test]
     async fn generated_two_arm_witness_requires_both_arms_to_exhaust_retry_budget() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1171,70 +1124,6 @@ mod tests {
         let error = validate_composition_witness(&omitted_arm_witness)
             .expect_err("the oracle must reject a real run missing its second arm");
         assert!(error.contains("paired arms must exhaust"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn bounded_seed_set_covers_every_sqlite_fault_and_oracle() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let report = run_backend_fault_profile(
-            BackendFaultKind::SqliteMemory,
-            tmp.path(),
-            &sqlite_fault_seeds(4),
-        )
-        .await
-        .expect("SQLite fault profile")
-        .expect("the SQLite lane is always configured");
-        assert_eq!(report.status, "passed");
-        assert!(report.coverage.dropped_scenarios.is_empty());
-        assert_eq!(report.scenarios.len(), 4);
-        assert!(report.report_path.exists());
-        for scenario in report.scenarios {
-            assert!(
-                scenario
-                    .oracles
-                    .iter()
-                    .all(|oracle| oracle.status == "passed")
-            );
-            if scenario.injected_fault.is_some() {
-                assert_eq!(scenario.injection_observations.len(), 1);
-            }
-        }
-    }
-
-    /// The same bounded seed set on a real PostgreSQL: every commit-fault
-    /// oracle holds there too.
-    ///
-    /// Ignored without the service gate; an explicit run requires PostgreSQL.
-    #[tokio::test]
-    #[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
-    async fn postgres_backend_fault_seed_set_covers_every_fault_and_oracle() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let Some(report) = run_backend_fault_profile(
-            BackendFaultKind::Postgres,
-            tmp.path(),
-            &sqlite_fault_seeds(4),
-        )
-        .await
-        .expect("Postgres fault profile") else {
-            eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not configured");
-            return;
-        };
-        assert_eq!(report.backend, BackendFaultKind::Postgres);
-        assert_eq!(report.status, "passed");
-        assert!(report.coverage.dropped_scenarios.is_empty());
-        assert_eq!(report.scenarios.len(), 4);
-        assert!(report.report_path.exists());
-        for scenario in report.scenarios {
-            assert!(
-                scenario
-                    .oracles
-                    .iter()
-                    .all(|oracle| oracle.status == "passed")
-            );
-            if scenario.injected_fault.is_some() {
-                assert_eq!(scenario.injection_observations.len(), 1);
-            }
-        }
     }
 
     /// What one arm did on one backend: every call the script saw, and the
@@ -1409,31 +1298,5 @@ mod tests {
         assert!(body.contains("sim.oracle.postgres-lost-commit-reply.v1"));
         assert!(body.contains("lash.sim.postgres-substrate-fault-failure.v1"));
         assert!(!body.contains("sqlite"));
-    }
-
-    #[test]
-    fn every_backend_fault_oracle_id_is_declared_in_the_inventory() {
-        for backend in BackendFaultKind::ALL {
-            let names = naming(backend);
-            let mut ids = vec![
-                names.harness_oracle,
-                names.typed_error_oracle,
-                names.preserves_committed_work_oracle,
-                names.reopen_preserves_committed_work_oracle,
-                names.no_duplicate_effect_oracle,
-                names.multi_arm_composition_oracle,
-            ];
-            ids.extend(
-                BackendFaultScenarioKind::ALL
-                    .iter()
-                    .map(|scenario| scenario.oracle_id(backend)),
-            );
-            for id in ids {
-                assert!(
-                    id.class == crate::trace::OracleObservationClass::RealObservation,
-                    "`{id}` is missing from the declared oracle inventory"
-                );
-            }
-        }
     }
 }

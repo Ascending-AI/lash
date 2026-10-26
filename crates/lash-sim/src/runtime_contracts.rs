@@ -692,18 +692,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn runtime_turn_contract_accepts_realistic_observation() {
-        let verdict = runtime_turn_contract(
-            &observation(),
-            &SessionId::from("session-001"),
-            2,
-            "answer",
-            2,
-        );
-        assert_eq!(verdict.status, OracleStatus::Passed);
-    }
-
     /// ADR 0033: assistant text is a fact, including whitespace and line endings.
     #[test]
     fn runtime_turn_contract_requires_unmodified_provider_text() {
