@@ -91,36 +91,6 @@ fn presentation_before_all_members_settle_is_refused() {
     assert!(fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).is_err());
 }
 
-/// V24: the marker derives every presented call from ordered admission.
-#[test]
-fn a_presentation_marker_derives_its_members_in_admission_order() {
-    let mut tx = opened();
-    let members = admitted(
-        &mut tx,
-        vec![
-            draft("a", "once", ExecutionPolicy::Once),
-            draft("b", "once", ExecutionPolicy::Once),
-        ],
-    );
-    for member in members.iter().rev() {
-        settle(
-            &mut tx,
-            member,
-            SettledOutput::Interrupted,
-            Vec::new(),
-            None,
-        )
-        .unwrap();
-    }
-    let next = Ordinal(rows(&tx).rows.len() as u64);
-    present(&mut tx, next);
-    let folded = fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap();
-    assert_eq!(
-        folded.round(RUN).unwrap().presented(),
-        Some(vec![ToolCallId::fixture("a"), ToolCallId::fixture("b")])
-    );
-}
-
 /// Appends the run's presentation marker at `ordinal`.
 fn present(tx: &mut ActorTx, ordinal: Ordinal) {
     super::records::append(

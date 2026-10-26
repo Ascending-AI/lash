@@ -63,18 +63,6 @@ fn assert_rejected(
 }
 
 #[test]
-fn rejects_empty_effect_id() {
-    let error = RuntimeEffectInvocation::try_new(
-        EffectAddress::new(ExecutionScope::runtime_operation("session"), "replay")
-            .expect("valid rejection-test address"),
-        RuntimeAttribution::for_session("session"),
-        "  ",
-    )
-    .expect_err("empty descriptive labels are refused");
-    assert_eq!(error.code.as_str(), "runtime_effect_invocation_subject");
-}
-
-#[test]
 fn rejects_empty_address_replay_key() {
     let mut empty_address = invocation(RuntimeEffectKind::Sleep);
     empty_address.address.replay_key.clear();

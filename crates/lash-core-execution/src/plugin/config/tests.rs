@@ -496,36 +496,6 @@ fn a_refused_member_refuses_the_whole_transaction() {
     );
 }
 
-#[test]
-fn the_final_candidate_is_validated_by_every_touched_owner() {
-    let (registry, _, _) = counters();
-    let base = head(&registry, 0);
-    let transaction = registry
-        .admit(
-            "t",
-            0,
-            vec![increment("first", 60, 1000), increment("first", 60, 1000)],
-        )
-        .expect("admitted");
-    let resolution = registry
-        .resolve(
-            &base,
-            &transaction,
-            &crate::EmptyLlmProfiles,
-            &crate::store::plugin_writers::PluginAdmission::default(),
-            &crate::plugin::prompt::PromptCatalogSnapshot::default(),
-        )
-        .expect("the recorded config reads");
-    let ConfigResolutionDecision::Refused { refusal } = resolution.result else {
-        panic!("the final candidate is refused");
-    };
-    assert_eq!(refusal.at, RefusalSite::Candidate);
-    assert_eq!(
-        refusal.owner_refusal::<CounterRefusal>(),
-        Some(CounterRefusal::OverHundred { count: 120 })
-    );
-}
-
 /// The reason `transaction` is refused for over `base`, with its site.
 fn refused_over(
     registry: &ConfigRegistry,

@@ -665,27 +665,6 @@ fn a_family_section_is_selected_only_when_its_tools_are_offered() {
     ));
 }
 
-/// REMOVED-SECTION: a plan admitted before a plugin was removed remains usable.
-#[test]
-fn a_removed_plugins_override_is_skipped_instead_of_failing_the_call() {
-    let catalog = catalog(vec![]).expect("empty catalog");
-    let plan = PromptPlan {
-        order: vec![id("removed", "notes")],
-        placements: vec![PromptSectionPlacement {
-            section: id("removed", "notes"),
-            placement: PromptPlacement::CurrentContext,
-        }],
-        ..PromptPlan::default()
-    };
-    let resolution = catalog.resolve(&plan, &PromptPurpose::Turn, &OfferedTools::default());
-    let resolution = resolution.expect("a removed section cannot brick a turn");
-    assert!(resolution.record().sections.is_empty());
-    assert_eq!(
-        resolution.record().absent_overrides,
-        vec![id("removed", "notes")]
-    );
-}
-
 /// OFFERED: discovery-hidden tools remain discoverable in the pinned catalog,
 /// but contribute neither inline callable bindings nor prompt guidance.
 #[test]

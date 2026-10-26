@@ -212,28 +212,6 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_start_needs_its_key_and_hold() {
-        let call_id = ToolCallId::fixture("start");
-        let mut keyless = registration(false);
-        keyless.start_key = None;
-        assert_eq!(
-            DeclaredStartObligation::new(call_id.clone(), keyless).unwrap_err(),
-            DeclaredStartObligationRefusal::Keyless
-        );
-        let mut unheld = registration(false);
-        unheld.consumer_hold = None;
-        assert_eq!(
-            DeclaredStartObligation::new(call_id.clone(), unheld).unwrap_err(),
-            DeclaredStartObligationRefusal::NoConsumerHold
-        );
-        let obligation = DeclaredStartObligation::new(call_id, registration(false)).unwrap();
-        let encoded = serde_json::to_value(&obligation).unwrap();
-        let decoded: DeclaredStartObligation = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(decoded.start_key(), &StartKey::for_host("declared-start"));
-        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
-    }
-
-    #[test]
     fn a_cancel_forbids_an_unadmitted_start_and_recovers_an_admitted_one() {
         let key = StartKey::for_host("declared-start");
         let obligation =

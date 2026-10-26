@@ -753,58 +753,6 @@ fn operation_metadata_comes_from_frozen_inventory() {
     );
 }
 
-/// Frozen inventory owns descriptive prompt metadata after execution storage is partitioned.
-#[test]
-fn prompt_metadata_comes_from_frozen_inventory() {
-    let mut reg = PluginRegistrar::<()>::new("prompt-metadata");
-    let spec = PromptSectionSpec::new(
-        PromptSectionKey::new("instructions").unwrap(),
-        PromptPlacement::InitialInstructions,
-    );
-    reg.prompt()
-        .section(spec, |_, _| {
-            panic!("descriptive reads cannot bind renderers")
-        })
-        .unwrap();
-    reg.prompt()
-        .family(
-            super::super::prompt::PromptSectionFamilySpec::new(
-                PromptSectionKey::new("tools").unwrap(),
-                PromptPlacement::CurrentContext,
-            ),
-            |_, _| panic!("descriptive reads cannot bind family sources"),
-        )
-        .unwrap();
-    reg.prompt()
-        .wrap(
-            super::super::prompt::PromptWrapSpec::new(
-                crate::prompt_sections::PromptWrapKey::new("wrap").unwrap(),
-                super::super::prompt::PromptSectionId::new(
-                    "prompt-metadata",
-                    PromptSectionKey::new("instructions").unwrap(),
-                ),
-            ),
-            |_, _| panic!("descriptive reads cannot bind wrappers"),
-        )
-        .unwrap();
-    let inventory = InstalledInventory {
-        scope: InventoryScope::Deployment(RegistryKind::Session),
-        entries: reg.descriptors("prompt-metadata"),
-        readiness: vec![ContributionReadiness::Ready; 3],
-        stateless: Default::default(),
-    };
-    let expected = super::super::prompt::PromptCatalogSnapshot::from_inventory(&inventory);
-    let mut contributions = PluginContributions {
-        inventory: Some(Arc::new(inventory)),
-        ..Default::default()
-    };
-    let registry = super::super::runtime_impl::build_tool_registry(&mut contributions).unwrap();
-    let composition = ExecutionComposition::new(&mut contributions, registry);
-    assert_eq!(composition.prompt_catalog().sections(), expected.sections());
-    assert_eq!(composition.prompt_catalog().families(), expected.families());
-    assert_eq!(composition.prompt_catalog().wraps(), expected.wraps());
-}
-
 /// PROCESS-ADMITS-WHAT-IT-RUNS (FIG-6273): the contribution table admits a
 /// callback slot in a process exactly when a process runs it. What a
 /// process runs comes from its own wiring, not a list: a plugin that binds

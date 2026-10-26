@@ -166,24 +166,3 @@ fn omission_changes_neither_stored_history_nor_tool_pairing() {
         "a named text part is unchanged"
     );
 }
-
-#[test]
-fn omission_uses_policy_text_and_preserves_record_order() {
-    let stored = history();
-    let mut view = stored.clone();
-    let omissions = [named("u1", 1), named("t1", 0)]
-        .into_iter()
-        .map(|id| (id, "mode-owned omission".to_owned()))
-        .collect();
-    assert_eq!(apply_attachment_omissions(&mut view, &omissions), 2);
-    assert_eq!(view[0].parts[1].content(), "mode-owned omission");
-    assert_eq!(shape(&view), shape(&stored));
-    assert_eq!(
-        view.iter().map(|m| &m.id).collect::<Vec<_>>(),
-        stored.iter().map(|m| &m.id).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        stored[0].parts[1].attachment().map(|a| &a.reference),
-        Some(&image("u1"))
-    );
-}

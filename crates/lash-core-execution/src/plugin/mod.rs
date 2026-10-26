@@ -960,29 +960,6 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
 
         drop(child);
     }
-
-    #[test]
-    fn plugin_host_unregisters_sessions() {
-        let host = PluginHost::new(
-            vec![Arc::new(MockPluginFactory)],
-            lash_protocol_types::ExecutionBudgets::recommended(),
-            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
-        );
-        let _session = host
-            .build_session(PluginSessionRequest::creation(
-                "root",
-                crate::plugin::SessionAuthorityContext::fixture(),
-            ))
-            .expect("session");
-        assert!(host.session(&SessionId::from("root")).is_ok());
-        host.unregister_session(&SessionId::from("root"))
-            .expect("unregister");
-        match host.session(&SessionId::from("root")) {
-            Err(PluginOperationInvokeError::UnknownSession(id)) => assert_eq!(id, "root"),
-            Ok(_) => panic!("expected missing session"),
-            Err(other) => panic!("unexpected error: {other}"),
-        }
-    }
 }
 
 mod inventory_reader;

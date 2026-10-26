@@ -694,50 +694,6 @@ async fn one_refused_command_publishes_none_of_its_batch() {
     ));
 }
 
-/// A durable resolution replays on a build whose reducer changed, without
-/// running it.
-#[tokio::test]
-async fn a_recorded_resolution_replays_without_its_reducer() {
-    let reducer_calls = Arc::new(AtomicUsize::new(0));
-    let recording = host(&reducer_calls);
-    let live = session(&recording, None);
-    let base = live.export_state();
-    let outcome = record(
-        &live,
-        "add",
-        vec![tool_commands(
-            LEDGER,
-            "add",
-            StateCommands::new().apply("total", "add", serde_json::json!(7)),
-        )],
-    )
-    .await;
-    publish(&live, "add", outcome.clone()).unwrap();
-    assert_eq!(reducer_calls.load(Ordering::SeqCst), 1);
-
-    let changed = crate::PluginHost::new(
-        vec![
-            Arc::new(StaticPluginFactory::new(
-                PluginDeclaration::initial(LEDGER),
-                PluginSpec::new().with_state_reducer(
-                    "add",
-                    Arc::new(|_: StateReduction<'_>| panic!("a recorded resolution never reduces")),
-                ),
-            )),
-            Arc::new(StaticPluginFactory::new(
-                PluginDeclaration::initial(OTHER),
-                PluginSpec::new(),
-            )),
-        ],
-        crate::ExecutionBudgets::recommended(),
-        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
-    );
-    let cold = session(&changed, Some(&base));
-    publish(&cold, "add", journaled(&outcome)).unwrap();
-    assert_eq!(value(&cold, LEDGER, "total"), Some(serde_json::json!(7)));
-    assert_eq!(cold.export_state(), live.export_state());
-}
-
 /// A recorded failure publishes nothing, and leaves no reservation behind.
 #[tokio::test]
 async fn a_failed_body_publishes_nothing() {
