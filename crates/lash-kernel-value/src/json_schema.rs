@@ -98,47 +98,53 @@ struct KernelTypes {
     result_widenings: Vec<crate::schema::Widening>,
 }
 
-/// Share only pure admission results while a schema still owns them. No
-/// cache entry keeps a body or validator alive, and keys compare whole JSON
-/// bodies so annotations, defaults and refusal diagnostics remain exact.
-#[derive(Default)]
-struct Admissions(Mutex<std::collections::VecDeque<Weak<Admitted>>>);
-impl Admissions {
-    fn admit(&self, value: Value) -> Result<JsonSchema, SchemaAdmissionError> {
-        if let Some(admitted) = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .filter_map(Weak::upgrade)
-            .find(|found| *found.value == value)
-        {
-            return Ok(JsonSchema { admitted });
-        }
-        let compiled = JsonSchema::compile(value)?;
-        Ok(self.keep(compiled))
-    }
+pub(crate) mod admissions {
+    use super::*;
 
-    // Compilation is outside the lock. Classify again under its owner so
-    // concurrent admissions transfer the same immutable result to callers.
-    fn keep(&self, compiled: JsonSchema) -> JsonSchema {
-        let mut entries = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        entries.retain(|entry| entry.strong_count() != 0);
-        if let Some(admitted) = entries
-            .iter()
-            .filter_map(Weak::upgrade)
-            .find(|found| found.value == compiled.admitted.value)
-        {
-            return JsonSchema { admitted };
+    /// Share only pure admission results while a schema still owns them. No
+    /// cache entry keeps a body or validator alive, and keys compare whole JSON
+    /// bodies so annotations, defaults and refusal diagnostics remain exact.
+    #[derive(Default)]
+    pub struct Admissions(Mutex<std::collections::VecDeque<Weak<Admitted>>>);
+    impl Admissions {
+        /// Admit a schema, sharing its immutable preparation with live owners
+        /// in this cache. Dropping the cache discards all lookup state.
+        pub fn admit(&self, value: Value) -> Result<JsonSchema, SchemaAdmissionError> {
+            if let Some(admitted) = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .filter_map(Weak::upgrade)
+                .find(|found| *found.value == value)
+            {
+                return Ok(JsonSchema { admitted });
+            }
+            let compiled = JsonSchema::admit(value)?;
+            Ok(self.keep(compiled))
         }
-        entries.push_back(Arc::downgrade(&compiled.admitted));
-        while entries.len() > 128 {
-            entries.pop_front();
+
+        // Compilation is outside the lock. Classify again under its owner so
+        // concurrent admissions transfer the same immutable result to callers.
+        pub(super) fn keep(&self, compiled: JsonSchema) -> JsonSchema {
+            let mut entries = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            entries.retain(|entry| entry.strong_count() != 0);
+            if let Some(admitted) = entries
+                .iter()
+                .filter_map(Weak::upgrade)
+                .find(|found| found.value == compiled.admitted.value)
+            {
+                return JsonSchema { admitted };
+            }
+            entries.push_back(Arc::downgrade(&compiled.admitted));
+            while entries.len() > 128 {
+                entries.pop_front();
+            }
+            compiled
         }
-        compiled
     }
 }
 
@@ -163,8 +169,7 @@ impl JsonSchema {
         if value.as_object().is_some_and(serde_json::Map::is_empty) {
             return Ok(Self::any());
         }
-        static ADMISSIONS: OnceLock<Admissions> = OnceLock::new();
-        ADMISSIONS.get_or_init(Admissions::default).admit(value)
+        Self::compile(value)
     }
 
     fn compile(value: Value) -> Result<Self, SchemaAdmissionError> {
@@ -376,7 +381,7 @@ mod preparation_tests {
     /// exact bodies retain annotations and only live owners retain admissions.
     #[test]
     fn raced_schema_admissions_share_exact_bodies_without_retaining_them() {
-        let cache = Arc::new(Admissions::default());
+        let cache = Arc::new(admissions::Admissions::default());
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let value = serde_json::json!({"type":"string", "title":"original"});
         let handles: Vec<_> = (0..2)

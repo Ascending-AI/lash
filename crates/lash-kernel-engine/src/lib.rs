@@ -6,10 +6,7 @@ use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Request, Step, Target, WaitId,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::Arc;
 
 mod compile;
 pub mod embedding;
@@ -133,9 +130,30 @@ pub struct Program {
 /// Opaque run-scoped identity retaining both the semantic effect and wait.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CallId {
-    run: u64,
+    run: RunId,
     wait: WaitId,
     effect: lash_kernel_value::sites::EffectId,
+}
+
+/// An allocation owned by the run and every call identity it issued.
+/// Its address cannot be reused while any of those identities survives.
+#[derive(Clone, Debug)]
+struct RunId(Arc<u8>);
+impl PartialEq for RunId {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for RunId {}
+impl PartialOrd for RunId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for RunId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        Arc::as_ptr(&self.0).cmp(&Arc::as_ptr(&other.0))
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Call {
@@ -185,7 +203,7 @@ struct Continuation {
     program: Program,
     checkpoint: lash_kernel_state::paged::Checkpoint,
     pages: pages::Pages,
-    run: u64,
+    run: RunId,
     pending: Vec<Call>,
     retired: BTreeSet<CallId>,
     output_bytes: usize,
@@ -223,10 +241,7 @@ impl Engine {
             return Err(Fault::Policy);
         }
         check_values(&args, program.limits.value_bytes)?;
-        static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
-        let run = NEXT_RUN
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map_err(|_| Fault::Kernel("run identity exhausted".into()))?;
+        let run = RunId(Arc::new(0));
         let pages = pages::Pages::new(program.limits.storage_bytes);
         let machine = KernelMachine::start(
             program.kernel.clone(),
@@ -334,7 +349,7 @@ impl Engine {
         mut machine: KernelMachine,
         program: Program,
         pages: pages::Pages,
-        run: u64,
+        run: RunId,
         mut pending: Vec<Call>,
         mut retired: BTreeSet<CallId>,
         output_bytes: usize,
@@ -380,7 +395,7 @@ impl Engine {
                         check_values(&args, program.limits.value_bytes)?;
                         let call = Call {
                             id: CallId {
-                                run,
+                                run: run.clone(),
                                 wait: request.wait,
                                 effect: request.identity,
                             },

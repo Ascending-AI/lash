@@ -4,6 +4,10 @@
 # build tables and opt-in diagnostics belong here: guest-derived state
 # lives in the machine instance a worker hosts, which a worker reset drops.
 
+crates/lash-kernel-value/src/json_schema.rs::any::ANY  # immutable unconstrained schema compiled only from the constant empty object; no guest input
+crates/lash-kernel-value/src/tokens.rs::<module>::KEYED  # BLAKE3 key schedule derived only from the fixed logical body domain; each digest clones it before reading caller bytes
+crates/lash-kernel-engine/src/embedding.rs::standard::IMAGE  # immutable image and indexes derived only from the build-owned helper release; no guest source, values or run state
+
 crates/lash-ext-ts-helpers/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
 crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the constant empty binding set a process body lowers against; no guest input
 crates/lash-kernel-services/src/lib.rs::<module>::TYPESCRIPT  # immutable clock, random and sleep operation declarations derived only from the fixed typescript package name and signatures; no guest input or host routes

@@ -5,6 +5,10 @@ pub mod data_limits;
 pub mod entry_schema;
 pub mod identity;
 pub mod json_schema;
+/// Caller-owned lookup state for sharing immutable schema preparations.
+pub mod schema_admissions {
+    pub use crate::json_schema::admissions::Admissions;
+}
 pub mod names;
 pub mod observation;
 pub mod operation_keys;

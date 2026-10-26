@@ -48,7 +48,12 @@ impl SchemaContract {
     }
 
     pub fn admit(canonical: Value) -> Result<Self, SchemaAdmissionError> {
-        JsonSchema::admit(canonical).map(Self::new)
+        static ADMISSIONS: std::sync::OnceLock<lash_kernel_value::schema_admissions::Admissions> =
+            std::sync::OnceLock::new();
+        ADMISSIONS
+            .get_or_init(Default::default)
+            .admit(canonical)
+            .map(Self::new)
     }
 
     pub fn with_override(mut self, dialect: SchemaDialect, schema: JsonSchema) -> Self {

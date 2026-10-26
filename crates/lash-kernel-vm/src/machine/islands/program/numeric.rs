@@ -24,10 +24,9 @@ impl Build<'_> {
         }
         let removed = self.call_inputs(&targets);
         let mut relocation = vec![0; self.ops.len() + 1];
-        let mut old = std::mem::take(&mut self.ops)
-            .into_iter()
-            .enumerate()
-            .peekable();
+        let source = std::mem::take(&mut self.ops);
+        self.ops = Vec::with_capacity(source.len());
+        let mut old = source.into_iter().enumerate().peekable();
         while let Some((at, mut instruction)) = old.next() {
             relocation[at] = self.ops.len();
             if removed.contains(&at) {
