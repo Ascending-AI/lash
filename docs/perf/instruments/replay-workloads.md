@@ -78,11 +78,13 @@ LASH_REPLAY_ARTIFACT_DIR=/tmp/warm-caps just perf-replay warm-capabilities \
 ```
 
 This versioned workload runs on a SQLite file store and prints a row for each
-turn. Turn 1 primes 31 resident host tools; turn 2 invokes one under unchanged
-`RunSpec.capabilities`; turn 3 stores and attaches a fresh text document and
-publishes the host's new document operation. Every tool body checks its exact
-per-turn document capability, and every turn must execute exactly one authorized
-operation. Turn 2 must enter zero snapshot, manifest and link_payload callbacks;
+turn. Turn 1 primes 31 resident host tools; turn 2 is a quiet clean model turn
+carrying unchanged `RunSpec.capabilities`; turn 3 stores and attaches a fresh text
+document and publishes the host's new document operation. Every tool body checks
+its exact per-turn document capability. Setup and fresh-document turns must each
+execute exactly one authorized operation; the quiet turn must execute zero.
+Native tool invocation also performs legitimate by-ID contract lookups, so the
+quiet model window excludes that separate work. Turn 2 must enter zero snapshot, manifest and link_payload callbacks;
 turn 3 must enter some. The snapshot adapter uses the existing callback counters
 and observes the default snapshot's calls into the actual runner separately.
 

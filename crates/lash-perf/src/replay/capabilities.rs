@@ -12,13 +12,12 @@ use lash_protocol_types::sync::MutexExt;
 
 use super::script::CapabilityTurn;
 
+type WeakEnvironmentSink = std::sync::Weak<dyn Fn(EnvironmentChange) + Send + Sync>;
+
 #[derive(Default)]
 struct State {
     documents: usize,
-    subscriptions: Vec<(
-        SourceId,
-        std::sync::Weak<dyn Fn(EnvironmentChange) + Send + Sync>,
-    )>,
+    subscriptions: Vec<(SourceId, WeakEnvironmentSink)>,
     authorized_calls: u64,
 }
 
@@ -206,9 +205,10 @@ pub fn metrics(
     .collect()
 }
 pub fn check(turn: CapabilityTurn, metrics: &BTreeMap<String, f64>, authorized: u64) -> Result<()> {
+    let expected_calls = u64::from(turn != CapabilityTurn::Quiet);
     ensure!(
-        authorized == 1,
-        "capability turn must execute exactly one authorized host operation, got {authorized}"
+        authorized == expected_calls,
+        "capability turn must execute {expected_calls} authorized host operations, got {authorized}"
     );
     ensure!(
         metrics
