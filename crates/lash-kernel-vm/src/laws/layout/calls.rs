@@ -19,10 +19,13 @@ fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool
             layout,
             slice,
             bounds,
-            probes: Some(scalar_probes),
+            probes: Some(helper_probes),
             ..Setup::default()
         },
     );
+    if source.contains("helper.element") && layout == Layout(1) {
+        embedder.machine.count_work();
+    }
     let tape = crate::ChargeTape::new();
     if taped {
         embedder.machine.record_charges(tape.clone());
@@ -60,6 +63,9 @@ fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
                 embedder.reopen(layout, true);
+                if source.contains("helper.element") && layout == Layout(1) {
+                    embedder.machine.count_work();
+                }
                 if taped {
                     embedder.machine.record_charges(tape.clone());
                 }
@@ -106,6 +112,9 @@ fn direct_call_entry_agrees() {
     );
     let mut comparisons = 0;
     for body in [
+        "return invoke helper.element([7], 0)",
+        "return invoke helper.element({value: 7}, \"value\")",
+        "return invoke helper.element([7], 2)",
         "let f = fn(x) { return 1 } return apply f(7)",
         "let n = 0 while flat.lt(n, 3) { set n = flat.add(n, call literal(n)) } return n",
         "let n = 7 let f = fn() { return false } try { set n = flat.add(n, apply f()) } catch err { print n } return n",

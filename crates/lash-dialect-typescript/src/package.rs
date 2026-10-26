@@ -252,7 +252,7 @@ fn computed_reader(table: &'static builtins::Table, numeric: bool) -> String {
     let mut source = format!(
         "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse record.contains\nuse ts.builtin_name\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
-    source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+    source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse tuple.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
     // Calling a member reads its value before applying it.
     let mut rows = row_names(table);
     if numeric {
@@ -299,7 +299,7 @@ fn computed_reader(table: &'static builtins::Table, numeric: bool) -> String {
       }}
     }}
   }}
-  do invoke ts.require_object_coercible(this)\n"
+"
     ));
     // A number naming an element of a list or a text spells a row's name
     // only if some row's name is all digits; then every key takes the rows.
@@ -309,6 +309,9 @@ fn computed_reader(table: &'static builtins::Table, numeric: bool) -> String {
     {
         source.push_str(ELEMENT_READ);
     }
+    // The numeric read returns only after proving a list or text receiver.
+    // All other reads check coercibility before converting the key.
+    source.push_str("  do invoke ts.require_object_coercible(this)\n");
     source.push_str("  let name = invoke ts.to_property_key(key)\n");
     search(&branches, 1, &mut source);
     let args = "this, name";
@@ -328,7 +331,9 @@ const ELEMENT_READ: &str = "  if same(kind(key), \"float\") {
     if num.le(0, position) {
       if same(kind(this), \"list\") {
         let element = this[position]
-        if same(element, ()) { return absent }
+        if same(kind(element), \"tuple\") {
+          if same(tuple.len(element), 0) { return absent }
+        }
         return element
       }
       let element = invoke ts.get(this, key)

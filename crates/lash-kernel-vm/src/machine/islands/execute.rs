@@ -1313,7 +1313,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     #[inline(always)]
     fn returning(&mut self, frame: &mut Frame<'e>, value: Value) -> Result<Next, Stop> {
-        if !frame.may_clean {
+        // A catch-only scope has no work on a successful return. Keep
+        // that return's source coordinate for a library formula refusal.
+        if !frame.may_clean || !frame.callee.compiled.cleanups {
             return Ok(Next::Return(value));
         }
         self.departure(frame, Completion::Return(Box::new(value)))

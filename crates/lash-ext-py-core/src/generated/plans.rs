@@ -5035,7 +5035,7 @@ const BRAND_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: brand_of,
-    template: Some(p::HelperTemplate { entry: Some(brand_of_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: Some(brand_of_template), metered: None, depth: 1, callees: &[p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), ], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `brand.of`.
@@ -5122,6 +5122,103 @@ fn brand_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
             None
         },
         [Value::Record(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
+                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
+                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
+                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                let v9 = heap.index(v1, Value::Int(1))?; let _ = v9;
+                let v10 = (natives[0].entry)(&[v9])?; let _ = v10;
+                let v11 = match (natives[1].entry)(&[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v11;
+                if !matches!(v11, Value::Bool(true)) { return None; }
+                Some(v1)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
+                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
+                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
+                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
+                if !matches!(v8, Value::Bool(true)) { return None; }
+                let v9 = heap.index(v1, Value::Int(1))?; let _ = v9;
+                let v10 = (natives[0].entry)(&[v9])?; let _ = v10;
+                let v11 = match (natives[1].entry)(&[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v11;
+                if !matches!(v11, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
+                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(true)) { return None; }
+                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
+                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
+                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
+                if !matches!(v8, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
+                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
+                if !matches!(v5, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
             let charge_mark = heap.mark();
             if let Some(value) = (|| {
                 let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
@@ -7936,7 +8033,7 @@ const PY_POW_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_pow,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("1aad1a79381293bdcd04432b82bd1e45fe6804d78bb50cea35de94a314cadc4c"), p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"), p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), ], heap: Some(p::HeapTemplate { entry: py_pow_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9"), p::function("c9d0596f4f074156dbf91337bae10830f8594cb7ddb121c44e526c681d2d88f4"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478"), p::function("2dd038c91c0a2c8997f4469a85b833d88f903312c7de53c72c6b71d8c0d74842"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.pow`.
@@ -8050,6 +8147,260 @@ fn py_pow(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.begin()?;
     ctx.local(3, 0)?;
     Ok(ctx.take(0))
+}
+fn py_pow_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent, Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(1, &[args[0], args[1]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = (natives[4].entry)(&[v4])?; let _ = v5;
+                let v6 = match (natives[5].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                let v7 = match (natives[1].entry)(&[v4, v4]) { Some(value) => value, None => heap.call(3, &[v4, v4])? }; let _ = v7;
+                if !matches!(v7, Value::Bool(true)) { return None; }
+                let v8 = match (natives[6].entry)(&[v4]) { Some(value) => value, None => heap.call(4, &[v4])? }; let _ = v8;
+                let v9 = (natives[3].entry)(&[v8])?; let _ = v9;
+                if !matches!(v9, Value::Bool(false)) { return None; }
+                Some(v4)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(1, &[args[0], args[1]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = (natives[4].entry)(&[v4])?; let _ = v5;
+                let v6 = match (natives[5].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v6;
+                if !matches!(v6, Value::Bool(true)) { return None; }
+                let v7 = match (natives[1].entry)(&[v4, v4]) { Some(value) => value, None => heap.call(3, &[v4, v4])? }; let _ = v7;
+                if !matches!(v7, Value::Bool(false)) { return None; }
+                let v10 = (natives[1].entry)(&[args[1], args[1]])?; let _ = v10;
+                if !matches!(v10, Value::Bool(false)) { return None; }
+                Some(v4)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                let v4 = heap.call(1, &[args[0], args[1]])?; let _ = v4;
+                heap.bind(v4, None)?;
+                let v5 = (natives[4].entry)(&[v4])?; let _ = v5;
+                let v6 = match (natives[5].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v6;
+                if !matches!(v6, Value::Bool(false)) { return None; }
+                Some(v4)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v11 = heap.call(1, &[args[0], args[1]])?; let _ = v11;
+                heap.bind(v11, None)?;
+                let v12 = (natives[4].entry)(&[v11])?; let _ = v12;
+                let v13 = match (natives[5].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                let v14 = match (natives[1].entry)(&[v11, v11]) { Some(value) => value, None => heap.call(3, &[v11, v11])? }; let _ = v14;
+                if !matches!(v14, Value::Bool(true)) { return None; }
+                let v15 = match (natives[6].entry)(&[v11]) { Some(value) => value, None => heap.call(4, &[v11])? }; let _ = v15;
+                let v16 = (natives[3].entry)(&[v15])?; let _ = v16;
+                if !matches!(v16, Value::Bool(false)) { return None; }
+                Some(v11)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v11 = heap.call(1, &[args[0], args[1]])?; let _ = v11;
+                heap.bind(v11, None)?;
+                let v12 = (natives[4].entry)(&[v11])?; let _ = v12;
+                let v13 = match (natives[5].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v13;
+                if !matches!(v13, Value::Bool(true)) { return None; }
+                let v14 = match (natives[1].entry)(&[v11, v11]) { Some(value) => value, None => heap.call(3, &[v11, v11])? }; let _ = v14;
+                if !matches!(v14, Value::Bool(false)) { return None; }
+                let v17 = (natives[1].entry)(&[args[1], args[1]])?; let _ = v17;
+                if !matches!(v17, Value::Bool(false)) { return None; }
+                Some(v11)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.call(0, &[args[1]])?; let _ = v1;
+                let v2 = (natives[3].entry)(&[v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v3 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v3;
+                if !matches!(v3, Value::Bool(false)) { return None; }
+                let v11 = heap.call(1, &[args[0], args[1]])?; let _ = v11;
+                heap.bind(v11, None)?;
+                let v12 = (natives[4].entry)(&[v11])?; let _ = v12;
+                let v13 = match (natives[5].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v13;
+                if !matches!(v13, Value::Bool(false)) { return None; }
+                Some(v11)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                let v20 = heap.call(1, &[args[0], args[1]])?; let _ = v20;
+                heap.bind(v20, None)?;
+                let v21 = (natives[4].entry)(&[v20])?; let _ = v21;
+                let v22 = match (natives[5].entry)(&[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v22;
+                if !matches!(v22, Value::Bool(true)) { return None; }
+                let v23 = match (natives[1].entry)(&[v20, v20]) { Some(value) => value, None => heap.call(3, &[v20, v20])? }; let _ = v23;
+                if !matches!(v23, Value::Bool(true)) { return None; }
+                let v24 = match (natives[6].entry)(&[v20]) { Some(value) => value, None => heap.call(4, &[v20])? }; let _ = v24;
+                let v25 = (natives[3].entry)(&[v24])?; let _ = v25;
+                if !matches!(v25, Value::Bool(false)) { return None; }
+                Some(v20)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                let v20 = heap.call(1, &[args[0], args[1]])?; let _ = v20;
+                heap.bind(v20, None)?;
+                let v21 = (natives[4].entry)(&[v20])?; let _ = v21;
+                let v22 = match (natives[5].entry)(&[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v22;
+                if !matches!(v22, Value::Bool(true)) { return None; }
+                let v23 = match (natives[1].entry)(&[v20, v20]) { Some(value) => value, None => heap.call(3, &[v20, v20])? }; let _ = v23;
+                if !matches!(v23, Value::Bool(false)) { return None; }
+                let v26 = (natives[1].entry)(&[args[1], args[1]])?; let _ = v26;
+                if !matches!(v26, Value::Bool(false)) { return None; }
+                Some(v20)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(true)) { return None; }
+                let v20 = heap.call(1, &[args[0], args[1]])?; let _ = v20;
+                heap.bind(v20, None)?;
+                let v21 = (natives[4].entry)(&[v20])?; let _ = v21;
+                let v22 = match (natives[5].entry)(&[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v21, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v22;
+                if !matches!(v22, Value::Bool(false)) { return None; }
+                Some(v20)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v27 = heap.call(1, &[args[0], args[1]])?; let _ = v27;
+                heap.bind(v27, None)?;
+                let v28 = (natives[4].entry)(&[v27])?; let _ = v28;
+                let v29 = match (natives[5].entry)(&[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v29;
+                if !matches!(v29, Value::Bool(true)) { return None; }
+                let v30 = match (natives[1].entry)(&[v27, v27]) { Some(value) => value, None => heap.call(3, &[v27, v27])? }; let _ = v30;
+                if !matches!(v30, Value::Bool(true)) { return None; }
+                let v31 = match (natives[6].entry)(&[v27]) { Some(value) => value, None => heap.call(4, &[v27])? }; let _ = v31;
+                let v32 = (natives[3].entry)(&[v31])?; let _ = v32;
+                if !matches!(v32, Value::Bool(false)) { return None; }
+                Some(v27)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v27 = heap.call(1, &[args[0], args[1]])?; let _ = v27;
+                heap.bind(v27, None)?;
+                let v28 = (natives[4].entry)(&[v27])?; let _ = v28;
+                let v29 = match (natives[5].entry)(&[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v29;
+                if !matches!(v29, Value::Bool(true)) { return None; }
+                let v30 = match (natives[1].entry)(&[v27, v27]) { Some(value) => value, None => heap.call(3, &[v27, v27])? }; let _ = v30;
+                if !matches!(v30, Value::Bool(false)) { return None; }
+                let v33 = (natives[1].entry)(&[args[1], args[1]])?; let _ = v33;
+                if !matches!(v33, Value::Bool(false)) { return None; }
+                Some(v27)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            heap.path();
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v18 = (natives[3].entry)(&[v0])?; let _ = v18;
+                if !matches!(v18, Value::Bool(false)) { return None; }
+                let v19 = (natives[0].entry)(&[args[1], Value::Int(0)])?; let _ = v19;
+                if !matches!(v19, Value::Bool(false)) { return None; }
+                let v27 = heap.call(1, &[args[0], args[1]])?; let _ = v27;
+                heap.bind(v27, None)?;
+                let v28 = (natives[4].entry)(&[v27])?; let _ = v28;
+                let v29 = match (natives[5].entry)(&[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(2, &[v28, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v29;
+                if !matches!(v29, Value::Bool(false)) { return None; }
+                Some(v27)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
@@ -35145,7 +35496,7 @@ const PY_METHOD_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_join,
-    template: None,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), ], heap: Some(p::HeapTemplate { entry: py_method_join_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("49e45f1748520d620ee3f1a93000f2fde17eadad70bc76c6c14065707a4c55cf"), p::function("bd08e68b1e327b051decdd2d7930faf3b78e70011ac419f60baac24c34f5ea95"), p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"), p::function("2ccb8077e20a0f0aa5f10c7b2d773dee55e031c55186da0c375dd87ded10c3fa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.method.join`.
@@ -35243,6 +35594,27 @@ fn py_method_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+fn py_method_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Text(_) | Value::LongText(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(1, &[v0, args[0]])?; let _ = v1;
+                heap.bind(v1, None)?;
+                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
+                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(2, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v3;
+                if !matches!(v3, Value::Bool(true)) { return None; }
+                Some(v1)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {

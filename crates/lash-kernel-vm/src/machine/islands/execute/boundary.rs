@@ -235,6 +235,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 reason,
                 self.scratch.counting,
             );
+            let lib = match &instruction.op {
+                Op::Native { site, .. } | Op::DirectNative { site, .. } => Some(site.lib),
+                Op::Operator { site, .. }
+                | Op::DirectOperator { site, .. }
+                | Op::Unary { site, .. }
+                | Op::Binary { site, .. } => Some(site.lib),
+                Op::Heap { site, .. } => Some(site.lib),
+                Op::Call { site, .. } => site.library,
+                _ => None,
+            };
+            if let Some(lib) = lib {
+                execution::operation_exit(
+                    &self.scratch.census,
+                    reason,
+                    self.exe.lib(lib).header.name.as_str(),
+                    self.scratch.counting,
+                );
+            }
         }
         if self.scratch.exit.halt.is_none() {
             if active.resident && callers.is_empty() && self.scratch.exit.scheduling {

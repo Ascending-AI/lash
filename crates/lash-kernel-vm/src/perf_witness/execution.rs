@@ -52,6 +52,9 @@ pub struct Census {
     pub transitions: BTreeMap<Owner, BTreeMap<Owner, u64>>,
     pub register_entries: u64,
     pub slow_exits: BTreeMap<Owner, BTreeMap<Reason, u64>>,
+    /// The library operation at a precise exit, grouped by its exit reason.
+    /// This is diagnostic execution data, never a guest or checkpoint fact.
+    pub operation_exits: BTreeMap<Reason, BTreeMap<String, u64>>,
     /// The linear text accumulators' writes that committed a text their
     /// concatenation extended in place (FIG-6795).
     pub accumulated: u64,
@@ -108,6 +111,7 @@ enum Fact {
     Statements(Owner, u64),
     RegisterEntry,
     SlowExit(Owner, Reason),
+    OperationExit(Reason, String),
     Accumulated,
 }
 
@@ -142,6 +146,15 @@ fn produce(counts: &Arc<Mutex<Collector>>, fact: Fact) {
                 .entry(owner)
                 .or_default()
                 .entry(reason)
+                .or_default() += 1;
+        }
+        Fact::OperationExit(reason, name) => {
+            *counts
+                .census
+                .operation_exits
+                .entry(reason)
+                .or_default()
+                .entry(name)
                 .or_default() += 1;
         }
     }
@@ -234,5 +247,12 @@ pub(crate) fn accumulated(recorder: &Recorder, counting: bool) {
 pub(crate) fn slow_exit(recorder: &Recorder, owner: Owner, reason: Reason, counting: bool) {
     if counting && let Some(counts) = &recorder.inner {
         produce(counts, Fact::SlowExit(owner, reason));
+    }
+}
+
+#[inline(always)]
+pub(crate) fn operation_exit(recorder: &Recorder, reason: Reason, name: &str, counting: bool) {
+    if counting && let Some(counts) = &recorder.inner {
+        produce(counts, Fact::OperationExit(reason, name.to_owned()));
     }
 }

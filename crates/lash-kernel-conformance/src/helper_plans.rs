@@ -1084,6 +1084,18 @@ fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
         ),
     ];
     let typescript = [
+        // FIG-7412: a computed list read's dynamic kind and empty-slot
+        // guard used to prevent a heap path for the default string sort.
+        (
+            "default sort UTF16 and holes",
+            r#"const xs = ["2", "10", "😀", "a", "", ""];
+xs.sort();
+const ys = [2, "10", "😀", 10, "2", ""];
+ys.sort();
+const zs = ["b", , "a", undefined];
+zs.sort();
+await host.observe(JSON.stringify([xs, ys, zs, zs[2], 2 in zs, 3 in zs]));"#,
+        ),
         (
             "dict record",
             "function build(n) {\n  const counts = {};\n  for (let i = 0; i < n; i++) {\n    const key = \"key_\" + String(i % 3);\n    counts[key] = (counts[key] || 0) + i;\n  }\n  return counts;\n}\nconst result = build(7);\nconst call = build;\ncall(2);\n",
@@ -1195,11 +1207,14 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
             library: in_layout(&program.library, Layout(3)),
             ..program.clone()
         };
-        assert_eq!(
-            run::<0>(&case, &program, &mut Projector::default()),
-            run::<3>(&case, &bodies, &mut Projector::default()),
-            "{}",
-            case.id
-        );
+        let planned = run::<0>(&case, &program, &mut Projector::default());
+        let reference = run::<3>(&case, &bodies, &mut Projector::default());
+        assert_eq!(planned, reference, "{}", case.id);
+        if case.id.ends_with("default sort UTF16 and holes") {
+            let Request::Effect(effect) = &planned.requests[0];
+            assert_eq!(effect.args, vec![Datum::Text(
+                r#"[["","10","2","a","😀",""],["10",10,2,"2","😀",""],["a","b",null,null],null,true,false]"#.into()
+            )]);
+        }
     }
 }

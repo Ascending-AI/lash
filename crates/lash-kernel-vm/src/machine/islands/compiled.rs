@@ -216,8 +216,8 @@ pub(super) struct CallSite {
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
     /// The call depth its library's prepared answer needs beyond the
-    /// caller's, where an unpaid body call may answer immediately
-    /// ([`answer_depth`]).
+    /// caller's, where its partial prepared paths may answer before
+    /// entering the ordinary body ([`answer_depth`]).
     pub(super) answers: Option<u32>,
     pub(super) root: Option<StmtId>,
     pub(super) callee: Option<CodeId>,
@@ -306,10 +306,15 @@ impl Compiled {
             literal,
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
-            cleanups: cx
-                .ops
-                .iter()
-                .any(|instruction| matches!(instruction.op, Op::Try { .. })),
+            cleanups: cx.ops.iter().any(|instruction| {
+                matches!(
+                    instruction.op,
+                    Op::Try {
+                        finally: Some(_),
+                        ..
+                    }
+                )
+            }),
             ops: cx.ops,
             registers: cx.registers,
             headers: headers.into(),

@@ -764,8 +764,9 @@ impl Evaluator<'_> {
         }
         // Kind is known even though the value is not. This is the only
         // intrinsic reduction; all value computations use native entries.
-        if definition.name.as_str() == "kind" {
-            let kind = args.first()?.kind?;
+        if definition.name.as_str() == "kind"
+            && let Some(kind) = args.first()?.kind
+        {
             let handle = ArenaHandle::new(0, 0);
             let sample = match kind {
                 ValueKind::Null => Value::Null,
@@ -828,9 +829,16 @@ impl Evaluator<'_> {
                 self.callees.len() - 1
             }
         };
-        let kind = self
-            .result_kind(definition)
-            .filter(|kind| *kind != ValueKind::Null);
+        // `kind` reads the value tag, even when a preceding heap read
+        // left that tag unknown to this pass. Its native entry always
+        // returns an inline name and requires no arena reservation.
+        let tag = definition.name.as_str() == "kind";
+        let kind = if tag {
+            Some(ValueKind::Text)
+        } else {
+            self.result_kind(definition)
+                .filter(|kind| *kind != ValueKind::Null)
+        };
         // Boolean negation is a result wrapper; the underlying comparison
         // or truth test remains the one value-producing native.
         let calls = usize::from(definition.name.as_str() != "bool.not")
@@ -839,7 +847,7 @@ impl Evaluator<'_> {
         let result = &definition.signature.result;
         let reserved = matches!(result, lash_vocabulary::Type::Text);
         state.steps.push(
-            if self.heap && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
+            if self.heap && !tag && (reserved || !args.iter().all(|arg| immediate(arg.kind))) {
                 // An operand the entry may decline, or a text whose room
                 // only the general call reserves: the general call answers.
                 Step::Fallback {

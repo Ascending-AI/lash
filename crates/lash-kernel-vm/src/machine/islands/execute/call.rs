@@ -83,26 +83,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 return Err(self.at(site.pc));
             }
             if !OBSERVING
-                && !self.accounting
-                && site.occurrence.or(root_occurrence).is_none()
-                && let (Some(lib), Some(extra)) = (site.library, site.answers)
-                && args.len() <= MAX_ARGS
+                && site.library.is_some()
+                && self.retaining(&mut frame.transient, |island| {
+                    island.call_answer(
+                        site,
+                        (args, inputs.as_ref().map(|input| input.1)),
+                        regs,
+                        before,
+                        root_occurrence,
+                    )
+                })?
             {
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (at, (value, reg)) in values.iter_mut().zip(args.iter()).enumerate() {
-                    *value = inputs
-                        .as_ref()
-                        .map_or_else(|| regs[*reg as usize], |input| input.1[at]);
-                }
-                if let Some(value) = self.retaining(&mut frame.transient, |island| {
-                    island.library_answer(lib, extra, &values[..args.len()])
-                }) {
-                    regs[site.reg as usize] = value;
-                    if site.after != 0 {
-                        self.admit(site.after);
-                    }
-                    return Ok(Next::Continue);
-                }
+                return Ok(Next::Continue);
             }
             let target = match (site.callee, callee) {
                 (Some(code), _) => self.declared(code),

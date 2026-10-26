@@ -658,9 +658,7 @@ impl Former<'_> {
                         }
                         _ => None,
                     };
-                    if let Some(code) = body.filter(|_| {
-                        !self.charged || self.operator(*lib, args.len(), true).is_none()
-                    }) {
+                    if let Some(code) = body.filter(|_| self.body_call(*lib, args.len())) {
                         // The original action owns its argument prefix and
                         // library completion formula across a physical call.
                         ExprKind::Call {
@@ -1085,8 +1083,8 @@ impl Former<'_> {
     /// its counted sites recorded and its closure call sites numbered, and
     /// each conditional arm of other ops made cold.
     fn admit(&mut self, expr: &mut Expr) -> Option<()> {
-        // An uncharged body-only library call retains its body continuation
-        // beside its prepared answer in the common call instruction.
+        // A partial read keeps its body beside its heap answer. Writing
+        // templates retain the operator's resident mutation admission.
         if let ExprKind::Operator {
             lib,
             invoke: Some(invoke),
@@ -1094,8 +1092,8 @@ impl Former<'_> {
             closes,
         } = &mut expr.kind
             && !invoke.checked
-            && (!self.charged || self.operator(*lib, args.len(), true).is_none())
             && let Some(function) = self.library.get_lib(*lib)
+            && self.body_call(*lib, args.len())
             && function.arity == args.len()
             && let LibRun::Body(code) = function.run
         {
@@ -1263,6 +1261,22 @@ impl Former<'_> {
             && given <= function.arity
             && function.arity <= MAX_ARGS)
             .then_some(())
+    }
+
+    /// A partial heap read may enter its ordinary body when its entry
+    /// declines. Charged writes keep the existing operator admission,
+    /// whose resident path stages a mutation without a call frame.
+    fn body_call(&self, lib: LibId, given: usize) -> bool {
+        !self.charged
+            || self.operator(lib, given, true).is_none()
+            || self
+                .library
+                .get_lib(lib)
+                .and_then(|function| function.prepared.as_ref())
+                .is_some_and(|(entry, _)| {
+                    !entry.immediate()
+                        && !entry.writes(&|id| self.library.lib(id), &|id| self.library.lib_of(id))
+                })
     }
 
     /// Whether `lib` called with `given` arguments answers through its
