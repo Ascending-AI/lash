@@ -170,6 +170,12 @@ impl Workload {
         );
         ensure!(!self.turns.is_empty(), "`{}` has no turns", self.name);
         for group in &self.turns {
+            if group.oracle.is_some() {
+                ensure!(
+                    self.sessions == 1 && self.protocol != Protocol::Standard,
+                    "record oracle windows require one code-mode session"
+                );
+            }
             if group.capability_turn.is_some() {
                 ensure!(
                     self.sessions == 1,

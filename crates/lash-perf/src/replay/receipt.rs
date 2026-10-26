@@ -306,8 +306,7 @@ pub fn table(receipt: &ReplayReceipt) -> String {
         if let Err(reason) = workload.experiment.compare(&workload.experiment) {
             out.push_str(&format!("  timing comparison refused: {reason:?}\n"));
         }
-        out.push_str("  turn window          wall_ms sql_writes rows_written wal_bytes snapshots manifests link_payload
-");
+        out.push_str("  turn window          wall_ms sql_writes rows_written wal_bytes snapshots manifests link_payload\n");
         for round in &workload.rounds {
             let value = |name: &str| {
                 round
@@ -327,6 +326,16 @@ pub fn table(receipt: &ReplayReceipt) -> String {
                 value("tool_manifest_callbacks"),
                 value("link_payload_callbacks")
             ));
+            if round.metrics.contains_key("oracle_keys_checked") {
+                out.push_str(&format!(
+                    "       oracle passed: count={} first={} middle={} last={} sorted={}\n",
+                    value("oracle_keys_checked"),
+                    value("oracle_first_key"),
+                    value("oracle_middle_key"),
+                    value("oracle_last_key"),
+                    value("oracle_sorted"),
+                ));
+            }
         }
         out.push_str(
             "  metric                  unit         median(round-average) p95(round-average) max(round-average)  \

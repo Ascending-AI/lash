@@ -50,7 +50,15 @@ pub(in crate::boundary) async fn run(
             Fleet::open(&population_args, &meter, 1, Flavor::Workflow, |b, _| Ok(b)).await?;
         let result = async {
             let core = &fleet.nodes[0].core;
+            within_population("namespace node registration", async {
+                while core.backend().durable().live_nodes().await?.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+                Ok::<_, lash_durable::DurableError>(())
+            }).await??;
+            let cleanup = lash::testing::quiesce_artifact_cleanup(core).await;
             for cycle in 0..=args.operations {
+                cleanup.settle().await?;
                 let temperature = if cycle == 0 { "cold" } else { "warm" };
                 let pin = HostArtifactPin::mint();
                 let env = environment(false)?;
@@ -64,8 +72,8 @@ pub(in crate::boundary) async fn run(
                 let mut original = None;
                 for operation in ["create", "replace", "start"] {
                     let identity = format!("{definition}/{temperature}/{cycle}/{operation}");
-                    let before = idle_cut(&witness, &writes).await?;
                     lash_core::perf_witness::sql_shapes::work::set_window(Some(cycle), operation);
+                    let before = idle_cut(&witness, &writes).await?;
                     let instruction_start = instructions.read()?;
                     let begin = Instant::now();
                     let packages = core.host_artifacts().process_namespace(&pin, &env, context.clone()).await?;

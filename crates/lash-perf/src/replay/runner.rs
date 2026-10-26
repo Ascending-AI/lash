@@ -548,7 +548,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             for (name, position) in [("first", 0), ("middle", records / 2), ("last", records - 1)] {
                 metrics.insert(
                     format!("oracle_{name}_key"),
-                    keys[position].as_u64().context("checked key")? as f64,
+                    keys[position].as_f64().context("checked key")?,
                 );
             }
             metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));

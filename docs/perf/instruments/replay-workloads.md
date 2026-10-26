@@ -63,6 +63,28 @@ the counted subset or its baseline. Wall time on shared hosts is noise-affected;
 no wall-time number gates a merge. The SQL sidecar uses these same turn cuts
 and retains shape × store-origin attribution.
 
+### Warm host capabilities and a fresh document
+
+```sh
+LASH_REPLAY_ARTIFACT_DIR=/tmp/warm-caps just perf-replay warm-capabilities \
+  --sql-shapes /tmp/warm-caps/sql.json
+```
+
+This versioned workload runs on a SQLite file store and prints a row for each
+turn. Turn 1 primes 31 resident host tools; turn 2 invokes one under unchanged
+`RunSpec.capabilities`; turn 3 stores and attaches a fresh text document and
+publishes the host's new document operation. Every tool body checks its exact
+per-turn document capability, and every turn must execute exactly one authorized
+operation. Turn 2 must enter zero snapshot, manifest and link_payload callbacks;
+turn 3 must enter some. The snapshot adapter uses the existing callback counters
+and observes the default snapshot's calls into the actual runner separately.
+
+The receipt joins callback entries to `sql_writes`, `sql_rows_written` and
+`store_bytes_written` using the same settled before/after cuts. Callback entries
+are not writes; SQL write statements, changed rows and WAL bytes are distinct
+units. SQL shape/origin attribution is retained in the usual `--sql-shapes`
+receipt. Wall time on a shared host is noise-affected and never a gate.
+
 ### SQL shape attribution and execution joins
 
 ```sh
@@ -358,7 +380,9 @@ bytes prepared for owner commit attempts, including restaged nodes and the
 uncommitted zero-prefix attempt; it is distinct from
 physical WAL bytes. `bytes_read` counts returned scalar SQL payload in the
 decorated durable port, including writes' returned values, and excludes catalog
-reads and OS read amplification. The receipt records commit, dirty status,
+reads and OS read amplification. The exact useful-work check compares
+root-local observed tool names (`fixture_lookup`) and arguments; model-facing
+calls retain `tools.fixture_lookup`. The receipt records commit, dirty status,
 executable SHA-256, compiler/profile, N, repeats, raw label counts and all
 samples. Compare timed results only within a host/build; counted differences
 explain whether batching saves model rounds, owner commits or storage work.
@@ -450,10 +474,11 @@ per workload, profile `replay`, scenario `replay/<workload>`. The record holds
 the per-turn wall median and p95, `turn_host_cpu_ms` and `turn_worker_cpu_ms`,
 and every counted metric's per-turn median and robust history slope in its own
 unit. The file is then read with the advisory detector of
-[duration history](duration-history.md). The current Performance workflow
-appends runtime history; it does not produce replay history. A scheduled
-owner must supply a persistent path and run the replay producer and reader.
-For example:
+[duration history](duration-history.md). The manually dispatched Performance
+workflow appends `.benchmarks/perf-history/replay.jsonl` beside the runtime
+and kernel series and saves that cache on main. That wiring alone does not
+establish a scheduled producer or an owner reviewing findings. A scheduled
+owner can supply a persistent path and run:
 
 ```sh
 just perf-replay --history <persistent>/replay.jsonl

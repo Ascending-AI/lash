@@ -36,16 +36,20 @@ impl Oracle {
                 }
                 let actual = keys
                     .iter()
-                    .map(|key| key.as_u64().context("noninteger record key"))
+                    .map(|key| key.as_f64().context("nonnumeric record key"))
                     .collect::<Result<Vec<_>>>()?;
                 for position in [0, records / 2, records.saturating_sub(1)] {
                     ensure!(
-                        actual.get(position) == expected.get(position),
+                        actual.get(position).copied()
+                            == expected.get(position).map(|key| *key as f64),
                         "record key at {position} differs from the independent oracle"
                     );
                 }
                 ensure!(
-                    actual == expected,
+                    actual
+                        .iter()
+                        .zip(&expected)
+                        .all(|(actual, expected)| *actual == *expected as f64),
                     "record keys differ from the independent oracle"
                 );
                 ensure!(

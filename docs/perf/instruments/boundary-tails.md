@@ -110,7 +110,8 @@ lifecycle on that same core and store, using a fresh host pin. `unchanged`
 replaces the document with identical content; `changed` replaces `return 0`
 with `return 1`. Every lifecycle calls the namespace processor three times,
 including the call just before start. Other publication, linking, execution and
-cleanup work stays outside the namespace windows. The SQL and write intervals
+cleanup work stays outside the namespace windows. The population waits for node registration and holds periodic artifact cleanup
+at its pass boundary, settling due cleanup between lifecycles. The SQL and write intervals
 include all host-store activity between their cuts; they are isolated lifecycle
 windows, not causal assignment of concurrent background work.
 
