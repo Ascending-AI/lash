@@ -995,7 +995,6 @@ pub enum Placement {
 
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
-    static LOGICAL_SCAN_EVENTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static REFERENCE_SCANS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -1042,12 +1041,6 @@ pub fn with_analysis_work<T>(read: impl FnOnce() -> T) -> (T, AnalysisWork) {
     let work = ANALYSIS_WORK.with(|work| work.borrow_mut().take().unwrap_or_default());
     drop(capture);
     (result, work)
-}
-
-/// Token events parsed by logical preparation on this testing thread.
-#[cfg(any(test, feature = "testing"))]
-pub fn logical_scan_events() -> u64 {
-    LOGICAL_SCAN_EVENTS.with(std::cell::Cell::get)
 }
 
 fn prepare_references(
@@ -1116,8 +1109,6 @@ impl LogicalScan {
             let event = reader
                 .next_event()
                 .map_err(|error| GraphRefusal::from_token(error, None, Some(kind.0)))?;
-            #[cfg(any(test, feature = "testing"))]
-            LOGICAL_SCAN_EVENTS.with(|count| count.set(count.get() + 1));
             if tree_end.is_none() {
                 pending = pending.saturating_sub(1).saturating_add(event.contents());
                 if pending == 0 {

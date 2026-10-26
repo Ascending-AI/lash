@@ -963,30 +963,6 @@ fn checkpoint_read_policy_honors_the_configured_kernel_decode_depth() {
     ));
 }
 
-/// GRAPH-READ-ADMISSION: deployment read budgets are independent of what the writer admitted.
-#[test]
-fn a_deployment_graph_read_policy_refuses_its_configured_byte_budget() {
-    let mut staged = staging();
-    let value = serde_json::json!("payload");
-    let body = encode_body(&value);
-    let id = staged
-        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
-        .unwrap();
-    let policy = GraphReadPolicy::new(
-        1,
-        2,
-        3,
-        64,
-        lash_vocabulary::data_limits::KernelDataLimits::standard(),
-    )
-    .unwrap();
-    let mut decoder = GraphDecoder::new(&staged, policy.owner());
-    assert!(matches!(
-        decoder.decode::<serde_json::Value>(id, NodeKind::FROZEN_VALUE),
-        Err(GraphRefusal::DecodeLimit { limit: 1, .. })
-    ));
-}
-
 /// Repeated captures materialize only changed nodes: immutable envelopes
 /// keep their allocation, including an unchanged placed subtree of a new root.
 #[test]

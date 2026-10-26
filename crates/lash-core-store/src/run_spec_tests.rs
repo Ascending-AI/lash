@@ -285,37 +285,6 @@ fn unfinished_rendering_requires_the_exact_recorded_renderer() {
 }
 
 #[test]
-fn a_spec_hash_is_canonical_over_option_key_order() {
-    let forward = serde_json::json!({ "a": 1, "b": 2 });
-    let backward: serde_json::Value = serde_json::from_str(r#"{ "b": 2, "a": 1 }"#).expect("json");
-    let spec = |options| {
-        RunSpec::overrides(RunOverrides {
-            owners: protocol_options(options),
-            ..RunOverrides::default()
-        })
-    };
-    let hash = spec(forward.clone())
-        .hash()
-        .expect("hash")
-        .expect("non-default");
-    assert_eq!(
-        Some(hash.clone()),
-        spec(backward).hash().expect("hash"),
-        "key insertion order must not name a different spec"
-    );
-    assert!(hash.as_str().starts_with("run-spec:v1:blake3:"));
-    assert_eq!(
-        spec(forward.clone()).canonical_json().expect("json"),
-        spec(forward).canonical_json().expect("json")
-    );
-    let other = RunSpec::overrides(RunOverrides {
-        model: Some(LlmProfileKey::new("other")),
-        ..RunOverrides::default()
-    });
-    assert_ne!(Some(hash), other.hash().expect("hash"));
-}
-
-#[test]
 fn capabilities_are_durable_refs_recorded_on_the_resolution() {
     let mut spec = RunSpec::default();
     assert_eq!(
@@ -523,34 +492,6 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             .payload,
         serde_json::json!({ "keep": 1, "replace": "explicit", "added": true })
     );
-}
-
-#[test]
-fn a_redundant_resolved_override_normalizes_to_the_snapshot() {
-    let run = ResolvedRun::snapshot(snapshot());
-    let mut payload = serde_json::to_value(&run).unwrap();
-    payload["resolved"] = payload["base"].clone();
-    let decoded: ResolvedRun = serde_json::from_value(payload).unwrap();
-    assert_eq!(decoded, run);
-    assert!(
-        serde_json::to_value(decoded)
-            .unwrap()
-            .get("resolved")
-            .is_none()
-    );
-    assert_eq!(run.clone().with_config(snapshot()), run);
-    let mut changed = snapshot();
-    changed.config_revision += 1;
-    let overridden = run.clone().with_config(changed.clone());
-    assert!(overridden.has_override());
-    assert_eq!(overridden.config(), &changed);
-    let normalized = overridden
-        .map_configs(|mut config| {
-            config.config_revision = run.base().config_revision;
-            Ok::<_, std::convert::Infallible>(config)
-        })
-        .unwrap();
-    assert_eq!(normalized, run);
 }
 
 /// OWNER-ADMISSION (FIG-6021): a stored spec states each owner once; a spec

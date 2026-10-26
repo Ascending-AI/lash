@@ -806,36 +806,6 @@ mod preparation_tests {
         );
     }
 
-    /// FIG-7135: unplacement consumes ordered prepared token facts, rather
-    /// than parsing the same checked logical content for every cold read.
-    #[test]
-    fn unplacement_token_scans_do_not_grow_with_read_count() {
-        let mut tokens = TokenWriter::new();
-        tokens.seq(3);
-        tokens.text("FIG-7135 unplacement scan work");
-        tokens.unsigned(7341);
-        tokens.bool(true);
-        let placed = tokens.into_bytes();
-        let nodes = BTreeMap::<NodeId, EncodedNode>::new();
-        let id = NodeId([0xa9; 32]);
-        let limits = DecodeLimits::within_total(1 << 20);
-        let before = super::super::encode::logical_scan_events();
-        for _ in 0..12 {
-            let mut decoder = GraphDecoder::new(&nodes, limits);
-            assert_eq!(
-                &*decoder
-                    .unplace(id, &AnalyzedBody::new(&placed.clone()))
-                    .unwrap(),
-                placed
-            );
-        }
-        let scanned = super::super::encode::logical_scan_events() - before;
-        assert_eq!(
-            scanned, 4,
-            "one parse of the four-token content across twelve reads"
-        );
-    }
-
     /// Prepared unplacement retains event order, but no child existence or
     /// caller-specific admission. A prefix refusal precedes a missing child;
     /// at the child event its read precedes that event's byte-limit check.

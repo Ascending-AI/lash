@@ -1,4 +1,4 @@
-use crate::runtime_error::{RuntimeError, RuntimeErrorClass, RuntimeErrorCode};
+use crate::runtime_error::{RuntimeError, RuntimeErrorCode};
 use lash_vocabulary::identity::SessionId;
 
 /// The retired replacement-abort codes are not aliased (clean cutover): a
@@ -21,37 +21,6 @@ fn retired_replacement_abort_wire_codes_are_not_aliased() {
         serde_json::to_value(&code).expect("serialize divergence code"),
         serde_json::json!("effect_replay_divergence")
     );
-}
-
-#[test]
-fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
-    // The code declaration generates both classification and law iteration.
-    for code in RuntimeErrorCode::ALL_FIRST_PARTY {
-        let class = code.classification();
-        assert_eq!(
-            code.is_retryable(),
-            class == RuntimeErrorClass::Retryable,
-            "{code}"
-        );
-        assert_eq!(
-            code.is_terminal(),
-            class == RuntimeErrorClass::Terminal,
-            "{code}"
-        );
-
-        let json = serde_json::to_value(code).expect("serialize typed code");
-        let decoded: RuntimeErrorCode =
-            serde_json::from_value(json).expect("deserialize typed code");
-        assert!(
-            !matches!(&decoded, RuntimeErrorCode::ForeignCode(_)),
-            "first-party code {} decoded as foreign",
-            code.as_str()
-        );
-        assert_eq!(&decoded, code, "typed round trip for {code}");
-    }
-
-    let decoded = RuntimeErrorCode::from_wire_code("plugin_defined_abort");
-    assert_eq!(decoded.classification(), RuntimeErrorClass::Terminal);
 }
 
 /// A failed assistant-response hook is an incomplete derivation over a

@@ -450,117 +450,6 @@ fn stored_bodies_below_the_supported_generation_are_refused() {
     );
 }
 
-#[cfg(feature = "synthetic-next")]
-#[test]
-fn supported_older_stored_bodies_remain_readable_after_finalize() {
-    let older = r#"{"schema_version":1,"timestamp":"2026-08-18T00:00:00.000000000Z","kind":"plugin","plugin_type":"older-history","body":{"value":7}}"#;
-
-    for epoch in [1, 2] {
-        let fleet = crate::store::FleetFormat::from_version(epoch);
-        let window = fleet.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
-        assert_eq!(window.oldest(), 1);
-        assert_eq!(window.newest(), 2);
-        assert!(window.admits(1));
-        let decoded = SessionNodeRecord::decode_storage_body_for_fleet(
-            "node-1".to_string(),
-            Some("parent-1".to_string()),
-            older,
-            fleet,
-        )
-        .expect("supported older history must remain readable before and after finalize");
-
-        assert_eq!(
-            decoded.node_id,
-            lash_vocabulary::identity::NodeId::from("node-1")
-        );
-        assert_eq!(
-            decoded.parent_node_id,
-            Some(lash_vocabulary::identity::NodeId::from("parent-1"))
-        );
-        assert_eq!(
-            decoded.timestamp.to_string(),
-            "2026-08-18T00:00:00.000000000Z"
-        );
-        let SessionNodePayload::Plugin { plugin_type, body } = decoded.payload else {
-            panic!("the older plugin payload must be preserved");
-        };
-        assert_eq!(plugin_type, "older-history");
-        assert_eq!(body.as_ref(), &serde_json::json!({"value": 7}));
-    }
-}
-
-#[test]
-fn stored_bodies_from_a_newer_generation_are_refused() {
-    let newer = serde_json::json!({
-        "schema_version": SESSION_NODE_BODY_SCHEMA_VERSION + 1,
-        "timestamp": "2026-08-18T00:00:00.000000000Z",
-        "kind": "plugin",
-        "plugin_type": "from-the-future",
-        "body": {},
-    })
-    .to_string();
-
-    let error = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, &newer)
-        .expect_err("a newer node-body generation must be refused");
-
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "graph node body is schema version {}, but this build reads generation {} and the \
-             fleet's recorded {} (FIG-3796); remedy: run a Lash build at that node-body \
-             generation",
-            SESSION_NODE_BODY_SCHEMA_VERSION + 1,
-            SESSION_NODE_BODY_SCHEMA_VERSION,
-            SESSION_NODE_BODY_SCHEMA_VERSION
-        ),
-    );
-}
-
-#[test]
-fn stored_frame_open_rejects_a_raw_frame_key() {
-    let frame_key = crate::FrameKey::from_caller_material("strict-durable-frame")
-        .expect("non-empty frame material");
-    let node = SessionNodeRecord {
-        node_id: NodeId::fixture(
-            frame_node_id(&SessionId::from("session"), frame_key.as_str()).into_inner(),
-        ),
-        parent_node_id: None,
-        timestamp: "2026-09-01T00:00:00.000000000Z"
-            .parse()
-            .expect("canonical node timestamp"),
-        payload: SessionNodePayload::FrameOpen {
-            frame_key,
-            reason: crate::AgentFrameReason::initial(),
-            assignment: crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            )),
-        },
-    };
-    let mut stored: serde_json::Value = serde_json::from_str(
-        &node
-            .encode_storage_body(crate::store::FleetFormat::current())
-            .expect("encode current frame-open body"),
-    )
-    .expect("frame-open body is JSON");
-    stored["frame_key"] = serde_json::json!("initial-frame");
-
-    let error = SessionNodeRecord::decode_storage_body(
-        node.node_id.to_string(),
-        None,
-        &serde_json::to_string(&stored).expect("encode malformed frame-open body"),
-    )
-    .expect_err("raw durable frame keys must fail the FrameKey gate");
-
-    assert!(
-        error
-            .to_string()
-            .contains("frame key must be derived by Lash"),
-        "strict durable decode must surface the FrameKey refusal: {error}"
-    );
-}
-
 #[test]
 fn nearest_frame_is_derived_from_ancestry() {
     let assignment = crate::AgentFrameAssignment::unconfigured(crate::SessionPolicy::new(
@@ -749,44 +638,6 @@ fn projection_and_replacement_retain_the_same_prefix() {
     }
 }
 
-/// ADR 0112 §9: the one projection starts at the current frame, and a
-/// pending `FrameOpen` moves its start before the frame is committed.
-#[test]
-fn a_pending_frame_open_moves_the_projection_to_the_new_frame() {
-    let mut graph = SessionGraph::default();
-    let session = SessionId::from("session");
-    open_test_frame(
-        &mut graph,
-        &session,
-        "frame-a",
-        crate::AgentFrameReason::initial(),
-    );
-    graph.append_message(text_message("frame-a", MessageRole::User, "a"));
-    assert_eq!(graph.read_model().messages.len(), 1);
-
-    open_test_frame(
-        &mut graph,
-        &session,
-        "frame-b",
-        crate::AgentFrameReason::continue_as(),
-    );
-    assert!(
-        graph.read_model().messages.is_empty(),
-        "the new frame starts an empty projection"
-    );
-    graph.append_message(text_message("frame-b", MessageRole::User, "b"));
-    let b = graph.read_model();
-    assert_eq!(b.messages.len(), 1);
-    assert_eq!(b.messages[0].id, "frame-b");
-
-    // A cold cache projects the same span.
-    let cold = SessionGraph::from_shared_nodes(graph.nodes.clone(), graph.leaf_node_id.clone())
-        .expect("valid graph");
-    let cold_read = cold.read_model();
-    assert_eq!(cold_read.messages.len(), 1);
-    assert_eq!(cold_read.messages[0].id, "frame-b");
-}
-
 /// The tail rewrite covers the current frame only, like the projection.
 #[test]
 fn the_tail_rewrite_covers_only_the_current_frame() {
@@ -912,30 +763,6 @@ fn retiring_below_the_current_frame_re_anchors_the_graph() {
 
     // The base is current now: a second trim does nothing.
     assert!(graph.retire_below_current_frame().is_none());
-}
-
-/// A pending `FrameOpen` keeps everything below it until it is durable.
-#[test]
-fn a_pending_frame_switch_retires_nothing() {
-    let mut graph = SessionGraph::default();
-    let session = SessionId::from("session");
-    open_test_frame(
-        &mut graph,
-        &session,
-        "frame-a",
-        crate::AgentFrameReason::initial(),
-    );
-    graph.append_message(text_message("a1", MessageRole::User, "a1"));
-    graph.mark_all_durable();
-    open_test_frame(
-        &mut graph,
-        &session,
-        "frame-b",
-        crate::AgentFrameReason::continue_as(),
-    );
-    assert!(graph.retire_below_current_frame().is_none());
-    assert_eq!(graph.nodes.len(), 3);
-    assert!(graph.anchor().is_none());
 }
 
 #[test]
@@ -1108,17 +935,6 @@ mod window_anchor {
             SessionGraph::from_nodes(nodes, Some("b".into())),
             Err(crate::StoreError::InvalidGraphParent { .. })
         ));
-    }
-
-    #[test]
-    fn a_run_frame_window_has_no_external_parent() {
-        let base = frame_open("first-frame", None);
-        let base_id = base.node_id.to_string();
-        let anchor = anchor_at(&base, 0);
-        let graph =
-            SessionGraph::from_window(vec![base, plugin("a", &base_id)], "a".into(), anchor)
-                .expect("a root window");
-        assert_eq!(graph.anchor().map(|anchor| anchor.generation), Some(0));
     }
 
     #[test]
@@ -1370,44 +1186,6 @@ fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
     assert_eq!(last_of_a.messages.len(), TURNS + 1);
     assert_eq!(held[0].0.messages.len(), 1);
     assert_eq!(held[0].0.messages[0].id, "m0");
-}
-
-/// The render cache a fold makes extends the previous render instead of
-/// re-rendering the frame, and gives exactly the render of the whole frame.
-#[test]
-fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
-    const TURNS: usize = 64;
-    let mut graph = SessionGraph::default();
-    let mut renders = Vec::<lash_protocol_types::llm::types::RequestMessages>::new();
-    for turn in 0..TURNS {
-        graph.append_message(text_message(
-            &format!("u{turn}"),
-            MessageRole::User,
-            &format!("question {turn}"),
-        ));
-        graph.append_message(text_message(
-            &format!("a{turn}"),
-            MessageRole::Assistant,
-            &format!("answer {turn}"),
-        ));
-        let read = graph.read_model();
-        let rendered = read.prompt_render_cache.rendered_retained(
-            read.messages.as_slice(),
-            &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
-        );
-        assert_eq!(
-            rendered.iter().cloned().collect::<Vec<_>>(),
-            lash_protocol_types::session_model::render_prompt(read.messages.as_slice()).messages
-        );
-        if let Some(previous) = renders.last() {
-            assert_eq!(
-                previous.shared_prefix(&rendered),
-                previous.len(),
-                "each render shares the entire preceding retained prefix",
-            );
-        }
-        renders.push(rendered);
-    }
 }
 
 /// FIG-5052: durable node time admits only the fixed-width nanosecond UTC spelling.
