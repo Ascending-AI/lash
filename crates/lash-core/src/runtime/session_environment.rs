@@ -161,6 +161,7 @@ pub(super) struct Publication {
         EnvironmentHead,
         Arc<EnvironmentBody>,
         crate::session::ToolCatalogHandle,
+        InputFrontier,
     )>,
     owners: Vec<VersionOwnerId>,
     changes: BTreeSet<uuid::Uuid>,
@@ -179,7 +180,8 @@ impl Publication {
         staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
     ) -> Result<(), DurableError> {
         if !self.acknowledged.load(Ordering::Acquire)
-            && let Some((head, _, _)) = &self.next
+            && let Some((head, _, _, _)) = &self.next
+            && self.expected.as_ref() != Some(head)
         {
             lash_durable::environment::stage_head(staging, head)?;
         }
@@ -194,7 +196,12 @@ impl Publication {
                 owner: owner.clone(),
             }));
         }
-        if let Some((head, _, _)) = &self.next {
+        // Cold reconciliation may only rebuild the native projection of
+        // the same durable head. Acknowledge it locally without adding a
+        // write that a warm owner would never produce.
+        if let Some((head, _, _, _)) = &self.next
+            && self.expected.as_ref() != Some(head)
+        {
             tx.write(DomainWrite::Environment(EnvironmentWrite::Head {
                 expected: self.expected.clone(),
                 head: Some(head.clone()),
@@ -206,8 +213,9 @@ impl Publication {
             return;
         }
         let mut state = self.resident.state.lock_recover();
-        if let Some((head, body, handle)) = &self.next {
+        if let Some((head, body, handle, frontier)) = &self.next {
             state.head = Some(head.clone());
+            state.frontier = Some(frontier.clone());
             state.body = Some(body.clone());
             state.handle = Some(handle.clone());
         }
@@ -347,6 +355,7 @@ impl SessionEnvironment {
                 handle,
                 epoch: Some(cx.epoch()),
                 reconcile: false,
+                frontier: None,
             };
         }
         if reconcile {
@@ -354,9 +363,14 @@ impl SessionEnvironment {
             state.epoch = Some(cx.epoch());
             state.reconcile = false;
         }
-        let (previous, body, handle) = {
+        let (previous, body, handle, native_frontier) = {
             let state = self.state.lock_recover();
-            (state.head.clone(), state.body.clone(), state.handle.clone())
+            (
+                state.head.clone(),
+                state.body.clone(),
+                state.handle.clone(),
+                state.frontier.clone(),
+            )
         };
         let registered = self.registered.clone();
         let notices: BTreeSet<_> = changes.iter().map(|(id, _)| *id).collect();
@@ -430,9 +444,8 @@ impl SessionEnvironment {
         }
         // Detached producers cannot make stale revision notices authoritative.
         let changes = changes.into_iter().map(|(_, change)| change).filter(|change| !matches!(change, EnvironmentChange::SourceRevision { source, .. } if !registered.contains(source)));
-        let frontier = previous
-            .as_ref()
-            .map(|h| h.input_frontier.clone())
+        let mut frontier = native_frontier
+            .or_else(|| previous.as_ref().map(|head| head.input_frontier.clone()))
             .unwrap_or_default();
         let config =
             crate::plugin::OwnerConfigView::session(session.plugins().admitted_plugin_config());
@@ -441,7 +454,6 @@ impl SessionEnvironment {
         let mut owners = Vec::new();
         let mut next = None;
         let (base_head, base_body, base_handle) = if !delta.is_empty() || body.is_none() {
-            let mut frontier = frontier;
             let candidate = self.assemble(body.as_deref(), delta, &config, &mut frontier)?;
             frontier.retain(|source, _| registered.contains(source));
             let (body, handle, owner) = if body
@@ -464,12 +476,19 @@ impl SessionEnvironment {
                 owners.push(owner.clone());
                 (candidate, handle, owner)
             };
-            let head = EnvironmentHead {
-                version: body.id().clone(),
-                owner: owner.clone(),
-                input_frontier: frontier,
-            };
-            next = Some((head.clone(), body.clone(), handle.clone()));
+            // Source incarnations and counters belong to this collector's
+            // lifetime. An unchanged observation advances its native frontier,
+            // but only different content publishes a durable head.
+            let head = previous
+                .as_ref()
+                .filter(|head| head.version == *body.id())
+                .cloned()
+                .unwrap_or_else(|| EnvironmentHead {
+                    version: body.id().clone(),
+                    owner: owner.clone(),
+                    input_frontier: frontier.clone(),
+                });
+            next = Some((head.clone(), body.clone(), handle.clone(), frontier.clone()));
             (head, body, handle)
         } else {
             (
@@ -480,7 +499,6 @@ impl SessionEnvironment {
                 handle.ok_or(lash_durable::environment::EnvironmentRefusal::Content)?,
             )
         };
-        let frontier = base_head.input_frontier.clone();
         let (round, body, handle) = (base_head.round(), base_body, base_handle);
         let publication = (next.is_some() || !notices.is_empty()).then(|| {
             Arc::new(Publication {

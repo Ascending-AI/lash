@@ -3,6 +3,7 @@
 //! Taking the projection before calling the writer is the cancellation guard:
 //! no future, panic or failed adoption can leave the old basis usable.
 
+use lash_protocol_types::sync::MutexExt as _;
 use std::future::Future;
 
 use lash_durable::{
@@ -452,6 +453,16 @@ impl SessionProjection {
                 frame_changed = state.current_frame_node_id != self.head.current_frame_node_id;
                 if frame_changed {
                     self.prompt.clear();
+                    // Replacing a frame is a real environment boundary. Its first
+                    // round collects the advertised surface afresh; ordinary
+                    // rounds keep the claim's acknowledged environment.
+                    if state
+                        .current_agent_frame()
+                        .is_some_and(|frame| frame.previous_frame_node_id.is_some())
+                        && let Some(environment) = &self.environment
+                    {
+                        environment.state.lock_recover().reconcile = true;
+                    }
                 }
                 self.configuration = self.configuration.retaining(&state);
                 self.head = std::sync::Arc::new(state);

@@ -304,6 +304,41 @@ async fn env_preparation_is_not_pass_progress() {
     );
 }
 
+/// ENV-RESTART-UNCHANGED: replacing the native sources of an unchanged
+/// session reuses its committed environment and writes no head.
+#[tokio::test]
+async fn env_restart_unchanged_writes_no_head() {
+    let mut f = fixture().await;
+    boundary(&mut f, 0).await;
+    publish(&mut f, "before-restart").await;
+    let committed = f.driver.run_config.current_environment().unwrap().clone();
+    f.driver.environment = super::super::session_environment::SessionEnvironment::materialize(
+        &f.driver.session,
+        f.driver
+            .host
+            .core
+            .backend()
+            .durable()
+            .environments()
+            .as_ref(),
+    )
+    .await
+    .unwrap();
+    f.driver.adopted_environment = None;
+    boundary(&mut f, 1).await;
+    assert_eq!(f.driver.run_config.current_environment(), Some(&committed));
+    let (tx, _) = stage(&mut f, "after-restart").await;
+    assert!(
+        !tx.domain().iter().any(|write| matches!(
+            write,
+            lash_durable::DomainWrite::Environment(
+                lash_durable::environment::EnvironmentWrite::Head { .. }
+            )
+        )),
+        "unchanged providers must not rewrite the durable environment head after restart"
+    );
+}
+
 /// ENV-UNCHANGED: clean boundaries and reads reuse versioned catalog JSON and preambles.
 #[tokio::test]
 async fn env_unchanged() {

@@ -78,9 +78,9 @@ impl Runner {
             _ => return Err(format!("unknown dialect {dialect}")),
         };
         let built = lash_ext_helper_compiler::library::Library::of(dialect)?;
+        let named: BTreeSet<_> = built.names.iter().map(|(_, id)| id).collect();
         let mut registry = built.registry;
         let helpers = built.helpers;
-        let library = built.names;
         // The runner installs each dialect's operation natives, as a worker
         // does (FIG-6440).
         if implementations {
@@ -103,6 +103,11 @@ impl Runner {
                     .map_err(|e| e.to_string())?,
             }
         }
+        // Lowering and checking need the registrations too: the compiler's
+        // authoring name map predates helper registration and otherwise
+        // rebuilds helper headers and transitive facts for every case.
+        let library = NamedLibrary::resolving(&registry, |id| named.contains(id))
+            .map_err(|e| e.to_string())?;
         let build_helpers = Arc::new(
             lash_kernel_doc::BuildHelpers::new(
                 registry.clone(),

@@ -21,6 +21,8 @@ pub struct ResidentEnvironment {
     pub epoch: Option<lash_durable::Epoch>,
     pub reconcile: bool,
     pub head: Option<EnvironmentHead>,
+    /// Progress of these native producers, independent of the last content publication.
+    pub frontier: Option<InputFrontier>,
     pub body: Option<Arc<EnvironmentBody>>,
     pub handle: Option<crate::session::ToolCatalogHandle>,
 }
