@@ -13,7 +13,7 @@ use lash_vm_worker::core_support::compare as kernel;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::perf_support::instructions::InstructionCounter;
+use crate::perf_support::instructions::{InstructionCounter, InstructionReading};
 
 /// Comparative profiling is an explicit developer command, outside merge gates.
 #[derive(Debug, clap::Args)]
@@ -38,16 +38,16 @@ pub struct Args {
     pub workload: Vec<String>,
     #[arg(long, value_parser = ["typescript", "python"])]
     pub dialect: Option<String>,
-    /// Opt in to duration history; ordinary measurements never open a history file.
+    /// Opt in to measurement history; ordinary measurements never open a history file.
     #[arg(long)]
     pub history: Option<PathBuf>,
-    /// Advisory local check against the last comparable recorded lash slope.
-    #[arg(long, requires = "history")]
+    /// Check qualified instructions/op against the last comparable recorded baseline.
+    #[arg(long, requires_all = ["history", "instructions"])]
     pub check: bool,
     /// Count instructions around each fresh cell execution, excluding driver setup/I/O.
     #[arg(long)]
     pub instructions: bool,
-    #[arg(long, default_value_t = 0.20)]
+    #[arg(long, default_value_t = 0.01)]
     pub tolerance: f64,
     /// Pin to this CPU; default is the first CPU in this process's allowed set.
     #[arg(long)]
@@ -78,12 +78,14 @@ pub(crate) struct Sample {
     pub(crate) result: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) instructions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) instruction_window: Option<InstructionReading>,
 }
 
 #[derive(Debug, Serialize)]
-struct InstructionSlopes {
+pub(crate) struct InstructionSlopes {
     minimum_per_operation: f64,
-    median_per_operation: f64,
+    pub(crate) median_per_operation: f64,
 }
 #[derive(Debug, Serialize)]
 pub(crate) struct Row {
@@ -99,7 +101,7 @@ pub(crate) struct Row {
     pub median_ns: [f64; 2],
     pub minimum: math::Fit,
     pub median: math::Fit,
-    instructions: Option<InstructionSlopes>,
+    pub(crate) instructions: Option<InstructionSlopes>,
     pub fixed_scopes_ns: BTreeMap<String, f64>,
     ratios: BTreeMap<String, f64>,
     /// Census of the separate fresh diagnostic cell at trips[0].
@@ -358,13 +360,18 @@ fn execution(
     // Read only across the synchronous fresh-cell call. Lowering, embedding,
     // diagnostics, executable hashing and optional history are outside this
     // interval, rather than two multi-billion-instruction process intercepts.
-    let before = counter.map(InstructionCounter::read).transpose()?;
+    let before = counter.map(InstructionCounter::snapshot).transpose()?;
     let sample = kernel::execute(program, false, observe).map_err(anyhow::Error::from_boxed)?;
-    let after = counter.map(InstructionCounter::read).transpose()?;
+    let after = counter.map(InstructionCounter::snapshot).transpose()?;
+    let window = before
+        .zip(after)
+        .map(|(before, after)| after.since(before))
+        .transpose()?;
     Ok(Sample {
+        instruction_window: window,
         ns: sample.0.ns,
         result: sample.0.result,
-        instructions: before.zip(after).map(|(before, after)| after - before),
+        instructions: window.map(|window| window.instructions),
     })
 }
 
@@ -494,13 +501,14 @@ pub fn run(args: &Args) -> Result<()> {
     receipt.load_after = load();
     let mut drift = Vec::new();
     if args.check {
-        for row in receipt
-            .rows
-            .iter()
-            .filter(|r| r.engine == "lash" && r.median.slope_ns <= 0.0)
-        {
+        for row in receipt.rows.iter().filter(|r| {
+            r.engine == "lash"
+                && r.instructions
+                    .as_ref()
+                    .is_none_or(|r| r.median_per_operation <= 0.0)
+        }) {
             drift.push(format!(
-                "{}/{}: nonpositive slope; increase trip separation",
+                "{}/{}: nonpositive instruction slope; increase trip separation",
                 row.dialect, row.workload
             ));
         }
@@ -536,13 +544,17 @@ fn table(receipt: &Receipt) -> String {
         use std::fmt::Write as _;
         let _ = writeln!(
             text,
-            "| {} | {} | {} | {:.2} | {:.2} | {:.0} | {} |",
+            "| {} | {} | {} | {:.2} | {:.2} | {} | {} |",
             row.dialect,
             row.workload,
             row.engine,
             row.minimum.slope_ns,
             row.median.slope_ns,
-            row.median.intercept_ns,
+            if row.workload == "object_sort" {
+                "n/a (nonlinear)".into()
+            } else {
+                format!("{:.0}", row.median.intercept_ns)
+            },
             row.ratios
                 .iter()
                 .map(|(n, r)| format!("{n}: {r:.2}×"))
@@ -688,6 +700,7 @@ mod tests {
                     ns: 900_000.0 + 17.0 * n as f64,
                     result: serde_json::json!(0),
                     instructions: Some(fixed + 23 * n),
+                    instruction_window: None,
                 })
             })
             .to_vec();

@@ -12,7 +12,7 @@ import profile_runtime
 from perf_capture import blocked_stacks, run_profiled
 from profile_diff import differential, sample_commits
 
-from profile_kernel_cost import admit, sampled_phases
+from profile_kernel_cost import admit
 from perf_artifacts import artifacts
 from profile_runtime import resolve_binary as runtime_binary
 from profile_runtime_stack import resolve_binary as stack_binary
@@ -168,13 +168,46 @@ class KernelCostIdentity(unittest.TestCase):
             with self.assertRaises(ValueError):
                 admit(identity, dict(row, **change), "off", 3)
 
-    def test_sampled_phase_population_is_exclusive_and_never_exact_instructions(self):
-        # Audit rule: sampled phases cannot be relabeled as physical instructions.
-        report = sampled_phases("run;native_heap::Roots;::refine 5\nrun;::refine 3\nrun;unknown 2\n", 2)
-        self.assertFalse(report["exact_phase_instructions"])
-        self.assertEqual(report["population"], 10)
-        self.assertEqual(report["top"], [dict(phase="publication", samples=5), dict(phase="refinement", samples=3)])
-        self.assertEqual(report["omitted_samples"], 2)
+
+
+class CellSourceJoin(unittest.TestCase):
+    def test_python_adapter_body_keeps_its_authored_function_owner(self):
+        # FIG-7431: Python's named callable wrapper and the executing inner
+        # body have different function identities. Source spans join them.
+        from profile_cell import authored_name
+        named = {"token": 1, "authored_name": "buildSort", "name": "local.function",
+                 "site": {"unit": {"library": "wrapper"}}, "offset": 10, "line": 2}
+        body = {"token": 2, "authored_name": None, "name": "local.function",
+                "site": {"unit": {"library": "body"}}, "offset": 25, "line": 3}
+        outside = dict(body, offset=120)
+        raw = {"file": "cell.py", "codes": [named, body], "source_map": {"sites": [
+            {"site": named["site"], "ranges": [{"start": 10, "end": 100}], "implicit": None}]}}
+        self.assertEqual(authored_name(body, raw), "buildSort [body]")
+        self.assertEqual(authored_name(named, raw), "buildSort")
+        self.assertEqual(authored_name(outside, raw), "<lambda>")
+
+    def test_joined_rows_keep_the_interrupted_statement_line(self):
+        # FIG-7431: using a function's first line for every joined sample
+        # collapses build and sort sites inside the same authored function.
+        import contextlib
+        import io
+        from profile_cell import report
+        raw = {"file": "cell.ts", "codes": [{"token": 1, "authored_name": "buildSort",
+               "name": "local.function", "site": {"unit": "main"}, "offset": 0, "line": 2}],
+               "statements": [6], "samples": [{"guest": [1], "native": [123],
+               "phase": "Interpret", "truncated_guest": False, "truncated_native": False}],
+               "instructions": {"instructions": 100, "time_enabled": 10, "time_running": 10},
+               "running_fraction": 1, "allocations": 0, "charge": 1, "wall_seconds": 1,
+               "sample_hz": 100, "refused": 0, "overflow": 0, "overruns": 0, "pid": 1, "window": "run"}
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch("profile_cell.resolve", return_value={123: ["vm (./crates/lash-kernel-vm/src/run.rs:7)"]}), \
+             mock.patch("profile_cell.tool", return_value="inferno-flamegraph"), \
+             mock.patch("profile_cell.checked", return_value=subprocess.CompletedProcess([], 0, "<svg/>", "")), \
+             contextlib.redirect_stdout(io.StringIO()):
+            result = report(raw, Path(directory))
+        self.assertEqual(result["tables"]["guest"][0]["site"], "buildSort (cell.ts:2)")
+        self.assertEqual(result["tables"]["joined"][0]["site"],
+                         "buildSort (cell.ts:6) -> vm (./crates/lash-kernel-vm/src/run.rs:7)")
 
 
 if __name__ == "__main__":

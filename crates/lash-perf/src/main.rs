@@ -19,7 +19,22 @@ static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::HistoryAllocator
 
 // The same `INSTRUMENTED_SYSTEM` instance that `lash_perf::GLOBAL_ALLOCATOR`
 // reads its counters from.
-#[cfg(not(feature = "dhat-heap"))]
+#[cfg(all(
+    not(feature = "dhat-heap"),
+    target_os = "linux",
+    target_arch = "x86_64"
+))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: lash_vm_worker::core_support::cell_profile::CountingAllocator<
+    lash_perf::latency::history_allocator::HistoryAllocator<&StatsAlloc<System>>,
+> = lash_vm_worker::core_support::cell_profile::CountingAllocator(
+    lash_perf::latency::history_allocator::HistoryAllocator(&INSTRUMENTED_SYSTEM),
+);
+
+#[cfg(all(
+    not(feature = "dhat-heap"),
+    not(all(target_os = "linux", target_arch = "x86_64"))
+))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::HistoryAllocator<
     &StatsAlloc<System>,
@@ -314,6 +329,17 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    if std::env::args().nth(1).as_deref() == Some("--profile-cell") {
+        let args: Vec<_> = std::env::args_os().skip(2).collect();
+        anyhow::ensure!(args.len() == 2, "usage: --profile-cell FILE OUT");
+        return lash_vm_worker::core_support::cell_profile::run(
+            std::path::Path::new(&args[0]),
+            std::path::Path::new(&args[1]),
+        )
+        .map_err(anyhow::Error::from_boxed);
+    }
+
     // A replay's Python cells run in workers that re-execute this binary.
     if lash_perf::replay::python_worker_entry()? {
         return Ok(());

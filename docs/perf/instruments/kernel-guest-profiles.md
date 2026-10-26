@@ -1,4 +1,31 @@
-# Kernel work counters and guest-context profiles
+# Source-attributed cell CPU profiles
+
+```sh
+just profile-cell /absolute/path/cell.ts
+just profile-cell /absolute/path/cell.py --worker
+just profile-cell-diff HEAD~1 /absolute/path/cell.ts
+```
+
+Use these commands for an arbitrary slow source cell. They print authored
+functions and source file:line, Rust self/inclusive CPU samples with inline
+source lines, and Rust work under each sampled guest site. One thread-directed
+CPU interrupt captures both stacks. The input's dialect source map is checked
+against the lowered document and source digest before execution. Library code
+without authored input coordinates is labelled as library code. Each output
+contains raw tokens, native addresses, source-map identities, and explicit
+refused/truncated/lost sample counts.
+
+`--worker` captures in the `lash-vm-worker` executable's diagnostic fresh-cell
+entry. It uses the production natives and helpers, without a host IPC or
+commit window. Totals cover run-to-terminal with metering on, including sampler
+overhead. Hardware instructions retain enabled/running times and are refused
+below 99% running time. Allocation calls, exact charge and wall time are
+reported. Folded stacks and SVGs are written next to the tables.
+
+See [CPU profiles](cpu-profiles.md#one-source-cell) for the build configuration,
+artifacts, bounds, differential behavior and sampling limitations.
+
+## Kernel work counters and guest-context profiles
 
 Rust CPU profiles of the kernel show interpreter symbols, not the guest
 functions they run. These two instruments attribute kernel work and time to
@@ -11,17 +38,17 @@ parked run, and neither changes a result, error, charge, park or seal
 thread for them; the sampler is the harness's.
 
 Both commands run the gate 6 programs of
-`crates/lash-dialect-typescript/examples/kernel_perf.rs` (any program name it
+`crates/lash-vm-worker/examples/kernel_perf.rs` (any program name it
 lists, or a `.ts` path) on one optimized, symbolized build:
 
 ```sh
 . ./env.sh
 E=.kiln/<ticket>
-kiln build //crates/lash-dialect-typescript:kernel_perf__example \
+kiln build //crates/lash-vm-worker:kernel_perf__example \
   --target-platforms //tools/buck2:profiling -c kiln.rust_profile=optimized \
   --materializations final --build-report "$E/kernel-build.json"
 B="$(python3 tools/buck2/outputs.py --report "$E/kernel-build.json" \
-  --label //crates/lash-dialect-typescript:kernel_perf__example --single)"
+  --label //crates/lash-vm-worker:kernel_perf__example --single)"
 ```
 
 ## Exact work counters
@@ -112,10 +139,9 @@ frame stack under a sequence lock and a read keeps only a whole one
 innermost statement are single stores, so a sample's statement may be one
 the frame reached during the read. Each task has its own stack: spawn and
 join are not call ancestry. One machine writes a context at a time; a
-dropped machine leaves it inactive. The sampler lives in this harness only:
-no worker or host drive publishes a context. Mixed Rust and guest stacks are
-not produced; locate a hot helper's Rust work with the
-[CPU profiles](cpu-profiles.md).
+dropped machine leaves it inactive. The older wall sampler lives in this harness. The standalone `profile-cell` route above supplies the worker reader and
+simultaneous native stacks. This older harness remains a wall-residency
+instrument with its own separate population.
 
 ## Overhead
 
@@ -214,15 +240,11 @@ passes leave it absent. Units are explicit:
   means no contributing trace population, not a measured zero-cost trace.
 
 A final, separate CPU sampling pass uses `perf_capture.py` and retains raw
-folded stacks and `sampled-phase-top.json`. Its exclusive symbol-family
-classification gives publication priority over refinement, then accounting,
-copying, frame resolution and register work; unrecognized or inlined work
-stays `other_or_unresolved`. It covers the whole process envelope, including
-setup and reference passes. These are **CPU cycle samples, not exact phase
-instructions**, and cannot divide the instruction window into exact shares.
-The sample counts conserve the folded population, with omitted top-N rows
-counted explicitly. All instrumented processes run under an 8 GiB address
-space cap. No thresholds, budgets or automatic regression gate are added.
+folded profiles. It covers the whole process envelope, including setup and
+reference passes. These CPU cycle samples cannot divide the acknowledged
+instruction window into exact phase shares. All instrumented processes run
+under an 8 GiB address space cap. No automatic regression gate is added by
+this phase-cost command.
 
 The worker's existing `--count-heap-work` mode also transports root
 publications and all fixed phase counts in `WorkerWork`. Additive counters

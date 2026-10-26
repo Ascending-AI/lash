@@ -5,7 +5,6 @@ separate populations. This is an advisory experiment, with no charge budget.
 """
 from __future__ import annotations
 
-from collections import Counter
 import hashlib
 import json
 import os
@@ -47,35 +46,6 @@ def admit(reference: dict, row: dict, observer: str, iterations: int, *, acknowl
         raise ValueError("unexpected observer")
 
 
-def sampled_phases(folded: str, top: int) -> dict:
-    """Exclusive first matching phase per stack; unmatched samples stay visible.
-
-    Inlining and missing symbols prevent complete attribution. The priority is
-    explicit: publication > refinement > accounting > tree copies > resolution.
-    """
-    phases = Counter()
-    symbols = (
-        ("publication", ("native_heap::Roots", "set_execution_roots", "publish_holdings", "publish_roots")),
-        ("refinement", ("census_impl::trace", "::refine", "::collect")),
-        ("accounting", ("census_impl::Census", "replace_holding", "release_statement_roots")),
-        ("tree_copy", ("tree::make_dirty", "tree::Node<T> as core::clone::Clone", "tree::Tree<T>::load")),
-        ("frame_resolution", ("frames::Frames::last_mut", "tasks::Tasks::get_mut")),
-        ("registers", ("Vec<T,A>::resize", "Vec<T,A>::clear")),
-    )
-    for line in folded.splitlines():
-        stack, count = line.rsplit(" ", 1)
-        phase = next((phase for phase, names in symbols if any(name in stack for name in names)),
-                     "other_or_unresolved")
-        phases[phase] += int(count)
-    if not phases or sum(phases.values()) <= 0:
-        raise ValueError("empty sampled phase population")
-    return {"unit": "CPU cycle samples; process envelope including setup/reference passes",
-            "aggregation": "exclusive first matching symbol family per stack; heuristic, inlining can hide phases",
-            "exact_phase_instructions": False, "population": sum(phases.values()),
-            "top": [{"phase": phase, "samples": count} for phase, count in phases.most_common(top)],
-            "omitted_samples": sum(count for _, count in phases.most_common()[top:])}
-
-
 def read_one(directory: Path) -> dict:
     rows = json.loads((directory / "phase-run.json").read_text())
     if len(rows) != 1:
@@ -101,13 +71,12 @@ def render(report: dict) -> str:
               "No zero-work subtraction; raw controls retained. No wall-time or universal instructions/charge claim.",
               "Fixed phase counts: one separate counted run (calls, rows, work units and scratch peaks):",
               json.dumps(report["phase_counts"], sort_keys=True),
-              "Sampled phase top-N: CPU cycle samples over process envelope; NOT exact phase instructions:"]
-    lines += [f"{row['samples']} {row['phase']}" for row in report["sampled_phases"]["top"]]
+              f"Raw process CPU stacks: {report['sampled_folded']}"]
     return "\n".join(lines) + "\n"
 
 
 def measure(root: Path, out: Path, program: str, iterations: int, repeats: int,
-            build_report: Path | None, *, build: bool, top: int) -> str:
+            build_report: Path | None, *, build: bool) -> str:
     if out.exists():
         raise ValueError("kernel-cost output must be a fresh directory")
     out.mkdir(parents=True)
@@ -169,9 +138,6 @@ def measure(root: Path, out: Path, program: str, iterations: int, repeats: int,
     (out / "sampled.stderr").write_text(proc.stderr)
     sampled = read_one(directory)
     admit(identity, sampled, "off", iterations, acknowledged=False)
-    phases = sampled_phases((out / "sampled.profiles" / "cpu.folded").read_text(), top)
-    phases.update(experiment_id=experiment, producer=sampled)
-    (out / "sampled-phase-top.json").write_text(json.dumps(phases, indent=2) + "\n")
     ratios = []
     for repeat in range(repeats):
         pair = {row["producer"]["observer"]: row["perf"]["instructions"]
@@ -184,7 +150,7 @@ def measure(root: Path, out: Path, program: str, iterations: int, repeats: int,
               "iterations": iterations, "repeats": repeats, "samples": samples,
               "guest_statements_per_run": sum(function["statements"] for function in reference["functions"]),
               "phase_counts": reference["phase_counts"], "paired_instruction_ratios": ratios,
-              "sampled_phases": phases}
+              "sampled_folded": str(out / "sampled.profiles" / "cpu.folded")}
     (out / "statement-phase-cost.json").write_text(json.dumps(report, indent=2) + "\n")
     text = render(report)
     (out / "statement-phase-cost.txt").write_text(text)

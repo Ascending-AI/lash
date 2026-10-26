@@ -1,20 +1,74 @@
 #[cfg(all(feature = "cell-memory", feature = "dhat-heap"))]
-#[global_allocator]
-static CELL_DHAT_ALLOCATOR: lash_vm_worker::cell_memory::Alloc<dhat::Alloc> =
-    lash_vm_worker::cell_memory::Alloc(dhat::Alloc);
+type BaseAllocator = lash_vm_worker::cell_memory::Alloc<dhat::Alloc>;
+#[cfg(all(feature = "cell-memory", feature = "dhat-heap"))]
+const BASE_ALLOCATOR: BaseAllocator = lash_vm_worker::cell_memory::Alloc(dhat::Alloc);
+
 #[cfg(all(feature = "cell-memory", not(feature = "dhat-heap")))]
-#[global_allocator]
-static CELL_ALLOCATOR: lash_vm_worker::cell_memory::Alloc<std::alloc::System> =
-    lash_vm_worker::cell_memory::Alloc(std::alloc::System);
+type BaseAllocator = lash_vm_worker::cell_memory::Alloc<std::alloc::System>;
+#[cfg(all(feature = "cell-memory", not(feature = "dhat-heap")))]
+const BASE_ALLOCATOR: BaseAllocator = lash_vm_worker::cell_memory::Alloc(std::alloc::System);
+
 #[cfg(all(feature = "dhat-heap", not(feature = "cell-memory")))]
+type BaseAllocator = dhat::Alloc;
+#[cfg(all(feature = "dhat-heap", not(feature = "cell-memory")))]
+const BASE_ALLOCATOR: BaseAllocator = dhat::Alloc;
+
+#[cfg(not(any(feature = "dhat-heap", feature = "cell-memory")))]
+type BaseAllocator = std::alloc::System;
+#[cfg(not(any(feature = "dhat-heap", feature = "cell-memory")))]
+const BASE_ALLOCATOR: BaseAllocator = std::alloc::System;
+
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "testing",
+    feature = "dialect-typescript",
+    feature = "dialect-python"
+))]
 #[global_allocator]
-static ALLOCATOR: dhat::Alloc = dhat::Alloc;
+static ALLOCATOR: lash_vm_worker::core_support::cell_profile::CountingAllocator<BaseAllocator> =
+    lash_vm_worker::core_support::cell_profile::CountingAllocator(BASE_ALLOCATOR);
+
+#[cfg(not(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "testing",
+    feature = "dialect-typescript",
+    feature = "dialect-python"
+)))]
+#[global_allocator]
+static ALLOCATOR: BaseAllocator = BASE_ALLOCATOR;
 
 #[expect(
     clippy::disallowed_methods,
     reason = "helper entry reports bootstrap failure through its process exit"
 )]
 fn main() {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        feature = "testing",
+        feature = "dialect-typescript",
+        feature = "dialect-python"
+    ))]
+    if std::env::args().nth(1).as_deref() == Some("--profile-cell") {
+        let args: Vec<_> = std::env::args_os().skip(2).collect();
+        if args.len() != 2 {
+            eprintln!("usage: --profile-cell FILE OUT");
+            std::process::exit(2);
+        }
+        match lash_vm_worker::core_support::cell_profile::run(
+            std::path::Path::new(&args[0]),
+            std::path::Path::new(&args[1]),
+        ) {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("cell profile: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().nth(1).as_deref() == Some("--version") {
         println!(
             "{}",

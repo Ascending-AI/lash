@@ -32,7 +32,11 @@ pub struct Measurement {
 }
 
 /// A linked cell whose VM program remains owned by the worker.
-pub struct PreparedCell(Program);
+pub struct PreparedCell(
+    Program,
+    lash_kernel_doc::SourceMap,
+    BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
+);
 
 fn elapsed(at: std::time::Instant) -> f64 {
     at.elapsed().as_secs_f64() * 1e9
@@ -144,18 +148,21 @@ impl Kernel {
             .map_err(|e| failure(format!("{e:?}")))?;
         let environment = Environment::new(&library, &namespaces);
         let mode = Mode::Cell(CellEnvironment::first());
-        let document = {
+        let lowered = {
             let _scope = Scope::new("admission_lowering", &mut phases);
             if python {
                 lash_dialect_python::lower(source, &environment, mode)
-                    .map(|l| Arc::clone(l.document.shared()))
                     .map_err(|e| failure(format!("{e:?}")))?
             } else {
                 lash_dialect_typescript::lower(source, &environment, mode)
-                    .map(|l| Arc::clone(l.document.shared()))
                     .map_err(|e| failure(format!("{e:?}")))?
             }
         };
+        let source_map = lowered
+            .source_map
+            .ok_or_else(|| failure("cell has no source map"))?;
+        source_map.validate_identified(&lowered.document, source)?;
+        let document = Arc::clone(lowered.document.shared());
         let _scope = Scope::new("linking", &mut phases);
         let link = Link {
             document: document.identity(),
@@ -194,7 +201,7 @@ impl Kernel {
         )
         .map_err(failure)?;
         drop(_scope);
-        Ok((PreparedCell(program), phases))
+        Ok((PreparedCell(program, source_map, lowered.written), phases))
     }
 }
 
@@ -212,29 +219,7 @@ pub fn execute(
     let began = std::time::Instant::now();
     let mut machine = {
         let _scope = Scope::new("machine_construction", &mut phases);
-        KernelMachine::start(
-            program.0.clone(),
-            Bounds {
-                charge_limit: 10_000_000_000,
-                memory: 512 << 20,
-                call_depth: 1000,
-                live_tasks: 1024,
-                requests_per_park: 1024,
-                join_members: 1024,
-                memory_meter: lash_kernel_vm::MemoryMeter::On,
-                charge: lash_kernel_vm::Charge::Exact,
-            },
-            CellStart {
-                owner: PageId([9; 32]),
-                modes: BTreeMap::new(),
-                target: Target::Main,
-                args: Vec::new(),
-                session: None,
-                host: Vec::new(),
-            },
-            Box::<Pages>::default(),
-        )
-        .map_err(failure)?
+        start(program)?
     };
     if observe {
         machine.count_work();
@@ -316,5 +301,103 @@ impl Drop for Scope<'_> {
             self.name.into(),
             lash_core_execution::perf_witness::latency::Stamp::now().since(self.at) * 1e6,
         );
+    }
+}
+
+fn start(program: &PreparedCell) -> Result<KernelMachine> {
+    KernelMachine::start(
+        program.0.clone(),
+        Bounds {
+            charge_limit: 10_000_000_000,
+            memory: 512 << 20,
+            call_depth: 1000,
+            live_tasks: 1024,
+            requests_per_park: 1024,
+            join_members: 1024,
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
+            charge: lash_kernel_vm::Charge::Exact,
+        },
+        CellStart {
+            owner: PageId([9; 32]),
+            modes: BTreeMap::new(),
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            host: Vec::new(),
+        },
+        Box::<Pages>::default(),
+    )
+    .map_err(failure)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(super) fn profile(
+    program: &PreparedCell,
+    file: &std::path::Path,
+    source: &str,
+    out: &std::path::Path,
+) -> Result<()> {
+    let mut machine = start(program)?;
+    super::cell_profile::capture(
+        &mut machine,
+        super::cell_profile::Source {
+            file,
+            text: source,
+            map: &program.1,
+            document: &program.0.document,
+            written: &program.2,
+        },
+        out,
+        |machine| {
+            let mut console = Console::default();
+            loop {
+                match machine.run(&mut console, u64::MAX).map_err(failure)? {
+                    Step::Slice => {}
+                    Step::Ended(End::Finished(_)) => break,
+                    other => return Err(failure(format!("cell did not finish: {other:?}"))),
+                }
+            }
+            Ok(console.0)
+        },
+    )
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+mod tests {
+    use super::*;
+
+    // FIG-7431: creation-site metadata must name the executable library bodies,
+    // in both dialects. Looking up a body site directly loses both names.
+    #[test]
+    fn authored_source_names_follow_closures_to_executable_bodies() {
+        let kernel = Kernel::new().unwrap();
+        for (python, source) in [
+            (
+                false,
+                "function compareKeys(a,b) { return a-b; }\nfunction buildSort(n) { return compareKeys(n,1); }\nconsole.log(buildSort(2));",
+            ),
+            (
+                true,
+                "def compareKeys(a,b):\n    return a-b\ndef buildSort(n):\n    return compareKeys(n,1)\nprint(buildSort(2))\n",
+            ),
+        ] {
+            let (program, _) = kernel.prepare(source, python).unwrap();
+            let machine = start(&program).unwrap();
+            let symbols = machine.guest_symbols();
+            for expected in ["compareKeys", "buildSort"] {
+                assert!(
+                    symbols.codes.iter().any(|code| {
+                        super::super::cell_profile::authored_name(
+                            &code.site,
+                            &program.2,
+                            &program.0.document,
+                        ) == Some(expected)
+                            && super::super::cell_profile::source_start(&program.1, &code.site)
+                                .is_some()
+                    }),
+                    "missing authored name and source location for {expected}, python={python}"
+                );
+            }
+        }
     }
 }

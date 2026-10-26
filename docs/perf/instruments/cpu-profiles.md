@@ -5,6 +5,77 @@ support, and Inferno's `inferno-collapse-perf`, `inferno-diff-folded` and
 `inferno-flamegraph` on PATH. These are local diagnostic tools; builds use Kiln's
 existing profiling platform, optimization, line tables and frame pointers.
 
+## One source cell
+
+```sh
+just profile-cell /absolute/path/build-sort.ts
+just profile-cell /absolute/path/build-sort.py --worker
+just profile-cell-diff HEAD~1 /absolute/path/build-sort.ts
+```
+
+`profile-cell` builds the symbolized optimized binary through Kiln. It selects
+`--target-platforms //tools/buck2:profiling -c kiln.rust_profile=optimized` in
+one build command; do not combine that platform with `--config=optimized`.
+The input must be an effect-free `.ts` or `.py` cell. The default output directory is
+`<file>.profile`; use `--out <fresh-directory>` for another capture.
+`--no-build --build-report <report.json>` reuses a materialized Kiln artifact.
+The commands need Linux x86-64, hardware perf permissions,
+`llvm-addr2line` and `inferno-flamegraph`.
+
+The text tables rank guest functions, Rust functions and their joined samples
+by inclusive and self CPU samples. Guest source maps identify authored source
+lines. Callable bodies without a direct name inherit the smallest enclosing
+named function's source-map range and carry a `[body]` label. Helper functions
+retain their library names. Each native stack and its
+guest context come from one interrupt of the executing thread, not separate
+runs. Function tables group by the function's mapped body location; the joined
+view uses each frame's current statement line so build and sort sites within
+one function remain distinct. A thread CPU timer requests 100 samples per CPU second; this is CPU
+residency rather than the older wall-residency sampler. Native frame-pointer
+walks retain inline frames after batch symbolization. The Rust text tables
+attribute inlined standard-library/dependency work to the innermost Lash
+source frame. Folded artifacts retain the complete inline chain. The interrupt handler
+copies into preallocated storage; source resolution and output happen after
+execution. Capacity loss and timer overruns fail the command and retain raw
+capture evidence. Truncated stacks, refused context reads and unresolved
+addresses remain explicit. System libraries without frame pointers can stop
+the native walk; truncated chains retain the sampled leaf and known frames.
+A tiny cell with no samples is refused.
+
+`--worker` executes the same fresh-cell production embedding in the real
+`lash-vm-worker` executable through its diagnostic entry. This is a standalone
+worker-process capture, without the serving host's IPC, checkpoint or durable
+commit costs. No deployed two-cell state is imported. Charge and memory
+metering stay enabled. No VM optimization is part of this instrument.
+
+Totals include unscaled `instructions:u`, enabled/running times and running
+fraction, allocation and reallocation calls, exact charge and wall time over
+run-to-terminal. Instructions are refused below 99% PMU running time. These
+are observed-run totals, including instrumentation overhead, not an
+uninstrumented performance claim. Prepare/start/drop are outside the window.
+The command bounds the workload to 90 seconds and 8 GiB of address space.
+Symbolization uses one batch of unique addresses per ELF object and disables
+external debug downloads. A cache keyed by the complete raw-capture digest
+retains resolved inline chains for offline report regeneration. `identity.json`, `raw.json`, `symbols.json`, `report.json`,
+`tables.txt`, `result.txt`, and guest/Rust/joined folded stacks and SVGs live
+beside one another.
+
+`profile-cell-diff` extends `scripts/profile_diff.py`'s existing sequential
+commit checkout/build/capture path. Run it from a clean tracked tree. Both
+revisions must have the worker comparison adapter and profiling platform. The
+comparison runs both cells in the worker executable with the current
+measurement adapter temporarily applied to each checkout. It leaves VM,
+dialect and helper implementations at their measured revisions. This supports
+baselines older than the cell-profile CLI. The overlay is restored before
+switching revisions, including failures. It freezes
+the source bytes before checking out either commit, restores the original
+branch on failure, and writes per-row self/inclusive deltas and total count
+deltas to `<file>.diff/cell-delta.txt`. Raw sample counts vary with workload
+CPU time and are diagnostic. `diff.svg` compares the joined folded stacks.
+Never edit or build concurrently in that fork during a commit comparison.
+
+## Standard runtime capture
+
 Capture a small standard scenario:
 
 ```sh

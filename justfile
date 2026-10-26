@@ -284,3 +284,11 @@ workbench-transcript-projection-e2e:
 # One cell's allocation sites, capacity ledger, RSS and optional stack occupancy.
 profile-cell-mem file *args:
   python3 scripts/profile_cell_mem.py "{{file}}" {{args}}
+
+# One cell's guest, Rust and joined CPU stacks, source lines and qualified totals.
+profile-cell file *args:
+  python3 "{{repo}}/scripts/profile_cell.py" "{{file}}" {{args}}
+
+# Reuse the commit and folded-stack comparison harness.
+profile-cell-diff base file *args:
+  python3 "{{repo}}/scripts/profile_diff.py" --commits "{{base}}" HEAD --cell "{{file}}" --svg --out "{{file}}.diff" {{args}}

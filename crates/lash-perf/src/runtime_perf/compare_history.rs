@@ -1,4 +1,4 @@
-//! Compare slopes use duration-trend's existing per-operation duration metric.
+//! Shared duration history retains wall observations and qualified instruction baselines.
 use super::duration_trend::{
     self, BuildMode, DurationHistoryRecord, DurationMetricHistoryValue, ExperimentIdentity,
     HISTORY_RECORD_VERSION,
@@ -18,7 +18,12 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
     };
     let mut records = Vec::new();
     let mut failures = Vec::new();
-    for row in receipt.rows.iter().filter(|r| r.median.slope_ns > 0.0) {
+    for row in receipt.rows.iter().filter(|r| {
+        r.instructions
+            .as_ref()
+            .is_some_and(|r| r.median_per_operation > 0.0)
+            || !args.check
+    }) {
         let scenario = if row.engine == "lash" {
             format!("compare/{}/{}", row.dialect, row.workload)
         } else {
@@ -54,12 +59,18 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
             let baseline = prior.iter().rev().find(|r| {
                 r.scenario == scenario && r.profile == "compare" && r.identity == identity
             });
-            match baseline.and_then(|r| r.duration_metrics_ms.get("slope_per_operation")) {
-                Some(baseline) if slope_ms > baseline.median_ms * (1.0 + args.tolerance) => {
+            let instructions = row.instructions.as_ref().map(|r| r.median_per_operation);
+            match baseline
+                .and_then(|r| r.compare_instructions_per_operation)
+                .zip(instructions)
+            {
+                Some((baseline, instructions))
+                    if instructions > baseline * (1.0 + args.tolerance) =>
+                {
                     failures.push(format!(
-                        "{scenario}: {:.2} ns/op vs {:.2} baseline (+{:.0}% allowed)",
-                        row.median.slope_ns,
-                        baseline.median_ms * 1e6,
+                        "{scenario}: {:.2} instructions/op vs {:.2} baseline (+{:.0}% allowed)",
+                        instructions,
+                        baseline,
                         args.tolerance * 100.0
                     ))
                 }
@@ -81,13 +92,21 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
             recorded_at: receipt.recorded_at.clone(),
             total_ms: row.median_ns[1] / 1e6,
             total_p95_ms: Some(high_p95),
-            duration_metrics_ms: BTreeMap::from([(
-                "slope_per_operation".into(),
-                DurationMetricHistoryValue {
-                    median_ms: slope_ms,
-                    p95_ms: p95,
-                },
-            )]),
+            duration_metrics_ms: if slope_ms > 0.0 {
+                BTreeMap::from([(
+                    "slope_per_operation".into(),
+                    DurationMetricHistoryValue {
+                        median_ms: slope_ms,
+                        p95_ms: p95,
+                    },
+                )])
+            } else {
+                BTreeMap::new()
+            },
+            compare_instructions_per_operation: row
+                .instructions
+                .as_ref()
+                .map(|r| r.median_per_operation),
             kernel: None,
             replay: None,
         });

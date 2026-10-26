@@ -266,6 +266,9 @@ pub(crate) struct DurationMetricHistoryValue {
 /// advisory line are never describing two different numbers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DurationHistoryRecord {
+    /// Qualified hardware instructions/op for the comparison harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) compare_instructions_per_operation: Option<f64>,
     /// See [`HISTORY_RECORD_VERSION`].
     pub(crate) version: u32,
     pub(crate) identity: ExperimentIdentity,
@@ -398,6 +401,7 @@ pub(crate) fn records_for_run(
                 .map(|total| (summary, total))
         })
         .map(|(summary, total)| DurationHistoryRecord {
+            compare_instructions_per_operation: None,
             kernel: None,
             replay: None,
             version: HISTORY_RECORD_VERSION,

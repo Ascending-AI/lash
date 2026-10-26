@@ -39,6 +39,7 @@ fn record(receipt: &ReplayReceipt, workload: &WorkloadReceipt) -> Option<Duratio
     let wall = distribution(workload, "wall_ms")?;
     let identity = workload.experiment.clone();
     Some(DurationHistoryRecord {
+        compare_instructions_per_operation: None,
         version: HISTORY_RECORD_VERSION,
         identity,
         scenario: format!("replay/{}/round_average", workload.workload),

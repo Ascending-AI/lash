@@ -147,6 +147,7 @@ fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>>
         let run = distribution(row.samples.iter().map(|sample| sample.ns_run));
         let whole = distribution(row.samples.iter().map(|sample| sample.ns_start_and_run));
         Ok(DurationHistoryRecord {
+            compare_instructions_per_operation: None,
             version: HISTORY_RECORD_VERSION,
             identity,
             scenario: format!("kernel/{}", row.program),

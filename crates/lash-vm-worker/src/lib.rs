@@ -13,6 +13,15 @@ mod embedding;
 /// Hosts submit runs through the worker service.
 #[doc(hidden)]
 pub mod core_support {
+    /// Simultaneous guest and native CPU capture for one cell.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        feature = "testing",
+        feature = "dialect-typescript",
+        feature = "dialect-python"
+    ))]
+    pub mod cell_profile;
     /// Fresh-cell measurements; lowering and machines stay worker owned.
     #[cfg(all(
         feature = "testing",
@@ -20,6 +29,9 @@ pub mod core_support {
         feature = "dialect-python"
     ))]
     pub mod compare;
+    /// Linux instruction counting used by developer measurements.
+    #[cfg(all(target_os = "linux", feature = "testing"))]
+    pub mod instructions;
 
     pub use crate::embedding::library_for;
 }

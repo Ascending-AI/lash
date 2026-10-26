@@ -26,8 +26,9 @@ All engines for a dialect receive the same checked-in workload source. Only
 clocks, invocation and result transport wrappers differ. External startup and
 JSON transport are excluded from reference timings. Lash includes fresh cell
 construction and run through its printed checksum; lowering, linking, machine
-destruction and host result validation are excluded. The fitted intercept
-absorbs these fixed differences; slopes describe the incremental guest work.
+destruction and host result validation are excluded. The two-point secant describes incremental work only for that exact geometry.
+For nonlinear `object_sort`, the table omits the intercept because two points
+do not identify fixed setup cost. Retain the actual high-count durations.
 
 Build the pinned external references into a cache without vendoring them:
 
@@ -58,10 +59,12 @@ before and after each synchronous fresh-cell execution. It excludes embedding,
 lowering/linking, diagnostic cells, executable hashing and driver/history I/O.
 It includes construction, execution, destruction and result validation; its
 interval therefore extends beyond the duration interval. Each sample retains
-its count, and rows report minimum and median differential instructions/op with
+its unscaled count plus time-enabled/time-running, and rows report minimum and
+median differential instructions/op with
 the same two-point formula below. This scoped counter avoids subtracting huge
 whole-process startup costs to measure small loop increments. Counter refusal is
-an explicit comparison failure. Reference rows retain their ordinary timings;
+an explicit comparison failure. A measured interval with less than 99% PMU
+running time is refused; counts are never silently scaled. Reference rows retain their ordinary timings;
 this option counts only Lash cells.
 
 Each workload has a low count and a high count (`low * --factor`, default 100).
@@ -83,13 +86,14 @@ the two minima and the two medians use:
 
 ```text
 slope_ns_per_operation = (t_high - t_low) / (ops_high - ops_low)
-fixed_ns_per_execution = t_low - slope * ops_low
 ```
 
-The adjacent Markdown table reports both slopes, the signed median intercept,
-and lash/reference median-slope ratios. Negative/noisy intercepts stay signed.
-Nonpositive slopes have no ratio or history observation: increase trip
-separation when investigating them. Refused execution, nondeterministic results,
+The adjacent Markdown table reports both secants and lash/reference ratios.
+Linear workloads also retain the signed median intercept; `object_sort` has
+no fixed-cost display.
+Nonpositive wall secants have no ratio or wall-secant trend; instruction
+history remains available when its own secant is positive. Increase trip
+separation when investigating nonpositive secants. Refused execution, nondeterministic results,
 invalid sample counts and mismatched reference checksums make the command fail;
 partial JSON evidence survives. Numeric checksums allow a relative 1e-10 float
 tolerance. Raw outputs remain archived in the receipt.
@@ -108,22 +112,19 @@ number overlaps execution/construction and must not be added to the other
 phases. Embedding setup is process-once, not per-execution. The diagnostic
 machine's checkpoint never perturbs the ordinary slope population.
 
-History is opt-in: pass `--history <file>` to append duration observations and
-also `--check` to read a prior baseline. `--check` requires an explicit history
-path. Append-only runs never read earlier records. Profiling children use no
-history. Explicit baseline I/O remains outside the scoped instruction counter.
-History is the existing `runtime_perf/duration_trend` JSONL format. Rows use
-profile `compare`, lash scenario `compare/<dialect>/<workload>` (reference
-scenarios add the engine name), total time at the
-high count, and duration metric `slope_per_operation` in milliseconds per
-operation. `lash-perf duration-trend --history <file> --profile compare` reads
-the same file. Reference histories retain their binary hash as compiler identity;
-`--check` applies only to lash. Host/compiler/allocator/build/CPU/source/metering/count/window
-identity must match. The receipt additionally retains executable hashes.
-`--check --tolerance 0.20` fails above a 20% increase against the last comparable
-record, and refuses a missing baseline. A failed check or incomplete comparison
-does not append a new baseline. This is an opt-in advisory tool, never a merge
-gate. Do not use a recent failed run as the next baseline.
+History is opt-in. Pass `--history <file>` to append observations and
+`--instructions --check` to compare against a prior qualified instructions/op
+baseline. The default threshold is 1% (`--tolerance 0.01`). Wall time remains
+in the receipt and duration trend, but never decides this check. A missing
+instruction baseline, unqualified hardware window or nonpositive instruction
+secant fails. Failed checks never append a new baseline.
+
+History uses the existing `runtime_perf/duration_trend` JSONL format, with
+`compare_instructions_per_operation` stored in instruction units. Duration
+metrics retain their original millisecond units. Old duration-only records
+cannot qualify as instruction baselines. Host/compiler/allocator/build/CPU,
+source, geometry, observation and metering identities must match. External
+reference rows remain descriptive. This is an opt-in developer gate.
 
 `--profile <directory>` performs a separate `perf record` run per selected lash
 workload and dialect, writing perf data, perf-script stacks, and Inferno folded

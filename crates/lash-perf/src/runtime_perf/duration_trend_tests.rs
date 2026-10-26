@@ -753,6 +753,7 @@ fn an_acceptance_nobody_can_audit_is_refused() {
 
 fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> DurationHistoryRecord {
     DurationHistoryRecord {
+        compare_instructions_per_operation: None,
         kernel: None,
         replay: None,
         version: HISTORY_RECORD_VERSION,
