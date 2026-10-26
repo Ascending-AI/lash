@@ -97,10 +97,8 @@ impl Layout {
         if self.leading {
             // Over `args`, whose length a call site fixes, so the copy
             // unrolls there rather than becoming a call of `memcpy`.
-            for (index, value) in args.enumerate() {
-                if index < given {
-                    slots[index] = SlotState::Value(value);
-                }
+            for (slot, value) in slots[..given].iter_mut().zip(args) {
+                *slot = SlotState::Value(value);
             }
             for slot in &mut slots[given..self.arity] {
                 *slot = SlotState::Value(Value::Absent);

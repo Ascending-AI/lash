@@ -28,8 +28,21 @@ fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool
         embedder.machine.record_charges(tape.clone());
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
+    let mut register_statements = 0;
     let end = loop {
+        if !taped {
+            embedder.machine.count_execution();
+        }
         let step = embedder.run();
+        if !taped {
+            register_statements += embedder
+                .machine
+                .take_execution_census()
+                .statements
+                .get(&crate::perf_witness::execution::Owner::RegisterProgram)
+                .copied()
+                .unwrap_or(0);
+        }
         stops.push((
             match &step {
                 Step::Ended(_) => "ended",
@@ -54,6 +67,12 @@ fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool
             }
         }
     };
+    if !taped {
+        assert!(
+            register_statements > 0,
+            "paired call cases must run register statements: {source}"
+        );
+    }
     Observed {
         end,
         printed: embedder.world.printed,
@@ -88,6 +107,9 @@ fn direct_call_entry_agrees() {
     let mut comparisons = 0;
     for body in [
         "let f = fn(x) { return 1 } return apply f(7)",
+        "let n = 0 let f = fn(x) { set n = flat.add(n, 1) let g = fn(y) { return call pair(y, n) } return apply g(x) } return invoke each.map(f, [1, 2, 3])",
+        "let n = 0 let f = fn(x) { set n = flat.add(n, 1) let answer = call pause(x) return call pair(answer, n) } return invoke each.map(f, [1, 2])",
+        "let f = fn(x) { try { return call pause(x) } finally { do flat.add(x, 1) } } return invoke each.map(f, [1, 2])",
         "let x = 3 return call pair(x, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3)",
