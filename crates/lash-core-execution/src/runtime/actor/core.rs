@@ -877,6 +877,7 @@ impl ActorContext {
                     committed.revision,
                     super::owner_state::SessionProjection {
                         prompt: Default::default(),
+                        configuration: Default::default(),
                         composition: None,
                         environment: None,
                         phase: None,

@@ -116,6 +116,8 @@ pub struct ActorTx {
     requires: Option<Vec<String>>,
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
+    exact_reads:
+        BTreeMap<NodeId, std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>>,
     budget: Option<GraphCommitBudget>,
     owed: BTreeMap<NodeId, Vec<lash_vocabulary::providers::PluginCallbackIdentity>>,
 }
@@ -172,6 +174,7 @@ impl ActorTx {
             requires: None,
             graph: BTreeMap::new(),
             reads: BTreeSet::new(),
+            exact_reads: BTreeMap::new(),
             budget: None,
             owed: BTreeMap::new(),
         }
@@ -524,6 +527,7 @@ impl ActorTx {
             self.graph.entry(id).or_insert(node);
         }
         self.reads.extend(held.reads);
+        self.exact_reads.extend(held.exact_reads);
         self.owed.extend(held.owed);
         Ok(self)
     }
@@ -566,6 +570,26 @@ impl ActorTx {
     #[must_use]
     pub fn graph(&self) -> &BTreeMap<NodeId, EncodedNode> {
         &self.graph
+    }
+
+    /// Require an acknowledged immutable node without resupplying it for
+    /// installation. The store must find it and compare its exact bytes;
+    /// absence refuses rather than recreating the node from preparation.
+    pub fn require_exact(
+        &mut self,
+        node: std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>,
+    ) -> &mut Self {
+        self.reads.insert(node.id);
+        self.exact_reads.entry(node.id).or_insert(node);
+        self
+    }
+
+    /// Prepared reference checks, in digest order. They never install nodes.
+    pub fn exact_reads(
+        &self,
+    ) -> &BTreeMap<NodeId, std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>>
+    {
+        &self.exact_reads
     }
 
     /// The stored nodes this transaction requires without staging them.

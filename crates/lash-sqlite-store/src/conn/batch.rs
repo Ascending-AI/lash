@@ -72,6 +72,8 @@ impl Writes {
 /// Everything a queued write needs on the connection thread, shared by the
 /// connection's clones: writes on one writer may share a transaction.
 pub(super) struct Writer {
+    #[cfg(feature = "perf-witness")]
+    pub(super) queued_writes: Arc<std::sync::atomic::AtomicU64>,
     pub(super) configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     pub(super) operational: crate::SqliteOperationalSettings,
     pub(super) write_gate: Arc<Mutex<()>>,
@@ -122,7 +124,9 @@ pub(crate) struct Member {
     #[cfg(feature = "perf-witness")]
     origin: &'static str,
     #[cfg(feature = "perf-witness")]
-    timing: Option<lash_core_ids::perf_witness::queues::Timer>,
+    timing: Option<Box<lash_core_ids::perf_witness::queues::Timer>>,
+    #[cfg(feature = "perf-witness")]
+    queued: Option<lash_core_ids::perf_witness::latency::WriteTicket>,
 }
 
 impl Member {
@@ -144,7 +148,12 @@ impl Member {
                 reply,
             }),
             #[cfg(feature = "perf-witness")]
-            timing: lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.worker"),
+            timing: lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.worker")
+                .map(Box::new),
+            #[cfg(feature = "perf-witness")]
+            queued: lash_core_ids::perf_witness::latency::WriteTicket::enqueue(
+                &writer.queued_writes,
+            ),
         }
     }
 
@@ -160,6 +169,10 @@ impl Member {
     }
 
     fn run(&mut self, tx: &FencedTx<'_>) -> Kept {
+        #[cfg(feature = "perf-witness")]
+        if let Some(queued) = self.queued.take() {
+            queued.started();
+        }
         let window = self.window.clone();
         let body = &mut self.body;
         #[cfg(feature = "perf-witness")]

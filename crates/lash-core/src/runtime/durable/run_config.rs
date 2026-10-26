@@ -2,16 +2,19 @@
 //! it (FIG-6021).
 //!
 //! A run resolves its spec once. Its configuration graph is shared with
-//! revisions; each model round adds a typed immutable environment reference.
+//! revisions. A default run references its acknowledged head's configuration
+//! without staging it again; each model round adds a typed immutable environment reference.
 //! Phases retain every round the run used. A resume resolves those owners and
 //! never substitutes the session-current environment. The surface here is only
 //! a resident projection for existing diagnostics; it is never serialized.
 
 use std::sync::Arc;
 
+use lash_core_store::checkpoint_graph::bodies::RunConfigReference;
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId, config};
 
 use crate::ResolvedRun;
+use lash_core_store::checkpoint_graph::node::VerifiedNode;
 
 /// A run's recorded configuration: its resolved shape and the tool surface
 /// it installed last, each with the node a committed phase stored it as.
@@ -19,6 +22,7 @@ use crate::ResolvedRun;
 pub struct RecordedRunConfig {
     run: Arc<ResolvedRun>,
     run_stored: Option<NodeId>,
+    session_config: Option<Arc<VerifiedNode>>,
     surface: Option<Arc<crate::RecordedSurface>>,
     environments: std::collections::BTreeMap<u64, lash_core_store::environment::RoundEnvironment>,
     publication: Option<Arc<crate::runtime::session_environment::Publication>>,
@@ -32,10 +36,23 @@ impl RecordedRunConfig {
         Self {
             run: Arc::new(run),
             run_stored: None,
+            session_config: None,
             surface: None,
             environments: Default::default(),
             publication: None,
         }
+    }
+
+    /// Reuse exactly the configuration the acknowledged head retains.
+    pub(in crate::runtime) fn with_head_config(
+        mut self,
+        config: &crate::PersistedSessionConfig,
+        node: Arc<VerifiedNode>,
+    ) -> Self {
+        if self.run.spec().is_default() && !self.run.has_override() && self.run.base() == config {
+            self.session_config = Some(node);
+        }
+        self
     }
 
     /// The run's resolved shape.
@@ -95,8 +112,9 @@ pub struct RunConfigStored {
 /// The configuration of a staged phase: the nodes its PhaseRoot names, the
 /// staging of those it adds, and the nodes it requires stored.
 pub(super) struct StagedRunConfig {
-    pub(super) run: NodeId,
+    pub(super) run: RunConfigReference,
     pub(super) held: Vec<NodeId>,
+    pub(super) prepared: Vec<Arc<VerifiedNode>>,
     pub(super) stored: RunConfigStored,
     pub(super) environments: Vec<(u64, NodeId)>,
     pub(super) publication: Option<Arc<crate::runtime::session_environment::Publication>>,
@@ -111,16 +129,25 @@ impl RecordedRunConfig {
                 .map_err(|error| error.to_string())?;
         }
         let mut held = Vec::new();
+        let mut prepared = Vec::new();
         let mut stored = RunConfigStored::default();
-        let run = match self.run_stored {
-            Some(node) => {
+        let run = match (self.run_stored, self.session_config.as_ref()) {
+            (Some(node), _) => {
                 held.push(node);
-                node
+                RunConfigReference::Resolved(node)
             }
-            None => {
+            (None, Some(config)) => {
+                prepared.push(config.clone());
+                held.push(config.id);
+                RunConfigReference::Snapshot {
+                    config: config.id,
+                    render: self.run.render.clone(),
+                }
+            }
+            (None, None) => {
                 let node = config::stage(staging, &*self.run)?;
                 stored.run = Some(node);
-                node
+                RunConfigReference::Resolved(node)
             }
         };
         let environments = self
@@ -137,6 +164,7 @@ impl RecordedRunConfig {
             publication: self.publication.clone(),
             run,
             held,
+            prepared,
             stored,
         })
     }
@@ -144,19 +172,112 @@ impl RecordedRunConfig {
     /// The configuration a PhaseRoot names, read back from its nodes'
     /// data, each with the node it is stored as.
     pub(super) fn load(
-        run: (NodeId, ResolvedRun),
+        run: (RunConfigReference, ResolvedRun),
         environments: std::collections::BTreeMap<
             u64,
             lash_core_store::environment::RoundEnvironment,
         >,
-    ) -> Self {
-        let resolved = run.1;
-        Self {
+        source: &dyn lash_core_store::checkpoint_graph::NodeSource,
+    ) -> Result<Self, String> {
+        let session_config = match &run.0 {
+            RunConfigReference::Snapshot { config, .. } => {
+                use lash_core_store::checkpoint_graph::{DecodeLimits, EncodedNode, GraphRefusal};
+                let stored = source
+                    .fetch(config)
+                    .ok_or_else(|| GraphRefusal::MissingNode(*config).to_string())?;
+                Some(Arc::new(
+                    VerifiedNode::check(
+                        EncodedNode {
+                            id: *config,
+                            bytes: Arc::from(stored.bytes),
+                        },
+                        &DecodeLimits::within_total(u64::MAX),
+                    )
+                    .map_err(|error| error.to_string())?,
+                ))
+            }
+            RunConfigReference::Resolved(_) => None,
+        };
+        Ok(Self {
             environments,
             publication: None,
-            run: Arc::new(resolved),
-            run_stored: Some(run.0),
+            run: Arc::new(run.1),
+            run_stored: match run.0 {
+                RunConfigReference::Resolved(root) => Some(root),
+                RunConfigReference::Snapshot { .. } => None,
+            },
+            session_config,
             surface: None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit};
+
+    /// CONFIG-STAGED-ONCE: each fresh default turn names the configuration
+    /// its acknowledged head retains, without staging any configuration node.
+    #[test]
+    fn default_turns_reference_the_acknowledged_configuration_without_staging_nodes() {
+        let config = lash_core_store::store::SessionHeadPayload::default().config;
+        let mut head = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let node = config::stage(&mut head, &config).unwrap();
+        for _ in 0..2 {
+            let recorded = RecordedRunConfig::resolved(ResolvedRun::snapshot(config.clone()))
+                .with_head_config(
+                    &config,
+                    Arc::new(
+                        VerifiedNode::check(
+                            head.get(&node).unwrap().clone(),
+                            &lash_core_store::checkpoint_graph::DecodeLimits::within_total(
+                                u64::MAX,
+                            ),
+                        )
+                        .unwrap(),
+                    ),
+                );
+            let mut delta = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            let staged = recorded.stage(&mut delta).unwrap();
+            assert!(
+                delta.nodes().is_empty(),
+                "a fresh default turn restaged {} config nodes",
+                delta.nodes().len()
+            );
+            assert_eq!(staged.held, vec![node]);
+        }
+    }
+
+    /// CONFIG-REFERENCE-IDENTITY: a head lends only its exact configuration,
+    /// never a same-revision edit or a run's override.
+    #[test]
+    fn a_head_reference_cannot_replace_changed_or_overridden_configuration() {
+        let config = lash_core_store::store::SessionHeadPayload::default().config;
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let node = config::stage(&mut staging, &config).unwrap();
+        let mut changed = config.clone();
+        changed.max_tool_calls = crate::MaxToolCalls::new(73);
+        assert_eq!(config.config_revision, changed.config_revision);
+        for run in [
+            ResolvedRun::snapshot(changed.clone()),
+            ResolvedRun::snapshot(config.clone()).with_config(changed),
+        ] {
+            let recorded = RecordedRunConfig::resolved(run).with_head_config(
+                &config,
+                Arc::new(
+                    VerifiedNode::check(
+                        staging.get(&node).unwrap().clone(),
+                        &lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
+                    )
+                    .unwrap(),
+                ),
+            );
+            assert!(recorded.session_config.is_none());
+            let mut delta = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            let staged = recorded.stage(&mut delta).unwrap();
+            assert!(matches!(staged.run, RunConfigReference::Resolved(_)));
+            assert!(!delta.nodes().is_empty());
         }
     }
 }

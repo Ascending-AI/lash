@@ -20,6 +20,7 @@ async fn a_contended_reader_releases_the_projection_when_the_claim_ends() {
             super::super::owner_state::SessionProjection {
                 head,
                 prompt: Default::default(),
+                configuration: Default::default(),
                 composition: None,
                 environment: None,
                 fleet: lash_core_store::store::FleetFormat::current(),

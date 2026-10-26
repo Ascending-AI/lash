@@ -576,6 +576,8 @@ impl SqliteConnection {
             #[cfg(feature = "perf-witness")]
             reader: false,
             writer: Arc::new(batch::Writer {
+                #[cfg(feature = "perf-witness")]
+                queued_writes: Arc::default(),
                 configs: Arc::default(),
                 operational: policy.operational,
                 write_gate: Arc::clone(&gate),
@@ -651,6 +653,8 @@ impl SqliteConnection {
             #[cfg(feature = "perf-witness")]
             reader: true,
             writer: Arc::new(batch::Writer {
+                #[cfg(feature = "perf-witness")]
+                queued_writes: Arc::default(),
                 configs: Arc::default(),
                 operational,
                 write_gate: Arc::clone(&gate),

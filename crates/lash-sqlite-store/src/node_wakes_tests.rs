@@ -1296,3 +1296,23 @@ async fn a_commit_rings_a_listener_in_another_process_past_its_poll() {
     }
     child.kill().await;
 }
+
+/// WAKE-EXPIRY-WORK: a pass with no expired hints does bounded index work,
+/// rather than materializing 4096 young candidates on the writer.
+#[test]
+fn young_wakes_do_not_pay_for_expiry_candidate_materialization() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(super::TABLES).unwrap();
+    conn.execute_batch(
+        "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<4096)
+        INSERT INTO node_wakes (actors, published_at_ms) SELECT 'young', 100 FROM n",
+    )
+    .unwrap();
+    let mut statement = conn.prepare(super::PRUNE).unwrap();
+    assert_eq!(statement.execute([50]).unwrap(), 0);
+    let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+    assert!(
+        steps <= 64,
+        "an empty expiry pass spent {steps} VM steps on young hints"
+    );
+}

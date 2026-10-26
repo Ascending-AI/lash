@@ -404,6 +404,8 @@ macro_rules! law {
 }
 
 law!(a_refused_owner_graph_commit_writes_nothing);
+law!(prepared_configuration_references_refuse_missing_or_conflicting_nodes);
+law!(a_prepared_configuration_reference_racing_retirement_is_atomic);
 law!(an_owner_refuses_a_second_outcome_for_one_call);
 law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
 law!(the_orphan_audit_peels_only_what_no_root_reaches);

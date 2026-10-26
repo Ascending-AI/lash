@@ -406,3 +406,65 @@ pub async fn commits_and_reads_progress_while_the_audit_runs(
     );
     exact(tier, "the audit under load").await
 }
+
+/// CONFIG-REFERENCE-RACE: a prepared reference racing its retaining root's
+/// retirement publishes the exact existing configuration or refuses missing;
+/// preparation must never recreate a node the collector already reclaimed.
+///
+/// # Errors
+/// The first missing-node or atomic-publication rule broken.
+pub async fn a_prepared_configuration_reference_racing_retirement_is_atomic(
+    tier: &dyn GraphTier,
+) -> LawOutcome {
+    use super::{LABEL, graph_refusal, pin, unpin};
+    use lash_core_store::checkpoint_graph::node::VerifiedNode;
+    let source = owned(tier, "prepared-source").await?;
+    let follower = owned(tier, "prepared-follower").await?;
+    for round in 0..RACE_ROUNDS {
+        let key = format!("prepared-source-{round}");
+        let mut nodes = staging();
+        let root = lash_core_store::checkpoint_graph::config::stage(
+            &mut nodes,
+            &serde_json::json!({"round": round}),
+        )
+        .map_err(|error| refused("prepare racing config", error))?;
+        let expected = VerifiedNode::check(
+            nodes
+                .get(&root)
+                .cloned()
+                .ok_or_else(|| LawBroken("prepared config root was not staged".into()))?,
+            &DecodeLimits::within_total(u64::MAX),
+        )
+        .map_err(|error| refused("verify racing config", error))?;
+        owner_commit(tier, &source, nodes.into_nodes(), vec![pin(&key, root)])
+            .await
+            .map_err(|error| refused("retain racing config", error))?;
+        let mut reference = tier
+            .store()
+            .begin(&follower.actor, follower.epoch)
+            .await
+            .map_err(|error| refused("begin racing reference", error))?;
+        reference.require_exact(std::sync::Arc::new(expected));
+        reference.write(pin(&format!("prepared-follower-{round}"), root));
+        let (retired, published) = tokio::join!(
+            owner_commit(tier, &source, BTreeMap::new(), vec![unpin(&key, root)]),
+            tier.store().commit(reference, LABEL),
+        );
+        retired.map_err(|error| refused("retire racing config", error))?;
+        match published.map_err(graph_refusal) {
+            Ok(_) => ensure!(
+                present(tier, &root).await,
+                "a published reference lost its config"
+            ),
+            Err(GraphRefusal::MissingNode(missing)) if missing == root => {
+                ensure!(
+                    !present(tier, &root).await,
+                    "a missing reference recreated its config"
+                );
+            }
+            Err(error) => return Err(refused("reference racing retirement", error)),
+        }
+        exact(tier, "prepared reference race").await?;
+    }
+    Ok(())
+}

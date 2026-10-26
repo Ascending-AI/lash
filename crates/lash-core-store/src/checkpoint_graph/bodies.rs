@@ -175,25 +175,64 @@ pub struct PhaseRoot {
     pub checkpoint: String,
     pub window_pin: Option<serde_json::Value>,
     pub content: Vec<(String, NodeId)>,
-    pub run: Option<NodeId>,
+    pub run: Option<RunConfigReference>,
     pub environments: Vec<(u64, NodeId)>,
 }
 
-fn encode_node_ref(node: Option<&NodeId>, out: &mut TokenWriter) {
-    match node {
-        None => out.none(),
-        Some(node) => {
-            out.some();
-            node.encode(out);
+/// A phase's immutable execution configuration. A default run shares the
+/// configuration already retained by its acknowledged session head; its
+/// resolved renderer remains the run's own recorded decision. A run with a
+/// spec or override instead names its complete recorded resolution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunConfigReference {
+    Snapshot {
+        config: NodeId,
+        render: Option<crate::run_spec::RecordedRender>,
+    },
+    Resolved(NodeId),
+}
+
+impl RunConfigReference {
+    /// The configuration node this phase retains and its commit requires.
+    pub fn root(&self) -> NodeId {
+        match self {
+            Self::Snapshot { config, .. } => *config,
+            Self::Resolved(root) => *root,
         }
     }
 }
 
-fn decode_node_ref(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenError> {
-    if input.option()? {
-        Ok(Some(NodeId::decode(input)?))
-    } else {
-        Ok(None)
+impl TokenCodec for RunConfigReference {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Snapshot { config, render } => {
+                out.sum(0, 2);
+                config.encode(out);
+                render.encode(out);
+            }
+            Self::Resolved(root) => {
+                out.sum(1, 1);
+                root.encode(out);
+            }
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let (variant, fields) = input.sum()?;
+        match variant {
+            0 => {
+                TokenReader::expect_fields(fields, 2)?;
+                Ok(Self::Snapshot {
+                    config: NodeId::decode(input)?,
+                    render: Option::decode(input)?,
+                })
+            }
+            1 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Ok(Self::Resolved(NodeId::decode(input)?))
+            }
+            other => Err(unsupported(other)),
+        }
     }
 }
 
@@ -208,7 +247,7 @@ impl TokenCodec for PhaseRoot {
             out.text(digest);
             node.encode(out);
         }
-        encode_node_ref(self.run.as_ref(), out);
+        self.run.encode(out);
         self.environments.encode(out);
     }
 
@@ -223,7 +262,7 @@ impl TokenCodec for PhaseRoot {
             let digest = input.text()?.to_owned();
             content.push((digest, NodeId::decode(input)?));
         }
-        let run = decode_node_ref(input)?;
+        let run = Option::decode(input)?;
         let environments = Vec::decode(input)?;
         Ok(Self {
             checkpoint,

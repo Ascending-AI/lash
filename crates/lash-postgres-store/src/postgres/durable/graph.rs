@@ -1109,6 +1109,43 @@ pub(crate) async fn install(
     Ok(installed)
 }
 
+/// Check acknowledged immutable references without installing absent nodes.
+/// The key-share locks keep each checked root present through publication.
+pub(crate) async fn validate_exact_reads(
+    tx: &mut PgConnection,
+    expected: &BTreeMap<
+        NodeId,
+        std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>,
+    >,
+) -> Answer<()> {
+    if expected.is_empty() {
+        return Ok(());
+    }
+    let digests: Vec<&[u8]> = expected.keys().map(|id| &id.0[..]).collect();
+    let rows: Vec<(crate::keys::Key, i16, Option<Vec<u8>>)> =
+        crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
+            .bind(Vec::<Vec<u8>>::new())
+            .bind(&digests)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(db)?;
+    let mut present = BTreeSet::new();
+    for (hash, encoding, bytes) in rows {
+        let Some(id) = NodeId::from_hex(&hash.0) else {
+            continue;
+        };
+        let Some(node) = expected.get(&id) else {
+            continue;
+        };
+        compare(id, &node.bytes, encoding_of(encoding)?, bytes.as_deref())?;
+        present.insert(id);
+    }
+    if let Some(id) = expected.keys().find(|id| !present.contains(id)) {
+        return Err(GraphRefusal::MissingNode(*id));
+    }
+    Ok(())
+}
+
 /// What an install knows of one staged node.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Staged {

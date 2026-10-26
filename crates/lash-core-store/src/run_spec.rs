@@ -795,6 +795,24 @@ pub struct RecordedRender {
     pub params: std::sync::Arc<serde_json::Value>,
 }
 
+impl lash_vocabulary::tokens::TokenCodec for RecordedRender {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
+        out.seq(2);
+        out.text(&self.renderer_id);
+        self.params.as_ref().encode(out);
+    }
+
+    fn decode(
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            renderer_id: input.text()?.to_owned(),
+            params: std::sync::Arc::new(serde_json::Value::decode(input)?),
+        })
+    }
+}
+
 impl RecordedRender {
     pub fn require_available<'a>(
         recorded: Option<&'a Self>,

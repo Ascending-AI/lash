@@ -17,7 +17,9 @@
 //! The root holds checkpoint text with its window pin as a separate structured field. The
 //! run's resolved shape rides beside it as configuration graph nodes shared
 //! with retained revisions; its tool surface is a TurnContent node. The
-//! first phase that holds them stages them (FIG-6021, FIG-6599).
+//! first phase stages a nondefault run's resolution. Default runs instead
+//! reference the configuration retained by their acknowledged head, with
+//! their own resolved renderer (FIG-3843).
 
 use lash_core_store::checkpoint_graph::EncodeBudget;
 use lash_core_store::checkpoint_graph::ExplicitLimit;
@@ -305,6 +307,7 @@ pub(in crate::runtime) struct StagedPhase {
     surface: Option<std::sync::Arc<crate::RecordedSurface>>,
     staging: GraphStaging,
     held: Vec<NodeId>,
+    prepared: Vec<std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>>,
     stored: PhaseStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
 }
@@ -431,7 +434,7 @@ impl StagedPhase {
             checkpoint: value.to_string(),
             window_pin,
             content,
-            run: config.as_ref().map(|config| config.run),
+            run: config.as_ref().map(|config| config.run.clone()),
             environments: config
                 .as_ref()
                 .map(|config| config.environments.clone())
@@ -454,8 +457,10 @@ impl StagedPhase {
             .as_ref()
             .and_then(|config| config.publication.clone());
         let mut config_stored = RunConfigStored::default();
+        let mut prepared = Vec::new();
         if let Some(config) = config {
             held_nodes.extend(config.held);
+            prepared = config.prepared;
             config_stored = config.stored;
         }
         Ok(Self {
@@ -472,6 +477,7 @@ impl StagedPhase {
                 .and_then(|config| config.surface().cloned()),
             staging,
             held: held_nodes,
+            prepared,
             stored: PhaseStored {
                 content: stored,
                 config: config_stored,
@@ -491,6 +497,9 @@ impl StagedPhase {
         }
         for node in self.held {
             tx.require(node);
+        }
+        for node in self.prepared {
+            tx.require_exact(node);
         }
         tx.stage_all(self.staging);
         tx.phase(self.root, self.surface, self.environments);
@@ -532,10 +541,12 @@ pub(super) fn restaged_text(
         .content
         .iter()
         .map(|(_, node)| node)
-        .chain(body.run.iter())
         .chain(body.environments.iter().map(|(_, node)| node))
     {
         tx.require(*node);
+    }
+    if let Some(run) = &body.run {
+        tx.require(run.root());
     }
     tx.stage_all(staging);
     Ok(root)
@@ -585,9 +596,23 @@ pub(in crate::runtime) fn load(
         None => None,
         Some(run) => {
             decoder
-                .child_kind(root, run, &[NodeKind::CONFIG_VALUE])
+                .child_kind(root, run.root(), &[NodeKind::CONFIG_VALUE])
                 .map_err(text)?;
-            let resolved = lash_core_store::checkpoint_graph::config::load(&mut decoder, run)?;
+            let resolved = match &run {
+                lash_core_store::checkpoint_graph::bodies::RunConfigReference::Resolved(node) => {
+                    lash_core_store::checkpoint_graph::config::load(&mut decoder, *node)?
+                }
+                lash_core_store::checkpoint_graph::bodies::RunConfigReference::Snapshot {
+                    config,
+                    render,
+                } => {
+                    let config =
+                        lash_core_store::checkpoint_graph::config::load(&mut decoder, *config)?;
+                    let mut resolved = crate::ResolvedRun::snapshot(config);
+                    resolved.render = render.clone();
+                    resolved
+                }
+            };
             let environments = body
                 .environments
                 .iter()
@@ -600,7 +625,11 @@ pub(in crate::runtime) fn load(
                         .map_err(|error| error.to_string())
                 })
                 .collect::<Result<_, _>>()?;
-            Some(RecordedRunConfig::load((run, resolved), environments))
+            Some(RecordedRunConfig::load(
+                (run, resolved),
+                environments,
+                source,
+            )?)
         }
     };
     Ok((
@@ -722,6 +751,50 @@ async fn read_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CONFIG-REFERENCE-RESUME: the reference keeps its original renderer,
+    /// including its parameters, and missing configuration remains refused.
+    #[test]
+    fn a_snapshot_reference_retains_its_renderer_and_requires_its_configuration() {
+        use lash_core_store::checkpoint_graph::{bodies::RunConfigReference, config};
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let config = config::stage(
+            &mut staging,
+            &crate::store::SessionHeadPayload::default().config,
+        )
+        .unwrap();
+        let reference = RunConfigReference::Snapshot {
+            config,
+            render: Some(crate::RecordedRender {
+                renderer_id: "original-renderer".into(),
+                params: std::sync::Arc::new(serde_json::json!({"audience": "recorded"})),
+            }),
+        };
+        let root = staging
+            .encode_value(
+                NodeKind::PHASE_ROOT,
+                &PhaseRootBody {
+                    checkpoint: "{}".into(),
+                    window_pin: None,
+                    content: Vec::new(),
+                    run: Some(reference.clone()),
+                    environments: Vec::new(),
+                },
+            )
+            .unwrap();
+        let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20);
+        let mut nodes = staging.into_nodes();
+        let body: PhaseRootBody = GraphDecoder::new(&nodes, limits)
+            .decode(root, NodeKind::PHASE_ROOT)
+            .unwrap();
+        assert_eq!(body.run, Some(reference));
+        nodes.remove(&config);
+        let mut decoder = GraphDecoder::new(&nodes, limits);
+        assert_eq!(
+            config::load::<crate::PersistedSessionConfig>(&mut decoder, config).unwrap_err(),
+            GraphRefusal::MissingNode(config).to_string()
+        );
+    }
 
     /// BorrowedEncodingIsIdentical: borrowing canonical phase text keeps every
     /// staged envelope and its digest, including placed and chunked UTF-8 text.

@@ -198,6 +198,10 @@ fn invalid(message: &str) -> DurableError {
 pub struct SessionProjection {
     pub prompt: lash_core_store::prompt_sections::OwnerPromptState,
 
+    /// Prepared immutable configuration under this acknowledged head and
+    /// claim. It owns no retention: the head's revision already roots it.
+    pub configuration: SessionConfiguration,
+
     /// The compatible immutable plugin assembly for this claim.
     pub composition: Option<std::sync::Arc<crate::plugin::PluginHost>>,
     /// Providers, subscriptions and committed environment for this claim.
@@ -208,6 +212,67 @@ pub struct SessionProjection {
     /// The acknowledged phase's prepared facts; absence requires cold
     /// recovery.
     pub phase: Option<AcknowledgedPhase>,
+}
+
+/// Preparation shared by the turns of one acknowledged configuration. This
+/// is discarded with its owner projection, and a changed head's exact value
+/// invalidates it even if the caller did not change its config revision.
+#[derive(Clone, Default)]
+pub struct SessionConfiguration {
+    prepared: std::sync::Arc<std::sync::OnceLock<Result<PreparedConfiguration, DurableError>>>,
+}
+
+/// Exact configuration bytes prepared from an acknowledged head, with their content identity.
+pub struct PreparedConfiguration {
+    pub value: lash_core_store::session_graph::PersistedSessionConfig,
+    pub node: std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>,
+}
+
+impl SessionConfiguration {
+    /// Prepare the subgraph already retained by the coherently loaded or
+    /// acknowledged head. Stores still check its presence on every commit.
+    pub fn get(
+        &self,
+        head: &lash_core_store::session_state::RuntimeSessionState,
+    ) -> Result<&PreparedConfiguration, DurableError> {
+        self.prepared
+            .get_or_init(|| {
+                use lash_core_store::checkpoint_graph::{
+                    EncodeBudget, ExplicitLimit, GraphStaging, config,
+                };
+                let value = lash_core_store::store::persisted_session_config_from_state(head);
+                let mut staging =
+                    GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+                let root = config::stage(&mut staging, &value).map_err(|error| invalid(&error))?;
+                let encoded = staging
+                    .get(&root)
+                    .cloned()
+                    .ok_or_else(|| invalid("prepared configuration has no root"))?;
+                let node = lash_core_store::checkpoint_graph::node::VerifiedNode::check(
+                    encoded,
+                    &lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
+                )
+                .map_err(|error| invalid(&error.to_string()))?;
+                Ok(PreparedConfiguration {
+                    value,
+                    node: std::sync::Arc::new(node),
+                })
+            })
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+
+    fn retaining(&self, head: &lash_core_store::session_state::RuntimeSessionState) -> Self {
+        match self.prepared.get() {
+            Some(Ok(prepared))
+                if prepared.value
+                    == lash_core_store::store::persisted_session_config_from_state(head) =>
+            {
+                self.clone()
+            }
+            _ => Self::default(),
+        }
+    }
 }
 
 /// What the phase an owner committed prepared beside its PhaseRoot: its
@@ -388,6 +453,7 @@ impl SessionProjection {
                 if frame_changed {
                     self.prompt.clear();
                 }
+                self.configuration = self.configuration.retaining(&state);
                 self.head = std::sync::Arc::new(state);
             }
             (None, []) => {}
@@ -411,6 +477,36 @@ impl SessionProjection {
 mod tests {
     use super::*;
     use futures_util::FutureExt as _;
+
+    /// CONFIG-PREPARATION-LIFETIME: equal acknowledged heads share one
+    /// preparation; an exact-value change invalidates it, even at the same
+    /// config revision, and a new owner starts with no preparation.
+    #[test]
+    fn configuration_preparation_is_shared_only_by_equal_acknowledged_heads() {
+        let mut head = lash_core_store::session_state::RuntimeSessionState::fixture(
+            crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+                crate::MaxToolCalls::new(1024),
+                crate::NoProgressBudget::bounded(12),
+            ),
+        );
+        let cold = SessionConfiguration::default();
+        let cold_successor = cold.retaining(&head);
+        assert!(
+            !std::sync::Arc::ptr_eq(&cold.prepared, &cold_successor.prepared),
+            "an escaped unprepared head must not initialize its successor's preparation"
+        );
+        let configuration = SessionConfiguration::default();
+        let prepared = configuration.get(&head).unwrap();
+        let root = prepared.node.id;
+        let equal = configuration.retaining(&head);
+        assert!(std::ptr::eq(prepared, equal.get(&head).unwrap()));
+        head.policy.max_tool_calls = crate::MaxToolCalls::new(73);
+        let changed = configuration.retaining(&head);
+        assert!(changed.prepared.get().is_none());
+        assert_ne!(changed.get(&head).unwrap().node.id, root);
+        assert!(SessionConfiguration::default().prepared.get().is_none());
+    }
 
     fn tx(revision: i64) -> ActorTx {
         ActorTx::opened(lash_durable::OpenedActor {

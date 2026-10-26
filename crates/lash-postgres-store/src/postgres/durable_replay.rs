@@ -360,6 +360,7 @@ pub(super) async fn apply_owner(
             lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
                 .and_then(|measured| budget.admit(&measured))?;
         }
+        graph::validate_exact_reads(tx, write.exact_reads()).await?;
         match candidate {
             Some(candidate) => {
                 pages::install_candidate(tx, write.domain(), &checked, candidate)

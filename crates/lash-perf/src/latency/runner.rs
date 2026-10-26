@@ -1031,6 +1031,16 @@ fn worker_delta(start: &Snapshot, end: &Snapshot) -> Vec<Worker> {
             if let Some(before) = start.workers.get(key) {
                 worker.busy_ns -= before.busy_ns;
                 worker.write_transactions -= before.write_transactions;
+                for (total, old) in worker
+                    .write_queue_depths
+                    .iter_mut()
+                    .zip(before.write_queue_depths)
+                {
+                    *total -= old;
+                }
+                for (total, old) in worker.write_cohorts.iter_mut().zip(before.write_cohorts) {
+                    *total -= old;
+                }
             }
             worker
         })
@@ -1055,6 +1065,8 @@ pub(crate) struct WorkerWork {
     pub(crate) busy_ns: u64,
     pub(crate) write_transactions: u64,
     pub(crate) busy_ms_per_send: f64,
+    pub(crate) write_queue_depths: [u64; 32],
+    pub(crate) write_cohorts: [u64; 32],
 }
 impl SqliteWork {
     fn assemble(workers: Vec<Worker>, sends: usize, held: bool) -> Self {
@@ -1086,6 +1098,8 @@ impl SqliteWork {
                     busy_ns: w.busy_ns,
                     write_transactions: w.write_transactions,
                     busy_ms_per_send: w.busy_ns as f64 / 1_000_000.0 / denominator,
+                    write_queue_depths: w.write_queue_depths,
+                    write_cohorts: w.write_cohorts,
                 })
                 .collect(),
             includes_held_predecessors: held,

@@ -76,6 +76,7 @@ impl LashRuntime {
             .and_then(|input| input.run_spec.clone());
         let attachments = self.bind_turn_attachments(controller)?;
         self.transition_turn_plugins(controller).await?;
+        let fresh = matches!(&start, TurnStart::Fresh(_));
         let (recorded_before_turn, retained_trace, run_config, cell_start) = match start {
             TurnStart::Resumed(recorded) => (
                 Some(recorded.before_turn),
@@ -409,6 +410,21 @@ impl LashRuntime {
                     "serving turn has no acknowledged projection",
                 )
             })?;
+        let run_config = if fresh
+            && run_config.run().spec().is_default()
+            && !run_config.run().has_override()
+            && projection.head.undelivered_config_change.is_none()
+        {
+            let config = projection
+                .configuration
+                .get(&projection.head)
+                .map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
+                })?;
+            run_config.with_head_config(&config.value, config.node.clone())
+        } else {
+            run_config
+        };
         let driver = Box::new(RuntimeTurnDriver {
             prompt_state: projection.prompt.draft(),
 

@@ -337,6 +337,114 @@ fn put_exec(exec: &ExecKey, expected: Option<(u64, NodeId)>, root: NodeId) -> Do
     })
 }
 
+/// CONFIG-EXACT-REFERENCE: acknowledged preparation supplies no nodes to
+/// install. Absence is refused, and a present node must keep its exact bytes.
+///
+/// # Errors
+/// The first presence, conflict, or atomic-publication rule broken.
+pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nodes(
+    tier: &dyn GraphTier,
+) -> LawOutcome {
+    let owner = owned(tier, "prepared-config").await?;
+    let mut nodes = staging();
+    let root = lash_core_store::checkpoint_graph::config::stage(
+        &mut nodes,
+        &serde_json::json!({"configured": "immutable"}),
+    )
+    .map_err(|error| refused("prepare config", error))?;
+    let expected = lash_core_store::checkpoint_graph::node::VerifiedNode::check(
+        nodes
+            .get(&root)
+            .cloned()
+            .ok_or_else(|| LawBroken("prepared config root was not staged".into()))?,
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .map_err(|error| refused("check prepared config", error))?;
+    let mut missing = tier
+        .store()
+        .begin(&owner.actor, owner.epoch)
+        .await
+        .map_err(|error| refused("begin missing", error))?;
+    missing.require_exact(std::sync::Arc::new(expected.clone()));
+    ensure!(
+        missing.graph().is_empty(),
+        "a reference staged config nodes"
+    );
+    let before = tier.blobs().await;
+    let answer = tier
+        .store()
+        .commit(missing, LABEL)
+        .await
+        .map_err(graph_refusal);
+    ensure!(
+        answer == Err(GraphRefusal::MissingNode(root)),
+        "missing config was not refused: {answer:?}"
+    );
+    ensure!(
+        tier.blobs().await == before,
+        "a missing reference recreated config"
+    );
+
+    let mut install = tier
+        .store()
+        .begin(&owner.actor, owner.epoch)
+        .await
+        .map_err(|error| refused("begin install", error))?;
+    install.stage_all(nodes);
+    install.write(pin("prepared-config", root));
+    tier.store()
+        .commit(install, LABEL)
+        .await
+        .map_err(|error| refused("install", error))?;
+    let mut later = tier
+        .store()
+        .begin(&owner.actor, owner.epoch)
+        .await
+        .map_err(|error| refused("begin later", error))?;
+    later.require_exact(std::sync::Arc::new(expected.clone()));
+    later.write(pin("later-config", root));
+    ensure!(
+        later.graph().is_empty(),
+        "a later reference restaged config"
+    );
+    tier.store()
+        .commit(later, LABEL)
+        .await
+        .map_err(|error| refused("reference", error))?;
+
+    let mut changed = expected.bytes.to_vec();
+    *changed
+        .last_mut()
+        .ok_or_else(|| LawBroken("prepared config root is empty".into()))? ^= 1;
+    tier.foreign(ForeignWrite::OverwriteBlob {
+        node: root,
+        bytes: changed,
+    })
+    .await;
+    let mut conflict = tier
+        .store()
+        .begin(&owner.actor, owner.epoch)
+        .await
+        .map_err(|error| refused("begin conflict", error))?;
+    conflict.require_exact(std::sync::Arc::new(expected));
+    conflict.write(pin("refused-config", root));
+    let roots = tier.roots().await;
+    let answer = tier
+        .store()
+        .commit(conflict, LABEL)
+        .await
+        .map_err(graph_refusal);
+    ensure!(
+        answer == Err(GraphRefusal::ContentConflict(root)),
+        "conflicting config was not refused: {answer:?}"
+    );
+    ensure!(
+        tier.roots().await == roots,
+        "a conflicting reference published a root"
+    );
+    Ok(())
+}
+
 /// PC-ATOMIC: a refused commit leaves no node, edge, fact, admission or
 /// root behind, whatever refused it.
 ///

@@ -1,14 +1,15 @@
 //! Opt-in causal clocks and cumulative connection service counters. This is
 //! transient evidence; none of it is engine state or a persisted store format.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static WINDOW: AtomicU64 = AtomicU64::new(0);
 static CURRENT: Mutex<Option<Snapshot>> = Mutex::new(None);
 const LIMIT: usize = 100_000;
 
@@ -61,6 +62,12 @@ pub struct Worker {
     pub busy_ns: u64,
     /// Successful BEGIN IMMEDIATEs, including later rollback/refusal.
     pub write_transactions: u64,
+    /// Queue depth immediately before each write body starts, excluding
+    /// that body. Bin 31 includes all depths of 31 or more.
+    pub write_queue_depths: [u64; 32],
+    /// Write bodies that actually started per physical worker service
+    /// window. Bin 31 includes cohorts of 31 or more; zero is unused.
+    pub write_cohorts: [u64; 32],
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -92,11 +99,68 @@ impl Collector {
             return Err(super::AlreadyInstalled);
         }
         *state = Some(Snapshot::default());
+        WINDOW.fetch_add(1, Ordering::AcqRel);
         ENABLED.store(true, Ordering::Release);
         Ok(Self)
     }
     pub fn snapshot(&self) -> Snapshot {
         current().as_ref().cloned().unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Writes {
+    members: u64,
+    depths: [u64; 32],
+}
+
+thread_local! {
+    static WRITES: Cell<Writes> = const { Cell::new(Writes { members: 0, depths: [0; 32] }) };
+}
+
+/// One queued write's observation owner, claimed before enqueue. Failed
+/// enqueue and dropped work release the same counter without inventing a
+/// service sample. This is opt-in evidence and grants no write authority.
+pub struct WriteTicket {
+    pending: Option<Arc<AtomicU64>>,
+    window: u64,
+}
+
+impl WriteTicket {
+    pub fn enqueue(pending: &Arc<AtomicU64>) -> Option<Self> {
+        ENABLED
+            .load(Ordering::Acquire)
+            .then(|| Self::claimed(pending))
+    }
+
+    fn claimed(pending: &Arc<AtomicU64>) -> Self {
+        pending.fetch_add(1, Ordering::AcqRel);
+        Self {
+            pending: Some(Arc::clone(pending)),
+            window: WINDOW.load(Ordering::Acquire),
+        }
+    }
+
+    pub fn started(mut self) {
+        if let Some(pending) = self.pending.take() {
+            let depth = pending.fetch_sub(1, Ordering::AcqRel) - 1;
+            if ENABLED.load(Ordering::Acquire) && self.window == WINDOW.load(Ordering::Acquire) {
+                WRITES.with(|writes| {
+                    let mut next = writes.get();
+                    next.members += 1;
+                    next.depths[depth.min(31) as usize] += 1;
+                    writes.set(next);
+                });
+            }
+        }
+    }
+}
+
+impl Drop for WriteTicket {
+    fn drop(&mut self) {
+        if let Some(pending) = &self.pending {
+            pending.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 }
 impl Drop for Collector {
@@ -250,6 +314,7 @@ impl Busy {
         }
         GATE_WAIT.with(|wait| *wait.borrow_mut() = Duration::ZERO);
         TRANSACTIONS.with(|count| *count.borrow_mut() = 0);
+        WRITES.with(|writes| writes.set(Writes::default()));
         Some(Self {
             start: Instant::now(),
             reader,
@@ -273,6 +338,13 @@ impl Drop for Busy {
             });
             worker.busy_ns += nanos(busy);
             worker.write_transactions += TRANSACTIONS.with(|count| *count.borrow());
+            let writes = WRITES.with(Cell::get);
+            if writes.members > 0 {
+                worker.write_cohorts[writes.members.min(31) as usize] += 1;
+                for (total, count) in worker.write_queue_depths.iter_mut().zip(writes.depths) {
+                    *total += count;
+                }
+            }
         });
     }
 }
@@ -303,4 +375,23 @@ pub fn workers() -> Vec<Worker> {
         .as_ref()
         .map(|s| s.workers.values().cloned().collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WRITER-QUEUE-LIFETIME: the observation owner is created with the
+    /// queue position and releases it on either service or abandoned enqueue.
+    #[test]
+    fn abandoned_and_started_writes_release_their_queue_positions_once() {
+        let pending = Arc::new(AtomicU64::new(0));
+        let abandoned = WriteTicket::claimed(&pending);
+        let started = WriteTicket::claimed(&pending);
+        assert_eq!(pending.load(Ordering::Acquire), 2);
+        drop(abandoned);
+        assert_eq!(pending.load(Ordering::Acquire), 1);
+        started.started();
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+    }
 }

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS node_wakes (
     actors TEXT NOT NULL,
     published_at_ms INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_node_wakes_published_at ON node_wakes(published_at_ms);
 ";
 
 /// Append one hint for node `?1`, or for every node with none: the shared
@@ -80,8 +81,13 @@ const INSERT: &str =
 /// two-second cadence can retire 2,048 hints/s, above the measured plain
 /// fixture's three hints/send at 146 sends/s. Recheck expiry on each row:
 /// a regressed clock may delay cleanup but cannot expire a young hint.
+/// The indexed expiry probe makes LIMIT zero when nothing expired, before
+/// SQLite opens the candidate scan. A nonempty pass keeps the same oldest
+/// 4096 candidates, including young hints, and the same per-row recheck.
 const PRUNE: &str = "DELETE FROM node_wakes WHERE seq IN (
-    SELECT seq FROM node_wakes ORDER BY seq LIMIT 4096) AND published_at_ms < ?1";
+    SELECT seq FROM node_wakes ORDER BY seq LIMIT
+        CASE WHEN EXISTS (SELECT 1 FROM node_wakes WHERE published_at_ms < ?1)
+        THEN 4096 ELSE 0 END) AND published_at_ms < ?1";
 
 /// The last hint published so far: where a new listener's cursor starts.
 const TAIL: &str = "SELECT COALESCE(MAX(seq), 0) FROM node_wakes";

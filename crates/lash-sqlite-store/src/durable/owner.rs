@@ -163,6 +163,9 @@ pub(super) fn apply_owner(
         {
             return refuse(error);
         }
+        if let Err(refusal) = graph::validate_exact_reads(tx, write.exact_reads())? {
+            return refuse(DurableError::from(refusal));
+        }
         let installed = match candidate {
             None => graph::install(tx, checked)?.map(drop),
             Some(candidate) => pages::install_candidate(tx, write.domain(), checked, candidate)?,

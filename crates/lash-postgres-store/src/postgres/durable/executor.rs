@@ -560,6 +560,21 @@ impl Call {
                 call.digests.push(node.id.0.to_vec());
                 call.contents.push(node.bytes.to_vec());
             }
+            // An exact reference is required present by the named-node
+            // check, then byte-compared by the existing supplied-body check.
+            // It cannot be recreated, and publishes no new edges.
+            for node in tx.exact_reads().values() {
+                let key = crate::keys::key(node.id.to_hex());
+                if !call.named.contains(&key) {
+                    call.named.push(key);
+                }
+                if !checked.nodes.iter().any(|staged| staged.id == node.id) {
+                    call.digests.push(node.id.0.to_vec());
+                    call.contents.push(node.bytes.to_vec());
+                }
+            }
+            call.named.sort_by(|left, right| left.0.cmp(&right.0));
+            call.named.dedup();
         }
         (call.release, call.due) = match tx.release() {
             None => (None, None),

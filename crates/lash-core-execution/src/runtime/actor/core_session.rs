@@ -165,6 +165,7 @@ impl ActorContext {
                 let turn = self.durable_reads()?.turn(&id).await?;
                 Ok::<_, DurableError>(owner_state::SessionProjection {
                     prompt: Default::default(),
+                    configuration: Default::default(),
                     composition: None,
                     environment: None,
                     phase: None,

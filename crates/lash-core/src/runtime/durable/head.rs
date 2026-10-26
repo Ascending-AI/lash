@@ -249,6 +249,7 @@ impl SessionOwner {
                             &basis,
                             lash_core_execution::runtime::actor::owner_state::SessionProjection {
                                 prompt: Default::default(),
+                                configuration: Default::default(),
                                 composition: None,
                     environment: None,
                                 phase: None,
