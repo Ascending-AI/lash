@@ -33,6 +33,19 @@ async fn saved(
     lash::vm::WorkflowEnvironmentRequest,
     FunctionValue,
 ) {
+    saved_source(core, pin, format, TS).await
+}
+
+async fn saved_source(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    format: SourceFormat,
+    typescript: &str,
+) -> (
+    lash::process::ProcessDefinition,
+    lash::vm::WorkflowEnvironmentRequest,
+    FunctionValue,
+) {
     let (_, environment) = namespace(core, pin, &source_environment(false)).await;
     let release = lash_kernel_releases::helper_release().unwrap();
     let roots = release.resolver_roots();
@@ -48,7 +61,7 @@ async fn saved(
     let bound = lash::dialect::Environment::new(&library, checked.namespaces());
     let lowered = match format {
         SourceFormat::TypeScriptV1 => lash::typescript::lower(
-            TS,
+            typescript,
             &bound,
             lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
         )
@@ -347,6 +360,57 @@ async fn callable_caption_overrides_validate_identity_and_limits() {
             panic!("caption refusal: {error:?}");
         };
         assert_eq!(actual, expected);
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7475: a saved arrow's tool import must not occupy the clock helper's
+/// fixed slot. Publication, materialization and source republication preserve
+/// both operations and the returned value.
+#[tokio::test]
+async fn saved_arrow_with_clock_and_tool_materializes_and_prints() {
+    let core = core().await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let source = "const offset = 7; const f = (x: number): number => x + offset; const first = f; const second = f; const answer = async (x: number): Promise<number> => { const now = Date.now(); return await tools.echo({value: first(x) + second(x)}); };";
+    let format = SourceFormat::TypeScriptV1;
+    let (definition, environment, function) = saved_source(&core, &pin, format, source).await;
+    let opened = core
+        .host_artifacts()
+        .open_workflow(&definition.id, None)
+        .await
+        .unwrap();
+    for operation in ["typescript.clock", "tools.echo"] {
+        assert!(
+            opened
+                .draft
+                .document()
+                .imports
+                .values()
+                .any(|import| import.name.to_string() == operation)
+        );
+    }
+    let printed = core
+        .host_artifacts()
+        .print_workflow(&definition.id, None, format, Default::default())
+        .await
+        .unwrap();
+    let roundtrip = publish_source(&core, &pin, &printed.source, format, &environment, "run").await;
+    let original_env = execution_environment(&core, &pin, &function).await;
+    let roundtrip_env =
+        definition_environment(&core, &pin, &roundtrip, &source_environment(false)).await;
+    for (definition, environment, key) in [
+        (&definition, &original_env, "clock-tool-original"),
+        (&roundtrip, &roundtrip_env, "clock-tool-roundtrip"),
+    ] {
+        let run = start_with(
+            &core,
+            environment,
+            definition,
+            key,
+            [("x".into(), serde_json::json!(3))].into_iter().collect(),
+        )
+        .await;
+        assert_eq!(finished(&core, &run).await, serde_json::json!(22));
     }
     core.shutdown().await.unwrap();
 }
