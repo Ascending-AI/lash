@@ -164,7 +164,9 @@ impl KernelMachine {
         args: usize,
     ) -> Eval<Option<lash_kernel_doc::Value>> {
         let function = exe.lib(lib);
-        if function.shares_params {
+        // This path suppresses native charges under a completion formula.
+        // Statement-metered helpers must retain their own body charges.
+        if function.shares_params || function.header.charge().is_none() {
             return Ok(None);
         }
         let Some((prepared, _)) = &function.prepared else {

@@ -29,7 +29,7 @@
 #![allow(clippy::expect_used)]
 
 use lash_vm_worker::in_process::InProcess;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1091,6 +1091,13 @@ impl MemberBodies for LawBodies {
                     token,
                     admitted_first,
                 });
+                if worker == Some(0) {
+                    // Keep the run alive across both nodes' first renewals,
+                    // independently of how fast its kernel work completes.
+                    clock
+                        .sleep(Matrix::test_lease().settings().heartbeat_every * 2)
+                        .await;
+                }
                 while let Some(index) = worker {
                     let outcomes = database
                         .run_facts(&exec().owner())
@@ -1281,6 +1288,17 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
         })
         .await;
     report.assert_held();
+    let renewed: BTreeSet<_> = report
+        .baseline
+        .iter()
+        .filter(|write| write.point.label == CommitLabel::HEARTBEAT && write.committed())
+        .map(|write| write.node.to_string())
+        .collect();
+    assert_eq!(
+        renewed,
+        BTreeSet::from(["a".to_owned(), "b".to_owned()]),
+        "both nodes must contribute heartbeat cuts even when the kernel finishes quickly"
+    );
     // The uncut run: the first park admits the three workers, each outcome
     // commits on its own, the second park saves the state that consumed
     // them and admits the sum, and the end commits last.
