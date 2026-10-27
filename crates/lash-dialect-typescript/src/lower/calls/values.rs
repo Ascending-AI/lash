@@ -41,15 +41,12 @@ impl Lowerer<'_> {
             return Some(token);
         }
         (!path.contains('.') && lash_ext_ts_helpers::builtins::is_global(path)).then(|| {
-            Err(Diagnostic {
-                kind: DiagnosticKind::Refusal,
-                ..Diagnostic::with_repair(
-                    DiagnosticCode::UnsupportedExpression,
-                    format!("Unsupported: `{path}` as a value"),
-                    format!("call a function of `{path}` or read one of its constants"),
-                    span,
-                )
-            })
+            Err(Diagnostic::with_refusal_repair(
+                DiagnosticCode::UnsupportedExpression,
+                format!("Unsupported: `{path}` as a value"),
+                format!("call a function of `{path}` or read one of its constants"),
+                span,
+            ))
         })
     }
 

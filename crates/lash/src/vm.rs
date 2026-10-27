@@ -57,7 +57,7 @@
 /// fixed system-call allowlist, under which it opens nothing and never maps
 /// memory writable and executable at once, and an address-space ceiling. A
 /// native escape keeps only what that allowlist grants.
-pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, SourceServiceError};
+pub use lash_vm_client::service::{Service as WorkerService, SourceServiceError};
 /// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
@@ -165,3 +165,5 @@ pub use {lash_kernel_value::SignatureMismatch, lash_kernel_value::SignatureSide}
 
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::Rewritten as RewrittenKernelDocument;
+
+pub use lash_kernel_dialect::{Diagnostic, DiagnosticKind, DiagnosticReason, DialectCode};

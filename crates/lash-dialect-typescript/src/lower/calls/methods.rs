@@ -1,6 +1,6 @@
 //! Named method admission and callable checks preserve the receiver and key.
 use super::{Key, Lowerer, Lowering, Operand, Ty, ast, declared_receiver};
-use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use lash_kernel_doc::{Callee, Expr};
 
 impl Lowerer<'_> {
@@ -89,15 +89,12 @@ impl Lowerer<'_> {
         message: String,
         span: Option<SourceSpan>,
     ) -> Diagnostic {
-        Diagnostic {
-            kind: DiagnosticKind::Refusal,
-            ..Diagnostic::with_repair(
-                DiagnosticCode::MethodUnsupported,
-                message,
-                "use toLocaleString() or toLocaleString('en-US') with no options; Date uses UTC",
-                span,
-            )
-        }
+        Diagnostic::with_refusal_repair(
+            DiagnosticCode::MethodUnsupported,
+            message,
+            "use toLocaleString() or toLocaleString('en-US') with no options; Date uses UTC",
+            span,
+        )
     }
 
     pub(in crate::lower) fn refuse_intl(
@@ -153,15 +150,12 @@ impl Lowerer<'_> {
             .get(name.as_str())
             .is_some_and(|rows| rows.iter().any(|(kind, _)| *kind == receiver))
         {
-            return Err(Diagnostic {
-                kind: DiagnosticKind::Refusal,
-                ..Diagnostic::with_repair(
-                    DiagnosticCode::MethodUnsupported,
-                    format!("Unsupported: method `{name}` on {receiver:?}"),
-                    format!("use a method the dialect lists for {receiver:?}"),
-                    Some(span),
-                )
-            });
+            return Err(Diagnostic::with_refusal_repair(
+                DiagnosticCode::MethodUnsupported,
+                format!("Unsupported: method `{name}` on {receiver:?}"),
+                format!("use a method the dialect lists for {receiver:?}"),
+                Some(span),
+            ));
         }
         Ok(())
     }

@@ -173,7 +173,7 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
 #[test]
 fn a_tool_call_with_the_wrong_number_of_arguments_is_refused() {
     let error = lower_with_effects("await host.echo();").expect_err("too few");
-    assert_eq!(error.code, DiagnosticCode::UnsupportedExpression);
+    assert_eq!(error.code(), DiagnosticCode::UnsupportedExpression);
     assert!(lower_with_effects("await host.echo(1, 2);").is_err());
 }
 
@@ -244,7 +244,7 @@ fn tool_arguments_freeze_nested_functions_and_forward_builtin_callables() {
 #[test]
 fn the_promise_constructor_is_refused() {
     let error = lower("new Promise((resolve) => resolve(1));").expect_err("no constructor");
-    assert_eq!(error.code, DiagnosticCode::NewUnsupported);
+    assert_eq!(error.code(), DiagnosticCode::NewUnsupported);
 }
 
 /// FIG-6524: only free callees are tool candidates, at their lexical scope.
@@ -376,10 +376,10 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
             },
         )
         .expect_err("shadowing is diagnosed before execution");
-        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        assert_eq!(error.code(), "NAMESPACE_SHADOWED_BY_LOCAL");
         assert!(error.repairs.is_empty());
-        let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) =
-            error.fact.as_deref()
+        let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing { shadowing, .. } =
+            &error.reason
         else {
             panic!("typed namespace facts");
         };
@@ -387,7 +387,7 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
         assert_eq!(shadowing.binding_origin, None); // CellEnvironment has names, not cell provenance.
         assert_eq!(shadowing.namespace, "jev");
         assert_eq!(shadowing.call_path, "jev.decide");
-        assert_eq!(error.span.unwrap().start, 6);
+        assert_eq!(error.span().unwrap().start, 6);
         let tool =
             lower(source, CellEnvironment::first()).expect("without the local the tool resolves");
         assert!(
@@ -402,9 +402,9 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
         ] {
             let error = lower(source, CellEnvironment::first())
                 .expect_err("types do not change lexical resolution");
-            assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
-            let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) =
-                error.fact.as_deref()
+            assert_eq!(error.code(), "NAMESPACE_SHADOWED_BY_LOCAL");
+            let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing { shadowing, .. } =
+                &error.reason
             else {
                 panic!("typed namespace facts");
             };

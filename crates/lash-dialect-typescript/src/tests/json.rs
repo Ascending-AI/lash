@@ -584,7 +584,7 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
             crate::DiagnosticCode::PrototypeMutationUnsupported,
         ),
     ] {
-        assert_eq!(super::lower(source).unwrap_err().code, code, "{source}");
+        assert_eq!(super::lower(source).unwrap_err().code(), code, "{source}");
     }
     let mut admitted_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();
     let mut refused_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();

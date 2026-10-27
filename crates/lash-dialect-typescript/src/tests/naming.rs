@@ -40,7 +40,7 @@ fn the_canonical_spelling_of_a_multiword_operation_is_refused_with_its_repair() 
         &effects(&["inbox.send_item"]),
     )
     .expect_err("TypeScript spells `send_item` as `sendItem`");
-    assert_eq!(error.code.as_str(), "TS_OPERATION_SPELLING", "{error}");
+    assert_eq!(error.code().as_str(), "TS_OPERATION_SPELLING", "{error}");
     assert!(
         error
             .suggestions

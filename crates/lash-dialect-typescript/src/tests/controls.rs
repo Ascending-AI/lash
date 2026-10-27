@@ -87,7 +87,11 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
         "await Promise.all([1, 2].map(async (x) => await control.finish(x)));",
     ] {
         let error = lower_against_control(source).expect_err(source);
-        assert_eq!(error.code.as_str(), "TS_CONTROL_CALL_PLACEMENT", "{source}");
+        assert_eq!(
+            error.code().as_str(),
+            "TS_CONTROL_CALL_PLACEMENT",
+            "{source}"
+        );
         assert!(!error.is_dialect_refusal(), "a program defect: {source}");
     }
     let lowered = lower_against_control("await host.echo(1);\nawait control.finish(2);")

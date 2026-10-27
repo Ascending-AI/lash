@@ -422,7 +422,7 @@ fn plain_record_reassignment_keeps_brand_admission() {
     assert_eq!(
         super::lower("let r = {}; class C {} r = new C(); r.x;")
             .unwrap_err()
-            .code,
+            .code(),
         crate::DiagnosticCode::ClassUnsupported
     );
 }
@@ -455,7 +455,7 @@ fn plain_record_unknown_definitions_keep_admission() {
     assert_eq!(
         super::lower("const a = { left: b, right: b }; const b = { left: a, right: a }; a.left.x;")
             .unwrap_err()
-            .code,
+            .code(),
         crate::DiagnosticCode::TemporalDeadZone
     );
     // The root exists before a var initializer executes.
@@ -958,5 +958,5 @@ fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
         super::machine::run(effect_source, &[]),
         super::machine::run(&effect_source.replace("const r =", "var r ="), &[])
     );
-    assert_eq!(super::lower("const r = { a: { b: {} } }; for (let i = 0; i < 2; i++) { middle.b; const middle = r.a; }").unwrap_err().code, crate::DiagnosticCode::TemporalDeadZone);
+    assert_eq!(super::lower("const r = { a: { b: {} } }; for (let i = 0; i < 2; i++) { middle.b; const middle = r.a; }").unwrap_err().code(), crate::DiagnosticCode::TemporalDeadZone);
 }

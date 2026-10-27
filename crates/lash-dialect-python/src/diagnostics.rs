@@ -81,14 +81,12 @@ pub(crate) fn span(range: TextRange) -> Span {
 }
 
 pub(crate) fn diagnostic(code: Code, message: impl Into<String>, range: TextRange) -> Diagnostic {
-    Diagnostic {
-        code: code.as_str().to_string(),
-        message: message.into(),
-        span: Some(span(range)),
-        kind: code.kind(),
-        repairs: Vec::new(),
-        ..Default::default()
-    }
+    Diagnostic::dialect(
+        lash_kernel_dialect::DialectCode::from_static(code.as_str()),
+        code.kind(),
+        Some(span(range)),
+        message,
+    )
 }
 
 /// A rejection with what to write instead.
@@ -105,14 +103,12 @@ pub(crate) fn with_repair(
 
 /// A rejection that names no place in the source.
 pub(crate) fn unplaced(code: Code, message: impl Into<String>) -> Diagnostic {
-    Diagnostic {
-        code: code.as_str().to_string(),
-        message: message.into(),
-        span: None,
-        kind: code.kind(),
-        repairs: Vec::new(),
-        ..Default::default()
-    }
+    Diagnostic::dialect(
+        lash_kernel_dialect::DialectCode::from_static(code.as_str()),
+        code.kind(),
+        None,
+        message,
+    )
 }
 
 /// Refusals at the independent generated-workflow decoder boundary.

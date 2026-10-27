@@ -82,7 +82,7 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
 
 fn refusal(source: &str) -> String {
     module(source).map_or_else(
-        |diagnostic| diagnostic.code,
+        |diagnostic| diagnostic.code().to_owned(),
         |_| panic!("the module is refused:\n{source}"),
     )
 }
@@ -237,7 +237,7 @@ fn tool_keywords_name_the_declared_input_fields() {
     ] {
         let source = format!("async def demo() -> Any:\n    return await {call}\n");
         let refused = crate::lower(&source, &environment, Mode::Module).expect_err(call);
-        assert_eq!(refused.code, "PY_ARGUMENTS", "{call}: {refused}");
+        assert_eq!(refused.code(), "PY_ARGUMENTS", "{call}: {refused}");
     }
 }
 
@@ -247,10 +247,10 @@ fn the_contract_refuses_under_the_shared_codes() {
     // FIG-7135: a code-only module still has no host-startable entry.
     for source in ["value = 3\n", ""] {
         let diagnostic = module(source).expect_err("a module must declare an entry");
-        assert_eq!(diagnostic.code, "WORKFLOW_EMPTY_MODULE");
-        assert_eq!(diagnostic.span, None);
+        assert_eq!(diagnostic.code(), "WORKFLOW_EMPTY_MODULE");
+        assert_eq!(diagnostic.span(), None);
         assert_eq!(
-            diagnostic.kind,
+            diagnostic.kind(),
             lash_kernel_dialect::DiagnosticKind::Refusal
         );
     }
@@ -394,14 +394,12 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
     ] {
         machine::lower(source).expect("an ordinary function remains free");
         let error = module(source).expect_err("an entry needs a written signature");
-        assert_eq!(error.code, "SIGNATURE_REQUIRED");
-        let Some(lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)) =
-            error.fact.as_deref()
+        assert_eq!(error.code(), "SIGNATURE_REQUIRED");
+        let lash_kernel_dialect::DiagnosticReason::SignatureRequired(required) = &error.reason
         else {
             panic!("a typed missing annotation: {error:?}");
         };
         assert_eq!(required.function.name.as_deref(), Some("handle"));
-        assert_eq!(required.span, error.span);
         assert_eq!(
             required.position,
             if missing == "event" {
@@ -428,7 +426,7 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         assert_eq!(saved.span, required.span);
         assert_eq!(saved.function.name, required.function.name);
         let span = error
-            .span
+            .span()
             .expect("the missing annotation has a source position");
         let offset = source.find(missing).unwrap();
         if missing == "event" {
@@ -562,10 +560,9 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         ),
     ] {
         let error = module(source).expect_err("unrepresentable entry annotation");
-        assert_eq!(error.code, "ENTRY_ANNOTATION_REFUSED");
+        assert_eq!(error.code(), "ENTRY_ANNOTATION_REFUSED");
         assert!(error.message.is_empty());
-        let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
-            error.fact.as_deref()
+        let lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) = &error.reason
         else {
             panic!("typed resolution fact")
         };
@@ -610,8 +607,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         crate::SourceLimits::standard().with_annotation_nodes(1),
     )
     .expect_err("bounded expansion");
-    let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
-        error.fact.as_deref()
+    let lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) = &error.reason
     else {
         panic!("typed expansion limit")
     };

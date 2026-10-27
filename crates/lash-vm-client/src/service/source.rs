@@ -7,7 +7,7 @@ use lash_kernel_doc::{Captions, Document, IdentifiedDocument};
 
 use lash_protocol_types::engine_fault::{PayloadKind, SequenceFault};
 
-use super::{DialectRefusal, Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
+use super::{Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
 use crate::PoolError;
 
 /// A pure source operation's typed refusal or worker failure. Decoding a
@@ -19,7 +19,7 @@ pub enum SourceServiceError {
     #[error(transparent)]
     Print(#[from] lash_kernel_dialect::PrintError),
     #[error("generated source refused: {0:?}")]
-    Dialect(Box<DialectRefusal>),
+    Dialect(Box<lash_kernel_dialect::Diagnostic>),
     #[error("the worker has no `{dialect}` dialect")]
     UnknownDialect { dialect: String },
     #[error("undeclared package members: {members:?}")]
@@ -131,16 +131,7 @@ impl Service {
                     limit: limits.max_bytes,
                 }
                 .into();
-            return Err(SourceServiceError::Dialect(Box::new(DialectRefusal {
-                code: diagnostic.code,
-                message: diagnostic.message,
-                span: None,
-                unsupported: true,
-                repairs: diagnostic.repairs,
-                operand_type: diagnostic.operand_type,
-
-                fact: diagnostic.fact,
-            })));
+            return Err(SourceServiceError::Dialect(Box::new(diagnostic)));
         }
         let response = self
             .request_accounted(Request::Read {

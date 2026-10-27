@@ -181,10 +181,10 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
             },
         )
         .expect_err("shadowing is diagnosed before execution");
-        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        assert_eq!(error.code(), "NAMESPACE_SHADOWED_BY_LOCAL");
         assert!(error.repairs.is_empty());
-        let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) =
-            error.fact.as_deref()
+        let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing { shadowing, .. } =
+            &error.reason
         else {
             panic!("typed namespace facts");
         };
@@ -192,7 +192,7 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
         assert_eq!(shadowing.binding_origin, None); // CellEnvironment has names, not cell provenance.
         assert_eq!(shadowing.namespace, "jev");
         assert_eq!(shadowing.call_path, "jev.decide");
-        assert_eq!(error.span.unwrap().start, 6);
+        assert_eq!(error.span().unwrap().start, 6);
         let tool =
             lower(source, CellEnvironment::first()).expect("without the local the tool resolves");
         assert!(
@@ -203,7 +203,7 @@ fn a_cell_local_shadowing_a_discovered_namespace_is_diagnosed() {
         );
         let error = lower("jev = {}\nawait jev.decide({})\n", CellEnvironment::first())
             .expect_err("known local also shadows");
-        assert_eq!(error.code, "NAMESPACE_SHADOWED_BY_LOCAL");
+        assert_eq!(error.code(), "NAMESPACE_SHADOWED_BY_LOCAL");
         lower("jev = 41\nprint(jev + 1)\n", CellEnvironment::first())
             .expect("a namespace root can be used as an ordinary local");
         lower(

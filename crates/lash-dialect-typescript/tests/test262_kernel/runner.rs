@@ -392,8 +392,8 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
         // that refusal is the more exact observation.
         let body = source_without_unshimmed(&path, &meta, meta.negative.is_none());
         return match lower(&body) {
-            Err(diagnostic) if diagnostic.code != DiagnosticCode::UnknownBinding => {
-                Observed::Refused(diagnostic.code.as_str().to_string(), diagnostic.message)
+            Err(diagnostic) if diagnostic.code() != DiagnosticCode::UnknownBinding => {
+                Observed::Refused(diagnostic.code().as_str().to_string(), diagnostic.message)
             }
             _ => Observed::Harness(include.to_string()),
         };
@@ -406,11 +406,11 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
     let source = source_for(&path, &meta, meta.negative.is_none() && !is_async);
     let lowered = match lower(&source) {
         Ok(lowered) => lowered,
-        Err(diagnostic) if parse_negative && EARLY_ERROR_CODES.contains(&diagnostic.code) => {
+        Err(diagnostic) if parse_negative && EARLY_ERROR_CODES.contains(&diagnostic.code()) => {
             return Observed::Pass;
         }
         Err(diagnostic) => {
-            return Observed::Refused(diagnostic.code.as_str().to_string(), diagnostic.message);
+            return Observed::Refused(diagnostic.code().as_str().to_string(), diagnostic.message);
         }
     };
     if let Some(negative) = meta.negative.as_ref().filter(|_| parse_negative) {
@@ -811,7 +811,7 @@ fn lone_surrogate_literals_and_results_have_typed_refusals() {
     let diagnostic =
         lower(r#"await host.finish("\uD800");"#).expect_err("a lone surrogate is refused");
     assert_eq!(
-        diagnostic.code,
+        diagnostic.code(),
         DiagnosticCode::LoneSurrogateLiteralUnsupported
     );
     let end = execute("await host.finish(String.fromCharCode(0xD800));");

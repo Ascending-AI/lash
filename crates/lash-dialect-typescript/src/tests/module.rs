@@ -79,7 +79,7 @@ export async function unread_subjects(): any {
 
 fn refusal(source: &str) -> DiagnosticCode {
     module(source).map_or_else(
-        |diagnostic| diagnostic.code,
+        |diagnostic| diagnostic.code(),
         |_| panic!("the module is refused:\n{source}"),
     )
 }
@@ -149,10 +149,10 @@ fn the_contract_refuses_under_the_shared_codes() {
     // FIG-7135: a code-only module still has no host-startable entry.
     for source in ["const value = 3;", ""] {
         let diagnostic = module(source).expect_err("a module must declare an entry");
-        assert_eq!(diagnostic.code.as_str(), "WORKFLOW_EMPTY_MODULE");
-        assert_eq!(diagnostic.span, None);
+        assert_eq!(diagnostic.code().as_str(), "WORKFLOW_EMPTY_MODULE");
+        assert_eq!(diagnostic.span(), None);
         assert_eq!(
-            diagnostic.kind,
+            diagnostic.kind(),
             lash_kernel_dialect::DiagnosticKind::Refusal
         );
     }
@@ -393,12 +393,13 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
                     let diagnostic = result
                         .err()
                         .unwrap_or_else(|| panic!("must refuse {source}"));
-                    assert_eq!(diagnostic.code, DiagnosticCode::ImplicitTextConversion);
-                    assert_eq!(
-                        diagnostic.operand_type,
-                        Some(Box::new(expected.clone())),
-                        "{source}"
-                    );
+                    assert_eq!(diagnostic.code(), DiagnosticCode::ImplicitTextConversion);
+                    let lash_kernel_dialect::DiagnosticReason::ImplicitTextConversion(conversion) =
+                        &diagnostic.reason
+                    else {
+                        panic!("implicit conversion reason");
+                    };
+                    assert_eq!(conversion.operand_type, expected.clone(), "{source}");
                     assert!(diagnostic.suggestions.is_empty());
                 }
             }
@@ -606,7 +607,11 @@ fn strict_text_admission_preserves_iteration_binding_types() {
         let error = lower(body)
             .err()
             .unwrap_or_else(|| panic!("must refuse {body}"));
-        assert_eq!(error.code, DiagnosticCode::ImplicitTextConversion, "{body}");
+        assert_eq!(
+            error.code(),
+            DiagnosticCode::ImplicitTextConversion,
+            "{body}"
+        );
     }
     assert!(
         refused.is_empty(),
@@ -807,8 +812,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         ),
     ] {
         let diagnostic = module(source).unwrap_err();
-        let Some(lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)) =
-            diagnostic.fact.as_deref()
+        let lash_kernel_dialect::DiagnosticReason::SignatureRequired(required) = &diagnostic.reason
         else {
             panic!("typed missing annotation: {diagnostic:?}");
         };
@@ -848,7 +852,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
     }
     let arrow = "export const handle = (event: any) /* => */ => /* => */ event;";
     let error = module(arrow).unwrap_err();
-    assert_eq!(error.span.unwrap().start, arrow.find("=> /*").unwrap());
+    assert_eq!(error.span().unwrap().start, arrow.find("=> /*").unwrap());
     let signature = entries("export function handle(event: bigint): any { return event; }")
         .remove(&Name::new("handle"))
         .unwrap();
@@ -903,15 +907,15 @@ fn entry_annotations_distinguish_written_any_from_missing() {
             "{declaration} export function handle(event: {annotation}): any {{ return event; }}"
         );
         let diagnostic = module(&source).unwrap_err();
-        let Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) =
-            diagnostic.fact.as_deref()
+        let lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) =
+            &diagnostic.reason
         else {
             panic!("typed resolution refusal: {diagnostic:?}");
         };
         let encoded = serde_json::to_value(refused).unwrap();
         assert_eq!(
             serde_json::from_value::<lash_kernel_value::EntryAnnotationRefusal>(encoded).unwrap(),
-            *refused
+            **refused
         );
         assert_eq!(refused.reason, reason);
         assert!(refused.span.is_some());
@@ -940,7 +944,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
     let error =
         module("export function handle({x}: {x: string}): string { return x; }").unwrap_err();
     assert!(
-        matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if matches!(refused.position, lash_kernel_value::SignaturePosition::Parameter { index: 0, .. }))
+        matches!(&error.reason, lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) if matches!(refused.position, lash_kernel_value::SignaturePosition::Parameter { index: 0, .. }))
     );
     let patterns = [
         "const f = ({x}: {x: string}): string => x;",
@@ -961,7 +965,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         )
         .unwrap_err();
         assert!(
-            matches!(error.fact.as_deref(), Some(lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(refused)) if refused.reason == Reason::Limit)
+            matches!(&error.reason, lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused) if refused.reason == Reason::Limit)
         );
     }
 }
@@ -986,11 +990,16 @@ export function handle(event: Event): string { return `${event.answered_by}`; }
         ),
     )
     .unwrap_err();
-    assert_eq!(diagnostic.code, DiagnosticCode::ImplicitTextConversion);
+    assert_eq!(diagnostic.code(), DiagnosticCode::ImplicitTextConversion);
+    let lash_kernel_dialect::DiagnosticReason::ImplicitTextConversion(conversion) =
+        &diagnostic.reason
+    else {
+        panic!("implicit conversion reason");
+    };
     assert!(
         matches!(
-            diagnostic.operand_type.as_deref(),
-            Some(lash_kernel_dialect::SourceOperandType::Record(_))
+            &conversion.operand_type,
+            lash_kernel_dialect::SourceOperandType::Record(_)
         ),
         "{diagnostic:?}"
     );
@@ -1306,7 +1315,7 @@ fn qualified_package_types_map_to_the_exact_boundary_shape() {
         Mode::Module,
     )
     .unwrap_err();
-    assert_eq!(error.code, DiagnosticCode::PackageMemberUnknown);
+    assert_eq!(error.code(), DiagnosticCode::PackageMemberUnknown);
 }
 
 /// KD05/L31: bigint is exactly the kernel Int boundary, including aliases.
@@ -1336,7 +1345,7 @@ fn workflow_text_policy_is_explicit() {
         crate::SourceLimits::standard().with_implicit_text_conversion(Policy::Refuse),
     )
     .unwrap_err();
-    assert_eq!(refused.code, DiagnosticCode::ImplicitTextConversion);
+    assert_eq!(refused.code(), DiagnosticCode::ImplicitTextConversion);
 }
 
 /// FIG-7334: a named arrow passed to an array method retains a printable body.

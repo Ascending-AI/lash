@@ -1,7 +1,7 @@
 //! FIG-7139: inspect implicit conversions before their static facts disappear.
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter::BinaryOp;
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use crate::{Diagnostic, SourceSpan};
 use lash_kernel_dialect::{
     SourceOperandType as Static, workflow::ImplicitTextConversionPolicy as Policy,
 };
@@ -50,13 +50,11 @@ impl Lowerer<'_> {
         {
             return Ok(());
         }
-        let mut diagnostic = Diagnostic::refusal(
-            DiagnosticCode::ImplicitTextConversion,
-            "implicit text conversion refused by source admission policy",
-            fact.span,
-        );
-        diagnostic.operand_type = Some(Box::new(fact.operand_type));
-        Err(diagnostic)
+        Err(Diagnostic {
+            reason: lash_kernel_dialect::DiagnosticReason::ImplicitTextConversion(Box::new(fact)),
+            message: "implicit text conversion refused by source admission policy".into(),
+            suggestions: Vec::new(),
+        })
     }
 }
 

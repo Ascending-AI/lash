@@ -70,9 +70,9 @@ fn a_control_call_not_awaited_at_the_top_level_is_refused_before_anything_runs()
         "async def end():\n    await control.finish(1)\nawait end()\n",
     ] {
         let error = machine::lower_with_effects(source, &effects()).expect_err(source);
-        assert_eq!(error.code, "PY_CONTROL_CALL_PLACEMENT", "{source}");
+        assert_eq!(error.code(), "PY_CONTROL_CALL_PLACEMENT", "{source}");
         assert_eq!(
-            error.kind,
+            error.kind(),
             lash_kernel_dialect::DiagnosticKind::ProgramDefect,
             "{source}"
         );

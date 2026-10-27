@@ -241,22 +241,6 @@ impl<'de> Deserialize<'de> for LowerFunction {
     }
 }
 
-/// A front end's or printer's typed refusal of a source or a document.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DialectRefusal {
-    pub code: String,
-    pub message: String,
-    /// The byte span in the source, when the refusal has one.
-    pub span: Option<(usize, usize)>,
-    /// Whether the dialect chose not to support the construct, as opposed
-    /// to the source being malformed.
-    pub unsupported: bool,
-    pub repairs: Vec<String>,
-    pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
-    pub fact: Option<Box<lash_kernel_dialect::DiagnosticFact>>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
@@ -295,7 +279,7 @@ pub enum Response {
         /// The captions the source spelled, of that document.
         captions: lash_kernel_doc::Captions,
     },
-    DialectRefused(DialectRefusal),
+    DialectRefused(lash_kernel_dialect::Diagnostic),
     UndeclaredMembers {
         members: Vec<String>,
     },

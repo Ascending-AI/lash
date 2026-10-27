@@ -233,7 +233,7 @@ mod codemode_inventory {
     use lash::formats::KERNEL_DOCUMENT_SCHEMA_VERSION as _;
     use lash::process::KernelProcessDefinition as _;
     use lash::tools::LlmToolsPluginFactory as _;
-    use lash::vm::DialectRefusal as _;
+    use lash::vm::Diagnostic as _;
     use lash::vm::HostBoundary as _;
     use lash::vm::KernelProcessPluginFactory as _;
     use lash::vm::WorkerService as _;

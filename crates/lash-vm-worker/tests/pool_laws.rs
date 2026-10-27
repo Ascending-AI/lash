@@ -1999,7 +1999,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
         let Err(service::SourceServiceError::Dialect(refusal)) = malformed else {
             panic!("syntax is refused");
         };
-        assert!(refusal.span.is_some());
+        assert!(refusal.span().is_some());
     });
     let receipts = workers.worker_receipts();
     assert_eq!(receipts.len(), 3);

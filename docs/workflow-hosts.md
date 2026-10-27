@@ -443,9 +443,10 @@ where source is read.
 | `Strict` | Also reject unconstrained operands. |
 
 Explicit `String(x)` and `JSON.stringify(x)` are available under every policy.
-Refusals carry `TS_IMPLICIT_TEXT_CONVERSION`, the operand's original byte span
-and `operand_type`; Lash supplies no repair hints, so the host owns any guidance
-shown with them. Text, numbers, booleans, nullish values and selected primitive
+Refusals carry `DiagnosticReason::ImplicitTextConversion`, which owns the operand's
+original byte span and `operand_type`. `Diagnostic::code()` returns
+`TS_IMPLICIT_TEXT_CONVERSION`. Lash supplies no repair hints, so the host owns
+any guidance shown with them. Text, numbers, booleans, nullish values and selected primitive
 fields pass even under `Strict`.
 
 Cell execution keeps JavaScript semantics. Its `Written` metadata retains

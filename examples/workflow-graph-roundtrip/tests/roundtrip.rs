@@ -574,10 +574,10 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
                     })).send().await.unwrap();
                     assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
                     let error: Value = response.json().await.unwrap();
-                    assert_eq!(
-                        error["error"]["details"]["diagnostics"][0]["code"],
-                        declared["refusal"]
-                    );
+                    let diagnostic: lash::dialect::Diagnostic =
+                        serde_json::from_value(error["error"]["details"]["diagnostics"][0].clone())
+                            .unwrap();
+                    assert_eq!(diagnostic.code(), declared["refusal"].as_str().unwrap());
                     let after =
                         answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
                     assert_eq!(after["identity"], before["identity"]);

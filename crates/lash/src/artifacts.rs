@@ -955,11 +955,7 @@ impl HostArtifacts {
                         (document, Some(map), captions)
                     };
                     if compiled.canonical_bytes() != typed.document().canonical_bytes() || compiled_map.as_ref().is_some_and(|compiled| compiled != map) {
-                        return Err(crate::workflow::import::admission_error(crate::dialect::Diagnostic {
-                            code: "WORKFLOW_SOURCE_MISMATCH".into(),
-                            message: "submitted workflow content or map differs from ordinary source import".into(),
-                            ..Default::default()
-                        }));
+                        return Err(crate::workflow::import::admission_error(crate::dialect::Diagnostic::dialect(lash_kernel_dialect::DialectCode::from_static("WORKFLOW_SOURCE_MISMATCH"), crate::dialect::DiagnosticKind::Refusal, None, "submitted workflow content or map differs from ordinary source import")));
                     }
                     Ok(())
                 },

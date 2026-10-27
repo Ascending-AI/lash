@@ -908,7 +908,7 @@ fn locale_refusals_name_the_method_for_every_receiver_form() {
     ] {
         let error = super::lower(source).expect_err(source);
         assert_eq!(
-            error.code,
+            error.code(),
             crate::DiagnosticCode::MethodUnsupported,
             "{source}"
         );
@@ -946,7 +946,7 @@ fn missing_methods_name_the_receiver_and_preserve_argument_effects() {
     ] {
         let source = format!("const value = {receiver}; value.missingMethod();");
         let error = super::lower(&source).expect_err(&source);
-        assert_eq!(error.code, crate::DiagnosticCode::MethodUnsupported);
+        assert_eq!(error.code(), crate::DiagnosticCode::MethodUnsupported);
         let text = error.to_string();
         assert!(
             text.contains("missingMethod") && text.contains(kind),

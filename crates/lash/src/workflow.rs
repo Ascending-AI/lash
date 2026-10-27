@@ -26,7 +26,7 @@ pub(crate) mod import;
 #[cfg(feature = "codemode")]
 pub use import::{
     WorkflowImport, WorkflowImportUnsupported, WorkflowSourceDiagnostic,
-    WorkflowSourceDiagnosticFact, WorkflowSourceDiagnosticKind,
+    WorkflowSourceDiagnosticKind, WorkflowSourceDiagnosticReason,
 };
 
 /// The kernel document: its statements, expressions, types, data, sites

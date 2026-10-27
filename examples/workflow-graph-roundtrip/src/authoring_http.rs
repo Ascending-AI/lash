@@ -102,13 +102,7 @@ pub(crate) async fn import(
             StatusCode::UNPROCESSABLE_ENTITY,
             "source_refused",
             "the import was refused; the current document is unchanged",
-            serde_json::json!({"diagnostics": diagnostics.iter().map(|diagnostic| {
-                serde_json::json!({
-                    "code": diagnostic.code,
-                    "message": diagnostic.message,
-                    "span": diagnostic.span.map(|span| serde_json::json!({"start":span.start,"end":span.end})),
-                })
-            }).collect::<Vec<_>>()}),
+            serde_json::json!({"diagnostics": diagnostics}),
         )),
         other => Err(ErrorResponse::invalid(
             "source_unsupported",

@@ -98,9 +98,9 @@ fn admitted_basics_keep_cpython_observations_and_dispositions() {
                 assert_eq!(outcome.status, "refused", "{path}: cannot refuse a pass");
                 assert_eq!(outcome.qualifier, case.reason);
                 match machine::lower(source) {
-                    Err(diagnostic) if diagnostic.code == outcome.qualifier => {
+                    Err(diagnostic) if diagnostic.code() == outcome.qualifier => {
                         refused += 1;
-                        println!("refused {path}: {}", diagnostic.code);
+                        println!("refused {path}: {}", diagnostic.code());
                     }
                     other => problems.push(format!(
                         "{path}: expected refusal {}, got {other:?}",

@@ -20,7 +20,7 @@ pub(crate) fn refused(phase: &str, refusal_kind: &str) {
 
 pub(crate) fn source_refused(phase: &str, error: &SourceServiceError) {
     match error {
-        SourceServiceError::Dialect(refusal) => refused(phase, &refusal.code),
+        SourceServiceError::Dialect(refusal) => refused(phase, refusal.code()),
         SourceServiceError::UnknownDialect { .. } => refused(phase, "dialect_unavailable"),
         SourceServiceError::UndeclaredMembers { .. } => refused(phase, "undeclared_members"),
         SourceServiceError::Print(error) => {

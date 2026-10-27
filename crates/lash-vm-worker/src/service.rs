@@ -2,12 +2,12 @@
 //! document and printing a document as source. Both read guest-controlled
 //! input, so both run here, in the worker's crash domain.
 use lash_kernel_dialect::workflow::WorkflowSourceLimits;
-use lash_kernel_dialect::{Diagnostic, DiagnosticKind, Mode};
+use lash_kernel_dialect::{Diagnostic, Mode};
 use lash_kernel_doc::{Document, SourceLanguage};
 
 use lash_protocol_types::engine_fault::{Detail, PayloadKind, RunInput, RunRefusal};
 use lash_vm_client::PoolError;
-use lash_vm_client::service::{DialectRefusal, Request, Response};
+use lash_vm_client::service::{Request, Response};
 use lash_vm_protocol::EncodedPayload;
 
 use crate::embedding::Embedding;
@@ -36,7 +36,7 @@ pub(crate) fn perform(
                 },
             ) {
                 Ok(calls) => Response::ToolCalls(calls),
-                Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
+                Err(diagnostic) => Response::DialectRefused(diagnostic),
             },
         },
         Request::Lower {
@@ -70,7 +70,7 @@ pub(crate) fn perform(
                             .and_then(|package| package.function_values.clone()),
                     }
                 }
-                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
+                Some(Err(diagnostic)) => Response::DialectRefused(diagnostic),
             }
         }
         Request::ImportWorkflow {
@@ -85,7 +85,7 @@ pub(crate) fn perform(
                 None => Response::UnknownDialect {
                     dialect: dialect_name(language).into(),
                 },
-                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
+                Some(Err(diagnostic)) => Response::DialectRefused(diagnostic),
                 Some(Ok(lowered)) => {
                     embedding.documents.keep(lowered.document.clone(), None);
                     Response::Lowered {
@@ -125,7 +125,7 @@ pub(crate) fn perform(
                         Err(lash_kernel_dialect::PrintError::Unprintable { site }) => {
                             Response::Unprintable { site }
                         }
-                        Err(error) => Response::DialectRefused(refusal(error.into())),
+                        Err(error) => Response::DialectRefused(error.into()),
                     }
                 }
             }
@@ -151,7 +151,7 @@ pub(crate) fn perform(
                     document: document.canonical_bytes(),
                     captions,
                 },
-                Err(error) => Response::DialectRefused(refusal(error)),
+                Err(error) => Response::DialectRefused(error),
             },
         },
     };
@@ -260,19 +260,6 @@ fn decoded_document(body: Vec<u8>) -> Result<Document, PoolError> {
     })
 }
 
-fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
-    DialectRefusal {
-        code: diagnostic.code,
-        message: diagnostic.message,
-        span: diagnostic.span.map(|span| (span.start, span.end)),
-        unsupported: matches!(diagnostic.kind, DiagnosticKind::Refusal),
-        repairs: diagnostic.repairs,
-        operand_type: diagnostic.operand_type,
-
-        fact: diagnostic.fact,
-    }
-}
-
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod tests {
     use super::*;
@@ -339,12 +326,16 @@ mod tests {
             let Response::DialectRefused(refusal) = response else {
                 panic!("compile-time refusal");
             };
-            assert_eq!(refusal.code, "NAMESPACE_SHADOWED_BY_LOCAL");
-            assert_eq!(refusal.span.unwrap().0, 6);
-            assert!(!refusal.unsupported);
+            assert_eq!(refusal.code(), "NAMESPACE_SHADOWED_BY_LOCAL");
+            assert_eq!(refusal.span().unwrap().start, 6);
+            assert_eq!(
+                refusal.kind(),
+                lash_kernel_dialect::DiagnosticKind::ProgramDefect
+            );
             assert!(refusal.repairs.is_empty());
-            let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(facts)) =
-                refusal.fact.as_deref()
+            let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing {
+                shadowing: facts, ..
+            } = &refusal.reason
             else {
                 panic!("typed namespace facts");
             };
@@ -417,20 +408,16 @@ mod tests {
         let mut wrong_code = serde_json::to_value(&required).expect("fact JSON");
         wrong_code["code"] = "OTHER".into();
         assert!(serde_json::from_value::<lash_kernel_doc::SignatureRequired>(wrong_code).is_err());
-        let response = Response::DialectRefused(refusal(required.clone().into()));
+        let response = Response::DialectRefused(required.clone().into());
         let wire = rmp_serde::to_vec_named(&response).expect("refusal wire");
         let Response::DialectRefused(decoded) =
             rmp_serde::from_slice(&wire).expect("typed refusal")
         else {
             panic!("a dialect refusal");
         };
-        assert_eq!(decoded.code, "SIGNATURE_REQUIRED");
-        assert_eq!(decoded.span, Some((17, 22)));
         assert_eq!(
-            decoded.fact,
-            Some(Box::new(
-                lash_kernel_dialect::DiagnosticFact::SignatureRequired(required)
-            ))
+            decoded.reason,
+            lash_kernel_dialect::DiagnosticReason::SignatureRequired(Box::new(required))
         );
         assert!(decoded.message.is_empty());
         assert!(decoded.repairs.is_empty());

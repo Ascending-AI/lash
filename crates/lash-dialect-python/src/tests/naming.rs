@@ -84,7 +84,7 @@ fn a_dotted_call_performs_the_operation_by_its_canonical_name() {
     }
     let error = lower("await web_fetch({})\n", &[], &["web.fetch"])
         .expect_err("the flattened name is no operation");
-    assert!(!error.code.is_empty(), "{error}");
+    assert!(!error.code().is_empty(), "{error}");
 }
 
 /// NS-ESCAPE: an operation whose spelling is a Python keyword stays

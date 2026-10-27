@@ -35,8 +35,8 @@ fn parser_repairs_ignore_unrelated_raise_text() {
         "' raise ';\n",
     ] {
         let error = crate::parse(&format!("{prefix}const = ;")).unwrap_err();
-        assert_eq!(error.code, plain.code);
-        assert_eq!(error.kind, plain.kind);
+        assert_eq!(error.code(), plain.code());
+        assert_eq!(error.kind(), plain.kind());
         assert_eq!(error.message, plain.message);
         assert_eq!(error.suggestions, plain.suggestions);
     }
@@ -54,7 +54,7 @@ fn refusals_keep_their_codes() {
         ("class A {}", DiagnosticCode::ClassUnsupported),
     ] {
         match lower(source) {
-            Err(diagnostic) => assert_eq!(diagnostic.code, code, "{source}: {diagnostic}"),
+            Err(diagnostic) => assert_eq!(diagnostic.code(), code, "{source}: {diagnostic}"),
             Ok(_) => panic!("`{source}` lowered"),
         }
     }
@@ -78,7 +78,7 @@ fn top_level_bindings_are_the_sessions() {
     let Err(refused) = lowered else {
         panic!("a name read before its declaration in the same cell is refused");
     };
-    assert_eq!(refused.code, DiagnosticCode::TemporalDeadZone);
+    assert_eq!(refused.code(), DiagnosticCode::TemporalDeadZone);
 
     let lowered = lower_in_session("var seen = total + 1; var total = seen;", &["total"]).unwrap();
     let main = lowered.document.main.as_ref().unwrap();
@@ -151,7 +151,7 @@ fn member_reference_failure_precedes_argument_effects() {
     assert_eq!(
         super::lower("const o = { get get() { throw 1; } }; o.get(2);")
             .unwrap_err()
-            .code,
+            .code(),
         crate::DiagnosticCode::AccessorUnsupported
     );
     assert_eq!(

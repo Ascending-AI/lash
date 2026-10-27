@@ -965,7 +965,7 @@ async fn fresh_source_policy_checks_printed_text_again_at_publication() {
         .await
         .unwrap_err();
     let diagnostic = implicit_text_diagnostic(error);
-    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    assert_eq!(diagnostic.code(), "TS_IMPLICIT_TEXT_CONVERSION");
     core.shutdown().await.unwrap();
 }
 
@@ -1075,7 +1075,7 @@ async fn print_environment_selects_fresh_dependencies_and_refuses_conflicts() {
     assert!(
         diagnostics
             .iter()
-            .any(|d| d.code.contains("PACKAGE") || d.code.contains("UNKNOWN"))
+            .any(|d| d.code().contains("PACKAGE") || d.code().contains("UNKNOWN"))
     );
     let opened = core
         .host_artifacts()

@@ -242,14 +242,10 @@ impl Lowerer<'_> {
                 lash_kernel_dialect::Diagnostic::from(*required)
             }
             lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => {
-                lash_kernel_dialect::Diagnostic {
-                    code: "ENTRY_ANNOTATION_REFUSED".into(),
-                    span: refused.span,
-                    fact: Some(Box::new(
-                        lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(*refused),
-                    )),
-                    ..Default::default()
-                }
+                lash_kernel_dialect::Diagnostic::new(
+                    lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused),
+                    "",
+                )
             }
         })?;
         Ok(signature)

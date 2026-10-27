@@ -82,21 +82,18 @@ pub enum PrintError {
 }
 impl From<PrintError> for crate::Diagnostic {
     fn from(error: PrintError) -> Self {
-        Self {
-            code: match &error {
+        Self::dialect(
+            crate::DialectCode::from_static(match &error {
                 PrintError::Namespace(_) => "GENERATED_SOURCE_NAMESPACE",
                 PrintError::Bytes { .. } => "GENERATED_SOURCE_BYTES",
                 PrintError::Depth { .. } => "GENERATED_SOURCE_DEPTH",
                 PrintError::Unprintable { .. } => "GENERATED_SOURCE_UNPRINTABLE",
                 PrintError::Encode(_) | PrintError::Invalid(_) => "GENERATED_SOURCE_INVALID",
-            }
-            .into(),
-            message: error.to_string(),
-            span: None,
-            kind: crate::DiagnosticKind::Refusal,
-            repairs: vec![],
-            ..Default::default()
-        }
+            }),
+            crate::DiagnosticKind::Refusal,
+            None,
+            error.to_string(),
+        )
     }
 }
 

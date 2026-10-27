@@ -85,8 +85,8 @@ mod tests {
         ] {
             let span = swc_common::Span::new(swc_common::BytePos(2), swc_common::BytePos(6));
             let error = parser_diagnostic(Error::new(span, kind));
-            assert_eq!(error.code, code, "{error}");
-            assert_eq!(error.span, Some(SourceSpan { start: 2, end: 6 }));
+            assert_eq!(error.code(), code, "{error}");
+            assert_eq!(error.span(), Some(SourceSpan { start: 2, end: 6 }));
         }
     }
 }

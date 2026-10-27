@@ -84,7 +84,7 @@ print(first([4, 5]))
         lash_kernel_value::Type::Tuple(vec![lash_kernel_value::Type::Int; 2])
     );
     let error = machine::lower("type Number = int\nprint(Number)\n").unwrap_err();
-    assert_eq!(error.code, crate::Code::UnknownName.as_str());
+    assert_eq!(error.code(), crate::Code::UnknownName.as_str());
 }
 
 #[test]

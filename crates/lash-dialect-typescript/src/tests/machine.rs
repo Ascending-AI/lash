@@ -814,24 +814,29 @@ fn cells_keep_javascript_text_semantics_and_ship_conversion_facts() {
     let diagnostic = Policy::Refuse
         .check(&function.implicit_text_conversions)
         .expect_err("promotion refuses the retained fact");
-    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    assert_eq!(diagnostic.code(), "TS_IMPLICIT_TEXT_CONVERSION");
     let start = source.find("${event}").unwrap() + 2;
     assert_eq!(
-        diagnostic.span,
+        diagnostic.span(),
         Some(lash_kernel_doc::Span {
             start,
             end: start + 5
         })
     );
+    let lash_kernel_dialect::DiagnosticReason::ImplicitTextConversion(conversion) =
+        &diagnostic.reason
+    else {
+        panic!("implicit conversion reason");
+    };
     assert_eq!(
-        diagnostic.operand_type,
-        Some(Box::new(lash_kernel_dialect::SourceOperandType::Record(
+        conversion.operand_type,
+        lash_kernel_dialect::SourceOperandType::Record(
             [(
                 "identity_id".into(),
                 lash_kernel_dialect::SourceOperandType::Text
             )]
             .into()
-        )))
+        )
     );
     Policy::Allow
         .check(&function.implicit_text_conversions)

@@ -6,7 +6,7 @@ use lash_kernel_doc::{AssignOrder, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
-use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use lash_ext_ts_helpers::builtins::Receiver;
 
 mod discovery;
@@ -960,19 +960,14 @@ impl Lowerer<'_> {
                 && !path.starts_with("globalThis.")
                 && !self.table.values.contains_key(path.as_str())
             {
-                return Err(Diagnostic {
-                    kind: DiagnosticKind::Refusal,
-                    ..Diagnostic::with_repair(
-                        DiagnosticCode::MethodUnsupported,
-                        format!(
-                            "Unsupported: `{path}` is not a function the TypeScript dialect has"
-                        ),
-                        format!(
-                            "replace `{path}` with a method the dialect's standard-library contract lists for that receiver"
-                        ),
-                        Some(span),
-                    )
-                });
+                return Err(Diagnostic::with_refusal_repair(
+                    DiagnosticCode::MethodUnsupported,
+                    format!("Unsupported: `{path}` is not a function the TypeScript dialect has"),
+                    format!(
+                        "replace `{path}` with a method the dialect's standard-library contract lists for that receiver"
+                    ),
+                    Some(span),
+                ));
             }
         }
         if let ast::Expr::Ident(name, _) = callee

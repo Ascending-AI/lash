@@ -49,10 +49,10 @@ fn each_refusal_carries_its_code() {
         match machine::lower(source) {
             Ok(_) => panic!("lowered, where {} was expected:\n{source}", code.as_str()),
             Err(diagnostic) => {
-                assert_eq!(diagnostic.code, code.as_str(), "{diagnostic}\n{source}");
-                assert_eq!(diagnostic.kind, code.kind(), "{source}");
+                assert_eq!(diagnostic.code(), code.as_str(), "{diagnostic}\n{source}");
+                assert_eq!(diagnostic.kind(), code.kind(), "{source}");
                 assert!(
-                    diagnostic.span.is_some() || *code == Code::Syntax,
+                    diagnostic.span().is_some() || *code == Code::Syntax,
                     "{} names no place in:\n{source}",
                     code.as_str()
                 );
@@ -79,7 +79,7 @@ fn nesting_past_the_kernel_limit_is_refused() {
     source.push_str(&format!("{}pass\n", "    ".repeat(40)));
     let diagnostic = machine::lower(&source).expect_err("forty nested blocks");
     assert_eq!(
-        diagnostic.code,
+        diagnostic.code(),
         Code::InvalidDocument.as_str(),
         "{diagnostic}"
     );
@@ -96,14 +96,14 @@ fn an_expression_nested_too_deep_is_refused() {
         "parentheses are not nesting"
     );
     let diagnostic = machine::lower(&nested).expect_err("four hundred nested lists");
-    assert_eq!(diagnostic.code, Code::TooDeep.as_str(), "{diagnostic}");
+    assert_eq!(diagnostic.code(), Code::TooDeep.as_str(), "{diagnostic}");
 }
 
 #[test]
 fn a_source_past_the_size_limit_is_refused() {
     let source = "#".repeat(crate::MAX_SOURCE_BYTES + 1);
     let diagnostic = machine::lower(&source).expect_err("a source of over a megabyte");
-    assert_eq!(diagnostic.code, Code::SourceTooLarge.as_str());
+    assert_eq!(diagnostic.code(), Code::SourceTooLarge.as_str());
 }
 
 /// Without the dialect's helpers installed the front end names the one it
@@ -125,7 +125,7 @@ fn a_missing_helper_is_named() {
         }),
     )
     .expect_err("an empty library");
-    assert_eq!(diagnostic.code, Code::LibraryMissing.as_str());
+    assert_eq!(diagnostic.code(), Code::LibraryMissing.as_str());
     assert!(diagnostic.message.contains("py.print_text"), "{diagnostic}");
 }
 
@@ -264,7 +264,7 @@ fn every_advertised_repair_form_lowers() {
     for (prelude, refused, code, form) in sites {
         let diagnostic =
             machine::lower(&format!("{prelude}{refused}\n")).expect_err("the construct is refused");
-        assert_eq!(diagnostic.code, code.as_str(), "{diagnostic}");
+        assert_eq!(diagnostic.code(), code.as_str(), "{diagnostic}");
         assert!(
             diagnostic
                 .repairs

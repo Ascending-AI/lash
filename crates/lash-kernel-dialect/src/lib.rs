@@ -40,7 +40,9 @@ mod namespaces_laws;
 #[cfg(test)]
 mod tests;
 
-pub use diagnostic::{Diagnostic, DiagnosticFact, DiagnosticKind, SourceOperandType};
+pub use diagnostic::{
+    Diagnostic, DiagnosticKind, DiagnosticReason, DialectCode, SourceOperandType,
+};
 pub use dialect::{
     CaptionSupport, CellEnvironment, Dialect, EffectControl, Environment, FrontEnd, Lowered, Mode,
     Printer, ReadSource, ToolCalls,

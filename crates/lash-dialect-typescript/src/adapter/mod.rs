@@ -511,7 +511,7 @@ fn parse_from_goal(
         return parse_from_goal(source, Goal::Script, workflow, limits);
     }
     let early_error =
-        matches!(&converted, Err(diagnostic) if diagnostic.kind == DiagnosticKind::ProgramDefect);
+        matches!(&converted, Err(diagnostic) if diagnostic.kind() == DiagnosticKind::ProgramDefect);
     if !early_error && let Some(error) = adapter.unvalidated_respelling() {
         return Err(parser_diagnostic(error.clone()));
     }

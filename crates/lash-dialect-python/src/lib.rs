@@ -144,16 +144,16 @@ fn lower_with_calls(
             format!("the source is larger than the configured {max_bytes}-byte source limit"),
         ));
     }
-    let parsed = ruff_python_parser::parse_module(source).map_err(|error| Diagnostic {
-        code: Code::Syntax.as_str().to_string(),
-        message: error.error.to_string(),
-        span: Some(Span {
-            start: error.location.start().to_usize(),
-            end: error.location.end().to_usize(),
-        }),
-        kind: Code::Syntax.kind(),
-        repairs: Vec::new(),
-        ..Default::default()
+    let parsed = ruff_python_parser::parse_module(source).map_err(|error| {
+        Diagnostic::dialect(
+            lash_kernel_dialect::DialectCode::from_static(Code::Syntax.as_str()),
+            Code::Syntax.kind(),
+            Some(Span {
+                start: error.location.start().to_usize(),
+                end: error.location.end().to_usize(),
+            }),
+            error.error.to_string(),
+        )
     })?;
     let spelled = captions::spelled(
         source,

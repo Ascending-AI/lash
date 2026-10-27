@@ -4,8 +4,8 @@ use lash_kernel_dialect::workflow::WorkflowSourceLimits;
 use lash_kernel_doc::{Captions, DocumentBytes, SourceLanguage, SourceMap};
 
 pub use lash_kernel_dialect::{
-    Diagnostic as WorkflowSourceDiagnostic, DiagnosticFact as WorkflowSourceDiagnosticFact,
-    DiagnosticKind as WorkflowSourceDiagnosticKind,
+    Diagnostic as WorkflowSourceDiagnostic, DiagnosticKind as WorkflowSourceDiagnosticKind,
+    DiagnosticReason as WorkflowSourceDiagnosticReason,
 };
 
 /// The outcome of importing a host-authored workflow module against a
@@ -80,23 +80,8 @@ pub(crate) fn source_refusal(
 ) -> crate::Result<WorkflowImport> {
     match error {
         lash_vm_client::service::SourceServiceError::Dialect(refusal) => {
-            crate::artifacts::diagnostics::refused("lower", &refusal.code);
-            Ok(WorkflowImport::Refused(vec![WorkflowSourceDiagnostic {
-                code: refusal.code,
-                message: refusal.message,
-                span: refusal
-                    .span
-                    .map(|(start, end)| lash_kernel_doc::Span { start, end }),
-                kind: if refusal.unsupported {
-                    WorkflowSourceDiagnosticKind::Refusal
-                } else {
-                    WorkflowSourceDiagnosticKind::ProgramDefect
-                },
-                repairs: refusal.repairs,
-                operand_type: refusal.operand_type,
-
-                fact: refusal.fact,
-            }]))
+            crate::artifacts::diagnostics::refused("lower", refusal.code());
+            Ok(WorkflowImport::Refused(vec![*refusal]))
         }
         lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => {
             crate::artifacts::diagnostics::refused("lower", "dialect_unavailable");
@@ -111,14 +96,6 @@ pub(crate) fn source_refusal(
 /// Source evidence reaches hosts through the same typed refusal as worker lowering.
 pub(crate) fn admission_error(diagnostic: lash_kernel_dialect::Diagnostic) -> crate::EmbedError {
     crate::EmbedError::WorkflowSource(lash_vm_client::service::SourceServiceError::Dialect(
-        Box::new(lash_vm_client::service::DialectRefusal {
-            code: diagnostic.code,
-            message: diagnostic.message,
-            span: diagnostic.span.map(|span| (span.start, span.end)),
-            unsupported: diagnostic.kind == lash_kernel_dialect::DiagnosticKind::Refusal,
-            repairs: diagnostic.repairs,
-            operand_type: diagnostic.operand_type,
-            fact: diagnostic.fact,
-        }),
+        Box::new(diagnostic),
     ))
 }

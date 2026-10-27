@@ -468,44 +468,45 @@ pub enum CodeClassification {
 /// A named parse or link-time TypeScript dialect rejection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
-    pub code: DiagnosticCode,
-    /// What the dialect refused. The refusal only.
+    pub reason: lash_kernel_dialect::DiagnosticReason,
     pub message: String,
-    pub span: Option<SourceSpan>,
-    /// Whose fault this is. Read by the code mode feedback layer to choose between
-    /// "the runtime refused this" and "the defect is in the program".
-    pub kind: DiagnosticKind,
-    /// What to write instead: the structured repair channel.
-    ///
-    /// A rejection a model cannot act on costs a whole turn. The dialect has
-    /// always known the accepted idiom — it was just written into the middle of
-    /// `message`, where reading it means parsing English. This is the same
-    /// content on a channel a consumer can find: the message holds the refusal,
-    /// these hold the rewrite, and no text appears in both.
     pub suggestions: Vec<String>,
-    pub operand_type: Option<Box<lash_kernel_dialect::SourceOperandType>>,
-    pub fact: Option<Box<lash_kernel_dialect::DiagnosticFact>>,
 }
 
 impl Diagnostic {
-    pub(crate) fn entry_signature(refusal: lash_kernel_value::EntrySignatureRefusal) -> Self {
-        let (code, span, fact) = match refusal {
-            lash_kernel_value::EntrySignatureRefusal::Required(required) => (
-                DiagnosticCode::SignatureRequired,
-                required.span,
-                lash_kernel_dialect::DiagnosticFact::SignatureRequired(*required),
-            ),
-            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => (
-                DiagnosticCode::EntryAnnotationRefused,
-                refused.span,
-                lash_kernel_dialect::DiagnosticFact::EntryAnnotationRefused(*refused),
-            ),
-        };
-        let mut diagnostic = Self::new(code, "", span);
-        diagnostic.fact = Some(Box::new(fact));
-        diagnostic
+    #[expect(
+        clippy::expect_used,
+        reason = "the TypeScript constructors only emit declared TypeScript or shared workflow codes"
+    )]
+    pub fn code(&self) -> DiagnosticCode {
+        DiagnosticCode::ALL
+            .iter()
+            .copied()
+            .chain(ModuleRefusal::ALL.into_iter().map(DiagnosticCode::Module))
+            .find(|code| code.as_str() == self.reason.code())
+            .expect("TypeScript diagnostic code")
     }
-
+    pub fn span(&self) -> Option<SourceSpan> {
+        self.reason.span()
+    }
+    pub fn kind(&self) -> DiagnosticKind {
+        self.reason.kind()
+    }
+    pub(crate) fn entry_signature(refusal: lash_kernel_value::EntrySignatureRefusal) -> Self {
+        let reason = match refusal {
+            lash_kernel_value::EntrySignatureRefusal::Required(required) => {
+                lash_kernel_dialect::DiagnosticReason::SignatureRequired(required)
+            }
+            lash_kernel_value::EntrySignatureRefusal::Annotation(refused) => {
+                lash_kernel_dialect::DiagnosticReason::EntryAnnotationRefused(refused)
+            }
+        };
+        Self {
+            reason,
+            message: String::new(),
+            suggestions: Vec::new(),
+        }
+    }
     /// The crate's rejections were authored as `"Unsupported: <refusal>.
     /// <rewrite>"` — one string, two jobs. Splitting here rather than at 34 call
     /// sites keeps the convention in one place and makes the migration total:
@@ -561,13 +562,9 @@ impl Diagnostic {
     ) -> Self {
         let diagnostic = lash_kernel_dialect::Diagnostic::namespace_shadowed(shadowing, Some(span));
         Self {
-            code: DiagnosticCode::NamespaceShadowedByLocal,
+            reason: diagnostic.reason,
             message: diagnostic.message,
-            span: diagnostic.span,
-            kind: diagnostic.kind,
             suggestions: Vec::new(),
-            operand_type: None,
-            fact: diagnostic.fact,
         }
     }
 
@@ -583,7 +580,7 @@ impl Diagnostic {
     /// Whether the dialect refused the construct, as opposed to reporting a
     /// defect in an allowed one.
     pub fn is_dialect_refusal(&self) -> bool {
-        self.kind == DiagnosticKind::Refusal
+        self.kind() == DiagnosticKind::Refusal
     }
 
     fn classified(
@@ -599,14 +596,25 @@ impl Diagnostic {
             .into_iter()
             .collect();
         Self {
-            code,
+            reason: lash_kernel_dialect::DiagnosticReason::Dialect {
+                code: lash_kernel_dialect::DialectCode::from_static(code.as_str()),
+                kind,
+                span,
+            },
             message,
-            span,
-            kind,
             suggestions,
-            operand_type: None,
-            fact: None,
         }
+    }
+
+    pub(crate) fn with_refusal_repair(
+        code: DiagnosticCode,
+        message: impl Into<String>,
+        repair: impl Into<String>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        let mut diagnostic = Self::refusal(code, message, span);
+        diagnostic.suggestions = vec![repair.into()];
+        diagnostic
     }
 
     /// Builds a diagnostic whose refusal and rewrite are authored separately.
@@ -622,13 +630,13 @@ impl Diagnostic {
         span: Option<SourceSpan>,
     ) -> Self {
         Self {
-            code,
+            reason: lash_kernel_dialect::DiagnosticReason::Dialect {
+                code: lash_kernel_dialect::DialectCode::from_static(code.as_str()),
+                kind: kind_from_code(code),
+                span,
+            },
             message: message.into(),
-            span,
-            kind: kind_from_code(code),
             suggestions: vec![repair.into()],
-            operand_type: None,
-            fact: None,
         }
     }
 }
@@ -679,7 +687,7 @@ impl fmt::Display for Diagnostic {
     /// The model-facing one-liner: code, refusal, then each rewrite on its own
     /// `hint:` line, exactly as Lash VM renders its own hint channel.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}: {}", self.code.as_str(), self.message)?;
+        write!(formatter, "{}: {}", self.code().as_str(), self.message)?;
         for suggestion in &self.suggestions {
             write!(formatter, "\nhint: {suggestion}")?;
         }
@@ -692,13 +700,9 @@ impl std::error::Error for Diagnostic {}
 impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
     fn from(diagnostic: Diagnostic) -> Self {
         Self {
-            code: diagnostic.code.as_str().to_string(),
+            reason: diagnostic.reason,
             message: diagnostic.message,
-            span: diagnostic.span,
-            kind: diagnostic.kind,
             repairs: diagnostic.suggestions,
-            operand_type: diagnostic.operand_type,
-            fact: diagnostic.fact,
         }
     }
 }
@@ -984,7 +988,7 @@ mod tests {
         for (prelude, refused, code, form) in sites {
             let error = crate::validate(&format!("{prelude} {refused}"))
                 .expect_err("the source construct is refused");
-            assert_eq!(error.code, code);
+            assert_eq!(error.code(), code);
             assert!(error.is_dialect_refusal(), "{error}");
             assert!(
                 error.suggestions.iter().any(|repair| repair.contains(form)),
@@ -1014,7 +1018,7 @@ mod tests {
             assert!(
                 !error.is_dialect_refusal(),
                 "{label}: {} reports a wrong program",
-                error.code.as_str()
+                error.code().as_str()
             );
         }
 
@@ -1027,7 +1031,7 @@ mod tests {
             assert!(
                 error.is_dialect_refusal(),
                 "{label}: {} refuses a construct",
-                error.code.as_str()
+                error.code().as_str()
             );
         }
     }

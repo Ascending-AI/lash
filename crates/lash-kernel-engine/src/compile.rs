@@ -37,10 +37,13 @@ impl Engine {
         externals: &[External],
         mode: Mode<'_>,
     ) -> Result<Program, Diagnostic> {
-        let diagnostic = |message: String| Diagnostic {
-            code: "ENGINE_COMPILE".into(),
-            message,
-            ..Default::default()
+        let diagnostic = |message: String| {
+            Diagnostic::dialect(
+                lash_kernel_dialect::DialectCode::from_static("ENGINE_COMPILE"),
+                lash_kernel_dialect::DiagnosticKind::Refusal,
+                None,
+                message,
+            )
         };
         if source.len() > self.limits.source_bytes {
             return Err(diagnostic("source byte limit exceeded".into()));
@@ -154,10 +157,13 @@ impl Engine {
         environment: &Environment<'_>,
         mode: Mode<'_>,
     ) -> Result<lash_kernel_dialect::Lowered, Diagnostic> {
-        let diagnostic = |message: String| Diagnostic {
-            code: "ENGINE_COMPILE".into(),
-            message,
-            ..Default::default()
+        let diagnostic = |message: String| {
+            Diagnostic::dialect(
+                lash_kernel_dialect::DialectCode::from_static("ENGINE_COMPILE"),
+                lash_kernel_dialect::DiagnosticKind::Refusal,
+                None,
+                message,
+            )
         };
         if source.len() > self.limits.source_bytes {
             return Err(diagnostic("source byte limit exceeded".into()));

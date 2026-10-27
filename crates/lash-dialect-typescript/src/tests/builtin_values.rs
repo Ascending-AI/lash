@@ -103,7 +103,7 @@ fn reflective_protocols_and_builtin_global_writes_are_typed_refusals() {
         "Number = 12;",
     ] {
         assert_eq!(
-            super::lower(source).expect_err(source).code,
+            super::lower(source).expect_err(source).code(),
             DiagnosticCode::ReflectionUnsupported
         );
     }

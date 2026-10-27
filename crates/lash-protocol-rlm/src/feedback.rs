@@ -23,12 +23,12 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
+use lash_kernel_dialect::Diagnostic;
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::SourceMap;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::TaskLabel;
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
-use lash_vm_client::service::DialectRefusal;
 
 use crate::dialect::DialectPrompts;
 
@@ -211,7 +211,7 @@ pub(crate) fn worker_lost_failure(
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum CellObservation {
     /// The dialect refused the source.
-    Refused(DialectRefusal),
+    Refused(Diagnostic),
     /// The cell used a binding an earlier cell left that reached a function
     /// or a task, which no cell carries to the next (`K-SES-003`).
     BindingNotCarried {
@@ -292,7 +292,7 @@ impl CellObservation {
             .unwrap_or_default();
         let code = self.code();
         let span = match self {
-            Self::Refused(refusal) => refusal.span,
+            Self::Refused(refusal) => refusal.span().map(|span| (span.start, span.end)),
             _ => None,
         };
         let unknown_name = matches!(code.as_str(), "TS_UNKNOWN_BINDING" | "PY_UNKNOWN_NAME")
@@ -326,7 +326,7 @@ impl CellObservation {
 
     /// A dialect refusal remains the dialect's typed diagnosis. Source or
     /// diagnostic text cannot establish that a session binding was dropped.
-    pub(crate) fn of_refusal(refusal: DialectRefusal) -> Self {
+    pub(crate) fn of_refusal(refusal: Diagnostic) -> Self {
         Self::Refused(refusal)
     }
 
@@ -366,7 +366,7 @@ impl CellObservation {
     /// The observation's stable code: what a consumer matches on.
     pub(crate) fn code(&self) -> String {
         match self {
-            Self::Refused(refusal) => refusal.code.clone(),
+            Self::Refused(refusal) => refusal.code().to_owned(),
             Self::BindingNotCarried { .. } => SESSION_BINDING_NOT_CARRIED.to_owned(),
             Self::Uncaught(Datum::Error(error)) => error.kind.clone(),
             Self::Uncaught(_) => "uncaught".to_owned(),
@@ -402,9 +402,9 @@ impl CellObservation {
         };
         match self {
             Self::Refused(refusal) => {
-                let mut message = format!("{}: {}", refusal.code, refusal.message);
-                if let Some((start, _)) = refusal.span {
-                    let (line, column) = line_column(source, start);
+                let mut message = format!("{}: {}", refusal.code(), refusal.message);
+                if let Some(span) = refusal.span() {
+                    let (line, column) = line_column(source, span.start);
                     message.push_str(&format!(" (line {line}, column {column})"));
                     if let Some(text) = source.lines().nth(line - 1) {
                         message.push_str(&format!("\n  {}", text.trim_end()));
@@ -414,17 +414,17 @@ impl CellObservation {
                     message.push_str(&format!("\nInstead: {repair}"));
                 }
                 let mut failure = CellFailure::new(
-                    if refusal.unsupported {
+                    if refusal.kind() == lash_kernel_dialect::DiagnosticKind::Refusal {
                         CellFailureKind::Policy
                     } else {
                         CellFailureKind::Program
                     },
                     message,
                 );
-                if let Some(lash_kernel_dialect::DiagnosticFact::NamespaceShadowing(shadowing)) = refusal.fact.as_deref() {
+                if let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing { shadowing, span } = &refusal.reason {
                     failure = failure.with_defect(CellDefect::NamespaceShadowedByLocal {
-                        shadowing: Box::new(shadowing.clone()),
-                        span: refusal.span,
+                        shadowing: shadowing.clone(),
+                        span: span.map(|span| (span.start, span.end)),
                     });
                 }
                 failure

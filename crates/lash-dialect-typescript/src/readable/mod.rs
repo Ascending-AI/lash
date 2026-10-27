@@ -179,7 +179,7 @@ impl regions::Regions for Printing<'_> {
             self.options.limits,
             None,
         )
-        .map_err(|diagnostic| diagnostic.span.map(|span| span.start))
+        .map_err(|diagnostic| diagnostic.span().map(|span| span.start))
     }
 }
 

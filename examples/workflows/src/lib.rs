@@ -386,13 +386,13 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     );
                 };
                 ensure!(
-                    &diagnostic.code == expected,
+                    diagnostic.code() == expected,
                     "{} {extension}: expected {expected}, got {diagnostic}",
                     case.name
                 );
                 outputs.insert(
                     format!("{prefix}refusal.{extension}.txt"),
-                    format!("code: {}\n", diagnostic.code),
+                    format!("code: {}\n", diagnostic.code()),
                 );
                 continue;
             }

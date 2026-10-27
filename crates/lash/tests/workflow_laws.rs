@@ -1373,7 +1373,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             .collect::<Vec<_>>()
     };
     let code = |imported: WorkflowImport, source: &str| match imported {
-        WorkflowImport::Refused(diagnostics) => diagnostics[0].code.clone(),
+        WorkflowImport::Refused(diagnostics) => diagnostics[0].code().to_owned(),
         other => panic!("the module is refused: {other:?}\n{source}"),
     };
 
@@ -1446,7 +1446,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         let WorkflowImport::Refused(diagnostics) = import(language, source).await else {
             panic!("a syntax error is refused: {source}");
         };
-        let span = diagnostics[0].span.expect("the syntax error has a span");
+        let span = diagnostics[0].span().expect("the syntax error has a span");
         assert!(
             span.start <= span.end && span.end <= source.len(),
             "{span:?}"
@@ -1644,10 +1644,10 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
                     };
                     assert_eq!(diagnostics.len(), 1);
                     let diagnostic = &diagnostics[0];
-                    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+                    assert_eq!(diagnostic.code(), "TS_IMPLICIT_TEXT_CONVERSION");
                     let start = source.rfind("event.answered_by").unwrap();
                     assert_eq!(
-                        diagnostic.span,
+                        diagnostic.span(),
                         Some(Span {
                             start,
                             end: start + "event.answered_by".len()
@@ -1664,7 +1664,12 @@ async fn implicit_text_admission_preserves_operand_facts_for_hosts() {
                     } else {
                         Static::Any
                     };
-                    assert_eq!(diagnostic.operand_type, Some(Box::new(expected)));
+                    let lash::dialect::DiagnosticReason::ImplicitTextConversion(conversion) =
+                        &diagnostic.reason
+                    else {
+                        panic!("implicit conversion reason");
+                    };
+                    assert_eq!(conversion.operand_type, expected);
                     assert!(diagnostic.repairs.is_empty());
                 } else {
                     assert!(
@@ -1704,7 +1709,7 @@ fn cell_with_implicit_text(source: &str) -> lash::dialect::Lowered {
 }
 
 #[cfg(feature = "typescript")]
-fn implicit_text_diagnostic(error: lash::EmbedError) -> Box<lash::vm::DialectRefusal> {
+fn implicit_text_diagnostic(error: lash::EmbedError) -> Box<lash::vm::Diagnostic> {
     let lash::EmbedError::WorkflowSource(lash::vm::SourceServiceError::Dialect(diagnostic)) = error
     else {
         panic!("the refusal keeps its typed source diagnostic: {error:?}");
@@ -1713,15 +1718,25 @@ fn implicit_text_diagnostic(error: lash::EmbedError) -> Box<lash::vm::DialectRef
 }
 
 #[cfg(feature = "typescript")]
-fn assert_record_conversion(diagnostic: &lash::vm::DialectRefusal, source: &str, expression: &str) {
-    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+fn assert_record_conversion(diagnostic: &lash::vm::Diagnostic, source: &str, expression: &str) {
+    assert_eq!(diagnostic.code(), "TS_IMPLICIT_TEXT_CONVERSION");
     let start = source.rfind(expression).unwrap();
-    assert_eq!(diagnostic.span, Some((start, start + expression.len())));
     assert_eq!(
-        diagnostic.operand_type,
-        Some(Box::new(lash::dialect::SourceOperandType::Record(
+        diagnostic.span(),
+        Some(lash::workflow::document::Span {
+            start,
+            end: start + expression.len()
+        })
+    );
+    let lash::dialect::DiagnosticReason::ImplicitTextConversion(conversion) = &diagnostic.reason
+    else {
+        panic!("implicit conversion reason");
+    };
+    assert_eq!(
+        conversion.operand_type,
+        lash::dialect::SourceOperandType::Record(
             [("identity_id".into(), lash::dialect::SourceOperandType::Text)].into()
-        )))
+        )
     );
     assert!(diagnostic.repairs.is_empty());
 }
@@ -2039,20 +2054,24 @@ async fn ordinary_source_replacement_applies_the_hosts_implicit_text_policy() {
     };
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = &diagnostics[0];
-    assert_eq!(diagnostic.code, "TS_IMPLICIT_TEXT_CONVERSION");
+    assert_eq!(diagnostic.code(), "TS_IMPLICIT_TEXT_CONVERSION");
     let start = edited.rfind("event").unwrap();
     assert_eq!(
-        diagnostic.span,
+        diagnostic.span(),
         Some(lash::workflow::document::Span {
             start,
             end: start + 5
         })
     );
+    let lash::dialect::DiagnosticReason::ImplicitTextConversion(conversion) = &diagnostic.reason
+    else {
+        panic!("implicit conversion reason");
+    };
     assert_eq!(
-        diagnostic.operand_type,
-        Some(Box::new(lash::dialect::SourceOperandType::Record(
+        conversion.operand_type,
+        lash::dialect::SourceOperandType::Record(
             [("identity_id".into(), lash::dialect::SourceOperandType::Text)].into()
-        )))
+        )
     );
     core.shutdown().await.unwrap();
 }
@@ -2092,14 +2111,19 @@ async fn exported_workflow_readback_honours_strict_implicit_text_policy() {
             let WorkflowImport::Refused(diagnostics) = answer else {
                 panic!("Strict refuses Any");
             };
-            assert_eq!(diagnostics[0].code, "TS_IMPLICIT_TEXT_CONVERSION");
+            assert_eq!(diagnostics[0].code(), "TS_IMPLICIT_TEXT_CONVERSION");
+            let lash::dialect::DiagnosticReason::ImplicitTextConversion(conversion) =
+                &diagnostics[0].reason
+            else {
+                panic!("implicit conversion reason");
+            };
             assert_eq!(
-                diagnostics[0].operand_type,
-                Some(Box::new(lash::dialect::SourceOperandType::Any))
+                conversion.operand_type,
+                lash::dialect::SourceOperandType::Any
             );
             let start = source.rfind("event").unwrap();
             assert_eq!(
-                diagnostics[0].span,
+                diagnostics[0].span(),
                 Some(lash::workflow::document::Span {
                     start,
                     end: start + 5
@@ -2374,7 +2398,7 @@ mod artifact_tracing {
             else {
                 panic!("invalid syntax is a typed refusal");
             };
-            diagnostics[0].code.clone()
+            diagnostics[0].code().to_owned()
         }
         .with_subscriber(subscriber)
         .await;

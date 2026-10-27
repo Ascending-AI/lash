@@ -132,7 +132,10 @@ impl Catalog {
                     let error = imported.err().ok_or_else(|| {
                         RunError::Invalid(format!("{} must refuse {code}", case.name))
                     })?;
-                    if error.body.error.details["diagnostics"][0]["code"] != *code {
+                    let diagnostic: lash::dialect::Diagnostic =
+                        serde_json::from_value(error.body.error.details["diagnostics"][0].clone())
+                            .map_err(|error| RunError::Invalid(error.to_string()))?;
+                    if diagnostic.code() != code {
                         return Err(RunError::Invalid(format!(
                             "{}: unexpected refusal {:?}",
                             case.name, error.body

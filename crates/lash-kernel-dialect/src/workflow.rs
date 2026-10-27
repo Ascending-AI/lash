@@ -101,14 +101,14 @@ impl ModuleError {
     /// The refusal as a dialect-neutral diagnostic, under the shared code.
     #[must_use]
     pub fn into_diagnostic(self) -> Diagnostic {
-        Diagnostic {
-            code: self.refusal.code().to_owned(),
-            message: self.message,
-            span: self.span,
-            kind: self.refusal.kind(),
-            repairs: vec![self.refusal.repair().to_owned()],
-            ..Default::default()
-        }
+        let mut diagnostic = Diagnostic::dialect(
+            crate::DialectCode::from_static(self.refusal.code()),
+            self.refusal.kind(),
+            self.span,
+            self.message,
+        );
+        diagnostic.repairs.push(self.refusal.repair().to_owned());
+        diagnostic
     }
 }
 
@@ -150,13 +150,10 @@ impl ImplicitTextConversionPolicy {
             return Ok(());
         }
         if let Some(fact) = facts.iter().find(|fact| fact.refused(self == Self::Strict)) {
-            return Err(Diagnostic {
-                code: lash_kernel_doc::ImplicitTextConversion::CODE.into(),
-                message: "implicit text conversion refused by source admission policy".into(),
-                span: fact.span,
-                operand_type: Some(Box::new(fact.operand_type.clone())),
-                ..Default::default()
-            });
+            return Err(Diagnostic::new(
+                crate::DiagnosticReason::ImplicitTextConversion(Box::new(fact.clone())),
+                "implicit text conversion refused by source admission policy",
+            ));
         }
         Ok(())
     }

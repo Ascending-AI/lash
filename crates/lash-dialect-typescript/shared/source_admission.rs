@@ -127,22 +127,19 @@ impl Harness {
                 .map_err(|diagnostic| {
                     // Assert the concrete code and all typed facts survive the
                     // same conversion the FrontEnd boundary uses; no prose parsing.
-                    let code: DiagnosticCode = diagnostic.code;
+                    let code: DiagnosticCode = diagnostic.code();
                     let expected = diagnostic.clone();
                     let boundary = lash_kernel_dialect::Diagnostic::from(diagnostic);
-                    assert_eq!(boundary.code, code.as_str());
-                    assert_eq!(boundary.kind, expected.kind);
-                    assert_eq!(boundary.span, expected.span);
+                    assert_eq!(boundary.code(), code.as_str());
+                    assert_eq!(boundary.reason, expected.reason);
                     assert_eq!(boundary.repairs, expected.suggestions);
-                    assert_eq!(boundary.operand_type, expected.operand_type);
-                    assert_eq!(boundary.fact, expected.fact);
                     boundary
                 })
         };
         let lowered = match lowered {
             Ok(lowered) => lowered,
             Err(diagnostic) => {
-                assert!(!diagnostic.code.is_empty());
+                assert!(!diagnostic.code().is_empty());
                 assert!(!diagnostic.message.is_empty());
                 self.counts.source_refusals += 1;
                 return;
