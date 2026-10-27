@@ -268,7 +268,7 @@ impl Statement {
     pub fn render(&self, dialect: Dialect) -> Result<Rendered, RenderError> {
         Ok(Rendered {
             name: self.name,
-            sql: render(self.neutral, dialect, TABLES)?,
+            sql: render(self.neutral, dialect, TABLES)?.into_boxed_str(),
         })
     }
 
@@ -294,7 +294,7 @@ impl Statement {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rendered {
     name: &'static str,
-    sql: String,
+    sql: Box<str>,
 }
 
 impl Rendered {
