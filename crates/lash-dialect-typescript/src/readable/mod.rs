@@ -9,6 +9,7 @@ mod expressions;
 mod lift;
 mod methods;
 mod mixed;
+mod primitives;
 mod source;
 mod statements;
 
@@ -35,24 +36,47 @@ pub fn print(
     library: &dyn Library,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
-    match print_attempt(document, captions, library, options, false) {
-        Err(PrintError::Unprintable { .. }) => {
-            print_attempt(document, captions, library, options, true)
+    let mut printed = print_attempt(document, captions, library, options, STYLES[0]);
+    for style in &STYLES[1..] {
+        if !matches!(printed, Err(PrintError::Unprintable { .. })) {
+            break;
         }
-        result => result,
+        printed = print_attempt(document, captions, library, options, *style);
     }
+    printed
 }
+
+/// Plainest first: operators over constructor calls, then temporaries
+/// written where they are read over their own `const`s.
+const STYLES: [lift::Style; 4] = [
+    lift::Style {
+        operators: true,
+        preserve_temporaries: false,
+    },
+    lift::Style {
+        operators: true,
+        preserve_temporaries: true,
+    },
+    lift::Style {
+        operators: false,
+        preserve_temporaries: false,
+    },
+    lift::Style {
+        operators: false,
+        preserve_temporaries: true,
+    },
+];
 
 fn print_attempt(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn Library,
     options: PrintOptions,
-    preserve_temporaries: bool,
+    style: lift::Style,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     let namespaces = regions::namespaces(document).map_err(PrintError::Namespace)?;
-    let lifted = lift::document(document, captions, library, preserve_temporaries);
+    let lifted = lift::document(document, captions, library, style);
     let printing = Printing {
         document,
         options,

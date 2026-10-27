@@ -1425,3 +1425,67 @@ fn direct_service_calls_still_plan_their_reads() {
         );
     }
 }
+
+/// Numeric operators over checked `number` operands and primitive text
+/// methods over constant bounds print as the TypeScript they lower from.
+#[test]
+fn numeric_operators_and_primitive_text_methods_print_as_written() {
+    for (params, result, expression) in [
+        ("n: number", "boolean", "n < 1"),
+        ("n: number", "boolean", "n >= 1"),
+        ("n: number", "number", "n * 2 + 1"),
+        ("n: number", "number", "n % 2"),
+        ("n: number", "number", "-n"),
+        ("n: number", "boolean", "n === 0"),
+        ("n: number", "boolean", "n !== 0"),
+        ("s: string", "string", "s.slice(0, 3)"),
+        ("s: string", "string", "s.slice(2)"),
+        ("s: string", "string", "s.slice(1, -1)"),
+        (
+            "event: { firedAt: string; }",
+            "string",
+            "event.firedAt.slice(0, 10)",
+        ),
+        (
+            "table: { source: string; }",
+            "boolean",
+            "table.source !== \"app\"",
+        ),
+        ("table: { name: string; }", "string", "table.name.slice(1)"),
+        (
+            "table: JsonValue, schema: string",
+            "boolean",
+            "table.name.slice(0, schema.length + 1) !== schema + \".\"",
+        ),
+        (
+            "table: JsonValue",
+            "boolean",
+            "table.source !== \"app\" || table.name.slice(0, 2) !== \"x\"",
+        ),
+        ("event: { rows: number[]; }", "number", "event.rows.length"),
+        (
+            "r: { a: string | null; b: string | null; }",
+            "string",
+            "r.a ?? r.b ?? \"someone\"",
+        ),
+        ("s: string", "boolean", "s.startsWith(\"ab\")"),
+        ("s: string", "boolean", "s.endsWith(\"ab\", 3)"),
+        ("s: string", "boolean", "s.includes(\"ab\")"),
+        ("s: string", "number", "s.indexOf(\"ab\", 2)"),
+        ("s: string", "string", "s.trimEnd()"),
+        ("s: string", "string[]", "s.split(\",\")"),
+    ] {
+        let source = format!(
+            "export async function main({params}): Promise<{result}> {{\n  return {expression};\n}}\n"
+        );
+        let lowered = module(&source).unwrap();
+        let printed = crate::print(
+            &lowered.document,
+            Some(&lowered.captions),
+            super::library(),
+            Default::default(),
+        )
+        .unwrap_or_else(|refused| panic!("`{expression}` must print: {refused}"));
+        assert_eq!(printed.source, source);
+    }
+}

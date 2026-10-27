@@ -186,7 +186,7 @@ impl Lifter<'_> {
         }
     }
 
-    fn rhs(&mut self, value: &k::Rhs) -> Lift<Expr> {
+    pub(super) fn rhs(&mut self, value: &k::Rhs) -> Lift<Expr> {
         match value {
             k::Rhs::Expr(value) => self.expr(value),
             k::Rhs::Action(action) => self.act(&act_of(action)),
@@ -367,6 +367,23 @@ impl Lifter<'_> {
         {
             return Ok(None);
         }
+        // A name some built-in has is the record's own only where the record
+        // holds a field by it; otherwise its built-in helper reads it.
+        let (direct, owned) = match direct.as_slice() {
+            [
+                k::Stmt::If {
+                    condition: k::Expr::Call { function, args },
+                    then_block,
+                    else_block,
+                },
+            ] if self.is(function, "record.contains") => match args.as_slice() {
+                [held, k::Expr::Literal(k::Literal::Text(field))] if held == target => {
+                    (then_block.as_slice(), Some((field, else_block.as_slice())))
+                }
+                _ => return Ok(None),
+            },
+            direct => (direct, None),
+        };
         let Some(k::Rhs::Expr(k::Expr::Member(member))) = Self::sets(direct, name) else {
             return Ok(None);
         };
@@ -377,16 +394,28 @@ impl Lifter<'_> {
         else {
             return Ok(None);
         };
-        let helper = [
+        let read_helper = [
             target.clone(),
             k::Expr::Literal(k::Literal::Text(field.clone())),
         ];
+        let builtin = |helper: &str| format!("{helper}.{field}");
         let helper_args = |value: Option<&k::Rhs>| {
-            value
-                .and_then(|value| self.helper_read(value, "ts.read"))
-                .is_some_and(|args| args == helper)
+            value.is_some_and(|value| {
+                if owned.is_none() {
+                    return self
+                        .helper_read(value, "ts.read")
+                        .is_some_and(|args| args == read_helper);
+                }
+                ["ts.property", "ts.member"].iter().any(|helper| {
+                    self.helper_read(value, &builtin(helper))
+                        .is_some_and(|args| args.as_slice() == std::slice::from_ref(target))
+                })
+            })
         };
         if read != target
+            || owned.is_some_and(|(held, otherwise)| {
+                held != field || !helper_args(Self::sets(otherwise, name))
+            })
             || !helper_args(Self::sets(guarded, name))
             || !helper_args(Self::sets(else_block, name))
         {

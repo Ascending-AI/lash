@@ -40,7 +40,7 @@ mod lazy;
 mod packages;
 mod patterns;
 mod positional;
-mod primitive_methods;
+pub(crate) mod primitive_methods;
 mod process;
 mod statements;
 pub(crate) mod walk;

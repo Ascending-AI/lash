@@ -16,6 +16,18 @@ use super::source::{self, Item, Param, Property, Stmt, Type};
 /// Why a region did not lift.
 pub(super) type Lift<T> = Result<T, String>;
 
+/// How a lift spells what it may spell more than one way. [`super::print`]
+/// tries the plainest style first and keeps the first one that reads back.
+#[derive(Clone, Copy)]
+pub(super) struct Style {
+    /// Front-end temporaries keep their own `const`s instead of being written
+    /// where they are read.
+    pub(super) preserve_temporaries: bool,
+    /// Numeric natives over checked `number` operands are written as the
+    /// operators they lower from (`n < 1`), not as `num.lt(num.checked_float(n), 1)`.
+    pub(super) operators: bool,
+}
+
 pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
     Err(why.into())
 }
@@ -43,7 +55,7 @@ pub(super) fn document(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
-    preserve_temporaries: bool,
+    style: Style,
 ) -> Lifted {
     let functions = document
         .exports
@@ -63,7 +75,7 @@ pub(super) fn document(
                                 captions,
                                 Unit::Library(export.function),
                                 library,
-                                preserve_temporaries,
+                                style,
                             )
                             .item(name, function, export)
                         }),
@@ -73,19 +85,13 @@ pub(super) fn document(
         })
         .collect::<BTreeMap<_, _>>();
     let main = if document.exports.is_empty() {
-        let mut lifter = Lifter::new(
-            document,
-            captions,
-            Unit::Main,
-            library,
-            preserve_temporaries,
-        );
+        let mut lifter = Lifter::new(document, captions, Unit::Main, library, style);
         let block = document.main.as_deref().unwrap_or_default();
         lifter
             .block(block, &Site::new(Unit::Main, Vec::new()))
             .map(Main::Cell)
     } else {
-        module_main(document, captions, library, preserve_temporaries).map(Main::Module)
+        module_main(document, captions, library, style).map(Main::Module)
     };
     Lifted { functions, main }
 }
@@ -94,18 +100,12 @@ fn module_main(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
-    preserve_temporaries: bool,
+    style: Style,
 ) -> Lift<Vec<ModulePart>> {
     let parts = lash_kernel_dialect::regions::module_parts(document)
         .ok_or_else(|| "module exports do not match their Main bindings".to_owned())?;
     let main = document.main.as_deref().unwrap_or_default();
-    let mut lifter = Lifter::new(
-        document,
-        captions,
-        Unit::Main,
-        library,
-        preserve_temporaries,
-    );
+    let mut lifter = Lifter::new(document, captions, Unit::Main, library, style);
     parts
         .into_iter()
         .filter_map(|part| {
@@ -146,7 +146,7 @@ pub(super) struct Lifter<'a> {
     /// The temporaries lifted and not yet read, in the order they were
     /// bound: the order the source evaluated them.
     pending: Vec<Pending>,
-    preserve_temporaries: bool,
+    pub(super) style: Style,
     /// The captions of the temporaries the statement being lifted read.
     taken_captions: Vec<Caption>,
     /// The names some statement of the unit assigns.
@@ -161,7 +161,7 @@ impl<'a> Lifter<'a> {
         captions: Option<&'a k::Captions>,
         unit: Unit,
         library: &'a dyn lash_kernel_dialect::Library,
-        preserve_temporaries: bool,
+        style: Style,
     ) -> Self {
         let imports = match &unit {
             Unit::Library(id) => document
@@ -227,7 +227,7 @@ impl<'a> Lifter<'a> {
             imports,
             captions,
             pending: Vec::new(),
-            preserve_temporaries,
+            style,
             taken_captions: Vec::new(),
             assigned,
             bindings,
@@ -258,7 +258,7 @@ impl<'a> Lifter<'a> {
             self.captions,
             Unit::Library(function),
             self.library,
-            self.preserve_temporaries,
+            self.style,
         );
         inner.bindings.extend(self.bindings.clone());
         inner
@@ -297,7 +297,7 @@ impl<'a> Lifter<'a> {
             self.captions,
             Unit::Main,
             self.library,
-            self.preserve_temporaries,
+            self.style,
         );
         if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
             if export_scope.is(await_fn, "ts.await"))
@@ -521,6 +521,165 @@ impl<'a> Lifter<'a> {
         result
     }
 
+    /// How many statements from the start of `block`, child `at` of the
+    /// block at `site`, become one temporary waiting to be read: a lowered
+    /// read or method, a short circuit, or a front-end temporary. Zero when
+    /// the first statement is written as itself.
+    fn pend(&mut self, block: &[k::Stmt], site: &Site, at: usize) -> Lift<usize> {
+        let captions = self.captions;
+        let caption_at = |later: usize| {
+            captions
+                .and_then(|captions| captions.at(&site.child((at + later) as u32)))
+                .cloned()
+        };
+        let caption = caption_at(0);
+        // A primitive text method's receiver check, and its slice bounds:
+        // the method call they precede writes and lowers them again.
+        if self.receiver_check(&block[0]) {
+            self.taken_captions.extend(caption);
+            return Ok(1);
+        }
+        if let Some(bounds) = self.slice_bounds(block) {
+            let captions = [caption, caption_at(1)];
+            self.taken_captions.extend(captions.into_iter().flatten());
+            for (name, value) in bounds {
+                self.pending.push(Pending {
+                    name,
+                    value,
+                    caption: None,
+                });
+            }
+            return Ok(2);
+        }
+        if let Some((name, value)) = self.ends_with(block)? {
+            let captions = [caption, caption_at(1), caption_at(2)];
+            self.taken_captions.extend(captions.into_iter().flatten());
+            self.pending.push(Pending {
+                name,
+                value,
+                caption: None,
+            });
+            return Ok(3);
+        }
+        if let Some((name, value)) = self.short_circuit(block, site, at)? {
+            self.pending.push(Pending {
+                name,
+                value,
+                caption,
+            });
+            return Ok(2);
+        }
+        let ladder = match self.array_ladder(block, site, at)? {
+            Some(ladder) => Some(ladder),
+            None => self.read_ladder(block)?,
+        };
+        if let Some((name, value, taken)) = ladder {
+            if (1..taken).any(|later| caption_at(later).is_some()) {
+                return refuse("a caption inside a lowered read");
+            }
+            self.pending.push(Pending {
+                name,
+                value,
+                caption,
+            });
+            return Ok(taken);
+        }
+        // A helper call's result is a temporary too: reading the call where
+        // it is read hoists it again.
+        if let k::Stmt::Let { name, value } = &block[0]
+            && matches!(
+                value,
+                k::Rhs::Expr(_) | k::Rhs::Action(k::Action::Call { .. })
+            )
+            && temporary(name)
+            && !self.style.preserve_temporaries
+        {
+            let value = self.rhs(value)?;
+            self.pending.push(Pending {
+                name: name.clone(),
+                value,
+                caption,
+            });
+            return Ok(1);
+        }
+        Ok(0)
+    }
+
+    /// `a || b` (`a && b`, `a ?? b`) whose right operand needs statements of its own:
+    /// `let t = a; if t {} else { …; set t = b }`, the arm's statements
+    /// all temporaries `b` reads.
+    fn short_circuit(
+        &mut self,
+        block: &[k::Stmt],
+        site: &Site,
+        at: usize,
+    ) -> Lift<Option<(Name, source::Expr)>> {
+        let [
+            k::Stmt::Let { name, value: left },
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+            ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let tested = match condition {
+            k::Expr::Call { function, args } if self.is(function, "ts.to_boolean") => {
+                args.as_slice()
+            }
+            condition => std::slice::from_ref(condition),
+        };
+        if !temporary(name) || self.style.preserve_temporaries {
+            return Ok(None);
+        }
+        let (operator, arm, child) = if self.nullish(condition, name) && else_block.is_empty() {
+            ("??", then_block, 1)
+        } else if tested == [k::Expr::Variable(name.clone())] {
+            match (then_block.is_empty(), else_block.is_empty()) {
+                (true, false) => ("||", else_block, 2),
+                (false, true) => ("&&", then_block, 1),
+                _ => return Ok(None),
+            }
+        } else {
+            return Ok(None);
+        };
+        let [
+            prelude @ ..,
+            k::Stmt::Assign {
+                place: k::Place::Variable(set),
+                value: right,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = arm.as_slice()
+        else {
+            return Ok(None);
+        };
+        if set != name {
+            return Ok(None);
+        }
+        let left = self.rhs(left)?;
+        let outer = self.pending.len();
+        let arm_site = site.child((at + 1) as u32).child(child);
+        let mut index = 0;
+        while index < prelude.len() {
+            match self.pend(&prelude[index..], &arm_site, index)? {
+                0 => return refuse("a statement in a short circuit's right operand"),
+                taken => index += taken,
+            }
+        }
+        let right = self.rhs(right)?;
+        if self.pending.len() > outer {
+            return refuse("a temporary a short circuit's right operand does not read");
+        }
+        Ok(Some((
+            name.clone(),
+            source::Expr::Binary(operator, Box::new(left), Box::new(right)),
+        )))
+    }
+
     /// [`Self::block`] of statements that begin at child `first` of the
     /// block at `site`.
     pub(super) fn block_at(
@@ -539,42 +698,9 @@ impl<'a> Lifter<'a> {
                 .captions
                 .and_then(|captions| captions.at(&here))
                 .cloned();
-            let ladder = match self.array_ladder(&block[index..], site, first + index)? {
-                Some(ladder) => Some(ladder),
-                None => self.read_ladder(&block[index..])?,
-            };
-            if let Some((name, value, taken)) = ladder {
-                for later in 1..taken {
-                    if self.captions.is_some_and(|captions| {
-                        captions
-                            .at(&site.child((first + index + later) as u32))
-                            .is_some()
-                    }) {
-                        return refuse("a caption inside a lowered read");
-                    }
-                }
-                self.pending.push(Pending {
-                    name,
-                    value,
-                    caption,
-                });
-                index += taken;
-                continue;
-            }
-            if let k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(value),
-            } = &block[index]
-                && temporary(name)
-                && !self.preserve_temporaries
-            {
-                let value = self.expr(value)?;
-                self.pending.push(Pending {
-                    name: name.clone(),
-                    value,
-                    caption,
-                });
-                index += 1;
+            let pended = self.pend(&block[index..], site, first + index)?;
+            if pended > 0 {
+                index += pended;
                 continue;
             }
             // The TDZ cell is emitted before a closure captures a declaration
