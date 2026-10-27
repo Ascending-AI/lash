@@ -296,14 +296,7 @@ pub(super) fn owner_requires(
     requested: Option<&[String]>,
 ) -> Answer<Vec<String>> {
     let mut requires = match requested {
-        Some(requires) => {
-            tx.prepare_cached(super::SQL.actor.stamp_requires.sql())?
-                .execute(rusqlite::params![
-                    actor.as_str(),
-                    lash_durable::encode_requires(requires)
-                ])?;
-            requires.to_vec()
-        }
+        Some(requires) => requires.to_vec(),
         None => {
             let stored: Option<String> = tx
                 .prepare_cached(SQL.owner_revision.sql())?

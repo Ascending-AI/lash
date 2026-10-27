@@ -16,6 +16,35 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
     pub(crate) struct PendingInputSqliteStatements @ "pending_turn_input" {
+        /// Requested completion rows in request order, including a NULL row
+        /// for each missing identity. Validation preserves the first refusal.
+        completed_rows = "SELECT held.enqueue_seq, held.input_id, held.session_id, held.source_key,
+                    held.ingress_json, held.state,
+                    CASE WHEN {{terminal_turn_input_state(held.state)}} AND EXISTS (
+                        SELECT 1 FROM session_runs AS ended
+                        WHERE ended.session_id = held.session_id
+                          AND ended.run = held.admitted_run
+                          AND ended.terminal_kind IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1 FROM session_revisions AS kept
+                              WHERE kept.session_id = ended.session_id
+                                AND kept.head_revision = COALESCE(
+                                    ended.terminal_window_revision, ended.terminal_head_revision)
+                          )
+                    ) THEN NULL ELSE held.input_json END AS input_json,
+                    held.enqueued_at_ms, held.admitted_run, held.admitted_by, held.run_spec_hash,
+                    held.terminal_at_ms, held.trace_cause_json, held.origin_json
+             FROM json_each(?2) AS wanted LEFT JOIN pending_turn_inputs AS held
+                 ON held.session_id = ?1 AND held.input_id = wanted.value
+             ORDER BY CAST(wanted.key AS INTEGER)";
+
+        /// Settle the validated identity set under the run that holds it.
+        complete_set = "UPDATE pending_turn_inputs
+             SET state = 'completed', terminal_at_ms = ?4, admitted_by = NULL
+             WHERE session_id = ?1 AND admitted_run = ?3
+               AND input_id IN (SELECT value FROM json_each(?2))
+             RETURNING input_id";
+
         /// The facts the settlement verdict consults about input `?2` of
         /// session `?1`.
         ///

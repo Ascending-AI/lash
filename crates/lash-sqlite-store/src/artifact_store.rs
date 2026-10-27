@@ -45,6 +45,13 @@ lash_store_sql::statements! {
              SELECT value ->> 0, value ->> 1, ?2, ?3 FROM json_each(?1) WHERE true
              ON CONFLICT DO NOTHING";
 
+        /// Sever the local stores' complete share, returning the affected
+        /// identities for the existing checked reclamation pass.
+        delete_namespace_edges = "DELETE FROM artifact_referrer_edges
+             WHERE referrer_kind = ?1 AND referrer_id = ?2
+               AND namespace IN (SELECT value FROM json_each(?3))
+             RETURNING namespace, artifact_ref, referrer_kind, referrer_id";
+
         /// Point `?1`/`?2` at blob `?3`. An artifact is immutable, so a
         /// second publication of the same reference keeps the first pointer
         /// and the caller compares what it reads back.
@@ -55,6 +62,17 @@ lash_store_sql::statements! {
         /// The blob `?1`/`?2` points at.
         select_blob_ref = "SELECT blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
+
+        /// Holder fence, exact bundle lease and pointer in one snapshot.
+        material_lease = "SELECT
+             EXISTS (SELECT 1 FROM referrer_fences
+                 WHERE referrer_kind = ?3 AND referrer_id = ?4),
+             EXISTS (SELECT 1 FROM artifact_referrer_edges
+                 WHERE namespace = ?1 AND artifact_ref = ?2
+                   AND referrer_kind = ?3 AND referrer_id = ?4),
+             refs.blob_ref
+             FROM (SELECT 1) AS subject LEFT JOIN artifact_refs AS refs
+                 ON refs.namespace = ?1 AND refs.artifact_ref = ?2";
 
         /// The blob `?1`/`?2` points at and its encoding: a graph node is a
         /// node-bodied artifact's root (FIG-6469). A dangling pointer has
@@ -595,17 +613,33 @@ impl SqliteStore {
         referrer: &ArtifactReferrer,
         now_ms: u64,
     ) -> rusqlite::Result<()> {
-        let cleanup = ResolvedArtifactCleanup {
-            referrer: referrer.clone(),
-            carries: Vec::new(),
-        };
-        for namespace in [
+        let namespaces = [
             MODULE_ARTIFACT_NAMESPACE,
             PROCESS_ENV_NAMESPACE,
             PROCESS_DEFINITION_NAMESPACE,
             TURN_PRELUDE_NAMESPACE,
-        ] {
-            Self::end_namespaced_tx(tx, namespace, &cleanup, now_ms)?;
+        ];
+        fence_artifact_referrer_tx(tx, referrer, now_ms)?;
+        let mut released = std::collections::BTreeMap::<String, Vec<String>>::new();
+        let mut statement = tx.prepare_cached(artifact_sql().refs.delete_namespace_edges.sql())?;
+        let mut rows = statement.query(params![
+            referrer.kind().as_str(),
+            referrer.canonical_id(),
+            serde_json::to_string(&namespaces)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+        ])?;
+        while let Some(row) = rows.next()? {
+            let namespace = row.get(0)?;
+            let reference = row.get(1)?;
+            let kind: String = row.get(2)?;
+            let id: String = row.get(3)?;
+            decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+            released.entry(namespace).or_default().push(reference);
+        }
+        drop(rows);
+        drop(statement);
+        for (namespace, references) in released {
+            Self::reclaim_unreferenced_artifacts_tx(tx, &namespace, &references)?;
         }
         Ok(())
     }

@@ -3,6 +3,39 @@ use super::*;
 use lash_core_store::checkpoint_graph::GraphRefusal;
 use lash_durable::domain::graph_commit::CheckedGraph;
 
+lash_store_sql::statements! {
+    struct OwnerSqliteStatements @ "durable_owner_sqlite" {
+        /// The actor fence and its unchanged turn frontier share one read.
+        fence = "WITH open_turn AS MATERIALIZED (
+             SELECT r.run, p.checkpoint_ref, p.answer_ref,
+                    c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM session_runs AS r
+             JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN turn_cancel_requests AS c
+                 ON c.session_id = r.session_id AND c.turn_id = r.run
+             WHERE r.session_id = ?4 AND r.admission_json IS NOT NULL
+               AND r.terminal_kind IS NULL)
+             UPDATE actors SET state_revision = state_revision + 1
+             WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned' AND state_revision = ?3
+             RETURNING state_revision,
+                 (SELECT run FROM open_turn), (SELECT checkpoint_ref FROM open_turn),
+                 (SELECT answer_ref FROM open_turn), (SELECT request_id FROM open_turn),
+                 (SELECT origin FROM open_turn), (SELECT reason FROM open_turn),
+                 (SELECT disposition FROM open_turn), (SELECT mode FROM open_turn)";
+
+        /// Publish the owner's format, baseline/effective execution debt
+        /// and mailbox acknowledgement together, before releasing its claim.
+        publish = "UPDATE actors SET formats = COALESCE(?2, formats),
+             base_requires = CASE WHEN ?3 THEN ?4 ELSE base_requires END,
+             requires = CASE WHEN ?5 THEN ?6 ELSE requires END,
+             acked_seq = max(acked_seq, COALESCE(?7, acked_seq))
+             WHERE actor_key = ?1";
+    }
+}
+
+static OWNER_SQL: std::sync::LazyLock<OwnerSqliteStatements> =
+    std::sync::LazyLock::new(|| OwnerSqliteStatements::render(crate::schema_layout::MAIN));
+
 /// Session plans are keyed by declared session/head and exact encoded content;
 /// no list position supplies identity. Application keeps the original write
 /// order and reaches every refusal under the original fences.
@@ -98,14 +131,21 @@ pub(super) fn apply_owner(
     let write = &prepared.write;
     let fleet = tx.fleet();
     let actor = write.actor().as_str().to_owned();
+    let session =
+        (write.actor().kind() == lash_durable::ActorKind::Session).then(|| write.actor().id());
     let fence = tx
-        .prepare_cached(SQL.actor.fence.sql())?
+        .prepare_cached(OWNER_SQL.fence.sql())?
         .query_row(
-            rusqlite::params![actor, write.epoch().0, write.revision().0],
-            |row| row.get::<_, i64>(0),
+            rusqlite::params![actor, write.epoch().0, write.revision().0, session],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    turns::StoredFrontier::read(row, 1, write.actor().id()),
+                ))
+            },
         )
         .optional()?;
-    let Some(revision) = fence else {
+    let Some((revision, frontier)) = fence else {
         return refuse(fenced(tx, write.actor(), write.epoch(), write.revision())?);
     };
     if write.domain().iter().any(|domain| {
@@ -134,7 +174,7 @@ pub(super) fn apply_owner(
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };
-            match turns::turn_frontier(tx, &session)? {
+            match frontier?.map(|stored| stored.decode(&session)).transpose() {
                 Ok(Some((cancel, roots))) => (cancel, Some(roots)),
                 Ok(None) => (None, None),
                 Err(error) => return refuse(error),
@@ -259,14 +299,7 @@ pub(super) fn apply_owner(
         committing.retired.stored(root);
     }
     graph::hold_retired(tx, committing.retired, now)?;
-    if let Some(formats) = write.formats() {
-        cached_execute(
-            tx,
-            SQL.actor.stamp_formats.sql(),
-            rusqlite::params![actor, formats.as_str()],
-        )?;
-    }
-    if write.requires().is_some()
+    let requires = if write.requires().is_some()
         || write.domain().iter().any(|write| {
             matches!(
                 write,
@@ -276,16 +309,31 @@ pub(super) fn apply_owner(
                     | DomainWrite::SeedResolution(_)
                     | DomainWrite::Process(lash_durable::domain::ProcessWrite::Terminal { .. })
             )
-        })
-    {
+        }) {
         let requires = match packages::owner_requires(tx, write.actor(), write.requires())? {
             Ok(requires) => requires,
             Err(error) => return refuse(error),
         };
-        processes::stamp_requires(tx, &actor, &requires)?;
+        Some(requires)
+    } else {
+        None
+    };
+    if write.formats().is_some() || requires.is_some() || write.ack().is_some() {
+        cached_execute(
+            tx,
+            OWNER_SQL.publish.sql(),
+            rusqlite::params![
+                actor,
+                write.formats().map(|formats| formats.as_str()),
+                write.requires().is_some(),
+                write.requires().map(lash_durable::encode_requires),
+                requires.is_some(),
+                requires.as_deref().map(lash_durable::encode_requires),
+                write.ack().map(|through| through.0),
+            ],
+        )?;
     }
     if let Some(through) = write.ack() {
-        cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;
         cached_execute(
             tx,
             SQL.mail.delete_through.sql(),

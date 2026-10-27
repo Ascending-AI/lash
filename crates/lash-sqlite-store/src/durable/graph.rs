@@ -1016,9 +1016,7 @@ pub(super) fn hold_retired(
     retired: Retired,
     now: DurableInstant,
 ) -> rusqlite::Result<()> {
-    let (closures, phase_ends) = retired.into_parts();
-    super::pages::hold(tx, &closures, true, now)?;
-    super::pages::hold(tx, &phase_ends, false, now).map(drop)
+    super::pages::hold_retired(tx, retired, now)
 }
 
 /// Holds the closure of each stored root of `roots`, the roots the

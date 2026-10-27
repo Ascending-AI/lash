@@ -57,6 +57,12 @@ lash_store_sql::statements! {
              WHERE blobs.hash IN (SELECT unhex(value) FROM json_each(?1))
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
+        /// Mixed closure and node-only holds from one owner commit.
+        hold_set = "INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
+             SELECT blobs.hash, wanted.value ->> 1, ?2 FROM json_each(?1) AS wanted
+             JOIN blobs ON blobs.hash = unhex(wanted.value ->> 0) WHERE true
+             ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
+
         /// Release the complete owner handoff, returning roots for holds.
         release_leases = "DELETE FROM root_leases
             WHERE lease_id IN (SELECT value FROM json_each(?1)) RETURNING root_ref";
@@ -183,6 +189,29 @@ pub(super) fn hold(
         )?;
     }
     Ok(held)
+}
+
+pub(super) fn hold_retired(
+    tx: &Connection,
+    retired: super::Retired,
+    now: DurableInstant,
+) -> rusqlite::Result<()> {
+    let (closures, phase_ends) = retired.into_parts();
+    let mut roots = closures
+        .into_iter()
+        .map(|root| (root, true))
+        .chain(phase_ends.into_iter().map(|root| (root, false)));
+    loop {
+        let chunk: Vec<_> = roots.by_ref().take(HOLD_BATCH).collect();
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        cached_execute(
+            tx,
+            SQL.sqlite.hold_set.sql(),
+            rusqlite::params![graph::json_array(&chunk), now.0],
+        )?;
+    }
 }
 
 /// Installs `candidate` with the owner commit's own `checked` graph, in the

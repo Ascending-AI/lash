@@ -194,6 +194,12 @@ pub(super) fn apply(
                     commit.epoch.0,
                 ],
             )?;
+            *commit.open_roots.0.borrow_mut() = Some(PhaseRoots {
+                session: session.as_str().to_owned(),
+                run: run.as_str().to_owned(),
+                checkpoint: None,
+                answer: None,
+            });
             Ok(Ok(()))
         }
         TurnWrite::Advance {
@@ -846,30 +852,53 @@ pub(super) fn turn_frontier(
     let stored = tx
         .prepare_cached(super::SQL.sqlite.turn_frontier.sql())?
         .query_row([session.as_str()], |row| {
-            Ok((
-                PhaseRoots {
-                    session: session.as_str().to_owned(),
-                    run: row.get(0)?,
-                    checkpoint: crate::codec::optional_hash_column(row, 1)?,
-                    answer: crate::codec::optional_hash_column(row, 2)?,
-                },
-                row.get::<_, Option<String>>(3)?
-                    .map(|_| StoredCancel::read(row, 3))
-                    .transpose()?,
-            ))
+            StoredFrontier::read(row, 0, session.as_str())
         })
-        .optional()?;
-    let Some((roots, cancel)) = stored else {
-        return Ok(Ok(None));
-    };
-    let run = match TurnId::try_from(roots.run.clone()) {
-        Ok(run) => run,
-        Err(error) => return Ok(Err(corrupt("turn run", &error.to_string()))),
-    };
-    Ok(cancel
-        .map(|cancel| cancel.decode(session, &run))
-        .transpose()
-        .map(|cancel| Some((cancel, roots))))
+        .optional()?
+        .flatten();
+    Ok(stored.map(|stored| stored.decode(session)).transpose())
+}
+
+pub(super) struct StoredFrontier {
+    roots: PhaseRoots,
+    cancel: Option<StoredCancel>,
+}
+
+impl StoredFrontier {
+    pub(super) fn read(
+        row: &rusqlite::Row<'_>,
+        first: usize,
+        session: &str,
+    ) -> rusqlite::Result<Option<Self>> {
+        let Some(run) = row.get::<_, Option<String>>(first)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            roots: PhaseRoots {
+                session: session.to_owned(),
+                run,
+                checkpoint: crate::codec::optional_hash_column(row, first + 1)?,
+                answer: crate::codec::optional_hash_column(row, first + 2)?,
+            },
+            cancel: row
+                .get::<_, Option<String>>(first + 3)?
+                .map(|_| StoredCancel::read(row, first + 3))
+                .transpose()?,
+        }))
+    }
+
+    pub(super) fn decode(
+        self,
+        session: &SessionId,
+    ) -> Result<(Option<TurnCancelRequest>, PhaseRoots), DurableError> {
+        let run = TurnId::try_from(self.roots.run.clone())
+            .map_err(|error| corrupt("turn run", &error.to_string()))?;
+        let cancel = self
+            .cancel
+            .map(|cancel| cancel.decode(session, &run))
+            .transpose()?;
+        Ok((cancel, self.roots))
+    }
 }
 
 /// An unfinished turn's phase root and receipt as stored.

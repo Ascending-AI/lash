@@ -299,6 +299,54 @@ type PriorReceiptRow = (
     i64,
 );
 
+/// Decoding stays deferred until the original refusal point. A deleted
+/// session still refuses before a damaged head, and a bad request before a
+/// damaged receipt, even though their columns arrive in one SQL statement.
+struct CommitPreimage {
+    deleted: bool,
+    admitted: bool,
+    head: rusqlite::Result<Option<crate::codec::SessionHeadRow>>,
+    prior: rusqlite::Result<Option<PriorReceiptRow>>,
+    parent: rusqlite::Result<Option<(i64, String, String)>>,
+}
+
+impl CommitPreimage {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            deleted: row.get(5)?,
+            admitted: row.get(6)?,
+            head: (|| {
+                if row.get::<_, Option<i64>>(1)?.is_some() {
+                    crate::codec::SessionHeadRow::from_row(row).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })(),
+            prior: (|| {
+                if row.get::<_, bool>(7)? {
+                    Ok(Some((
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
+                        row.get(14)?,
+                        row.get(15)?,
+                    )))
+                } else {
+                    Ok(None)
+                }
+            })(),
+            parent: (|| {
+                row.get::<_, Option<i64>>(16)?
+                    .map(|generation| Ok((generation, row.get(17)?, row.get(18)?)))
+                    .transpose()
+            })(),
+        })
+    }
+}
+
 impl SqliteStore {
     /// One transaction of a planned runtime commit, fenced: it answers
     /// `FleetMoved` with the planner, having written nothing, when the fence
@@ -358,20 +406,25 @@ pub(crate) fn apply_runtime_commit_conn(
     // before anything of the commit is written (FIG-4746).
     tx.admit_plugin_writers(planner.plugin_publication())
         .map_err(sqlite_error)?;
-    ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-    let admitted = tx
-        .prepare_cached(session_sql().meta_sqlite.exists_materialized.sql())
+    let preimage = tx
+        .prepare_cached(session_sql().head_sqlite.commit_preimage.sql())
         .map_err(sqlite_error)?
-        .query_row(params![commit.session_id.as_str()], |_| Ok(()))
-        .optional()
-        .map_err(sqlite_error)?
-        .is_some();
-    if !admitted {
+        .query_row(
+            params![commit.session_id.as_str(), planner.operation_key()],
+            CommitPreimage::from_row,
+        )
+        .map_err(sqlite_error)?;
+    if preimage.deleted {
+        return Err(StoreError::SessionDeleted {
+            session_id: commit.session_id.clone(),
+        });
+    }
+    if !preimage.admitted {
         return Err(StoreError::SessionNotFound {
             session_id: commit.session_id.clone(),
         });
     }
-    let row = crate::codec::select_session_head_row(tx, &commit.session_id)?;
+    let row = preimage.head.map_err(sqlite_error)?;
     let prior_config = row
         .as_ref()
         .and_then(|row| row.config_ref().map(str::to_owned));
@@ -387,26 +440,7 @@ pub(crate) fn apply_runtime_commit_conn(
         .transpose()?;
     planner.validate_node_derivation()?;
     {
-        let prior: Option<PriorReceiptRow> = tx
-            .prepare_cached(session_sql().turn_commits.select_receipt.sql())
-            .map_err(sqlite_error)?
-            .query_row(
-                params![commit.session_id.as_str(), planner.operation_key()],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                        row.get(7)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(sqlite_error)?;
+        let prior = preimage.prior.map_err(sqlite_error)?;
         if let Some((
             stored_hash,
             result_json,
@@ -457,16 +491,8 @@ pub(crate) fn apply_runtime_commit_conn(
     let parent_leaf = old_leaf_node_id
         .as_deref()
         .map(|leaf_node_id| {
-            tx.prepare_cached(session_sql().graph_sqlite.select_parent_facts.sql())
-                .map_err(sqlite_error)?
-                .query_row(params![leaf_node_id], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                })
-                .optional()
+            preimage
+                .parent
                 .map_err(sqlite_error)?
                 .map(
                     |(generation, frame_node_id, owner)| -> Result<_, StoreError> {
@@ -576,54 +602,14 @@ pub(crate) fn apply_runtime_commit_conn(
 
     insert_graph_nodes_conn(tx, &commit.session_id, commit.graph.nodes(), &plan)?;
     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
-    // Divergence ruling (FIG-3381): SQLite carries no CAS
-    // predicate on its head upsert and needs none. `existing`
-    // was read inside this `BEGIN IMMEDIATE` transaction,
-    // which is SQLite's database-wide single-writer lock, so
-    // no revision can move between that read and this write.
-    // The invariant is asserted rather than assumed: if the
-    // head read is ever moved out of the write transaction,
-    // this refuses the publication instead of publishing over
-    // a revision nobody held.
+    // The preimage is read through this FencedTx under BEGIN IMMEDIATE.
+    // The publication keeps its revision predicate as a backstop; only a
+    // refused CAS needs another read to report the observed revision.
     lash_core_store::store_backend_support::require_single_writer_head_publication(
         &commit.session_id,
         crate::SQLITE_BACKEND,
         !tx.is_autocommit(),
     )?;
-    // Read the published revision again, inside the same
-    // write transaction, and let the shared verdict decide.
-    // This is SQLite's equivalent of PostgreSQL's
-    // `SELECT head_revision … FOR UPDATE`: under
-    // `BEGIN IMMEDIATE` it must still be the revision the plan
-    // was built on, and if the earlier read is ever moved out
-    // of this transaction it will not be.
-    let published_revision = tx
-        .prepare_cached(session_sql().head.select_revision.sql())
-        .map_err(sqlite_error)?
-        .query_row(params![commit.session_id.as_str()], |row| {
-            row.get::<_, i64>(0)
-        })
-        .optional()
-        .map_err(sqlite_error)?
-        .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
-        .transpose()
-        .map_err(sqlite_error)?
-        .unwrap_or(0);
-    match lash_core_store::store_backend_support::head_publication_verdict(
-        plan.actual_head_revision(),
-        published_revision,
-    ) {
-        lash_core_store::store_backend_support::HeadPublicationVerdict::Publish => {}
-        lash_core_store::store_backend_support::HeadPublicationVerdict::HeadMoved {
-            observed_head_revision,
-            ..
-        } => {
-            return Err(StoreError::HeadRevisionConflict {
-                expected: plan.actual_head_revision(),
-                actual: observed_head_revision,
-            });
-        }
-    }
     let left = lash_core_store::store::frames_left_by_commit(
         existing
             .as_ref()
@@ -683,6 +669,18 @@ pub(crate) fn apply_runtime_commit_conn(
     )
     .map_err(sqlite_error)?;
     if changed != 1 {
+        let published_revision = tx
+            .prepare_cached(session_sql().head.select_revision.sql())
+            .map_err(sqlite_error)?
+            .query_row(params![commit.session_id.as_str()], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()
+            .map_err(sqlite_error)?
+            .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
+            .transpose()
+            .map_err(sqlite_error)?
+            .unwrap_or(0);
         return Err(StoreError::HeadRevisionConflict {
             expected: plan.actual_head_revision(),
             actual: published_revision,

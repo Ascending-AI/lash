@@ -25,19 +25,7 @@ pub(super) fn settle_commit_ingress_conn(
     let mut affected_inputs = Vec::new();
     if let Some(ingress) = commit.ingress.as_ref() {
         let run = &ingress.run;
-        for completion in &ingress.completed_inputs {
-            for input_id in &completion.input_ids {
-                admitted_input_conn(tx, session_id, run, input_id)?;
-                settle_admitted_input_conn(
-                    tx,
-                    session_id,
-                    run,
-                    input_id,
-                    lash_core_store::turn_input_vocabulary::TurnInputStateKind::Completed,
-                    now,
-                )?;
-            }
-        }
+        complete_inputs_conn(tx, session_id, run, &ingress.completed_inputs, now)?;
         for completion in &ingress.completed_batches {
             for batch_id in &completion.batch_ids {
                 crate::queued_work::complete_admitted_batch_conn(
@@ -129,6 +117,77 @@ pub(super) fn settle_commit_ingress_conn(
                 .collect(),
         },
     )
+}
+
+/// Completion validates the ordered request against one snapshot, then
+/// publishes the set. Refused requests roll back the whole runtime commit.
+fn complete_inputs_conn(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+    completions: &[lash_core_store::turn_input_vocabulary::TurnInputCompletion],
+    now: u64,
+) -> Result<(), StoreError> {
+    let ids: Vec<_> = completions
+        .iter()
+        .flat_map(|completion| &completion.input_ids)
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let encoded =
+        serde_json::to_string(&ids).map_err(|error| StoreError::Backend(error.to_string()))?;
+    let sql = &crate::turn_ingress::turn_ingress_sql().pending_inputs_sqlite;
+    let mut statement = tx
+        .prepare_cached(sql.completed_rows.sql())
+        .map_err(sqlite_error)?;
+    let mut rows = statement
+        .query(params![session.as_str(), encoded])
+        .map_err(sqlite_error)?;
+    for id in &ids {
+        let row = rows
+            .next()
+            .map_err(sqlite_error)?
+            .ok_or_else(|| stored_data_corrupt("input completion", "missing requested preimage"))?;
+        let held = row
+            .get::<_, Option<String>>(1)
+            .map_err(sqlite_error)?
+            .map(|_| pending_turn_input_row_from_sql(row))
+            .transpose()
+            .map_err(sqlite_error)?;
+        lash_core_store::store_backend_support::require_admitted_to_run(
+            session,
+            run,
+            &input_row(id),
+            held.as_ref().map(|row| row.admitted_run.as_deref()),
+        )?;
+    }
+    drop(rows);
+    drop(statement);
+    let settled: std::collections::BTreeSet<String> = tx
+        .prepare_cached(sql.complete_set.sql())
+        .map_err(sqlite_error)?
+        .query_map(
+            params![
+                session.as_str(),
+                encoded,
+                run.as_str(),
+                crate::clamp_epoch_ms(now)
+            ],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(sqlite_error)?;
+    for id in ids {
+        require_settlement_applied(
+            session,
+            run,
+            input_row(id),
+            usize::from(settled.contains(id.as_str())),
+        )?;
+    }
+    Ok(())
 }
 
 /// The row of input `input_id`, which run `run` must hold.

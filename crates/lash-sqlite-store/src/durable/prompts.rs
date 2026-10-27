@@ -69,11 +69,6 @@ lash_store_sql::statements! {
              FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = unhex(wanted.value)
              ORDER BY wanted.key";
 
-        /// Whether calls eligible for settlement hold a snapshot.
-        settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
-             WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
-               AND (?3 IS NULL OR call <> ?3)";
-
         /// Release the request edges of every call of owner `?2` in session
         /// `?1` but call `?3` (none when `?3` is null), returning each text
         /// they named.
@@ -85,14 +80,15 @@ lash_store_sql::statements! {
         /// Release the root of every such call that holds no snapshot: its
         /// request was all it held.
         settle_bare_roots = "DELETE FROM prompt_snapshots
-             WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NOT NULL
-               AND (?3 IS NULL OR call <> ?3)";
+             WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NULL
+               AND call IN (SELECT value FROM json_each(?3))";
 
-        /// Release the request of every other such call, keeping its
-        /// snapshot.
+        /// Release requests and return exactly the calls to settle. Bare
+        /// roots are deleted after their text edges have been severed.
         settle_requests = "UPDATE prompt_snapshots SET request = NULL
              WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
-               AND (?3 IS NULL OR call <> ?3)";
+               AND (?3 IS NULL OR call <> ?3)
+             RETURNING call, snapshot IS NOT NULL";
 
         /// The reusable prefix currently owned by this session.
         read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
@@ -375,19 +371,27 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             let owner = ModelCallId::turn_owner(run);
             let open = open.map(|call| call.to_string());
             let params = rusqlite::params![session.as_str(), owner, open];
-            let mut statement = tx.prepare_cached(SQLITE_SQL.settling_calls.sql())?;
-            let snapshots = statement
-                .query_map(params, |row| row.get::<_, bool>(0))?
+            let mut statement = tx.prepare_cached(SQLITE_SQL.settle_requests.sql())?;
+            let calls = statement
+                .query_map(params, |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            if snapshots.is_empty() {
+            if calls.is_empty() {
                 return Ok(Ok(()));
             }
+            drop(statement);
             let released = hash_set(tx, SQLITE_SQL.settle_edges.sql(), params)?;
-            if snapshots.contains(&false) {
-                cached_execute(tx, SQLITE_SQL.settle_bare_roots.sql(), params)?;
-            }
-            if snapshots.contains(&true) {
-                cached_execute(tx, SQLITE_SQL.settle_requests.sql(), params)?;
+            let bare: Vec<_> = calls
+                .into_iter()
+                .filter_map(|(call, snapshot)| (!snapshot).then_some(call))
+                .collect();
+            if !bare.is_empty() {
+                cached_execute(
+                    tx,
+                    SQLITE_SQL.settle_bare_roots.sql(),
+                    rusqlite::params![session.as_str(), owner, encode(&bare)?],
+                )?;
             }
             reclaim(tx, &released)?;
             Ok(Ok(()))

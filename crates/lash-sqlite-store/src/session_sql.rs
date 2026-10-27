@@ -135,6 +135,27 @@ lash_store_sql::statements! {
     /// Head statements requiring SQLite semantics.
     pub(crate) struct SessionHeadSqliteStatements @ "session_head" {
 
+        /// The commit's admission, current head, exact operation receipt and
+        /// live parent facts, before any publication in its write transaction.
+        commit_preimage = "SELECT revision.config_ref, head.head_revision,
+                    revision.leaf_node_id, revision.checkpoint_ref, leaf.frame_node_id,
+                    EXISTS (SELECT 1 FROM deleted_sessions WHERE session_id = ?1),
+                    meta.session_id IS NOT NULL OR head.session_id IS NOT NULL,
+                    receipt.turn_id IS NOT NULL,
+                    receipt.turn_commit_hash, receipt.result_json, receipt.outcome_code,
+                    receipt.request_identity_hash, receipt.identity_encoding_version,
+                    receipt.requested_node_count, receipt.committed_at_ms, receipt.head_revision,
+                    CASE WHEN leaf.tombstoned = 0 THEN leaf.generation END,
+                    leaf.frame_node_id, leaf.session_id
+             FROM (SELECT 1) AS subject
+             LEFT JOIN session_meta AS meta ON meta.session_id = ?1
+             LEFT JOIN session_head AS head ON head.session_id = ?1
+             LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             LEFT JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+             LEFT JOIN runtime_turn_commits AS receipt
+                 ON receipt.session_id = ?1 AND receipt.turn_id = ?2";
+
         /// The leaf node `?1`'s head points at.
         select_leaf_node_id = "SELECT revision.leaf_node_id FROM session_head AS head
              JOIN session_revisions AS revision
@@ -268,10 +289,6 @@ lash_store_sql::statements! {
         /// configuration.
         select_frame_body = "SELECT parent_node_id, node_json FROM graph_nodes
              WHERE node_id = ?1 AND tombstoned = 0";
-
-        /// The generation, frame pointer and owner of the live leaf `?1`.
-        select_parent_facts = "SELECT generation, frame_node_id, session_id FROM graph_nodes
-                                 WHERE node_id = ?1 AND tombstoned = 0";
 
         /// The frame node nearest to `?1`.
         select_frame_node_id = "SELECT frame_node_id FROM graph_nodes

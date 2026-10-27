@@ -215,36 +215,35 @@ impl ToolMaterialStore for SqliteStore {
         let read = self
             .conn
             .read(move |conn| {
-                if artifact_fenced_tx(conn, &referrer)? {
-                    return Ok(Err(LeaseRefusal::HolderEnded));
-                }
-                let leased: bool = conn
-                    .prepare_cached(artifact_sql().edges.select_edge_exists.sql())
-                    .and_then(|mut statement| {
-                        statement.query_row(
-                            params![
-                                TOOL_MATERIAL_NAMESPACE,
-                                artifact_ref,
-                                referrer.kind().as_str(),
-                                referrer.canonical_id()
-                            ],
-                            |row| row.get(0),
-                        )
-                    })?;
-                if !leased {
-                    return Ok(Err(LeaseRefusal::BundleMissing));
-                }
+                let blob_ref = conn
+                    .prepare_cached(artifact_sql().refs.material_lease.sql())?
+                    .query_row(
+                        params![
+                            TOOL_MATERIAL_NAMESPACE,
+                            artifact_ref,
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                        |row| {
+                            if row.get::<_, bool>(0)? {
+                                return Ok(Err(LeaseRefusal::HolderEnded));
+                            }
+                            if !row.get::<_, bool>(1)? {
+                                return Ok(Err(LeaseRefusal::BundleMissing));
+                            }
+                            crate::codec::optional_hash_column(row, 2)?
+                                .ok_or(rusqlite::Error::QueryReturnedNoRows)
+                                .map(Ok)
+                        },
+                    )?;
+                let blob_ref = match blob_ref {
+                    Ok(blob_ref) => blob_ref,
+                    Err(refusal) => return Ok(Err(refusal)),
+                };
                 #[cfg(feature = "testing")]
                 if let Some(pauses) = pauses.as_ref() {
                     pauses.reach_compound_read(crate::testing::SqliteCompoundRead::ToolMaterial);
                 }
-                let blob_ref: String = conn
-                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
-                    .and_then(|mut statement| {
-                        statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
-                            crate::codec::hash_column(row, 0)
-                        })
-                    })?;
                 let bytes = Self::get_blob_conn(conn, &BlobRef(blob_ref))
                     .map_err(sqlite_conversion_error)?
                     .ok_or_else(|| {
@@ -267,35 +266,18 @@ pub(crate) fn release_material_tx(
     referrer: &ArtifactReferrer,
     now_ms: u64,
 ) -> rusqlite::Result<()> {
-    let held: Vec<String> = {
-        let mut stmt = tx.prepare_cached(
-            artifact_sql()
-                .edges
-                .select_referrer_edges_in_namespace
-                .sql(),
-        )?;
-        stmt.query_map(
+    fence_artifact_referrer_tx(tx, referrer, now_ms)?;
+    let held = tx
+        .prepare_cached(artifact_sql().refs.delete_namespace_edges.sql())?
+        .query_map(
             params![
-                TOOL_MATERIAL_NAMESPACE,
                 referrer.kind().as_str(),
-                referrer.canonical_id()
+                referrer.canonical_id(),
+                serde_json::to_string(&[TOOL_MATERIAL_NAMESPACE])
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
             ],
             |row| row.get(1),
         )?
-        .collect::<rusqlite::Result<_>>()?
-    };
-    fence_artifact_referrer_tx(tx, referrer, now_ms)?;
-    crate::conn::cached_execute(
-        tx,
-        artifact_sql()
-            .edges
-            .delete_referrer_edges_in_namespace
-            .sql(),
-        params![
-            TOOL_MATERIAL_NAMESPACE,
-            referrer.kind().as_str(),
-            referrer.canonical_id()
-        ],
-    )?;
+        .collect::<rusqlite::Result<Vec<String>>>()?;
     SqliteStore::reclaim_unreferenced_artifacts_tx(tx, TOOL_MATERIAL_NAMESPACE, &held)
 }
