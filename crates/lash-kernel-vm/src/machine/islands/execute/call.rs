@@ -13,19 +13,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         callers: &mut Vec<Frame<'e>>,
         slots: &mut usize,
     ) -> Result<Next, Stop> {
-        if let Some(inputs) = &site.inputs
-            && let Some(property) = inputs.property()
-            && let [target, key, value] = &*inputs.args
-            && let Some(values) = self.pure_call_values(frame, [target, key, value])
-            && let Some(answer) =
-                self.property_value(frame.statement, property, site.close, &values)
-        {
-            frame.regs[site.reg as usize] = answer?;
-            if site.after != 0 {
-                self.admit(site.after);
-            }
-            return Ok(Next::Continue);
-        }
         // Borrow the source-sized window through admission and binding.
         // Only a wide call initializes a maximum-arity window; an ordinary
         // positional call carries its receiver and argument directly.
@@ -65,6 +52,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     &small
                 }
                 args => {
+                    if let Some(property) = inputs.property()
+                        && let [target, key, value] = args
+                        && let Some(values) = self.pure_call_values(frame, [target, key, value])
+                        && let Some(answer) =
+                            self.property_value(frame.statement, property, site.close, &values)
+                    {
+                        frame.regs[site.reg as usize] = answer?;
+                        if site.after != 0 {
+                            self.admit(site.after);
+                        }
+                        return Ok(Next::Continue);
+                    }
                     wide = [Value::Absent; MAX_ARGS];
                     for (index, arg) in args.iter().enumerate() {
                         wide[index] = self.operand(frame, arg).inspect_err(|_| {
