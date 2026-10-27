@@ -905,6 +905,7 @@ pub(super) struct ExecutionObservation {
     pub(super) lines: Vec<String>,
     requests: Vec<String>,
     charged: u64,
+    held: u64,
     carry: Option<Checkpoint>,
 }
 
@@ -957,6 +958,7 @@ fn execution_observation_with_layout(
                 lines: host.lines,
                 requests,
                 charged: machine.meters().charged.expect("exact charge"),
+                held: machine.meters().memory,
                 carry,
             };
         }
@@ -1819,6 +1821,14 @@ fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     let source = r#"
 import json
 async def build():
+    objects = [(), (3,), [4]]
+    print(objects[0], objects[1], objects[2])
+    objects[0] = (await host.echo(5),)
+    print(objects[0])
+    try:
+        print(objects[3])
+    except IndexError:
+        print('bounds')
     parts = []
     text = ''
     floating = 0.5

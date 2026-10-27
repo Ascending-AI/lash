@@ -67,14 +67,23 @@ pub(in crate::machine::islands) enum AccessShape {
 }
 
 impl Build<'_> {
-    pub(super) fn element_read_charge(&self, lib: LibId) -> Option<u64> {
+    pub(super) fn element_read_charge(&self, lib: LibId) -> Option<super::super::ElementRead> {
+        use super::super::ElementRead;
+        use lash_kernel_doc::plan::Element;
         let function = self.exe.lib(lib);
         let (entry, _) = function.prepared.as_ref()?;
-        (entry.element() == Some(lash_kernel_doc::plan::Element::Read)).then_some(())?;
-        function.charge.known_charge(
-            &[None, Some(Value::Float(lash_kernel_doc::Float::new(0.0)))],
-            None,
-        )
+        let charge = |index| function.charge.known_charge(&[None, Some(index)], None);
+        match entry.element()? {
+            Element::Read => Some(ElementRead::Float(charge(Value::Float(
+                lash_kernel_doc::Float::new(0.0),
+            ))?)),
+            Element::ReadInt => Some(ElementRead::Int {
+                zero: charge(Value::Int(0))?,
+                nonzero: charge(Value::Int(1))?,
+            }),
+            Element::ReadMap => Some(ElementRead::Map(function.charge.short_text_charge(1)?)),
+            Element::Write => None,
+        }
     }
 
     pub(super) fn member_write(

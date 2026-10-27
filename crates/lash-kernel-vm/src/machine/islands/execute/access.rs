@@ -1,6 +1,6 @@
 //! Typed member reads admit their complete source charge before committing.
 
-use super::super::compiled::{AccessShape, AccessSite, OperatorSite, Read, WriteSite};
+use super::super::compiled::{AccessShape, AccessSite, ElementRead, OperatorSite, Read, WriteSite};
 use super::*;
 
 struct ReadAnswer {
@@ -82,7 +82,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         &mut self,
         site: &super::super::compiled::HeapSite,
         values: &[Value; 2],
-        units: u64,
+        charge: ElementRead,
     ) -> Option<Answer> {
         if OBSERVING
             || !self.swift
@@ -93,25 +93,45 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return None;
         }
-        let (Value::List(list), Value::Float(key)) = (values[0], values[1]) else {
-            return None;
+        let (value, units) = match (charge, *values) {
+            (ElementRead::Map(charge), [Value::Map(map), Value::Text(key)]) => (
+                self.arena.table_get_text(map, &key).ok()??,
+                charge.units(key.as_bytes().len() as u64),
+            ),
+            (charge, [Value::List(list), key]) => {
+                let (at, units, holes) = match (charge, key) {
+                    (ElementRead::Float(units), Value::Float(key)) => {
+                        let key = key.get();
+                        if !(0.0..lash_kernel_doc::plan::ELEMENT_POSITIONS as f64).contains(&key) {
+                            return None;
+                        }
+                        let at = key as u64;
+                        if at as f64 != key {
+                            return None;
+                        }
+                        (at, units, true)
+                    }
+                    (ElementRead::Int { zero, nonzero }, Value::Int(key)) => (
+                        u64::try_from(key).ok()?,
+                        if key == 0 { zero } else { nonzero },
+                        false,
+                    ),
+                    _ => return None,
+                };
+                let value = self.arena.item(list, at).ok()??;
+                let value = match value {
+                    Value::Tuple(tuple) if holes && self.arena.len(tuple).ok()? == 0 => {
+                        Value::Absent
+                    }
+                    value => value,
+                };
+                (value, units)
+            }
+            _ => return None,
         };
-        let key = key.get();
-        if !(0.0..lash_kernel_doc::plan::ELEMENT_POSITIONS as f64).contains(&key) {
-            return None;
-        }
-        let at = key as u64;
-        if at as f64 != key {
-            return None;
-        }
-        let value = self.arena.item(list, at).ok()??;
         if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
             return None;
         }
-        let value = match value {
-            Value::Tuple(tuple) if self.arena.len(tuple).ok()? == 0 => Value::Absent,
-            value => value,
-        };
         let (before, root) = self.root_prefix(site.root).ok()?;
         let counted = site.counted.or(root);
         if counted.is_some_and(|at| !self.counters.can_advance(&[at])) {

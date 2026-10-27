@@ -30,6 +30,7 @@ use crate::library::Library;
 mod bulk;
 mod forwarding;
 mod metering;
+mod reads;
 use metering::tree;
 
 /// The most native calls and arena forms one path's answer takes.
@@ -1176,6 +1177,7 @@ struct Pass {
     /// Whether a path of an arm writes an arena object.
     writes: bool,
     record_writes: BTreeMap<(String, u8, bool), u32>,
+    member_read: Option<lash_kernel_doc::plan::Element>,
 }
 
 impl Evaluator<'_> {
@@ -1212,6 +1214,7 @@ impl Evaluator<'_> {
             depth: 1,
             writes: false,
             record_writes: BTreeMap::new(),
+            member_read: None,
         };
         for mask in 0..combinations {
             let mut state = State {
@@ -1305,6 +1308,13 @@ impl Evaluator<'_> {
             {
                 let kind = state.vars.get(&definition.signature.params[2].name)?.kind?;
                 *pass.record_writes.entry(proof).or_default() |= 1 << kind as u32;
+            }
+            if self.heap
+                && let Some((state, Some(value))) = results.first()
+                && state.charging.is_none()
+                && let Some(read) = self.member_read(definition, &names, &state.steps, value)
+            {
+                pass.member_read = Some(read);
             }
             let mut code = String::new();
             if !self.heap {
@@ -1581,11 +1591,13 @@ pub(crate) fn emit(
         None => descriptor.push_str("None"),
         Some(heap) => {
             let element = if heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str()) {
-                "Some(p::Element::Write)"
+                "Some(p::Element::Write)".to_owned()
+            } else if let Some(read) = heap.member_read {
+                format!("Some(p::Element::{read:?})")
             } else if ELEMENT_READS.contains(&definition.name.as_str()) {
-                "Some(p::Element::Read)"
+                "Some(p::Element::Read)".to_owned()
             } else {
-                "None"
+                "None".to_owned()
             };
             let record_write = heap.record_writes.iter().max_by_key(|(_, kinds)| kinds.count_ones())
                 .map_or_else(|| "None".to_owned(), |((key, test, holds), kinds)| {

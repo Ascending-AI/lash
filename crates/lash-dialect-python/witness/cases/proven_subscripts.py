@@ -43,3 +43,16 @@ def annotated(xs: dict):
 print(annotated([42]))
 
 print({'x': 5}[await host.echo('x')])
+
+# An empty tuple is a Python value, including through an alias and a shifted index.
+values = [(), (1,), [2], None, False]
+print(values[0], values[1], values[2], values[3], values[4])
+alias = values
+alias[0] = (3,)
+print(values[0])
+del alias[0]
+print(values[0], values[1])
+try:
+    print(values[0.0])
+except TypeError:
+    print('float index')

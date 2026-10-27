@@ -158,7 +158,7 @@ pub struct HeapTemplate {
     /// the write is the path's last fallible step, but what runs after
     /// the call in its caller's statement may still fail.
     pub writes: bool,
-    /// A certified numeric array access, over unchanged arguments.
+    /// A collection access certified from its source over unchanged arguments.
     pub element: Option<Element>,
     /// A source-certified record membership guard followed by the write
     /// `target[key] = value`, returning `value`, over three unchanged
@@ -166,14 +166,20 @@ pub struct HeapTemplate {
     pub record_write: Option<RecordWrite>,
 }
 
-/// A helper's operation on a list and an integral nonnegative Float key
-/// below [`ELEMENT_POSITIONS`]. Other operand paths keep their source body.
+/// A source-certified collection operation. Other operand paths keep their source body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Element {
     /// Return the indexed value, converting an empty tuple hole to Absent.
-    /// The key must be strictly below the list's length.
+    /// The key is an integral nonnegative Float below [`ELEMENT_POSITIONS`]
+    /// and strictly below the list's length.
     Read,
-    /// Write the third argument and return it. The key may equal length.
+    /// Return the indexed value unchanged at a nonnegative word integer key.
+    /// The key must be strictly below the list's length.
+    ReadInt,
+    /// Return a map entry under an inline text key when the map holds it.
+    ReadMap,
+    /// Write the third argument and return it. The key is an integral
+    /// nonnegative Float below [`ELEMENT_POSITIONS`] and may equal length.
     Write,
 }
 

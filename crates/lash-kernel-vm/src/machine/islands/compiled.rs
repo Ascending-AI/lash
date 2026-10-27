@@ -172,6 +172,14 @@ pub(super) struct OperatorSite {
     pub(super) deepest: std::sync::OnceLock<u32>,
 }
 
+/// A source-certified member read and its formula's scalar prices.
+#[derive(Clone, Copy)]
+pub(super) enum ElementRead {
+    Float(u64),
+    Int { zero: u64, nonzero: u64 },
+    Map(crate::compile::LengthCharge),
+}
+
 /// A prepared heap operation keeps the same semantic call coordinates.
 pub(super) struct HeapSite {
     pub(super) lib: LibId,

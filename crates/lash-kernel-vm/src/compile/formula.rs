@@ -48,6 +48,7 @@ pub(crate) struct TextCharge {
 }
 
 /// A sum whose only changing measurement is a collection's member count.
+#[derive(Clone, Copy)]
 pub(crate) struct LengthCharge {
     fixed: u64,
     members: u64,

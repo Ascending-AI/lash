@@ -174,7 +174,7 @@ pub(in crate::machine::islands) enum Op {
     ElementRead {
         site: HeapSite,
         args: Box<[u32]>,
-        units: u64,
+        units: super::ElementRead,
     },
     MemberStore {
         site: HeapSite,

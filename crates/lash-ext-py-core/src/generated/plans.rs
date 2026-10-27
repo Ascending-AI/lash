@@ -12584,7 +12584,7 @@ const PY_DICT_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_dict_getitem,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_dict_getitem_heap, depth: 1, writes: false, element: None, record_write: None, callees: &[p::function("395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_dict_getitem_heap, depth: 1, writes: false, element: Some(p::Element::ReadMap), record_write: None, callees: &[p::function("395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.dict_getitem`.
@@ -15599,7 +15599,7 @@ const PY_LIST_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_list_getitem,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: py_list_getitem_heap, depth: 2, writes: false, element: None, record_write: None, callees: &[p::function("cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: py_list_getitem_heap, depth: 2, writes: false, element: Some(p::Element::ReadInt), record_write: None, callees: &[p::function("cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.list_getitem`.

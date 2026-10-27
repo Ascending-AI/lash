@@ -463,6 +463,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Option<()> {
         if !self.arena.any_cold() {
             match (target, field) {
+                (Value::Map(map), None)
+                    if matches!(index, Value::Text(_))
+                        && self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES) =>
+                {
+                    return self.arena.table_write(map, index, value).ok();
+                }
                 (Value::List(list), None)
                     if self.resident_room(lash_kernel_state::arena::VALUE_BYTES) =>
                 {
