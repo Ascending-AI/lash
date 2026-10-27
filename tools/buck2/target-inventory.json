@@ -100705,7 +100705,7 @@
     "//crates/lash-perf:latency__test": 300,
     "//crates/lash-perf:latency__test__fv_0b134f7d": 300,
     "//crates/lash-perf:latency__test__fv_306332ab": 300,
-    "//crates/lash-perf:replay__test": 300,
+    "//crates/lash-perf:replay__test": 900,
     "//crates/lash-perf:workload__test": 300,
     "//crates/lash-perf:workload__test__fv_0b134f7d": 300,
     "//crates/lash-perf:workload__test__fv_306332ab": 300,

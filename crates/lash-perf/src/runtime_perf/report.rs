@@ -19,9 +19,7 @@ use super::scenarios::{RuntimePerfScenario, ScenarioHarnessKind};
 mod budgets;
 mod guards;
 pub use guards::BudgetEnforcement;
-use guards::{
-    RuntimePerfBudgetResult, enforcement_failures, evaluate_budgets, report_advisory_exceedances,
-};
+use guards::{RuntimePerfBudgetResult, enforcement_failures, evaluate_budgets};
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfReport {
@@ -321,7 +319,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         "{}",
         serde_json::to_string_pretty(&runtime_perf_output_json(&out_path, &report))?
     );
-    report_advisory_exceedances(&report.budget_results);
     // The trend runs before enforcement so a scenario whose allocation ceiling
     // failed still contributes its duration observation: the history is a
     // record of what the machine measured, not of which runs passed.
@@ -691,9 +688,7 @@ fn summarize_optional_metric(values: Vec<f64>) -> Option<RuntimePerfMetricSummar
 }
 #[cfg(test)]
 mod tests {
-    use super::budgets::{
-        allocation_budget_bytes, steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
-    };
+    use super::budgets::{allocation_budget_bytes, steady_state_turn_allocation_budget_bytes};
     use super::*;
     use crate::runtime_perf::openai_compat::openai_compat_sse_body;
     use crate::runtime_perf::providers::benchmark_stream_profile;
@@ -1098,7 +1093,7 @@ mod tests {
             .stage_summary
             .get(stage::TOTAL)
             .expect("total stage summary");
-        assert_eq!(records[0].total_ms, total.duration_ms.median);
+        assert_eq!(records[0].total_ms, Some(total.duration_ms.median));
         assert_eq!(records[0].total_p95_ms, Some(total.duration_ms.p95));
         assert_eq!(
             records[0].duration_metrics_ms["process.cpu_ms"].median_ms,
@@ -1267,10 +1262,6 @@ mod tests {
                 < steady_state_turn_allocation_budget_bytes(
                     RuntimePerfScenario::RlmProcessAsyncToolCompletion
                 )
-        );
-        assert!(wall_clock_budget_ms(RuntimePerfScenario::RlmAsyncToolCompletion) < 10_000.0);
-        assert!(
-            wall_clock_budget_ms(RuntimePerfScenario::RlmProcessAsyncToolCompletion) < 10_000.0
         );
     }
 

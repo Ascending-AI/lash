@@ -4,8 +4,8 @@
 use serde::Serialize;
 
 use super::budgets::{
-    GuardedSpan, allocation_budget_bytes, guarded_span, phase_wall_clock_budget_ms,
-    required_phase_names, steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
+    GuardedSpan, allocation_budget_bytes, guarded_span, phase_is_declared, required_phase_names,
+    steady_state_turn_allocation_budget_bytes,
 };
 use super::{RuntimePerfScenario, RuntimePerfScenarioSummary};
 use crate::runtime_perf::measurement::stage;
@@ -20,10 +20,10 @@ use crate::runtime_perf::measurement::stage;
 pub enum BudgetEnforcement {
     #[default]
     None,
-    /// Fail only on the machine-independent inventory class. Duration and
-    /// allocation ceilings are calibrated on the release profile.
+    /// Fail only on the machine-independent inventory class. Allocation
+    /// ceilings are calibrated on the release profile.
     InventoryOnly,
-    /// Fail on every non-advisory class.
+    /// Fail on inventory and allocation limits.
     All,
 }
 
@@ -76,30 +76,11 @@ pub(crate) enum RuntimePerfGuardClass {
     /// runner loaded enough to move wall-clock by 30x), so it gates the
     /// release.
     Allocation,
-    /// Wall-clock ceiling. Advisory only: on shared runners the same binary
-    /// measured 7.67 ms then 1.625 ms against a 0.25 ms phase ceiling, and no
-    /// duration-keeping remedy survives that (wide margins detect nothing,
-    /// median-of-N still misses under sustained load, isolated hardware does
-    /// not exist here). A flaky hard gate trains reruns, which is worse than
-    /// no gate — so these report and never fail.
-    Duration,
 }
 
 impl RuntimePerfGuardClass {
-    /// Every class ever defined, so the enforcement rules can be proven
-    /// exhaustively rather than sampled.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 3] = [Self::Inventory, Self::Allocation, Self::Duration];
-
-    /// Advisory results are reported but never turn into a non-zero exit.
-    /// Written as an exhaustive match on purpose: a new guard class must
-    /// declare whether it gates instead of silently inheriting "enforced".
-    fn is_advisory(self) -> bool {
-        match self {
-            Self::Inventory | Self::Allocation => false,
-            Self::Duration => true,
-        }
-    }
+    pub(crate) const ALL: [Self; 2] = [Self::Inventory, Self::Allocation];
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,8 +115,7 @@ impl RuntimePerfBudgetResult {
 }
 
 /// The failures that must fail the process, already rendered for the error.
-/// Empty means the enforced classes all held — advisory exceedances live in
-/// [`report_advisory_exceedances`] and never reach here.
+/// Empty means the enforced classes all held.
 pub(super) fn enforcement_failures(
     results: &[RuntimePerfBudgetResult],
     enforcement: BudgetEnforcement,
@@ -147,30 +127,12 @@ pub(super) fn enforcement_failures(
         .collect()
 }
 
-/// Advisory (wall-clock) results never are; the enforcement mode decides the rest.
+/// The selected enforcement mode decides which failed counted limits bind.
 pub(super) fn gates_run(result: &RuntimePerfBudgetResult, enforcement: BudgetEnforcement) -> bool {
-    if result.passed || result.class.is_advisory() {
+    if result.passed {
         return false;
     }
     enforcement.enforces(result.class)
-}
-
-/// Wall-clock exceedances never fail the run, so the only way they stay
-/// actionable is being printed every time, with the measured value next to
-/// the budget it missed.
-pub(super) fn report_advisory_exceedances(results: &[RuntimePerfBudgetResult]) {
-    let advisories = results
-        .iter()
-        .filter(|result| !result.passed && result.class.is_advisory())
-        .map(RuntimePerfBudgetResult::describe)
-        .collect::<Vec<_>>();
-    if advisories.is_empty() {
-        return;
-    }
-    eprintln!(
-        "warning: runtime perf advisory wall-clock budgets exceeded (reported, not gating):\n{}",
-        advisories.join("\n")
-    );
 }
 
 pub(super) fn evaluate_budgets(
@@ -215,54 +177,36 @@ pub(super) fn evaluate_budgets(
             });
         }
 
-        for (phase, metrics) in &summary.phase_summary {
-            let Some(budget_ms) = phase_wall_clock_budget_ms(*scenario, phase) else {
+        for phase in summary.phase_summary.keys() {
+            if !phase_is_declared(*scenario, phase) {
                 budgets.push(RuntimePerfBudgetResult {
                     scenario: summary.scenario.clone(),
                     scenario_harness: summary.scenario_harness.clone(),
-                    metric: format!("phase:{phase}:duration_ms"),
-                    statistic: "median".to_string(),
-                    // The ceiling itself is advisory, but its presence is
-                    // machine-independent: an emitted phase nobody budgeted is
-                    // an unreviewed measurement surface, and that still gates.
+                    metric: format!("phase:{phase}"),
+                    statistic: "declared".to_owned(),
                     class: RuntimePerfGuardClass::Inventory,
-                    actual: Some(metrics.duration_ms.median),
+                    actual: None,
                     budget: None,
                     passed: false,
-                    reason: Some("emitted phase has no checked-in wall-clock budget".to_string()),
+                    reason: Some("emitted phase has no checked-in inventory entry".to_owned()),
                 });
-                continue;
-            };
-            push_max_budget(
-                &mut budgets,
-                summary,
-                &format!("phase:{phase}:duration_ms"),
-                "median",
-                RuntimePerfGuardClass::Duration,
-                Some(metrics.duration_ms.median),
-                budget_ms,
-            );
+            }
         }
 
-        let (alloc_metric, alloc_actual, duration_metric, duration_actual) =
-            match guarded_span(*scenario) {
-                GuardedSpan::WholeRun => (
-                    "total_alloc_bytes",
-                    stage_alloc_bytes(summary, stage::TOTAL),
-                    "total_ms",
-                    stage_duration_ms(summary, stage::TOTAL),
-                ),
-                GuardedSpan::RunTurn => {
-                    // Populating the 1,537-row registry fixture is setup, reported as its
-                    // own span. Keep it out of the product-facing release guard.
-                    (
-                        "run_turn_alloc_bytes",
-                        stage_alloc_bytes(summary, stage::RUN_TURN),
-                        "run_turn_ms",
-                        stage_duration_ms(summary, stage::RUN_TURN),
-                    )
-                }
-            };
+        let (alloc_metric, alloc_actual) = match guarded_span(*scenario) {
+            GuardedSpan::WholeRun => (
+                "total_alloc_bytes",
+                stage_alloc_bytes(summary, stage::TOTAL),
+            ),
+            GuardedSpan::RunTurn => {
+                // Populating the 1,537-row registry fixture is setup, reported as its
+                // own span. Keep it out of the product-facing release guard.
+                (
+                    "run_turn_alloc_bytes",
+                    stage_alloc_bytes(summary, stage::RUN_TURN),
+                )
+            }
+        };
 
         push_max_budget(
             &mut budgets,
@@ -281,15 +225,6 @@ pub(super) fn evaluate_budgets(
             RuntimePerfGuardClass::Allocation,
             steady_state_turn_alloc_bytes(summary),
             steady_state_turn_allocation_budget_bytes(*scenario),
-        );
-        push_max_budget(
-            &mut budgets,
-            summary,
-            duration_metric,
-            "median",
-            RuntimePerfGuardClass::Duration,
-            duration_actual,
-            wall_clock_budget_ms(*scenario),
         );
     }
     budgets
@@ -317,13 +252,7 @@ pub(super) fn push_max_budget(
         actual,
         budget: Some(budget),
         passed: !exceeded,
-        reason: exceeded.then(|| {
-            if class.is_advisory() {
-                "metric exceeded advisory guard budget (reported, not gating)".to_string()
-            } else {
-                "metric exceeded checked-in guard budget".to_string()
-            }
-        }),
+        reason: exceeded.then(|| "metric exceeded checked-in guard budget".to_string()),
     });
 }
 
@@ -341,13 +270,6 @@ fn steady_state_turn_alloc_bytes(summary: &RuntimePerfScenarioSummary) -> Option
         .map(|stage| stage.alloc_bytes.median)
 }
 
-fn stage_duration_ms(summary: &RuntimePerfScenarioSummary, name: &str) -> Option<f64> {
-    summary
-        .stage_summary
-        .get(name)
-        .map(|stage| stage.duration_ms.median)
-}
-
 fn stage_alloc_bytes(summary: &RuntimePerfScenarioSummary, name: &str) -> Option<f64> {
     summary
         .stage_summary
@@ -358,7 +280,6 @@ fn stage_alloc_bytes(summary: &RuntimePerfScenarioSummary, name: &str) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime_perf::report::{stack_profile, summarize, tests::run_result};
 
     fn guard_result(class: RuntimePerfGuardClass, passed: bool) -> RuntimePerfBudgetResult {
         RuntimePerfBudgetResult {
@@ -377,9 +298,9 @@ mod tests {
     #[test]
     fn every_guard_class_declares_its_enforcement_in_every_mode() {
         use BudgetEnforcement::{All, InventoryOnly, None};
-        use RuntimePerfGuardClass::{Allocation, Duration, Inventory};
+        use RuntimePerfGuardClass::{Allocation, Inventory};
 
-        // The full table: three classes x three modes x passed/failed. The
+        // The full table: two classes x three modes x passed/failed. The
         // class axis was already exhaustive; the mode axis used to be two
         // bools sampled at two of their four combinations.
         let expected = [
@@ -391,10 +312,6 @@ mod tests {
             // skips them and the release mode enforces them.
             (Allocation, InventoryOnly, false),
             (Allocation, All, true),
-            // Wall-clock ceilings are advisory in every mode (FIG-1385).
-            (Duration, None, false),
-            (Duration, InventoryOnly, false),
-            (Duration, All, false),
         ];
         for (class, enforcement, gates) in expected {
             assert_eq!(
@@ -435,42 +352,6 @@ mod tests {
             .to_string();
         assert!(both.contains("--runtime-perf-enforce-inventory"), "{both}");
         assert!(both.contains("--runtime-perf-enforce-budgets"), "{both}");
-    }
-
-    #[test]
-    fn advisory_exceedances_carry_the_measurement_next_to_the_budget() {
-        let described = guard_result(RuntimePerfGuardClass::Duration, false).describe();
-
-        assert!(described.contains("actual=7.67"), "{described}");
-        assert!(described.contains("budget=0.25"), "{described}");
-    }
-
-    #[test]
-    fn exceeded_wall_clock_budgets_stay_visible_as_failed_advisory_results() {
-        let scenario = RuntimePerfScenario::DeepTurnComposition;
-        let results = vec![run_result(scenario, 10.0, 100)];
-        let stack_profile = stack_profile(2 * 1024 * 1024);
-        let summaries = summarize(&results, &[scenario], 1, &stack_profile);
-        let summary = summaries.first().expect("one scenario summary");
-        let mut budgets = Vec::new();
-
-        push_max_budget(
-            &mut budgets,
-            summary,
-            "phase:codemode_process.load_artifact:duration_ms",
-            "median",
-            RuntimePerfGuardClass::Duration,
-            Some(7.67),
-            0.25,
-        );
-
-        let result = budgets.first().expect("one advisory result");
-        assert!(!result.passed);
-        assert_eq!(result.class, RuntimePerfGuardClass::Duration);
-        assert_eq!(
-            result.reason.as_deref(),
-            Some("metric exceeded advisory guard budget (reported, not gating)")
-        );
     }
 
     #[test]

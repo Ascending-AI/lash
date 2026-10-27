@@ -725,6 +725,8 @@ pub enum WorkerPhase {
 /// Count-only performance receipt for one worker exchange. Never persisted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerWork {
+    /// Optional harness allocator and hardware PMU deltas, never guest charge.
+    pub resources: Option<WorkerResources>,
     /// Dev-only checkpoint work; zero unless the worker enables perf-witness.
     pub seal_attempts: u64,
     pub seal_nodes_hashed: u64,
@@ -772,6 +774,9 @@ pub struct WorkerWork {
 }
 impl WorkerWork {
     pub fn accumulate(&mut self, next: Self) {
+        if let Some(next) = next.resources {
+            self.resources.get_or_insert_default().accumulate(next);
+        }
         self.seal_attempts += next.seal_attempts;
         self.seal_nodes_hashed += next.seal_nodes_hashed;
         self.seal_nodes_visited += next.seal_nodes_visited;
@@ -811,5 +816,27 @@ impl WorkerWork {
         self.decoded_nodes += next.decoded_nodes;
         self.decoded_bytes += next.decoded_bytes;
         self.peak_buffer_bytes = self.peak_buffer_bytes.max(next.peak_buffer_bytes);
+    }
+}
+
+/// Harness-owned measurements. Absent when no resource observer is installed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerResources {
+    pub allocations: u64,
+    pub allocated_bytes: u64,
+    pub instructions: u64,
+    pub instruction_enabled_ns: u64,
+    pub instruction_running_ns: u64,
+    pub instruction_refusals: u64,
+}
+
+impl WorkerResources {
+    fn accumulate(&mut self, next: Self) {
+        self.allocations += next.allocations;
+        self.allocated_bytes += next.allocated_bytes;
+        self.instructions += next.instructions;
+        self.instruction_enabled_ns += next.instruction_enabled_ns;
+        self.instruction_running_ns += next.instruction_running_ns;
+        self.instruction_refusals += next.instruction_refusals;
     }
 }

@@ -312,6 +312,35 @@ pub async fn run(out: &Path, stores_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Twenty actual helper spawn-to-Ready observations. Wall durations are
+/// diagnostic; the local gate counts requested blocking syscalls in this window.
+pub fn measure_vm_gate(out: &Path) -> Result<()> {
+    let worker = std::env::var_os("LASH_VM_WORKER").context("LASH_VM_WORKER is required")?;
+    let config = lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper(&worker));
+    let mut rows = Vec::new();
+    for _ in 0..20 {
+        let began = Instant::now();
+        let mut child = lash_vm_client::ipc::Worker::spawn(&config)?;
+        let frame = child.receive(began + Duration::from_secs(30))?;
+        let raw_ns = began.elapsed().as_nanos() as u64;
+        ensure!(
+            frame.message.kind() == lash_protocol_types::worker_limit::WorkerFrameKind::Ready,
+            "worker did not send Ready"
+        );
+        rows.push(serde_json::json!({"pid": child.pid(), "spawn_to_ready_ns": raw_ns}));
+        drop(child);
+    }
+    std::fs::write(
+        out,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "identity": crate::replay::receipt::Identity::current(), "starts": rows,
+            "metric": "20 fresh spawn-to-Ready samples; raw wall durations diagnostic only",
+            "worker_sha256": crate::perf_support::git::artifact_sha256(Path::new(&worker)),
+        }))?,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

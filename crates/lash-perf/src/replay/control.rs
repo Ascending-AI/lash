@@ -234,7 +234,15 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("build durable backend: {e}"))?;
     let workers = (workload.protocol != Protocol::Standard)
-        .then(|| super::workers::service(workload.protocol == Protocol::Python, &args.dir, None))
+        .then(|| {
+            super::workers::service(
+                workload.protocol == Protocol::Python,
+                &args.dir,
+                None,
+                false,
+                false,
+            )
+        })
         .transpose()?;
     let observer = Arc::clone(&observation);
     let tools =

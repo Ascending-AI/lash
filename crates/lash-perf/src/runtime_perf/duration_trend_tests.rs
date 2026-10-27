@@ -169,8 +169,8 @@ fn history_round_trips_through_the_file_and_sorts_by_observation_time() {
 
     let loaded = load_history(&path).expect("history loads");
     assert_eq!(loaded.len(), 2);
-    assert_eq!(loaded[0].total_ms, 20.0);
-    assert_eq!(loaded[1].total_ms, 30.0);
+    assert_eq!(loaded[0].total_ms, Some(20.0));
+    assert_eq!(loaded[1].total_ms, Some(30.0));
     assert_eq!(loaded[0].total_p95_ms, Some(25.0));
 }
 
@@ -755,6 +755,8 @@ fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> Duratio
     DurationHistoryRecord {
         compare_instructions_per_operation: None,
         kernel: None,
+        counted_metrics: BTreeMap::new(),
+        producer_artifacts: BTreeMap::new(),
         replay: None,
         version: HISTORY_RECORD_VERSION,
         identity: fixture_identity().for_scenario(scenario),
@@ -767,7 +769,7 @@ fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> Duratio
         commit: format!("commit{index:04}"),
         run_id: format!("{index}"),
         recorded_at: format!("2026-01-01T{:02}:{:02}:00Z", index / 60, index % 60),
-        total_ms,
+        total_ms: Some(total_ms),
         total_p95_ms: Some(total_ms + 5.0),
         duration_metrics_ms: BTreeMap::new(),
     }
@@ -775,6 +777,42 @@ fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> Duratio
 
 #[test]
 fn an_unacknowledged_shift_survives_many_runs_and_compaction() {
+    // FIG-7434: the same detector must retain a counted shift without any
+    // duration observation. Different producer hashes do not reset its cohort.
+    let (mut counted, _) = stepped_series("standard", "counted");
+    for (index, record) in counted.iter_mut().enumerate() {
+        record.total_ms = None;
+        record.total_p95_ms = None;
+        record.counted_metrics.insert(
+            "allocations".to_owned(),
+            CountedHistoryValue {
+                unit: "calls/turn".to_owned(),
+                median: if index < TREND_WINDOW_RUNS {
+                    100.0
+                } else {
+                    200.0
+                },
+            },
+        );
+        record
+            .producer_artifacts
+            .insert("binary".to_owned(), format!("build-{index}"));
+    }
+    let wire = serde_json::to_value(&counted[0]).unwrap();
+    for forbidden in ["total_ms", "total_p95_ms", "duration_metrics_ms"] {
+        assert!(
+            wire.get(forbidden).is_none(),
+            "counted history wrote {forbidden}"
+        );
+    }
+    for _ in 0..3 {
+        counted = retained_records(&counted);
+        let rows = trend_rows_against(&counted, Some("counted"), &[]);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].verdict.is_drifting(), "counted shift was lost");
+        assert_eq!(rows[0].baseline_median_ms, Some(100.0));
+    }
+
     let (mut history, _) = stepped_series("standard", "quick");
     for index in 25..225 {
         history.push(record("standard", "quick", index, 20.0));

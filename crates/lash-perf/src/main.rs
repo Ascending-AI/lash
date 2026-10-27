@@ -246,6 +246,18 @@ enum Command {
         profile: lash_perf::perf_support::dhat::ProfileArgs,
     },
 
+    /// Append qualified counted workloads and run the existing history detector.
+    CountedHistoryRecord {
+        #[arg(long)]
+        sample: std::path::PathBuf,
+        #[arg(long)]
+        history: std::path::PathBuf,
+    },
+    /// Capture 20 fresh helper handshakes for the local counted startup gate.
+    VmStartupGate {
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
     /// Functional simultaneous 1/2/4 process startup phases; never a timing gate.
     Startup {
         #[arg(long)]
@@ -388,6 +400,12 @@ fn run_main() -> anyhow::Result<()> {
         None
     };
     match &args.command {
+        Some(Command::CountedHistoryRecord { sample, history }) => {
+            return lash_perf::runtime_perf::record_counted_sample(sample, history);
+        }
+        Some(Command::VmStartupGate { out }) => {
+            return lash_perf::latency::startup::measure_vm_gate(out);
+        }
         Some(Command::Compare(options)) => return lash_perf::compare::run(options),
         Some(Command::ReceiptTail {
             receipt,
@@ -473,6 +491,9 @@ fn run_main() -> anyhow::Result<()> {
             return runtime.block_on(lash_perf::replay::turn_profile::run(options));
         }
         Some(Command::Replay(options)) => {
+            if options.instructions {
+                lash_perf::perf_support::instructions::enable_host()?;
+            }
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_stack_size(tokio_thread_stack_bytes(&args))
@@ -481,6 +502,7 @@ fn run_main() -> anyhow::Result<()> {
         }
         Some(Command::ReplayGate(options)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(8)
                 .enable_all()
                 .thread_stack_size(tokio_thread_stack_bytes(&args))
                 .build()?;

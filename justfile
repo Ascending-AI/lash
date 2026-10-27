@@ -183,7 +183,7 @@ perf-code-mode-control *args:
     "$binary" code-mode-control --store-dir "$artifacts/stores-$BASHPID" \
     --out "$artifacts/receipt.json" {{args}}) | tee "$artifacts/table.txt"
 
-# Re-bless the per-merge replay gate's baseline from a fresh run of its
+# Calibrate the replay gate baseline from five fresh runs of its
 # subset, in the build the gate test uses. Commit the rewritten
 # crates/lash-perf/workloads/replay/baseline.json with the change that moved it.
 perf-replay-bless:
@@ -309,6 +309,18 @@ workbench-transcript-projection-e2e:
 # One cell's allocation sites, capacity ledger, RSS and optional stack occupancy.
 profile-cell-mem file *args:
   python3 scripts/profile_cell_mem.py "{{file}}" {{args}}
+
+# Local PMU checks for main's scheduled run. PMU events never run remotely.
+perf-gate-instructions *args:
+  bash "{{repo}}/scripts/perf-gate-local.sh" instructions {{args}}
+
+# Counts requested blocking startup work; raw spawn-to-Ready medians are diagnostic.
+perf-gate-startup *args:
+  bash "{{repo}}/scripts/perf-gate-local.sh" startup {{args}}
+
+# One main-head population, counted history only, then the existing change detector.
+perf-history-record:
+  bash "{{repo}}/scripts/perf-gate-local.sh" history --history "${LASH_PERF_HISTORY_FILE:-{{repo}}/.benchmarks/perf-guard/runtime-duration-history-full.jsonl}"
 
 # One cell's guest, Rust and joined CPU stacks, source lines and qualified totals.
 profile-cell file *args:

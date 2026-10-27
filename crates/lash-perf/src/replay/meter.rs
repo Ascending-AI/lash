@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 pub enum MetricKind {
     Counted,
     Timed,
+    /// Qualified hardware counts; local PMU gate only, never portable counted baselines.
+    Hardware,
 }
 
 /// One metric's name, unit, kind and meaning.
@@ -41,7 +43,7 @@ const fn counted(name: &'static str, unit: &'static str, meaning: &'static str) 
 }
 
 /// Every metric a turn record may carry, in receipt order.
-pub const METRICS: [MetricDef; 23] = [
+pub const METRICS: [MetricDef; 40] = [
     counted(
         "tool_snapshot_callbacks",
         "entries",
@@ -130,6 +132,94 @@ pub const METRICS: [MetricDef; 23] = [
         "processes",
         "code-mode workers the crash fixture killed mid-cell",
     ),
+    counted(
+        "provider_snapshots",
+        "entries",
+        "fixture environment_snapshot callback entries",
+    ),
+    counted(
+        "provider_manifests",
+        "entries",
+        "fixture tool_manifests callback entries",
+    ),
+    counted(
+        "provider_link_payloads",
+        "entries",
+        "fixture link_payload callback entries",
+    ),
+    counted("tool_bodies", "entries", "fixture execute callback entries"),
+    counted(
+        "provider_snapshots_per_tool_body",
+        "entries/body",
+        "fixture callback entries divided by actual execute entries",
+    ),
+    counted(
+        "provider_manifests_per_tool_body",
+        "entries/body",
+        "fixture callback entries divided by actual execute entries",
+    ),
+    counted(
+        "provider_link_payloads_per_tool_body",
+        "entries/body",
+        "fixture callback entries divided by actual execute entries",
+    ),
+    counted(
+        "facade_live_bytes",
+        "bytes",
+        "net live host Rust bytes since facade handles opened, sampled after final turn with handles retained",
+    ),
+    counted(
+        "worker_allocations",
+        "allocations",
+        "worker Rust allocator calls through progress receipts",
+    ),
+    counted(
+        "worker_allocated_bytes",
+        "bytes",
+        "worker requested Rust bytes through progress receipts",
+    ),
+    MetricDef {
+        name: "host_instructions",
+        unit: "instructions",
+        kind: MetricKind::Hardware,
+        meaning: "host threads only instructions:u",
+    },
+    MetricDef {
+        name: "host_instruction_enabled_ns",
+        unit: "ns",
+        kind: MetricKind::Hardware,
+        meaning: "PMU enabled time",
+    },
+    MetricDef {
+        name: "host_instruction_running_ns",
+        unit: "ns",
+        kind: MetricKind::Hardware,
+        meaning: "PMU running time",
+    },
+    MetricDef {
+        name: "worker_instructions",
+        unit: "instructions",
+        kind: MetricKind::Hardware,
+        meaning: "worker instructions:u through progress receipts",
+    },
+    MetricDef {
+        name: "worker_instruction_enabled_ns",
+        unit: "ns",
+        kind: MetricKind::Hardware,
+        meaning: "worker PMU enabled time",
+    },
+    MetricDef {
+        name: "worker_instruction_running_ns",
+        unit: "ns",
+        kind: MetricKind::Hardware,
+        meaning: "worker PMU running time",
+    },
+    MetricDef {
+        name: "worker_instruction_refusals",
+        unit: "count",
+        kind: MetricKind::Hardware,
+        meaning: "worker PMU intervals refused qualification",
+    },
     MetricDef {
         name: "host_cpu_ms",
         unit: "ms",
@@ -327,6 +417,17 @@ impl Meter {
             reading.insert("host_cpu_ms", cpu);
         }
         reading.insert("model_calls", model_calls as f64);
+        for (name, value) in [
+            "provider_snapshots",
+            "provider_manifests",
+            "provider_link_payloads",
+            "tool_bodies",
+        ]
+        .into_iter()
+        .zip(super::provider::metadata_counts())
+        {
+            reading.insert(name, value as f64);
+        }
         if let Some(nodes) = self.probe.graph_nodes().await {
             reading.insert("graph_nodes_written", nodes);
         }
@@ -390,6 +491,23 @@ impl Meter {
                 (counters.cell_executions + counters.process_executions) as f64,
             );
             reading.insert("workers_killed", super::workers::killed() as f64);
+            if let Some(resources) = counters.worker_work.resources {
+                reading.insert("worker_allocations", resources.allocations as f64);
+                reading.insert("worker_allocated_bytes", resources.allocated_bytes as f64);
+                reading.insert("worker_instructions", resources.instructions as f64);
+                reading.insert(
+                    "worker_instruction_enabled_ns",
+                    resources.instruction_enabled_ns as f64,
+                );
+                reading.insert(
+                    "worker_instruction_running_ns",
+                    resources.instruction_running_ns as f64,
+                );
+                reading.insert(
+                    "worker_instruction_refusals",
+                    resources.instruction_refusals as f64,
+                );
+            }
             reading.insert("worker_cpu_ms", pool.measured_cpu().as_secs_f64() * 1_000.0);
         }
         (reading, shapes, traffic)

@@ -53,11 +53,6 @@ pub struct GateWorkload {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tolerance {
-    /// Fraction of the baseline per-turn median.
-    pub relative: f64,
-    /// Absolute slack per metric, for medians near zero.
-    #[serde(default)]
-    pub absolute: BTreeMap<String, f64>,
     /// The metrics whose depth slope is ratcheted against the baseline, and
     /// how far each may rise: a known breach still fails when it grows. A
     /// `<workload>/<metric>` key overrides the metric's tolerance for one
@@ -159,6 +154,7 @@ pub struct Baseline {
     pub build: String,
     pub build_profile: String,
     pub allocator: String,
+    pub worker_resources: bool,
     pub workloads: BTreeMap<String, BaselineWorkload>,
 }
 
@@ -171,6 +167,10 @@ pub struct BaselineWorkload {
     pub backend: String,
     pub turns: usize,
     pub per_turn_median: BTreeMap<String, f64>,
+    /// Same-commit maximum minus minimum over five complete runs.
+    pub median_noise: BTreeMap<String, f64>,
+    /// Observed maximum plus absolute noise, with zero slack for exact counts.
+    pub median_ceiling: BTreeMap<String, f64>,
     /// Robust slopes against frame depth (history depth when the workload
     /// never compacts).
     pub depth_slope: BTreeMap<String, f64>,
@@ -178,7 +178,11 @@ pub struct BaselineWorkload {
 
 impl Baseline {
     pub fn committed() -> Result<Self> {
-        let baseline: Self = serde_json::from_str(BASELINE).context("parse baseline.json")?;
+        Self::parse(BASELINE)
+    }
+
+    pub fn parse(text: &str) -> Result<Self> {
+        let baseline: Self = serde_json::from_str(text).context("parse baseline.json")?;
         ensure!(
             baseline.format == BASELINE_FORMAT,
             "baseline.json is format `{}`, not `{BASELINE_FORMAT}`",
@@ -194,7 +198,8 @@ impl Baseline {
             "cannot bless a receipt with missing counted identity"
         );
         ensure!(
-            !receipt.identity.sql_shapes
+            !receipt.identity.instructions
+                && !receipt.identity.sql_shapes
                 && !receipt.identity.turn_profile
                 && !receipt.identity.traffic
                 && receipt.identity.heap_window.is_none(),
@@ -206,6 +211,7 @@ impl Baseline {
             build: receipt.identity.build.clone(),
             build_profile: receipt.identity.build_profile.clone(),
             allocator: receipt.identity.allocator.clone(),
+            worker_resources: receipt.identity.worker_resources,
             workloads: receipt
                 .workloads
                 .iter()
@@ -219,6 +225,10 @@ impl Baseline {
                             per_turn_median: counted(workload, |summary| {
                                 Some(summary.per_turn_median)
                             }),
+                            median_noise: counted(workload, |_| Some(0.0)),
+                            median_ceiling: counted(workload, |summary| {
+                                Some(summary.per_turn_median)
+                            }),
                             depth_slope: counted(workload, |summary| {
                                 summary.robust_slope_per_frame_turn
                             }),
@@ -228,6 +238,112 @@ impl Baseline {
                 .collect(),
         })
     }
+
+    /// Calibrate five complete ordinary receipts, refusing identity or population drift.
+    pub fn calibrate(receipts: &[ReplayReceipt]) -> Result<Self> {
+        ensure!(
+            receipts.len() == 5,
+            "count ceilings need five same-commit runs"
+        );
+        let mut baseline = Self::bless(&receipts[0])?;
+        for receipt in &receipts[1..] {
+            ensure!(
+                receipt.identity.commit == receipts[0].identity.commit
+                    && counted_identity_refusal(&receipt.identity, &baseline).is_none(),
+                "calibration identity drift"
+            );
+            let sample = Self::bless(receipt)?;
+            ensure!(
+                sample.workloads.keys().eq(baseline.workloads.keys()),
+                "calibration workload drift"
+            );
+            for (name, row) in &sample.workloads {
+                let first = &baseline.workloads[name];
+                ensure!(
+                    row.script_digest == first.script_digest
+                        && row.turns == first.turns
+                        && row.backend == first.backend
+                        && row.per_turn_median.keys().eq(first.per_turn_median.keys()),
+                    "calibration population drift for {name}"
+                );
+            }
+        }
+        for (name, row) in &mut baseline.workloads {
+            for (metric, maximum) in &mut row.per_turn_median {
+                let values: Vec<_> = receipts
+                    .iter()
+                    .map(|r| {
+                        r.workloads
+                            .iter()
+                            .find(|w| w.workload == *name)
+                            .and_then(|w| w.summary.get(metric))
+                            .map(|s| s.per_turn_median)
+                            .context("missing calibration metric")
+                    })
+                    .collect::<Result<_>>()?;
+                ensure!(
+                    values.iter().all(|v| v.is_finite() && *v >= 0.0),
+                    "invalid counted value"
+                );
+                *maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let minimum = values.iter().copied().fold(f64::INFINITY, f64::min);
+                row.median_noise.insert(metric.clone(), *maximum - minimum);
+                row.median_ceiling
+                    .insert(metric.clone(), *maximum + (*maximum - minimum));
+            }
+        }
+        Ok(baseline)
+    }
+}
+
+/// The candidate is a fixed population of five independent process runs.
+/// Median counted work rejects systematic amplification without treating a
+/// sporadic background allocation as foreground work. Maxima and depth slopes
+/// keep the worst observation, preserving the independent existing budgets.
+pub fn candidate_population(receipts: &[ReplayReceipt]) -> Result<ReplayReceipt> {
+    let _ = Baseline::calibrate(receipts)?;
+    let mut combined = receipts[0].clone();
+    for row in &mut combined.workloads {
+        row.round_statistic = "gate: median of five independent per-turn medians; maxima and slopes are worst-of-five; rounds below are the first raw population; sibling .0.json through .4.json retain every raw population".to_owned();
+        for (name, summary) in &mut row.summary {
+            let values: Vec<_> = receipts
+                .iter()
+                .map(|r| {
+                    r.workloads
+                        .iter()
+                        .find(|w| w.workload == row.workload)
+                        .and_then(|w| w.summary.get(name))
+                        .context("missing gate population metric")
+                })
+                .collect::<Result<_>>()?;
+            let mut medians: Vec<_> = values.iter().map(|s| s.per_turn_median).collect();
+            medians.sort_by(f64::total_cmp);
+            summary.per_turn_median = medians[2];
+            summary.round_average_max = values
+                .iter()
+                .map(|s| s.round_average_max)
+                .fold(f64::NEG_INFINITY, f64::max);
+            for (target, get) in [
+                (
+                    &mut summary.robust_slope_per_frame_turn,
+                    (|s: &MetricSummary| s.robust_slope_per_frame_turn)
+                        as fn(&MetricSummary) -> Option<f64>,
+                ),
+                (
+                    &mut summary.robust_slope_per_history_turn,
+                    (|s: &MetricSummary| s.robust_slope_per_history_turn)
+                        as fn(&MetricSummary) -> Option<f64>,
+                ),
+            ] {
+                *target = values
+                    .iter()
+                    .map(|s| get(s))
+                    .collect::<Option<Vec<_>>>()
+                    .map(|v| v.into_iter().fold(f64::NEG_INFINITY, f64::max));
+            }
+        }
+    }
+    Ok(combined)
 }
 
 fn counted(
@@ -306,17 +422,27 @@ fn counted_identity_refusal(
     identity: &super::receipt::Identity,
     baseline: &Baseline,
 ) -> Option<CountedIdentityRefusal> {
-    if identity.sql_shapes
+    if identity.instructions
+        || identity.worker_resources != baseline.worker_resources
         || identity.turn_profile
+        || identity.sql_shapes
         || identity.traffic
         || identity.heap_window.is_some()
     {
         return Some(CountedIdentityRefusal::Mismatch {
             dimension: CountedIdentityDimension::Observer,
-            baseline: "ordinary replay observation".to_owned(),
+            baseline: format!(
+                "ordinary replay; worker_resources={}",
+                baseline.worker_resources
+            ),
             candidate: format!(
-                "sql_shapes={};turn_profile={};traffic={};heap_window={:?}",
-                identity.sql_shapes, identity.turn_profile, identity.traffic, identity.heap_window
+                "sql_shapes={};turn_profile={};traffic={};heap_window={:?};worker_resources={};instructions={}",
+                identity.sql_shapes,
+                identity.turn_profile,
+                identity.traffic,
+                identity.heap_window,
+                identity.worker_resources,
+                identity.instructions
             ),
         });
     }
@@ -466,6 +592,23 @@ fn check_baseline(
         ));
         return;
     }
+    let measured = counted(workload, |s| Some(s.per_turn_median));
+    if !measured.keys().eq(blessed.per_turn_median.keys())
+        || !blessed
+            .median_ceiling
+            .keys()
+            .eq(blessed.per_turn_median.keys())
+        || !blessed
+            .median_noise
+            .keys()
+            .eq(blessed.per_turn_median.keys())
+    {
+        verdict.violations.push(format!(
+            "{}: counted metric population differs from its baseline",
+            workload.workload
+        ));
+        return;
+    }
     for (name, base) in &blessed.per_turn_median {
         let Some(summary) = workload.summary.get(name) else {
             verdict.violations.push(format!(
@@ -474,13 +617,24 @@ fn check_baseline(
             ));
             continue;
         };
-        let slack = budgets
-            .baseline_tolerance
-            .absolute
-            .get(name)
-            .copied()
-            .unwrap_or_default();
-        let ceiling = base * (1.0 + budgets.baseline_tolerance.relative) + slack;
+        let Some(&ceiling) = blessed.median_ceiling.get(name) else {
+            verdict
+                .violations
+                .push(format!("{}: missing ceiling for {name}", workload.workload));
+            continue;
+        };
+        let slack = blessed.median_noise.get(name).copied().unwrap_or_default();
+        if ![ceiling, slack, *base, summary.per_turn_median]
+            .into_iter()
+            .all(|v| v.is_finite() && v >= 0.0)
+            || ceiling < *base
+        {
+            verdict.violations.push(format!(
+                "{}: invalid counted ceiling or observation for {name}",
+                workload.workload
+            ));
+            continue;
+        }
         let observed = summary.per_turn_median;
         if observed > ceiling {
             verdict.violations.push(format!(
@@ -489,7 +643,7 @@ fn check_baseline(
                  intended",
                 workload.workload, summary.unit, budgets.rebless
             ));
-        } else if observed < base * (1.0 - budgets.baseline_tolerance.relative) - slack {
+        } else if observed < base - slack {
             verdict.improvements.push(format!(
                 "{}: per-turn median `{name}` fell to {observed} from {base}; re-bless to ratchet",
                 workload.workload
@@ -590,8 +744,6 @@ mod tests {
                 turns: None,
             }],
             baseline_tolerance: Tolerance {
-                relative: 0.25,
-                absolute: BTreeMap::new(),
                 depth_slope: BTreeMap::from([(
                     "sql_bytes_written".to_owned(),
                     SlopeTolerance {
@@ -643,13 +795,15 @@ mod tests {
     fn counted_baselines_refuse_mixed_observer_modes() {
         let candidate = receipt(0.0);
         let baseline = Baseline::bless(&candidate).unwrap();
-        for mode in 0..4 {
+        for mode in 0..6 {
             let mut observed = candidate.clone();
             observed.identity.sql_shapes = mode == 0;
-            observed.identity.turn_profile = mode == 3;
+            observed.identity.turn_profile = mode == 5;
             observed.identity.traffic = mode == 1;
             observed.identity.heap_window = (mode == 2).then_some([1, 2]);
-            assert!(Baseline::bless(&observed).is_err());
+            observed.identity.instructions = mode == 3;
+            observed.identity.worker_resources = mode == 4;
+            assert_eq!(Baseline::bless(&observed).is_err(), mode != 4);
             assert!(matches!(
                 evaluate(&observed, &budgets(false), &baseline).identity_refusal,
                 Some(CountedIdentityRefusal::Mismatch {
@@ -679,6 +833,33 @@ mod tests {
         };
         let baseline = Baseline::bless(&candidate).unwrap();
         assert!(evaluate(&candidate, &budgets(false), &baseline).passed());
+        let mut population = vec![candidate.clone(); 5];
+        for (index, receipt) in population.iter_mut().enumerate() {
+            receipt.workloads[0]
+                .summary
+                .get_mut("sql_bytes_written")
+                .unwrap()
+                .per_turn_median += if index == 0 { 1000.0 } else { 1.0 };
+        }
+        assert!(
+            !evaluate(
+                &candidate_population(&population).unwrap(),
+                &budgets(false),
+                &baseline
+            )
+            .passed(),
+            "one systematic counted unit passed the five-population gate"
+        );
+        let mut extra = candidate.clone();
+        extra.workloads[0]
+            .summary
+            .get_mut("sql_bytes_written")
+            .unwrap()
+            .per_turn_median += 1.0;
+        assert!(
+            !evaluate(&extra, &budgets(false), &baseline).passed(),
+            "one extra exact counted unit passed"
+        );
         candidate.identity.build = "release".to_owned();
         let verdict = evaluate(&candidate, &budgets(false), &baseline);
         println!(

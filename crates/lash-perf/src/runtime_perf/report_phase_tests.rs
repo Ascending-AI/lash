@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::budgets::{
     assert_complete_runtime_budget, configured_phase_names, configured_scenario_names,
-    phase_wall_clock_budget_ms,
+    phase_is_declared,
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
@@ -603,8 +603,8 @@ fn typed_runtime_phase_inventory_is_required_and_budgeted() {
             "new typed runtime phase {name} is not required by the standard scenario"
         );
         assert!(
-            phase_wall_clock_budget_ms(RuntimePerfScenario::Standard, name).is_some(),
-            "new typed runtime phase {name} has no wall-clock budget"
+            phase_is_declared(RuntimePerfScenario::Standard, name),
+            "new typed runtime phase {name} has no declared inventory entry"
         );
     }
 }
@@ -639,14 +639,6 @@ fn runtime_phase_inventory_is_closed_in_both_directions() {
             required.difference(&budgeted).collect::<Vec<_>>()
         );
     }
-}
-
-#[test]
-fn materially_different_shared_phases_use_scenario_budgets() {
-    assert!(
-        phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop")
-            > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "effect_loop")
-    );
 }
 
 #[test]

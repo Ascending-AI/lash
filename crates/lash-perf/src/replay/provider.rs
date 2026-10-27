@@ -343,6 +343,101 @@ fn definition(
     .with_execution_policy(ExecutionPolicy::Once))
 }
 
+static METADATA: [std::sync::atomic::AtomicU64; 4] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 4];
+
+pub(super) fn metadata_counts() -> [u64; 4] {
+    METADATA
+        .each_ref()
+        .map(|v| v.load(std::sync::atomic::Ordering::Relaxed))
+}
+fn callback(index: usize) {
+    METADATA[index].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+struct MeteredFixtures(Arc<dyn lash_core::ToolProvider>);
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for MeteredFixtures {
+    fn environment_mode(&self) -> lash_core_store::environment::SourceMode {
+        self.0.environment_mode()
+    }
+    fn environment_snapshot(
+        &self,
+        key: &lash_core::ProviderKey,
+        source: &lash_core_store::environment::SourceId,
+        revision: lash_core_store::environment::SourceRevision,
+        config: &lash_core::OwnerConfigView,
+        namespace: Option<(
+            &lash_kernel_value::package::PublicationDomain,
+            &lash_kernel_value::package::PublicationScope,
+        )>,
+    ) -> Result<lash_core_store::environment::SourceSnapshot, lash_execution_contracts::PluginError>
+    {
+        callback(0);
+        self.0
+            .environment_snapshot(key, source, revision, config, namespace)
+    }
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::PluginError> {
+        callback(1);
+        self.0.tool_manifests(config)
+    }
+    fn resolve_manifest(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
+        self.0.resolve_manifest(name, config)
+    }
+    fn resolve_manifest_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
+        self.0.resolve_manifest_by_id(id, config)
+    }
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        self.0.resolve_contract(name, config)
+    }
+    fn resolve_contract_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        self.0.resolve_contract_by_id(id, config)
+    }
+    fn readable_binding_formats(&self) -> &'static [lash_kernel_value::providers::FormatVersion] {
+        self.0.readable_binding_formats()
+    }
+    fn link_payload(
+        &self,
+        manifest: &lash_core::ToolManifest,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<(
+        lash_kernel_value::providers::FormatVersion,
+        serde_json::Value,
+    )> {
+        callback(2);
+        self.0.link_payload(manifest, config)
+    }
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<lash_core::PreparedToolCall, ToolOutcome> {
+        self.0.prepare_tool_call(call).await
+    }
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        callback(3);
+        self.0.execute(call).await
+    }
+}
+
 /// The fixture tools, bound as `tools.<name>` in code mode.
 pub fn fixtures() -> anyhow::Result<Arc<dyn lash_core::ToolProvider>> {
     observed_fixtures(None)
@@ -354,31 +449,33 @@ pub(crate) fn observed_fixtures(
 ) -> anyhow::Result<Arc<dyn lash_core::ToolProvider>> {
     let key = serde_json::json!({ "type": "string" });
     let number = serde_json::json!({ "type": "number" });
-    Ok(Arc::new(StaticToolProvider::new(
-        vec![
-            definition(
-                LOOKUP,
-                "Looks up a small record by key.",
-                serde_json::json!({ "key": key }),
-                true,
-            )?,
-            definition(
-                LARGE,
-                "Returns a text of the requested size.",
-                serde_json::json!({ "key": key, "bytes": number }),
-                false,
-            )?,
-            definition(
-                SLOW,
-                "Answers after a delay.",
-                serde_json::json!({
-                    "key": key,
-                    "ms": number,
-                    "kill_workers": { "type": "boolean" },
-                }),
-                false,
-            )?,
-        ],
-        Fixtures(observer),
-    )))
+    Ok(Arc::new(MeteredFixtures(Arc::new(
+        StaticToolProvider::new(
+            vec![
+                definition(
+                    LOOKUP,
+                    "Looks up a small record by key.",
+                    serde_json::json!({ "key": key }),
+                    true,
+                )?,
+                definition(
+                    LARGE,
+                    "Returns a text of the requested size.",
+                    serde_json::json!({ "key": key, "bytes": number }),
+                    false,
+                )?,
+                definition(
+                    SLOW,
+                    "Answers after a delay.",
+                    serde_json::json!({
+                        "key": key,
+                        "ms": number,
+                        "kill_workers": { "type": "boolean" },
+                    }),
+                    false,
+                )?,
+            ],
+            Fixtures(observer),
+        ),
+    ))))
 }

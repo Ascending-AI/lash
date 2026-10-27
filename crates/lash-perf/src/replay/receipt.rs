@@ -36,6 +36,8 @@ pub struct Identity {
     pub run_id: String,
     pub compiler: String,
     pub executable_sha256: Option<String>,
+    pub worker_resources: bool,
+    pub instructions: bool,
     pub sql_shapes: bool,
     #[serde(default)]
     pub turn_profile: bool,
@@ -72,6 +74,8 @@ impl Identity {
             executable_sha256: std::env::current_exe()
                 .ok()
                 .and_then(|path| crate::perf_support::git::artifact_sha256(&path)),
+            worker_resources: false,
+            instructions: false,
             sql_shapes: false,
             turn_profile: false,
             traffic: false,
@@ -177,7 +181,12 @@ fn series(rounds: &[RoundRecord], name: &str) -> Vec<(f64, f64, f64)> {
                 (
                     round.history_depth as f64,
                     round.frame_depth as f64,
-                    value / round.sessions.max(1) as f64,
+                    value
+                        / if name.ends_with("_per_tool_body") {
+                            1.0
+                        } else {
+                            round.sessions.max(1) as f64
+                        },
                 )
             })
         })

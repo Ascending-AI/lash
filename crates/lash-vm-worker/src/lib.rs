@@ -61,6 +61,8 @@ mod entry;
 #[cfg(unix)]
 mod host;
 mod perf_witness;
+#[cfg(feature = "testing")]
+pub use perf_witness::observe_resources;
 #[cfg(unix)]
 mod process;
 #[cfg(unix)]
@@ -130,3 +132,6 @@ pub use entry::worker_entry_with_hook;
 /// Opt-in development allocation and worker stack measurements.
 #[cfg(feature = "cell-memory")]
 pub mod cell_memory;
+
+#[cfg(feature = "testing")]
+pub use lash_vm_protocol::WorkerResources;

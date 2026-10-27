@@ -258,6 +258,12 @@ pub(crate) struct DurationMetricHistoryValue {
     pub(crate) p95_ms: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CountedHistoryValue {
+    pub(crate) unit: String,
+    pub(crate) median: f64,
+}
+
 /// One durable observation: one scenario's median and p95 wall clock from one
 /// perf run.
 ///
@@ -284,7 +290,8 @@ pub(crate) struct DurationHistoryRecord {
     pub(crate) commit: String,
     pub(crate) run_id: String,
     pub(crate) recorded_at: String,
-    pub(crate) total_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) total_ms: Option<f64>,
     /// The same run's p95 wall clock. `None` means a legacy record predating
     /// percentile reporting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -293,6 +300,12 @@ pub(crate) struct DurationHistoryRecord {
     /// deliberately stay out of this wall-clock-duration trend contract.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) duration_metrics_ms: BTreeMap<String, DurationMetricHistoryValue>,
+    /// Counted observations retain their units and never enter a duration field.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) counted_metrics: BTreeMap<String, CountedHistoryValue>,
+    /// Producer hashes are provenance, not the comparison cohort.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) producer_artifacts: BTreeMap<String, String>,
     /// Raw kernel samples and integer allocator/charge records, retained with this observation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) kernel: Option<super::kernel_history::KernelObservation>,
@@ -300,6 +313,32 @@ pub(crate) struct DurationHistoryRecord {
     /// beside its wall time (FIG-5934).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) replay: Option<super::replay_history::ReplayCounts>,
+}
+
+impl DurationHistoryRecord {
+    fn observations(&self) -> Vec<(String, String, f64, Option<f64>)> {
+        let mut values = Vec::new();
+        if let Some(total) = self.total_ms {
+            values.push(("total_ms".into(), "ms".into(), total, self.total_p95_ms));
+        }
+        for (name, value) in &self.duration_metrics_ms {
+            values.push((
+                name.clone(),
+                "ms".into(),
+                value.median_ms,
+                Some(value.p95_ms),
+            ));
+        }
+        for (name, value) in &self.counted_metrics {
+            values.push((
+                format!("{name} [{}]", value.unit),
+                value.unit.clone(),
+                value.median,
+                None,
+            ));
+        }
+        values
+    }
 }
 
 /// A history read leniently: what parsed, what could not, and what this build
@@ -404,6 +443,8 @@ pub(crate) fn records_for_run(
             compare_instructions_per_operation: None,
             kernel: None,
             replay: None,
+            counted_metrics: BTreeMap::new(),
+            producer_artifacts: BTreeMap::new(),
             version: HISTORY_RECORD_VERSION,
             identity: identity.for_scenario(&summary.scenario),
             scenario: summary.scenario.clone(),
@@ -415,7 +456,7 @@ pub(crate) fn records_for_run(
             commit: commit.clone(),
             run_id: run_id.clone(),
             recorded_at: recorded_at.clone(),
-            total_ms: total.duration_ms.median,
+            total_ms: Some(total.duration_ms.median),
             total_p95_ms: Some(total.duration_ms.p95),
             duration_metrics_ms: summary.metric_summary.iter().filter(|(key, _)| key.ends_with("_ms"))
                 .map(|(key, value)| (key.clone(), value))
@@ -551,18 +592,11 @@ pub(crate) fn retained_records(records: &[DurationHistoryRecord]) -> Vec<Duratio
         for &index in indices.iter().rev().take(RETAINED_RUNS_PER_SERIES) {
             keep[index] = true;
         }
-        let mut metrics = BTreeMap::<&str, Vec<(usize, f64)>>::new();
+        let mut metrics = BTreeMap::<String, Vec<(usize, f64)>>::new();
         for &index in indices {
             let record = &records[index];
-            metrics
-                .entry("total_ms")
-                .or_default()
-                .push((index, record.total_ms));
-            for (metric, value) in &record.duration_metrics_ms {
-                metrics
-                    .entry(metric)
-                    .or_default()
-                    .push((index, value.median_ms));
+            for (metric, _, value, _) in record.observations() {
+                metrics.entry(metric).or_default().push((index, value));
             }
         }
         for (metric, observations) in metrics {
@@ -571,7 +605,7 @@ pub(crate) fn retained_records(records: &[DurationHistoryRecord]) -> Vec<Duratio
                 checked_in_level_shifts(),
                 &record.profile,
                 &record.scenario,
-                metric,
+                &metric,
             )
             .and_then(LevelShift::effective_from);
             let observations: Vec<_> = observations
@@ -689,31 +723,12 @@ fn trend_rows_against(
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
         }
-        series
-            .entry((
-                record.profile.clone(),
-                record.scenario.clone(),
-                "total_ms".to_string(),
-                DurationTrendGeometry {
-                    runs: record.runs,
-                    warmups: record.warmups,
-                    turns: record.turns,
-                    build_mode: record.build_mode,
-                },
-                record.identity.clone(),
-            ))
-            .or_default()
-            .push((
-                record.recorded_at.clone(),
-                record.total_ms,
-                record.total_p95_ms,
-            ));
-        for (metric, value) in &record.duration_metrics_ms {
+        for (metric, _, value, p95) in record.observations() {
             series
                 .entry((
                     record.profile.clone(),
                     record.scenario.clone(),
-                    metric.clone(),
+                    metric,
                     DurationTrendGeometry {
                         runs: record.runs,
                         warmups: record.warmups,
@@ -723,11 +738,7 @@ fn trend_rows_against(
                     record.identity.clone(),
                 ))
                 .or_default()
-                .push((
-                    record.recorded_at.clone(),
-                    value.median_ms,
-                    Some(value.p95_ms),
-                ));
+                .push((record.recorded_at.clone(), value, p95));
         }
     }
     series
@@ -910,8 +921,8 @@ fn geometry_label(geometry: DurationTrendGeometry) -> String {
 /// The trend table, as printed by the run path and by the standalone CLI.
 pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
     let mut out = format!(
-        "quantities: total_ms = scenario run envelope; *_ms = per-run metric; sampled_operations/* = pooled operation samples within one receipt; baseline = median of receipt medians; all durations in ms\n\
-         runtime perf duration trend (advisory; baseline = preceding median, frozen while a shift is open, \
+        "quantities: *_ms are milliseconds; counted metric labels include their units; baseline = median of receipt medians\n\
+         runtime perf history trend (advisory; baseline = preceding median, frozen while a shift is open, \
          drift = >{DRIFT_THRESHOLD_PCT:.0}% for {DRIFT_CONSECUTIVE_RUNS} consecutive runs; \
          reset_at = reviewed accepted level shift, scripts/perf_duration_level_shifts.json)\n"
     );
@@ -952,7 +963,7 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .max("reset_at".len());
     out.push_str(&format!(
         "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {:reset_width$}  {}\n",
-        "scenario", "profile", "metric", "geometry", "current_median_ms", "current_p95_ms", "baseline_median_ms", "delta", "reset_at", "verdict"
+        "scenario", "profile", "metric", "geometry", "current_median", "current_p95", "baseline_median", "delta", "reset_at", "verdict"
     ));
     for row in rows {
         let p95 = row
@@ -1058,7 +1069,7 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "unknown".to_string());
         let message = format!(
-            "runtime perf duration drift: {} {} ({}) is {} against the frozen pre-shift median of {} ms ({})",
+            "runtime perf history drift: {} {} ({}) is {} against the frozen pre-shift median of {} ({})",
             row.scenario,
             row.metric,
             row.profile,
@@ -1073,13 +1084,12 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
         // parses, and that script re-emits workflow-command lines on its own
         // stdout where the Actions runner reads them.
         if github_actions {
-            eprintln!("::warning title=Runtime perf duration drift::{message}");
+            eprintln!("::warning title=Runtime perf history drift::{message}");
         }
         eprintln!("warning: {message}");
     }
     eprintln!(
-        "warning: duration drift is advisory and never fails the run (FIG-1385): \
-         it reports sustained wall-clock movement that allocation ceilings cannot see. \
+        "warning: history drift is advisory and never fails the run (FIG-1385). \
          A detected shift stays open until a committed acknowledgement accepts it."
     );
 }
@@ -1218,31 +1228,29 @@ pub fn export_duration_history_csv(
             record.turns.to_string(),
             record.build_mode.to_string(),
         ];
-        let mut observations = vec![("total_ms".to_string(), "median", record.total_ms)];
-        if let Some(value) = record.total_p95_ms {
-            observations.push(("total_ms".to_string(), "p95", value));
-        }
-        for (metric, values) in &record.duration_metrics_ms {
-            observations.push((metric.clone(), "median", values.median_ms));
-            observations.push((metric.clone(), "p95", values.p95_ms));
-        }
-        for (metric, statistic, value) in observations {
-            let mut fields = common.to_vec();
-            fields.extend([
-                metric,
-                "ms".to_string(),
-                "one_perf_receipt".to_string(),
-                statistic.to_string(),
-                value.to_string(),
-            ]);
-            csv.push_str(
-                &fields
-                    .iter()
-                    .map(|field| format!("\"{}\"", field.replace('"', "\"\"")))
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-            csv.push('\n');
+        for (metric, unit, value, p95) in record.observations() {
+            let mut observations = vec![(metric.clone(), "median", value)];
+            if let Some(p95) = p95 {
+                observations.push((metric, "p95", p95));
+            }
+            for (metric, statistic, value) in observations {
+                let mut fields = common.to_vec();
+                fields.extend([
+                    metric,
+                    unit.clone(),
+                    "one_perf_receipt".to_string(),
+                    statistic.to_string(),
+                    value.to_string(),
+                ]);
+                csv.push_str(
+                    &fields
+                        .iter()
+                        .map(|field| format!("\"{}\"", field.replace('"', "\"\"")))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+                csv.push('\n');
+            }
         }
     }
     std::fs::write(out, csv).context("writing duration history CSV")
@@ -1265,3 +1273,157 @@ fn non_empty_env(key: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "duration_trend_tests.rs"]
 mod tests;
+
+/// Append one counted population to the existing JSONL history and run its
+/// existing level-shift detector. This path never writes a duration field.
+pub fn record_counted_sample(sample: &Path, history: &Path) -> anyhow::Result<()> {
+    #[derive(Deserialize)]
+    struct Input {
+        identity: BTreeMap<String, String>,
+        geometry: BTreeMap<String, serde_json::Value>,
+        rows: BTreeMap<String, f64>,
+        counted_metrics: BTreeMap<String, CountedHistoryValue>,
+        artifacts: BTreeMap<String, String>,
+        provenance: BTreeMap<String, String>,
+        experiments: BTreeMap<String, ExperimentIdentity>,
+        cpu: String,
+    }
+    let input: Input = serde_json::from_slice(&std::fs::read(sample)?)?;
+    anyhow::ensure!(
+        !input.rows.is_empty() && !input.counted_metrics.is_empty(),
+        "empty counted history population"
+    );
+    let required = |map: &BTreeMap<String, String>, key: &str| -> anyhow::Result<String> {
+        map.get(key)
+            .filter(|v| !v.trim().is_empty())
+            .cloned()
+            .with_context(|| format!("missing counted history identity {key}"))
+    };
+    let commit = required(&input.provenance, "commit")?;
+    let recorded_at = required(&input.provenance, "recorded_at")?;
+    let run_id = required(&input.provenance, "run_id")?;
+    let mut populations = BTreeMap::<String, BTreeMap<String, CountedHistoryValue>>::new();
+    for (name, value) in &input.rows {
+        anyhow::ensure!(
+            value.is_finite() && *value > 0.0,
+            "invalid instruction observation {name}"
+        );
+        let (scenario, metric) = if name.starts_with("kernel/") {
+            (name.as_str(), "instructions_per_operation".to_owned())
+        } else {
+            let (scenario, process) = name
+                .rsplit_once('/')
+                .context("invalid replay instruction name")?;
+            (scenario, format!("{process}_instructions_per_operation"))
+        };
+        populations.entry(scenario.to_owned()).or_default().insert(
+            metric,
+            CountedHistoryValue {
+                unit: "instructions/op".to_owned(),
+                median: *value,
+            },
+        );
+    }
+    for (name, value) in input.counted_metrics {
+        anyhow::ensure!(
+            value.median.is_finite() && value.median >= 0.0 && !value.unit.is_empty(),
+            "invalid counted observation {name}"
+        );
+        let (scenario, metric) = name.rsplit_once('/').context("invalid replay count name")?;
+        populations.entry(scenario.to_owned()).or_default().insert(
+            metric.to_owned(),
+            CountedHistoryValue {
+                unit: format!("{}/turn", value.unit),
+                ..value
+            },
+        );
+    }
+    let mut records = Vec::new();
+    for (scenario, counts) in populations {
+        let geometry = input
+            .geometry
+            .get(&scenario)
+            .context("missing counted workload geometry")?;
+        let mut identity = if let Some(name) = scenario.strip_prefix("replay/") {
+            input
+                .experiments
+                .get(name)
+                .context("missing replay experiment identity")?
+                .clone()
+        } else {
+            ExperimentIdentity {
+                host: required(&input.identity, "host")?,
+                compiler: required(&input.identity, "compiler")?,
+                allocator: required(&input.identity, "allocator")?,
+                build_profile: required(&input.identity, "build_profile")?,
+                backend: "kernel/production-worker-embedding".to_owned(),
+                configured_durability: "none (compute only)".to_owned(),
+                workload: scenario.clone(),
+                configured_geometry: String::new(),
+                postgres_settings: None,
+            }
+        };
+        // Artifact hashes are retained as provenance, so implementation changes
+        // do not create a fresh comparison cohort on every commit.
+        let mut artifacts = input.artifacts.clone();
+        if scenario.starts_with("replay/") {
+            let original: serde_json::Value = serde_json::from_str(&identity.configured_geometry)?;
+            if let Some(worker) = original["worker"].as_str() {
+                artifacts.insert(format!("{scenario}/worker"), worker.to_owned());
+            }
+        }
+        let mut configured = if scenario.starts_with("replay/") {
+            serde_json::from_str::<serde_json::Value>(&identity.configured_geometry)?
+        } else {
+            serde_json::json!({})
+        };
+        anyhow::ensure!(configured.is_object(), "invalid counted replay geometry");
+        configured["population"] = geometry.clone();
+        configured["kernel_pinned_cpu"] = serde_json::json!(input.cpu);
+        configured["history_observer"] =
+            serde_json::json!("qualified instructions:u and replay resource counters");
+        if scenario.starts_with("replay/") {
+            configured["worker"] = serde_json::json!("hash retained in producer_artifacts");
+        } else {
+            configured["window"] = serde_json::json!("counted gate workload population");
+            configured["terminal"] = serde_json::json!("successful validated outputs");
+        }
+        identity.configured_geometry = configured.to_string();
+        anyhow::ensure!(
+            identity.compare(&identity).is_ok(),
+            "incomplete counted history identity"
+        );
+        records.push(DurationHistoryRecord {
+            compare_instructions_per_operation: None,
+            version: HISTORY_RECORD_VERSION,
+            identity,
+            scenario,
+            profile: "counted".to_owned(),
+            runs: geometry["runs"].as_u64().unwrap_or(1) as usize,
+            warmups: geometry["warmups"].as_u64().unwrap_or(0) as usize,
+            turns: geometry["turns"]
+                .as_u64()
+                .or_else(|| geometry["operations"][1].as_u64())
+                .context("missing counted population size")? as usize,
+            build_mode: if required(&input.identity, "build")? == "debug" {
+                BuildMode::Debug
+            } else {
+                BuildMode::Release
+            },
+            commit: commit.clone(),
+            run_id: run_id.clone(),
+            recorded_at: recorded_at.clone(),
+            total_ms: None,
+            total_p95_ms: None,
+            duration_metrics_ms: BTreeMap::new(),
+            counted_metrics: counts,
+            producer_artifacts: artifacts,
+            kernel: None,
+            replay: None,
+        });
+    }
+    append_records(history, &records)?;
+    let retained = retained_records(&load_history(history)?);
+    compact_history(history, &retained, &[])?;
+    run_duration_trend_cli(history, Some("counted"))
+}

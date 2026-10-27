@@ -125,6 +125,11 @@ flaky-result = "fail"
 # run for tests whose cost depends on a warm or service-backed workspace.
 slow-timeout = { period = "300s", terminate-after = 1 }
 
+# The counted replay law captures five independent complete processes.
+[[profile.ci.overrides]]
+filter = 'package(lash-perf) & test(the_replay_corpus_subset_stays_within_its_counted_budgets)'
+slow-timeout = { period = "900s", terminate-after = 1 }
+
 # The Unicode RGI tests are the longest ordinary tests (66.525s, 130.957s),
 # so start them with the long tail while leaving the five-minute default
 # termination bound intact.

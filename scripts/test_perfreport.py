@@ -70,6 +70,26 @@ class PerfReportDispatchTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, rf"unknown report kind {observed}"):
                     perfreport.dispatch_entry(payload, Path("report.json"))
 
+        # FIG-7434: the old reader printed a before/after ratio across hosts/builds.
+        import copy
+        report = {"kind": "runtime-perf", "scenarios": ["chat"], "runs": 5, "warmups": 1,
+                  "experiments": {"chat": {"host": "host-a", "compiler": "rustc", "allocator": "system",
+                      "build_profile": "optimized", "backend": "sqlite", "configured_durability": "FULL",
+                      "workload": "chat", "configured_geometry": json.dumps({"worker": "hash", "window": "turn",
+                          "terminal": "success", "phase_observation_mode": "clock_alloc_rss", "dhat_enabled": False}),
+                      "postgres_settings": None}}, "summary": [{"scenario": "chat"}]}
+        perfreport.diff_runtime(report, copy.deepcopy(report))
+        for key in ("host", "compiler", "allocator", "build_profile", "backend", "configured_durability", "configured_geometry"):
+            changed = copy.deepcopy(report)
+            changed["experiments"]["chat"][key] = "different"
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                perfreport.diff_runtime(report, changed)
+        for key in ("experiments", "runs", "warmups"):
+            changed = copy.deepcopy(report)
+            del changed[key]
+            with self.subTest(missing=key), self.assertRaises(ValueError):
+                perfreport.diff_runtime(report, changed)
+
     def test_cli_reports_missing_kind_loudly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "report.json"

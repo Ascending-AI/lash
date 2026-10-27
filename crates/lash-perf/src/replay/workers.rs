@@ -12,14 +12,60 @@ fn python_embedding(
     lash_vm_worker::Embedder::new().dialect(lash_vm_worker::python())
 }
 
-/// Serve as a Python worker when this process was started as one: a pool
-/// re-executes `lash-perf` for Python cells. Call before anything else.
-///
-/// # Errors
-///
-/// The worker could not start or serve.
+/// Serve replay workers before host runtime initialization. The harness installs
+/// its allocator reader after the worker closes inherited descriptors.
 pub fn python_worker_entry() -> Result<bool, lash::vm::PoolError> {
-    lash_vm_worker::worker_entry(&python_embedding)
+    let args: Vec<_> = std::env::args().collect();
+    let counted = args.iter().any(|a| a == "--replay-resources");
+    let instructions = args.iter().any(|a| a == "--replay-instructions");
+    let python = !args.iter().any(|a| a == "--replay-typescript");
+    lash_vm_worker::worker_entry(&move |tuning| {
+        if counted {
+            let mut previous = crate::GLOBAL_ALLOCATOR.stats();
+            let counter = instructions
+                .then(crate::perf_support::instructions::InstructionCounter::open_threads)
+                .transpose()
+                .map_err(|e| lash_vm_worker::EmbedError::Registry(e.to_string()))?;
+            let mut pmu_before = counter
+                .as_ref()
+                .map(|c| c.snapshot())
+                .transpose()
+                .map_err(|e| lash_vm_worker::EmbedError::Registry(e.to_string()))?;
+            lash_vm_worker::observe_resources(Box::new(move || {
+                let after = crate::GLOBAL_ALLOCATOR.stats();
+                let mut resources = lash_vm_worker::WorkerResources {
+                    allocations: (after.allocations + after.reallocations
+                        - previous.allocations
+                        - previous.reallocations) as u64,
+                    allocated_bytes: (after.bytes_allocated - previous.bytes_allocated) as u64,
+                    ..Default::default()
+                };
+                previous = after;
+                if let Some(counter) = &counter {
+                    let now = counter.snapshot().map_err(anyhow::Error::from);
+                    match now.and_then(|now| {
+                        let before = pmu_before
+                            .replace(now)
+                            .ok_or_else(|| anyhow::anyhow!("missing PMU start"))?;
+                        Ok(now.since(before)?.qualify()?)
+                    }) {
+                        Ok(delta) => {
+                            resources.instructions = delta.instructions;
+                            resources.instruction_enabled_ns = delta.time_enabled;
+                            resources.instruction_running_ns = delta.time_running;
+                        }
+                        Err(_) => resources.instruction_refusals = 1,
+                    }
+                }
+                resources
+            }));
+        }
+        if python {
+            python_embedding(tuning)
+        } else {
+            lash_vm_worker::built_dialects(tuning)
+        }
+    })
 }
 
 /// The worker service for `protocol`'s cells, with its run deadlines off the
@@ -29,6 +75,8 @@ pub(crate) fn service(
     python: bool,
     _profile_dir: &std::path::Path,
     instruction_limit: Option<u64>,
+    resources: bool,
+    instructions: bool,
 ) -> anyhow::Result<lash::vm::WorkerService> {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config =
@@ -36,7 +84,7 @@ pub(crate) fn service(
     if let Some(limit) = instruction_limit {
         config.run_bounds.charge_limit = config.run_bounds.charge_limit.max(limit);
     }
-    if python {
+    if python || resources {
         config.entry = lash::vm::WorkerEntry::reexec()
             .map_err(|error| anyhow::anyhow!("locate this binary for Python workers: {error}"))?;
         #[cfg(feature = "dhat-heap")]
@@ -47,6 +95,18 @@ pub(crate) fn service(
                 .ok_or_else(|| anyhow::anyhow!("worker heap-profile path must be UTF-8"))?
                 .to_owned(),
         ]);
+    }
+    if resources {
+        config
+            .entry
+            .args
+            .extend(["--count-heap-work".into(), "--replay-resources".into()]);
+        if !python {
+            config.entry.args.push("--replay-typescript".into());
+        }
+        if instructions {
+            config.entry.args.push("--replay-instructions".into());
+        }
     }
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;

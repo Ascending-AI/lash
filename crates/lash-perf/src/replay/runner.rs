@@ -28,6 +28,8 @@ pub enum StoreChoice {
 #[derive(Clone, Debug)]
 pub struct RunOptions {
     pub identity: super::receipt::Identity,
+    pub worker_resources: bool,
+    pub instructions: bool,
     pub store: StoreChoice,
     /// Run only the first this many turns of each session.
     pub turns: Option<usize>,
@@ -197,7 +199,17 @@ struct Lane {
 /// artifact cleanup, and settles between rounds the same way (FIG-6321).
 fn replay_settings() -> lash_durable::DurableSettings {
     let mut settings = lash_durable::DurableSettings::standard();
-    settings.retirement.every = Duration::from_secs(24 * 60 * 60);
+    let day = Duration::from_secs(24 * 60 * 60);
+    settings.retirement.every = day;
+    // This private single-node fixture is driven by after-commit wake hints.
+    // Periodic lease/reap/liveness polls otherwise become work proportional
+    // to executor descheduling rather than the scripted foreground turns.
+    settings.lease.heartbeat_every = day;
+    settings.lease.self_stop_after = day * 2;
+    settings.lease.ttl = day * 3;
+    settings.lease.reap_every = day;
+    settings.lease.claim_poll = day;
+    settings.lease.claim_backoff = day;
     settings
 }
 
@@ -224,6 +236,8 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         options.identity.sql_shapes == options.sql_shapes.is_some()
             && options.identity.turn_profile == options.turn_report.is_some()
             && options.identity.traffic == options.traffic
+            && options.identity.worker_resources == options.worker_resources
+            && options.identity.instructions == options.instructions
             && options.identity.heap_window
                 == options
                     .heap
@@ -259,7 +273,11 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut experiment = options.identity.experiment(serde_json::json!({
         "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
         "sessions": workload.sessions, "compact_every": workload.compact_every,
-        "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic, "turn_profile": options.identity.turn_profile,
+        "runtime_workers": tokio::runtime::Handle::current().metrics().num_workers(),
+        "maintenance_policy": "private single node; after-commit wakes; periodic housekeeping deferred beyond the run",
+        "worker_resources": options.worker_resources, "instructions": options.instructions,
+        "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
+        "turn_profile": options.identity.turn_profile,
         "heap_window": options.identity.heap_window, "heap_frames": options.heap.dhat_frames,
         "window": "round first send through last successful outcome; counters at settled cuts",
         "sql_work_window": options.sql_shapes.as_ref().map(|_| "node startup through core shutdown; start/finish phase cuts; includes unowned and cross-window SQL"),
@@ -319,6 +337,8 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 workload.protocol == Protocol::Python,
                 &options.worker_profile_dir,
                 workload.instruction_limit,
+                options.worker_resources,
+                options.instructions,
             )
         })
         .transpose()?;
@@ -405,6 +425,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .transpose()
         .map_err(|error| anyhow::anyhow!("start the worker pool: {error}"))?;
     meter.attach_workers(pool);
+    let live_before = crate::GLOBAL_ALLOCATOR.stats();
     let mut lanes = Vec::with_capacity(workload.sessions);
     for (index, inputs) in scripted.into_iter().enumerate() {
         let id = lash_kernel_value::identity::SessionId::try_from(format!(
@@ -504,6 +525,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         if off_cpu_marks {
             crate::perf_support::time::instruction_control("enable")?;
         }
+        let pmu_before = options
+            .instructions
+            .then(crate::perf_support::instructions::host_snapshot)
+            .transpose()?;
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
@@ -620,6 +645,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             profiled = true;
         }
         let mut metrics = difference(&before, &after);
+        if let Some(bodies) = metrics.get("tool_bodies").copied().filter(|n| *n > 0.0) {
+            for name in [
+                "provider_snapshots",
+                "provider_manifests",
+                "provider_link_payloads",
+            ] {
+                if let Some(entries) = metrics.get(name).copied() {
+                    metrics.insert(format!("{name}_per_tool_body"), entries / bodies);
+                }
+            }
+        }
         for (oracle, value) in oracle_values {
             let keys = oracle
                 .check(&value)
@@ -655,6 +691,20 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 - authorized_before;
             super::capabilities::check(mode, &metrics, authorized)?;
         }
+        if let Some(before) = pmu_before {
+            let delta = crate::perf_support::instructions::host_snapshot()?
+                .since(before)?
+                .qualify()?;
+            metrics.insert("host_instructions".into(), delta.instructions as f64);
+            metrics.insert(
+                "host_instruction_enabled_ns".into(),
+                delta.time_enabled as f64,
+            );
+            metrics.insert(
+                "host_instruction_running_ns".into(),
+                delta.time_running as f64,
+            );
+        }
         if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
             let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
             row["phase"] = serde_json::json!("turn");
@@ -687,6 +737,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             }
             let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
             let mut metrics = difference(&before, &after);
+            if let Some(bodies) = metrics.get("tool_bodies").copied().filter(|n| *n > 0.0) {
+                for name in [
+                    "provider_snapshots",
+                    "provider_manifests",
+                    "provider_link_payloads",
+                ] {
+                    if let Some(entries) = metrics.get(name).copied() {
+                        metrics.insert(format!("{name}_per_tool_body"), entries / bodies);
+                    }
+                }
+            }
             if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
                 let mut row = sql_shape_round(turn + 1, before, after, &metrics)?;
                 row["phase"] = serde_json::json!("compaction");
@@ -711,6 +772,15 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             });
             frame_depth = 0;
         }
+    }
+    // Keep actual facade handles alive through the final retained-byte cut.
+    std::hint::black_box(&lanes);
+    let live_after = crate::GLOBAL_ALLOCATOR.stats();
+    let retained = (live_after.bytes_allocated as i128 - live_after.bytes_deallocated as i128)
+        - (live_before.bytes_allocated as i128 - live_before.bytes_deallocated as i128);
+    if let Some(last) = rounds.last_mut() {
+        last.metrics
+            .insert("facade_live_bytes".to_owned(), retained.max(0) as f64);
     }
     if options.heap.dhat_out.is_some() {
         ensure!(

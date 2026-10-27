@@ -47,6 +47,13 @@ kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
 reason = "proves nothing without a live S3 server; the service job executes this label uncached against a real service"
 
+# Five independent counted replay processes need more than the old 300s bound.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["test"]
+targets = ["replay"]
+timeout = "long"
+
 # Each test action of this package starts the pinned PostgreSQL 18
 # (`native//:postgres`) on its own loopback, applies the published schema and
 # runs against it (`tools/buck2/postgres_action_runner.py`). The server is a

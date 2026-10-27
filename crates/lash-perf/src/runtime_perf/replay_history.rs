@@ -55,7 +55,7 @@ fn record(receipt: &ReplayReceipt, workload: &WorkloadReceipt) -> Option<Duratio
         commit: receipt.identity.commit.clone().unwrap_or_default(),
         run_id: receipt.identity.run_id.clone(),
         recorded_at: receipt.identity.started_at.clone(),
-        total_ms: wall.median_ms,
+        total_ms: Some(wall.median_ms),
         total_p95_ms: Some(wall.p95_ms),
         duration_metrics_ms: ["host_cpu_ms", "worker_cpu_ms"]
             .into_iter()
@@ -65,6 +65,8 @@ fn record(receipt: &ReplayReceipt, workload: &WorkloadReceipt) -> Option<Duratio
             })
             .collect(),
         kernel: None,
+        counted_metrics: BTreeMap::new(),
+        producer_artifacts: BTreeMap::new(),
         replay: Some(ReplayCounts {
             script_digest: workload.script_digest.clone(),
             counts: workload

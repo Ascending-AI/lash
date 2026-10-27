@@ -35,6 +35,104 @@ results; their old launchers have been retired.
 - [Interpreter comparison](compare-bench.md): matched kernel and reference-engine workloads.
 - [History component probe](history-probe.md): held-frame, checkpoint work and ownership growth.
 
+## Counted regression gates
+
+The scheduled main run executes the replay counted gate through
+`kiln test //:main_tests`. The PMU and startup commands execute locally after
+that suite, because remote workers need not expose a PMU. Landing runs Clippy;
+it does not execute these performance workloads.
+
+| Regression | Measurement and gate | Execution |
+|---|---|---|
+| Extra SQL write per turn | Replay `sql_writes`, rows changed and bound bytes | Main counted suite |
+| Extra worker allocation per guest read | Harness worker allocator deltas in progress receipts | Main counted suite |
+| Extra CPU instructions | `instructions:u` per operation, host threads and workers separately; 1% above previous successful main baseline | `just perf-gate-instructions` locally |
+| Extra startup sleep | Median requested sleep nanoseconds and sleep calls over 20 actual helper spawns, traced through Ready | `just perf-gate-startup` locally |
+| Repeated provider metadata per tool body | Snapshot, manifest, link-payload and body-entry counts in the replay fixture provider | Main counted suite |
+| Retained bytes per facade handle | Net live Rust bytes since session handles opened, sampled after the final turn with handles still held | Main counted suite |
+
+The counted gate fixes its Tokio runtime at eight workers on local and hermetic executors.
+The private single-node fixture uses after-commit wake hints and schedules periodic
+heartbeat, reap, liveness/claim polling and retirement beyond the measured run;
+those maintenance costs are outside this foreground-work population.
+It checks the median of five independent per-turn medians. It retains
+each raw population beside the aggregate receipt. Maxima and depth slopes
+retain the worst observation. Replay ceilings use the maximum of five same-commit runs plus their observed
+max-minus-min absolute noise. Exact metrics get zero slack. Every measured
+maximum, noise and resulting ceiling is in
+`crates/lash-perf/workloads/replay/baseline.json`. `just perf-replay-bless`
+collects all five receipts in independent processes and refuses to raise an existing ceiling. The
+committed depth-slope and independent hard ceilings still bind. The first
+five-run calibration measured 91 chat-short writes/turn and 101 compacting-chat
+writes/turn, both with zero noise. Full maxima, noise and ceilings are retained
+in the baseline for all 96 medians, including entries per actual tool body.
+The fixture stores use fixed-length private canonical paths during measurement:
+SQLite embeds its canonical path in publication domains, so artifact-directory
+length must not change SQL bytes or allocator work. Closed stores are copied
+to the requested artifact directory after measurement. These are
+finite same-commit observations, not a population-wide noise bound. SQL reads
+include asynchronous background work: existing observer origin tags do not
+provide a complete foreground/maintenance classification across all runtime
+tasks, so a one-read regression is not certified. Probe (e) is unproven and stale: its patch targets `SurfaceTools::execute`, which ordinary facade replay dispatch no longer runs. Their measured aggregate
+ceilings remain enforced.
+
+The retained-byte window includes host caches, the store and the result ledger
+created while those actual facade handles are held. It measures the final
+live level, not allocation traffic, direct session state, or RSS. The receipt
+contains that metric only on the final round. It is divided by the retained
+session population, like the other replay counts.
+
+PMU samples retain raw count, enabled time and running time. Missing events,
+empty populations, nonpositive instruction slopes, or less than 99% running
+time refuse the gate. Host events open before the runtime and inherit threads
+only; worker events are opened in the credential-free worker before confinement.
+The gate never substitutes guest charge or scaled wall durations. Successful
+clean main runs atomically advance `/workspace/kiln/lash/perf-gates/` baselines;
+a failure cannot replace its reference. A committed measured baseline bootstraps
+the first run. Workload source, geometry, host, compiler, build and allocator
+must match. A baseline from another history is refused. Kernel fits use 1,000
+to 100,000 trips for the small loops; the large object workloads retain their
+10,000 to 100,000 object population. The CPU reference contains all 40 rows from the first complete population,
+with five paired trip samples per kernel row. Its independent reverted control
+passed all 40 rows; its largest upward change was 0.845%. These finite
+observations do not establish a population-wide noise bound. Count calibration
+uses five independent processes, and startup calibration uses five populations
+of 20 Ready handshakes.
+
+Startup wall medians are retained as diagnostics. The startup verdict counts
+requested blocking syscalls, using `strace -f` on the exact helper PIDs in the
+20 Ready receipts. Shared-host scheduling cannot turn a requested 50 ms sleep
+into a pass. This catches added sleeps; it does not claim to gate page faults,
+filesystem wait, or all other causes of startup latency. Startup CPU work is
+outside the steady replay PMU population.
+
+For the external `tests-main/run.py`, run these commands from its main fork
+with `env.sh` sourced, and propagate either exit code as a red step:
+
+```sh
+just perf-gate-instructions
+just perf-gate-startup
+```
+
+`just perf-history-record` captures the instruction gate's complete kernel and
+replay populations once on the clean current main head. It appends qualified
+instructions per operation, SQL statements/writes, and host/worker allocation
+counts to `.benchmarks/perf-guard/runtime-duration-history-full.jsonl`, using the existing JSONL
+history store and level-shift detector. Set `LASH_PERF_HISTORY_FILE` to retain
+that store outside a disposable checkout. The existing detector reports a
+shift after five consecutive observations more than 50% above the preceding
+median; its retained evidence and reviewed acknowledgements also apply to
+counted series. The 1% CPU gate remains a separate immediate check. No duration
+fields, latency samples, or producer timing tables are retained by this recipe.
+Producer hashes remain provenance; changed workload geometry, compiler, build,
+allocator, backend or host select another comparison cohort.
+
+`perfreport --diff` requires matching complete experiment identities and sample
+geometry. `cellpath` refuses a failed or missing cell even if its synthetic
+model subsequently answers. `scripts/perf_guard_budgets.json` retains enforced
+allocation limits and required phase inventory; unused wall ceilings and the
+dead frame-curve configuration have been removed.
+
 ## Instruments
 
 - [async-scheduling-queues](instruments/async-scheduling-queues.md): how operations move through async task scheduling and the stores' physical queues.

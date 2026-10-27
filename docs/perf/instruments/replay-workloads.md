@@ -291,7 +291,7 @@ measures 0.375 over all steady turns. The longer window keeps the existing
 0.5-row slope tolerance and every byte-slope ceiling.
 
 FIG-6751 re-derived only Python's physical-write median as 2,453,504 B from
-an ordinary 24-turn debug replay on `2d246aab61`; its 25% headroom is unchanged
+an ordinary 24-turn debug replay on `2d246aab61`; its historical 25% headroom was later replaced by measured absolute noise in FIG-7434
 (3,066,880 B). Other baseline metrics retain their previous values. The
 bisection's adjacent samples measured 2,338,816 B on `cf1c07b95a` and
 2,371,584 B on `47e8cfc5bd` (FIG-6717), whose commit explicitly states:
@@ -406,8 +406,8 @@ test's debug build. It fails when:
 - a counted budget in `budgets.json` is exceeded: a per-turn median or max
   ceiling, or a depth-slope ceiling (`history_slope`, or `frame_slope` for
   the compacting workload);
-- a counted per-turn median rises more than `baseline_tolerance.relative`
-  (plus any per-metric `absolute` slack) above `baseline.json`;
+- a counted per-turn median exceeds `baseline.json`'s `median_ceiling`: the
+  maximum of five same-commit runs plus their max-minus-min absolute noise;
 - a depth slope listed under `baseline_tolerance.depth_slope` rises more than
   `relative * |baseline| + absolute` above its blessed value; a
   `<workload>/<metric>` key loosens one noisier workload;

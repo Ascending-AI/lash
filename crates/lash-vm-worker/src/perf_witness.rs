@@ -3,6 +3,7 @@
 use std::cell::Cell;
 #[cfg(feature = "testing")]
 thread_local! {
+    static RESOURCES: std::cell::RefCell<Option<Box<dyn FnMut() -> lash_vm_protocol::WorkerResources>>> = const { std::cell::RefCell::new(None) };
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     static GRAPH: Cell<[u64; 6]> = const { Cell::new([0; 6]) };
     static PEAK: Cell<u64> = const { Cell::new(0) };
@@ -10,6 +11,12 @@ thread_local! {
     /// staging since the last receipt.
     static PAGES: Cell<[u64; 2]> = const { Cell::new([0; 2]) };
     static PUBLISHED_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Install a harness allocator/PMU reader after descriptor confinement and before serving.
+#[cfg(feature = "testing")]
+pub fn observe_resources(reader: Box<dyn FnMut() -> lash_vm_protocol::WorkerResources>) {
+    RESOURCES.with(|slot| *slot.borrow_mut() = Some(reader));
 }
 
 pub(crate) struct Witness {
@@ -79,6 +86,7 @@ pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
         let previous = GRAPH.replace(graph);
         let [pages_loaded, pages_sealed] = PAGES.replace([0; 2]);
         Some(lash_vm_protocol::WorkerWork {
+            resources: RESOURCES.with(|slot| slot.borrow_mut().as_mut().map(|read| read())),
             serialized_body_bytes: graph[4] - previous[4],
             decoded_body_bytes: graph[5] - previous[5],
             pages_loaded,

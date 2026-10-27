@@ -19,13 +19,6 @@
     }
   ],
   "baseline_tolerance": {
-    "relative": 0.25,
-    "absolute": {
-      "graph_nodes_written": 1,
-      "model_calls": 0,
-      "workers_killed": 0,
-      "worker_executions": 1
-    },
     "depth_slope": {
       "allocations": {
         "relative": 0.02,

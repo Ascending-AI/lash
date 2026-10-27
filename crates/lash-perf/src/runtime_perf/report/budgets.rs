@@ -31,13 +31,7 @@ pub(super) enum GuardedSpan {
     RunTurn,
 }
 
-/// A runtime scenario's guard budgets, split by enforcement class.
-///
-/// The split is the checked-in format, not a naming convention: allocation
-/// ceilings are load-independent and gate the release, wall-clock ceilings
-/// drift by more than an order of magnitude on a busy shared runner and are
-/// therefore advisory. `deny_unknown_fields` on both halves keeps a
-/// misfiled ceiling from silently changing its enforcement class.
+/// Enforced allocation ceilings and the closed inventory of measured phases.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuntimeScenarioBudget {
@@ -46,7 +40,7 @@ struct RuntimeScenarioBudget {
     // Review evidence beside an attributed ceiling change, never an enforcement exemption.
     #[serde(default, rename = "allocation_attribution")]
     _allocation_attribution: Option<String>,
-    advisory_duration: AdvisoryDurationBudget,
+    phases: BTreeMap<String, PhaseInventory>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,15 +52,7 @@ struct EnforcedAllocationBudget {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AdvisoryDurationBudget {
-    ms_max: f64,
-    phases: BTreeMap<String, AdvisoryPhaseBudget>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AdvisoryPhaseBudget {
-    budget_ms: f64,
+struct PhaseInventory {
     required: bool,
 }
 
@@ -99,7 +85,6 @@ pub(super) fn required_phase_names(scenario: RuntimePerfScenario) -> &'static [&
                 .iter()
                 .map(|(scenario, budget)| {
                     let required = budget
-                        .advisory_duration
                         .phases
                         .iter()
                         .filter_map(|(phase, budget)| budget.required.then_some(phase.as_str()))
@@ -129,30 +114,15 @@ pub(super) fn steady_state_turn_allocation_budget_bytes(scenario: RuntimePerfSce
         .steady_state_turn_alloc_bytes_max
 }
 
-pub(super) fn wall_clock_budget_ms(scenario: RuntimePerfScenario) -> f64 {
-    scenario_budget(scenario).advisory_duration.ms_max
-}
-
-pub(super) fn phase_wall_clock_budget_ms(
-    scenario: RuntimePerfScenario,
-    phase: &str,
-) -> Option<f64> {
-    scenario_budget(scenario)
-        .advisory_duration
-        .phases
-        .get(phase)
-        .map(|budget| budget.budget_ms)
+pub(super) fn phase_is_declared(scenario: RuntimePerfScenario, phase: &str) -> bool {
+    scenario_budget(scenario).phases.contains_key(phase)
 }
 
 #[cfg(test)]
 pub(super) fn configured_phase_names(
     scenario: RuntimePerfScenario,
 ) -> impl Iterator<Item = &'static str> {
-    scenario_budget(scenario)
-        .advisory_duration
-        .phases
-        .keys()
-        .map(String::as_str)
+    scenario_budget(scenario).phases.keys().map(String::as_str)
 }
 
 #[cfg(test)]
@@ -165,7 +135,6 @@ pub(super) fn assert_complete_runtime_budget(scenario: RuntimePerfScenario) {
     let budget = scenario_budget(scenario);
     assert!(budget.enforced_allocation.alloc_bytes_max > 0.0);
     assert!(budget.enforced_allocation.steady_state_turn_alloc_bytes_max > 0.0);
-    assert!(budget.advisory_duration.ms_max > 0.0);
 }
 
 #[cfg(test)]
@@ -200,10 +169,7 @@ mod tests {
                 "alloc_bytes_max": 1000.0,
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
+            "phases": {}
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
@@ -220,10 +186,7 @@ mod tests {
                 "alloc_bytes_max": 1000.0,
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
+            "phases": {}
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
@@ -239,10 +202,7 @@ mod tests {
             "enforced_allocation": {
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
+            "phases": {}
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
@@ -258,53 +218,12 @@ mod tests {
             "enforced_allocation": {
                 "alloc_bytes_max": 1000.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
+            "phases": {}
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing field `steady_state_turn_alloc_bytes_max`"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn missing_advisory_duration_ceiling_fails_to_load() {
-        let json = r#"{
-            "guarded_span": "whole_run",
-            "enforced_allocation": {
-                "alloc_bytes_max": 1000.0,
-                "steady_state_turn_alloc_bytes_max": 500.0
-            },
-            "advisory_duration": {
-                "phases": {}
-            }
-        }"#;
-        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
-        assert!(err.to_string().contains("missing field `ms_max`"), "{err}");
-    }
-
-    #[test]
-    fn missing_phase_budget_fails_to_load_under_deny_unknown_fields() {
-        let json = r#"{
-            "guarded_span": "whole_run",
-            "enforced_allocation": {
-                "alloc_bytes_max": 1000.0,
-                "steady_state_turn_alloc_bytes_max": 500.0
-            },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {
-                    "phase": {"required": true}
-                }
-            }
-        }"#;
-        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
-        assert!(
-            err.to_string().contains("missing field `budget_ms`"),
             "{err}"
         );
     }
@@ -317,12 +236,9 @@ mod tests {
                 "alloc_bytes_max": 1000.0,
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {
-                    "phase": {"budget_ms": 1.0}
+            "phases": {
+                    "phase": {}
                 }
-            }
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
@@ -339,12 +255,9 @@ mod tests {
                 "alloc_bytes_max": 1000.0,
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {
-                    "phase": {"budget_ms": 1.0, "required": true, "unexpected": false}
+            "phases": {
+                    "phase": {"required": true, "unexpected": false}
                 }
-            }
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(
@@ -362,10 +275,7 @@ mod tests {
                 "alloc_bytes_max": 1000.0,
                 "steady_state_turn_alloc_bytes_max": 500.0
             },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
+            "phases": {}
         }"#;
         let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
         assert!(

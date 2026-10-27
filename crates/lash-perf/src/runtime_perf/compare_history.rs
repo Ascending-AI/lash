@@ -90,7 +90,7 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
             commit: receipt.commit.clone(),
             run_id: receipt.run_id.clone(),
             recorded_at: receipt.recorded_at.clone(),
-            total_ms: row.median_ns[1] / 1e6,
+            total_ms: Some(row.median_ns[1] / 1e6),
             total_p95_ms: Some(high_p95),
             duration_metrics_ms: if slope_ms > 0.0 {
                 BTreeMap::from([(
@@ -107,6 +107,8 @@ pub(crate) fn record(args: &Args, receipt: &Receipt) -> Result<Vec<String>> {
                 .instructions
                 .as_ref()
                 .map(|r| r.median_per_operation),
+            counted_metrics: BTreeMap::new(),
+            producer_artifacts: BTreeMap::new(),
             kernel: None,
             replay: None,
         });

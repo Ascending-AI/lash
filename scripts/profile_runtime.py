@@ -123,7 +123,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Exit non-zero when an enforced runtime perf guard budget "
             "(allocation ceiling or inventory check) is exceeded. Wall-clock "
-            "budgets are advisory: they are always reported and never gate."
+            "durations remain diagnostic and have no checked-in time ceilings."
         ),
     )
     parser.add_argument(
@@ -277,9 +277,7 @@ def main() -> int:
                         off_cpu=args.off_cpu, cwd=repo_root)
     if proc.stdout:
         print(proc.stdout, end="")
-    # Always forward stderr: advisory wall-clock exceedances are reported there
-    # on an otherwise successful run, and swallowing them would make the
-    # advisory class invisible.
+    # Preserve producer diagnostics even on a successful run.
     if proc.stderr:
         print(proc.stderr, file=sys.stderr, end="")
     # The binary's stdout is the JSON contract parsed below, so its GitHub

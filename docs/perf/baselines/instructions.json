@@ -1,0 +1,744 @@
+{
+  "identity": {
+    "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+    "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+    "allocator": "stats_alloc",
+    "build": "release",
+    "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false"
+  },
+  "cpu": "pinned:0",
+  "geometry": {
+    "kernel/typescript/empty_loop": {
+      "source_hash": "5db9a4e816911a041294fc70bfe29a990b83571e7af5b6f851f5a455cfbbfa8e",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/empty_loop": {
+      "source_hash": "efeb20152fc845f3cb4f80eefd00186813bba28a88f9cf174e088ecfd7b12b89",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/prop_read": {
+      "source_hash": "eced51007902ff8150e551a60f778195dbcfaa7a860f56b316559f717ecd2c4e",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/prop_read": {
+      "source_hash": "8d208e04816c73ef8785cde508434d4266ed489200aad36bce34886ee18c18d4",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/prop_write": {
+      "source_hash": "f37dc968fcd42a5245176938513aaa524f8a6f8a4daba175dd2b27ae545bd375",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/prop_write": {
+      "source_hash": "6fd5a7378e94da237608c105fe4a3a6f1b0f7c61021daeb434803d6941986921",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/array_read": {
+      "source_hash": "c9dbaaf2aa2f45e4aafe73ac2de9477e23818f0c20ade6c26540c981be75b9c9",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        10000,
+        1000000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/array_read": {
+      "source_hash": "d96a89641050cf1215695373978eb67f14019ae1d6ea65b49d12b0153990ddd6",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        10000,
+        1000000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/func_call": {
+      "source_hash": "3fdcf149dca1fb86431b5101990fb2abfe2f5e503ef017f31c4274b0c186614f",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/func_call": {
+      "source_hash": "08c224d8bf1cfef23bd6442cf3a1b597b14da8eff9df776bab133a5112ccf3d7",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/func_closure_call": {
+      "source_hash": "c6f9c51e7d58924795d48fcc15eac445338c2091d0c8318652aea22491b1c345",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/func_closure_call": {
+      "source_hash": "37e6120f7e3f91f05d4cad4303562de365c1295741a2df39aa573a625558e6c7",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        4000,
+        400000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/int_arith": {
+      "source_hash": "9c2b9a8eebc3fc780e4127e511c64d5bbce36e099f449480768e1403e33cb3d1",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/int_arith": {
+      "source_hash": "0ff439911aedb3817aea93dc6af64ce82e33efa9b9e137511b8171bd053eeb3f",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/float_arith": {
+      "source_hash": "d6527989ed40078389dc23af4f7e3a8a589104000705e318e44337b4329f967d",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/float_arith": {
+      "source_hash": "096caf1f86bc46450ea51f55bd0c53074ac9c7ea82d0b05555fe8893684a45ac",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/map_set_string": {
+      "source_hash": "cc1167209575863657c87be02c813598f26a7e0b7eb37adb2947a1e458c8e515",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/map_set_string": {
+      "source_hash": "693596e060cdc7bc1836d7dcbbf23fb1e4ee2941d94718dba82db13adc7f49b7",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/string_build1": {
+      "source_hash": "50bcc41da676e579ba17ff0457509dafd64e2cd75132c2ab8ac76f821c92e343",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/string_build1": {
+      "source_hash": "f7f211a6d7b28ddca506ffeb9f1fd3a62b0a2db0b8dc48292d1a1be1f821d7b9",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/int_to_string": {
+      "source_hash": "d1255679cf8317f3cefaf927fc49245f7d2f803d874641404029edca5533a8a8",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        3000,
+        300000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/int_to_string": {
+      "source_hash": "3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        3000,
+        300000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/sort_bench": {
+      "source_hash": "5cdc375d6143cb6fcc630d0504da19de734105f44c4ea990bb8aa5568a7dc199",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/sort_bench": {
+      "source_hash": "dc9d0f1b7fd397c2bcba5db1bb4e43de61ecc421bf80dad0e657bc17bfec4cf2",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/json_transform": {
+      "source_hash": "eb67836ac3d63d22ae77797a30d8f6bd454175f00b6f1fb38622a6ebbb2a336d",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/json_transform": {
+      "source_hash": "d96d3869baa5cd1a32ef1770d472e13b6ea991f3cb8826ac70e527174968b795",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/records": {
+      "source_hash": "9ccaf39805acb4a702481d27e6a29b1e25aef407962dbb0075f8252622a6c408",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/records": {
+      "source_hash": "d774b6a74d3d70c7b27049f61eaac81013a355b53aa2a5286c0aa7d34bf44ca1",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/templating": {
+      "source_hash": "8b4fb8138c22f6eb6e82a6933f279e83fe7fdfc2ff4dd0732ae30d36df23499a",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/templating": {
+      "source_hash": "687676b1fb9cc0bd7899aff8aa7625a374fedb274d1f8ea97837a1178be63d66",
+      "trips": [
+        1,
+        100
+      ],
+      "operations": [
+        1,
+        100
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/object_build": {
+      "source_hash": "dc86c054dc72a895e57ffc063d6f8cb8d553664bd1241a0783a0b2e8ed8f03e5",
+      "trips": [
+        10000,
+        100000
+      ],
+      "operations": [
+        10000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/object_build": {
+      "source_hash": "6ee0f8a356d69d0072786e778063bc42f68a600d5ffef95182d67aa4b3ce9320",
+      "trips": [
+        10000,
+        100000
+      ],
+      "operations": [
+        10000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/object_sort": {
+      "source_hash": "d92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b",
+      "trips": [
+        10000,
+        100000
+      ],
+      "operations": [
+        10000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/object_sort": {
+      "source_hash": "11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664",
+      "trips": [
+        10000,
+        100000
+      ],
+      "operations": [
+        10000,
+        100000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "replay/chat-short": {
+      "script_digest": "ffff3cf74981b3484e0b9d31a966ae6f7861e2788f83c196eecac9c6bb52c8ac",
+      "backend": "sqlite-file",
+      "turns": 20,
+      "sessions": 1
+    },
+    "replay/chat-long-compacting": {
+      "script_digest": "bc6a18e98200270f288968265fd67da5399573f0a903ac445a776abffd967c88",
+      "backend": "sqlite-file",
+      "turns": 200,
+      "sessions": 1
+    },
+    "replay/ts-codemode": {
+      "script_digest": "49459a2be4af8e8e4e2a10ea9e793fc48ceb1b438dc8f37df75ed605f5b7bf32",
+      "backend": "sqlite-file",
+      "turns": 12,
+      "sessions": 1
+    },
+    "replay/py-codemode": {
+      "script_digest": "19791d32850b2b2e1b29a7a6a9255beea43ede0f2e907a3afa6d96401e81339b",
+      "backend": "sqlite-file",
+      "turns": 24,
+      "sessions": 1
+    }
+  },
+  "rows": {
+    "kernel/typescript/empty_loop": 423.98950505050504,
+    "kernel/python/empty_loop": 8015.322666666667,
+    "kernel/typescript/prop_read": 2147.25447979798,
+    "kernel/python/prop_read": 4958.031181818182,
+    "kernel/typescript/prop_write": 1729.250330808081,
+    "kernel/python/prop_write": 4353.006628787879,
+    "kernel/typescript/array_read": 2415.1012717171716,
+    "kernel/python/array_read": 3984.854895959596,
+    "kernel/typescript/func_call": 1053.2530252525253,
+    "kernel/python/func_call": 3311.465232323232,
+    "kernel/typescript/func_closure_call": 2438.2516868686866,
+    "kernel/python/func_closure_call": 4719.001222222222,
+    "kernel/typescript/int_arith": 591.5952525252525,
+    "kernel/python/int_arith": 598.1688686868687,
+    "kernel/typescript/float_arith": 699.9164848484849,
+    "kernel/python/float_arith": 2435.825595959596,
+    "kernel/typescript/map_set_string": 39984.13308080808,
+    "kernel/python/map_set_string": 48770.66978787879,
+    "kernel/typescript/string_build1": 2569.9232525252523,
+    "kernel/python/string_build1": 2466.5513535353534,
+    "kernel/typescript/int_to_string": 2025.7904612794612,
+    "kernel/python/int_to_string": 4097.12994949495,
+    "kernel/typescript/sort_bench": 1580698406.4646466,
+    "kernel/python/sort_bench": 23065760.242424242,
+    "kernel/typescript/json_transform": 6019742.626262627,
+    "kernel/python/json_transform": 104374113.62626262,
+    "kernel/typescript/records": 183146206.56565657,
+    "kernel/python/records": 172908668.35353535,
+    "kernel/typescript/templating": 2517396.626262626,
+    "kernel/python/templating": 3441242.3434343436,
+    "kernel/typescript/object_build": 5125.256733333334,
+    "kernel/python/object_build": 13075.530133333334,
+    "kernel/typescript/object_sort": 197664.0089111111,
+    "kernel/python/object_sort": 105533.67993333333,
+    "replay/chat-short/host": 37521173.5,
+    "replay/chat-long-compacting/host": 41686609.0,
+    "replay/ts-codemode/host": 125400820.0,
+    "replay/ts-codemode/worker": 40633426.0,
+    "replay/py-codemode/host": 97413299.0,
+    "replay/py-codemode/worker": 12626166.0
+  },
+  "provenance": {
+    "commit": "c5e4cdfda8ed6b9078c717589b30d8e605bd66d8",
+    "recorded_at": "2026-10-26T23:21:02.046258215+00:00",
+    "run_id": "compare-211783"
+  },
+  "artifacts": {
+    "kernel": "80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958",
+    "chat-short": "80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958",
+    "chat-long-compacting": "80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958",
+    "ts-codemode": "80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958",
+    "py-codemode": "80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958"
+  },
+  "counted_metrics": {
+    "replay/chat-short/sql_statements": {
+      "median": 246.5,
+      "unit": "statements"
+    },
+    "replay/chat-short/sql_writes": {
+      "median": 91.0,
+      "unit": "statements"
+    },
+    "replay/chat-short/allocations": {
+      "median": 17072.5,
+      "unit": "allocations"
+    },
+    "replay/chat-short/allocated_bytes": {
+      "median": 3660959.5,
+      "unit": "bytes"
+    },
+    "replay/chat-long-compacting/sql_statements": {
+      "median": 295.0,
+      "unit": "statements"
+    },
+    "replay/chat-long-compacting/sql_writes": {
+      "median": 101.0,
+      "unit": "statements"
+    },
+    "replay/chat-long-compacting/allocations": {
+      "median": 18405.5,
+      "unit": "allocations"
+    },
+    "replay/chat-long-compacting/allocated_bytes": {
+      "median": 3970488.5,
+      "unit": "bytes"
+    },
+    "replay/ts-codemode/sql_statements": {
+      "median": 605.0,
+      "unit": "statements"
+    },
+    "replay/ts-codemode/sql_writes": {
+      "median": 144.0,
+      "unit": "statements"
+    },
+    "replay/ts-codemode/allocations": {
+      "median": 54530.0,
+      "unit": "allocations"
+    },
+    "replay/ts-codemode/allocated_bytes": {
+      "median": 11538377.0,
+      "unit": "bytes"
+    },
+    "replay/ts-codemode/worker_allocations": {
+      "median": 27794.0,
+      "unit": "allocations"
+    },
+    "replay/ts-codemode/worker_allocated_bytes": {
+      "median": 7947583.0,
+      "unit": "bytes"
+    },
+    "replay/py-codemode/sql_statements": {
+      "median": 589.0,
+      "unit": "statements"
+    },
+    "replay/py-codemode/sql_writes": {
+      "median": 144.0,
+      "unit": "statements"
+    },
+    "replay/py-codemode/allocations": {
+      "median": 43008.0,
+      "unit": "allocations"
+    },
+    "replay/py-codemode/allocated_bytes": {
+      "median": 9028941.0,
+      "unit": "bytes"
+    },
+    "replay/py-codemode/worker_allocations": {
+      "median": 11028.0,
+      "unit": "allocations"
+    },
+    "replay/py-codemode/worker_allocated_bytes": {
+      "median": 4203514.0,
+      "unit": "bytes"
+    }
+  },
+  "experiments": {
+    "chat-short": {
+      "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+      "allocator": "stats_alloc",
+      "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+      "backend": "sqlite-file",
+      "configured_durability": "SqliteStoreSetOptions { graph_reads: GraphReadPolicy { owner_bytes: 4294967296, engine_bytes: 17179869184, execution_bytes: 17179869184, depth: 64, kernel_data: KernelDataLimits { document_depth: 64, document_json_depth: 352, decode_depth: 512, state_json_depth: 512, value_depth: 128 } }, observer: StoreObserver { observed: false }, store: StoreOptions { blob_profile: Balanced, connection_policy: SqliteConnectionPolicy { read_connections: 4, busy_timeout: 15s, synchronous: Normal, wal_autocheckpoint_pages: 1000, cache_size: -8192, operational: SqliteOperationalSettings { statement_cache_capacity: 256, readonly_busy_timeout: 1s, readonly_cache_size: -500, checkpoint_interval: 100ms, checkpoint_busy_timeout: 20ms, wal_retained_bytes: 33554432, wal_retry_initial: 1ms, wal_retry_max: 50ms, liveness_lock_attempts: 8, wake_poll: 25ms, wake_retention: 10s, wake_lock_timeout: 5s, lock_poll: 10ms, wake_reopen_initial: 25ms, wake_reopen_max: 1s, migration_poll: 10ms, checkpoint_ref_chunk: 16384, occupied_node_chunk: 16384, graph_insert_chunk: 512, process_event_release_page: 256, write_batch_members: 32, write_batch_rows: 4096 } } }, process_id_mint: Random, migration_backup: SqliteMigrationBackup { location: BesideStore, retain: 2 }, pauses: None, inline_calls: false, migration_hook: None }",
+      "workload": "replay/chat-short:ffff3cf74981b3484e0b9d31a966ae6f7861e2788f83c196eecac9c6bb52c8ac",
+      "configured_geometry": "{\"compact_every\":null,\"heap_frames\":null,\"heap_window\":null,\"instructions\":true,\"sessions\":1,\"sql_shapes\":false,\"sql_work_window\":null,\"terminal\":\"all scripted replies validated; successful outcomes\",\"traffic\":false,\"turns\":20,\"window\":\"round first send through last successful outcome; counters at settled cuts\",\"worker\":\"none (standard protocol)\",\"worker_resources\":true}",
+      "postgres_settings": null
+    },
+    "chat-long-compacting": {
+      "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+      "allocator": "stats_alloc",
+      "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+      "backend": "sqlite-file",
+      "configured_durability": "SqliteStoreSetOptions { graph_reads: GraphReadPolicy { owner_bytes: 4294967296, engine_bytes: 17179869184, execution_bytes: 17179869184, depth: 64, kernel_data: KernelDataLimits { document_depth: 64, document_json_depth: 352, decode_depth: 512, state_json_depth: 512, value_depth: 128 } }, observer: StoreObserver { observed: false }, store: StoreOptions { blob_profile: Balanced, connection_policy: SqliteConnectionPolicy { read_connections: 4, busy_timeout: 15s, synchronous: Normal, wal_autocheckpoint_pages: 1000, cache_size: -8192, operational: SqliteOperationalSettings { statement_cache_capacity: 256, readonly_busy_timeout: 1s, readonly_cache_size: -500, checkpoint_interval: 100ms, checkpoint_busy_timeout: 20ms, wal_retained_bytes: 33554432, wal_retry_initial: 1ms, wal_retry_max: 50ms, liveness_lock_attempts: 8, wake_poll: 25ms, wake_retention: 10s, wake_lock_timeout: 5s, lock_poll: 10ms, wake_reopen_initial: 25ms, wake_reopen_max: 1s, migration_poll: 10ms, checkpoint_ref_chunk: 16384, occupied_node_chunk: 16384, graph_insert_chunk: 512, process_event_release_page: 256, write_batch_members: 32, write_batch_rows: 4096 } } }, process_id_mint: Random, migration_backup: SqliteMigrationBackup { location: BesideStore, retain: 2 }, pauses: None, inline_calls: false, migration_hook: None }",
+      "workload": "replay/chat-long-compacting:bc6a18e98200270f288968265fd67da5399573f0a903ac445a776abffd967c88",
+      "configured_geometry": "{\"compact_every\":50,\"heap_frames\":null,\"heap_window\":null,\"instructions\":true,\"sessions\":1,\"sql_shapes\":false,\"sql_work_window\":null,\"terminal\":\"all scripted replies validated; successful outcomes\",\"traffic\":false,\"turns\":200,\"window\":\"round first send through last successful outcome; counters at settled cuts\",\"worker\":\"none (standard protocol)\",\"worker_resources\":true}",
+      "postgres_settings": null
+    },
+    "ts-codemode": {
+      "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+      "allocator": "stats_alloc",
+      "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+      "backend": "sqlite-file",
+      "configured_durability": "SqliteStoreSetOptions { graph_reads: GraphReadPolicy { owner_bytes: 4294967296, engine_bytes: 17179869184, execution_bytes: 17179869184, depth: 64, kernel_data: KernelDataLimits { document_depth: 64, document_json_depth: 352, decode_depth: 512, state_json_depth: 512, value_depth: 128 } }, observer: StoreObserver { observed: false }, store: StoreOptions { blob_profile: Balanced, connection_policy: SqliteConnectionPolicy { read_connections: 4, busy_timeout: 15s, synchronous: Normal, wal_autocheckpoint_pages: 1000, cache_size: -8192, operational: SqliteOperationalSettings { statement_cache_capacity: 256, readonly_busy_timeout: 1s, readonly_cache_size: -500, checkpoint_interval: 100ms, checkpoint_busy_timeout: 20ms, wal_retained_bytes: 33554432, wal_retry_initial: 1ms, wal_retry_max: 50ms, liveness_lock_attempts: 8, wake_poll: 25ms, wake_retention: 10s, wake_lock_timeout: 5s, lock_poll: 10ms, wake_reopen_initial: 25ms, wake_reopen_max: 1s, migration_poll: 10ms, checkpoint_ref_chunk: 16384, occupied_node_chunk: 16384, graph_insert_chunk: 512, process_event_release_page: 256, write_batch_members: 32, write_batch_rows: 4096 } } }, process_id_mint: Random, migration_backup: SqliteMigrationBackup { location: BesideStore, retain: 2 }, pauses: None, inline_calls: false, migration_hook: None }",
+      "workload": "replay/ts-codemode:49459a2be4af8e8e4e2a10ea9e793fc48ceb1b438dc8f37df75ed605f5b7bf32",
+      "configured_geometry": "{\"compact_every\":null,\"heap_frames\":null,\"heap_window\":null,\"instructions\":true,\"sessions\":1,\"sql_shapes\":false,\"sql_work_window\":null,\"terminal\":\"all scripted replies validated; successful outcomes\",\"traffic\":false,\"turns\":12,\"window\":\"round first send through last successful outcome; counters at settled cuts\",\"worker\":\"80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958\",\"worker_resources\":true}",
+      "postgres_settings": null
+    },
+    "py-codemode": {
+      "host": "5ae0dd6d83716e9f9a4b128704f878f0f4ba8919496b5e4ce5517db38d4d5ccd",
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
+      "allocator": "stats_alloc",
+      "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+      "backend": "sqlite-file",
+      "configured_durability": "SqliteStoreSetOptions { graph_reads: GraphReadPolicy { owner_bytes: 4294967296, engine_bytes: 17179869184, execution_bytes: 17179869184, depth: 64, kernel_data: KernelDataLimits { document_depth: 64, document_json_depth: 352, decode_depth: 512, state_json_depth: 512, value_depth: 128 } }, observer: StoreObserver { observed: false }, store: StoreOptions { blob_profile: Balanced, connection_policy: SqliteConnectionPolicy { read_connections: 4, busy_timeout: 15s, synchronous: Normal, wal_autocheckpoint_pages: 1000, cache_size: -8192, operational: SqliteOperationalSettings { statement_cache_capacity: 256, readonly_busy_timeout: 1s, readonly_cache_size: -500, checkpoint_interval: 100ms, checkpoint_busy_timeout: 20ms, wal_retained_bytes: 33554432, wal_retry_initial: 1ms, wal_retry_max: 50ms, liveness_lock_attempts: 8, wake_poll: 25ms, wake_retention: 10s, wake_lock_timeout: 5s, lock_poll: 10ms, wake_reopen_initial: 25ms, wake_reopen_max: 1s, migration_poll: 10ms, checkpoint_ref_chunk: 16384, occupied_node_chunk: 16384, graph_insert_chunk: 512, process_event_release_page: 256, write_batch_members: 32, write_batch_rows: 4096 } } }, process_id_mint: Random, migration_backup: SqliteMigrationBackup { location: BesideStore, retain: 2 }, pauses: None, inline_calls: false, migration_hook: None }",
+      "workload": "replay/py-codemode:19791d32850b2b2e1b29a7a6a9255beea43ede0f2e907a3afa6d96401e81339b",
+      "configured_geometry": "{\"compact_every\":null,\"heap_frames\":null,\"heap_window\":null,\"instructions\":true,\"sessions\":1,\"sql_shapes\":false,\"sql_work_window\":null,\"terminal\":\"all scripted replies validated; successful outcomes\",\"traffic\":false,\"turns\":24,\"window\":\"round first send through last successful outcome; counters at settled cuts\",\"worker\":\"80b3526239f73571f55c19e67843467079bf56687fb9134205d619d721530958\",\"worker_resources\":true}",
+      "postgres_settings": null
+    }
+  },
+  "noise": {
+    "kernel/typescript/empty_loop": 0,
+    "kernel/python/empty_loop": 0,
+    "kernel/typescript/prop_read": 0,
+    "kernel/python/prop_read": 0,
+    "kernel/typescript/prop_write": 0,
+    "kernel/python/prop_write": 0,
+    "kernel/typescript/array_read": 0,
+    "kernel/python/array_read": 0,
+    "kernel/typescript/func_call": 0,
+    "kernel/python/func_call": 0,
+    "kernel/typescript/func_closure_call": 0,
+    "kernel/python/func_closure_call": 0,
+    "kernel/typescript/int_arith": 0,
+    "kernel/python/int_arith": 0,
+    "kernel/typescript/float_arith": 0,
+    "kernel/python/float_arith": 0,
+    "kernel/typescript/map_set_string": 0,
+    "kernel/python/map_set_string": 0,
+    "kernel/typescript/string_build1": 0,
+    "kernel/python/string_build1": 0,
+    "kernel/typescript/int_to_string": 0,
+    "kernel/python/int_to_string": 0,
+    "kernel/typescript/sort_bench": 0,
+    "kernel/python/sort_bench": 0,
+    "kernel/typescript/json_transform": 0,
+    "kernel/python/json_transform": 0,
+    "kernel/typescript/records": 0,
+    "kernel/python/records": 0,
+    "kernel/typescript/templating": 0,
+    "kernel/python/templating": 0,
+    "kernel/typescript/object_build": 0,
+    "kernel/python/object_build": 0,
+    "kernel/typescript/object_sort": 0,
+    "kernel/python/object_sort": 0,
+    "replay/chat-short/host": 0,
+    "replay/chat-long-compacting/host": 0,
+    "replay/ts-codemode/host": 0,
+    "replay/ts-codemode/worker": 0,
+    "replay/py-codemode/host": 0,
+    "replay/py-codemode/worker": 0
+  },
+  "ceilings": {
+    "kernel/typescript/empty_loop": 423.98950505050504,
+    "kernel/python/empty_loop": 8015.322666666667,
+    "kernel/typescript/prop_read": 2147.25447979798,
+    "kernel/python/prop_read": 4958.031181818182,
+    "kernel/typescript/prop_write": 1729.250330808081,
+    "kernel/python/prop_write": 4353.006628787879,
+    "kernel/typescript/array_read": 2415.1012717171716,
+    "kernel/python/array_read": 3984.854895959596,
+    "kernel/typescript/func_call": 1053.2530252525253,
+    "kernel/python/func_call": 3311.465232323232,
+    "kernel/typescript/func_closure_call": 2438.2516868686866,
+    "kernel/python/func_closure_call": 4719.001222222222,
+    "kernel/typescript/int_arith": 591.5952525252525,
+    "kernel/python/int_arith": 598.1688686868687,
+    "kernel/typescript/float_arith": 699.9164848484849,
+    "kernel/python/float_arith": 2435.825595959596,
+    "kernel/typescript/map_set_string": 39984.13308080808,
+    "kernel/python/map_set_string": 48770.66978787879,
+    "kernel/typescript/string_build1": 2569.9232525252523,
+    "kernel/python/string_build1": 2466.5513535353534,
+    "kernel/typescript/int_to_string": 2025.7904612794612,
+    "kernel/python/int_to_string": 4097.12994949495,
+    "kernel/typescript/sort_bench": 1580698406.4646466,
+    "kernel/python/sort_bench": 23065760.242424242,
+    "kernel/typescript/json_transform": 6019742.626262627,
+    "kernel/python/json_transform": 104374113.62626262,
+    "kernel/typescript/records": 183146206.56565657,
+    "kernel/python/records": 172908668.35353535,
+    "kernel/typescript/templating": 2517396.626262626,
+    "kernel/python/templating": 3441242.3434343436,
+    "kernel/typescript/object_build": 5125.256733333334,
+    "kernel/python/object_build": 13075.530133333334,
+    "kernel/typescript/object_sort": 197664.0089111111,
+    "kernel/python/object_sort": 105533.67993333333,
+    "replay/chat-short/host": 37521173.5,
+    "replay/chat-long-compacting/host": 41686609.0,
+    "replay/ts-codemode/host": 125400820.0,
+    "replay/ts-codemode/worker": 40633426.0,
+    "replay/py-codemode/host": 97413299.0,
+    "replay/py-codemode/worker": 12626166.0
+  }
+}

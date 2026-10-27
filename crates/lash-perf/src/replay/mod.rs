@@ -31,6 +31,43 @@ use anyhow::{Context, Result};
 use receipt::{Identity, RECEIPT_FORMAT, ReplayReceipt};
 use runner::{RunOptions, StoreChoice};
 
+/// SQLite embeds its canonical path in package publication identities. Keep
+/// that input's byte length constant, then preserve the closed stores beside
+/// the receipt, outside every measured window.
+struct GateStores(PathBuf);
+
+impl GateStores {
+    fn create() -> Result<Self> {
+        use std::os::unix::fs::DirBuilderExt;
+        let path = PathBuf::from("/tmp").join(format!("lash-counted-{}", uuid::Uuid::new_v4()));
+        std::fs::DirBuilder::new().mode(0o700).create(&path)?;
+        Ok(Self(path))
+    }
+
+    fn preserve(&self, destination: &std::path::Path) -> Result<()> {
+        fn copy(source: &std::path::Path, destination: &std::path::Path) -> Result<()> {
+            std::fs::create_dir_all(destination)?;
+            for entry in std::fs::read_dir(source)? {
+                let entry = entry?;
+                let target = destination.join(entry.file_name());
+                if entry.file_type()?.is_dir() {
+                    copy(&entry.path(), &target)?;
+                } else {
+                    std::fs::copy(entry.path(), target)?;
+                }
+            }
+            Ok(())
+        }
+        copy(&self.0, destination)
+    }
+}
+
+impl Drop for GateStores {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// The store a replay runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum StoreKind {
@@ -72,6 +109,12 @@ pub struct ReplayArgs {
     pub traffic: bool,
     #[arg(long)]
     pub turn_report: Option<PathBuf>,
+    /// Count qualified hardware instructions on this local host, including worker receipts.
+    #[arg(long)]
+    pub instructions: bool,
+    /// Count worker allocator deltas through the harness worker.
+    #[arg(long)]
+    pub worker_resources: bool,
     /// Bounded host-clock effect/worker phase JSONL (one SQLite workload).
     #[arg(long, conflicts_with = "history")]
     pub effect_phases: Option<PathBuf>,
@@ -110,12 +153,20 @@ pub struct GateArgs {
     /// the committed one (the re-bless command).
     #[arg(long)]
     pub bless: Option<PathBuf>,
+    /// Explicit counted reference for a local injection/control experiment.
+    #[arg(long, conflicts_with = "bless")]
+    pub baseline: Option<PathBuf>,
+    /// One raw population for the gate coordinator.
+    #[arg(long, hide = true, conflicts_with = "bless")]
+    pub capture: bool,
 }
 
 #[derive(Default)]
 struct Observers<'a> {
     sql_shapes: Option<&'a std::path::Path>,
     turn_report: Option<&'a std::path::Path>,
+    worker_resources: bool,
+    instructions: bool,
     traffic: bool,
     effect_phases: Option<(&'a std::path::Path, bool)>,
 }
@@ -132,12 +183,16 @@ async fn run_workloads(
     let Observers {
         sql_shapes,
         turn_report,
+        worker_resources,
+        instructions,
         traffic,
         effect_phases,
     } = observers;
     let mut identity = Identity::current();
     identity.sql_shapes = sql_shapes.is_some();
     identity.turn_profile = turn_report.is_some();
+    identity.worker_resources = worker_resources;
+    identity.instructions = instructions;
     identity.traffic = traffic;
     identity.heap_window = heap
         .profile_turn
@@ -150,6 +205,8 @@ async fn run_workloads(
     for (workload, turns) in workloads {
         let options = RunOptions {
             identity: receipt.identity.clone(),
+            worker_resources,
+            instructions,
             store: store.clone(),
             turns: *turns,
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
@@ -249,6 +306,8 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         Observers {
             sql_shapes: args.sql_shapes.as_deref(),
             turn_report: args.turn_report.as_deref(),
+            worker_resources: args.worker_resources || args.instructions,
+            instructions: args.instructions,
             traffic: args.traffic,
             effect_phases: args
                 .effect_phases
@@ -280,23 +339,112 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
                 .with_context(|| format!("the gate names unknown workload `{}`", entry.workload))
         })
         .collect::<Result<Vec<_>>>()?;
-    let receipt = run_workloads(
-        &workloads,
-        &StoreChoice::SqliteFile(args.store_dir.clone()),
-        &args.out,
-        &ReplayHeapArgs::default(),
-        Observers::default(),
-    )
-    .await?;
-    print!("{}", receipt::table(&receipt));
+    let mut receipts = Vec::new();
+    if !args.capture {
+        // A scheduled gate starts a fresh process. Calibrating within this
+        // runtime misses process-local allocator/cache variation.
+        for run in 0..5 {
+            let out = args.out.with_extension(format!("{run}.json"));
+            match std::fs::remove_file(&out) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            let captured = std::process::Command::new(std::env::current_exe()?)
+                .arg("replay-gate")
+                .arg("--capture")
+                .arg("--store-dir")
+                .arg(args.store_dir.join(format!("run-{run}")))
+                .arg("--out")
+                .arg(&out)
+                .output()?;
+            let mut log = captured.stdout;
+            log.extend_from_slice(&captured.stderr);
+            std::fs::write(args.out.with_extension(format!("{run}.log")), log)?;
+            // Failed or partial producers never enter the five-run statistic.
+            anyhow::ensure!(
+                captured.status.success() && out.exists(),
+                "calibration child {run} did not produce a receipt"
+            );
+            let receipt: ReplayReceipt = serde_json::from_slice(&std::fs::read(out)?)?;
+            anyhow::ensure!(
+                receipt.workloads.len() == workloads.len(),
+                "incomplete calibration population"
+            );
+            for (script, turns) in &workloads {
+                let row = receipt
+                    .workloads
+                    .iter()
+                    .find(|w| w.workload == script.name)
+                    .context("missing calibration workload")?;
+                anyhow::ensure!(
+                    row.script_digest == script.digest()
+                        && row.turns
+                            == turns
+                                .unwrap_or(script.turn_count())
+                                .min(script.turn_count())
+                        && row.sessions == script.sessions,
+                    "calibration workload geometry changed"
+                );
+            }
+            receipts.push(receipt);
+        }
+    } else {
+        let stores = GateStores::create()?;
+        receipts.push(
+            run_workloads(
+                &workloads,
+                &StoreChoice::SqliteFile(stores.0.clone()),
+                &args.out,
+                &ReplayHeapArgs::default(),
+                Observers {
+                    worker_resources: true,
+                    ..Observers::default()
+                },
+            )
+            .await?,
+        );
+        stores.preserve(&args.store_dir)?;
+    }
+    let raw = receipts.last().context("no replay runs")?;
+    if args.capture {
+        write_receipt(raw, &args.out)?;
+        return Ok(0);
+    }
+    let population = gate::candidate_population(&receipts)?;
+    let receipt = &population;
+    write_receipt(receipt, &args.out)?;
+    print!("{}", receipt::table(receipt));
     if let Some(path) = &args.bless {
-        let baseline = gate::Baseline::bless(&receipt)?;
+        let mut baseline = gate::Baseline::calibrate(&receipts)?;
+        let old = gate::Baseline::committed()?;
+        for (name, row) in &mut baseline.workloads {
+            if let Some(prior) = old.workloads.get(name) {
+                for (metric, value) in &prior.depth_slope {
+                    if let Some(slope) = row.depth_slope.get_mut(metric) {
+                        *slope = slope.min(*value);
+                    }
+                }
+                for (metric, ceiling) in &row.median_ceiling {
+                    if let Some(prior) = prior.median_ceiling.get(metric) {
+                        anyhow::ensure!(
+                            ceiling <= prior,
+                            "refuse loosening {name}/{metric}: {ceiling} > {prior}"
+                        );
+                    }
+                }
+            }
+        }
         std::fs::write(path, serde_json::to_string_pretty(&baseline)? + "\n")
             .with_context(|| format!("write {}", path.display()))?;
         println!("replay gate: blessed baseline {}", path.display());
         return Ok(0);
     }
-    let verdict = gate::evaluate(&receipt, &budgets, &gate::Baseline::committed()?);
+    let baseline = match &args.baseline {
+        Some(path) => gate::Baseline::parse(&std::fs::read_to_string(path)?)?,
+        None => gate::Baseline::committed()?,
+    };
+    let verdict = gate::evaluate(receipt, &budgets, &baseline);
     for line in &verdict.known_breaches {
         println!("replay gate: KNOWN BREACH {line}");
     }

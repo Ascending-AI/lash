@@ -367,6 +367,30 @@ def metric_pairs(name: str, baseline: dict[str, Any], current: dict[str, Any]) -
 
 
 def diff_runtime(baseline: dict[str, Any], current: dict[str, Any]) -> str:
+    # Ratios are meaningful only for complete, matching experiment identities.
+    for key in ("scenarios", "runs", "warmups"):
+        if key not in baseline or key not in current or baseline[key] != current[key]:
+            raise ValueError(f"incomparable runtime reports: missing or mismatched {key}")
+    expected = set(current["scenarios"])
+    fields = ("host", "compiler", "allocator", "build_profile", "backend",
+              "configured_durability", "workload", "configured_geometry")
+    for report in (baseline, current):
+        experiments = report.get("experiments")
+        if not expected or not isinstance(experiments, dict) or set(experiments) != expected:
+            raise ValueError("incomparable runtime reports: missing or incomplete experiments")
+        if {r["scenario"] for r in report.get("summary", [])} != expected:
+            raise ValueError("incomparable runtime reports: incomplete summaries")
+        for name, identity in experiments.items():
+            if any(not isinstance(identity.get(k), str) or not identity[k].strip() for k in fields):
+                raise ValueError(f"incomparable runtime reports: missing identity for {name}")
+            try:
+                geometry = json.loads(identity["configured_geometry"])
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"incomparable runtime reports: invalid geometry for {name}") from error
+            if not all(isinstance(geometry.get(k), str) and geometry[k].strip() for k in ("worker", "window", "terminal")) or not isinstance(geometry.get("dhat_enabled"), bool) or geometry.get("phase_observation_mode") not in ("clock_only", "clock_alloc_rss"):
+                raise ValueError(f"incomparable runtime reports: incomplete geometry for {name}")
+    if baseline["experiments"] != current["experiments"]:
+        raise ValueError("incomparable runtime reports: experiment identity mismatch")
     lines = ["# runtime-perf diff", ""]
     lines.append(f"baseline: {baseline.get('created_at', '?')[:19]}  scenarios: {', '.join(baseline.get('scenarios', []))}")
     lines.append(f"current:  {current.get('created_at', '?')[:19]}  scenarios: {', '.join(current.get('scenarios', []))}")
@@ -561,7 +585,11 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
-        print(diff(baseline, payload))
+        try:
+            print(diff(baseline, payload))
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
         return 0
     print(summarize(payload, args.top))
     return 0

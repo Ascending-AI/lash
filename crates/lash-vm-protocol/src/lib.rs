@@ -41,7 +41,7 @@ pub use message::{
     EncodedPayload, HostReadId, HostReadKind, LimitDecision, LimitedBound, MemoryMeter,
     MessageFence, MessageHeader, ParentFrame, ParentMessage, PoolStart, PoolStartParts,
     PoolStarted, RunBounds, RunMeters, Start, StartFrom, StoredDefinition, WorkerFrame,
-    WorkerMessage, WorkerPhase, WorkerWork,
+    WorkerMessage, WorkerPhase, WorkerResources, WorkerWork,
 };
 pub use state::VmOwner;
 pub use version::{

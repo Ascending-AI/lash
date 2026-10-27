@@ -11,7 +11,10 @@ use std::process::Command;
 #[test]
 fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     let dir = tempfile::tempdir().unwrap();
-    let receipt = dir.path().join("replay-receipt.json");
+    let evidence = std::env::var_os("TEST_UNDECLARED_OUTPUTS_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| dir.path().to_path_buf());
+    let receipt = evidence.join("replay-receipt.json");
     let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
         .arg("replay-gate")
         .arg("--store-dir")

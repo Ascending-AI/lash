@@ -9,7 +9,7 @@
 //! Wall time is the turn's, from send to settled output; run the process
 //! under `perf stat` and `/usr/bin/time -v` for instructions and CPU, which
 //! cover the host and its worker.
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
 use clap::{Parser, ValueEnum};
 use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
@@ -147,6 +147,27 @@ async fn run(args: Args) -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("the turn: {error}"))?;
     let elapsed = began.elapsed();
+    let state = session
+        .read()
+        .await?
+        .context("cell left no committed state")?
+        .to_snapshot();
+    let mut cells = 0;
+    let mut failures = Vec::new();
+    for event in state.read_view().active_events().iter() {
+        let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+            continue;
+        };
+        if let Some(entry) = lash_protocol_rlm::decode_rlm_protocol_event(&event)?
+            && let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(cell) = entry.as_ref()
+        {
+            cells += 1;
+            if let Some(failure) = cell.result.failure() {
+                failures.push(failure.message.clone());
+            }
+        }
+    }
+
     core.shutdown()
         .await
         .map_err(|error| anyhow::anyhow!("shut down: {error}"))?;
@@ -160,6 +181,10 @@ async fn run(args: Args) -> Result<()> {
             "answer": format!("{:?}", output.outcome).chars().take(600).collect::<String>(),
             "feedback": feedback.chars().take(2000).collect::<String>(),
         })
+    );
+    ensure!(
+        output.is_success() && cells == 1 && failures.is_empty(),
+        "cell failed or did not execute: {failures:?}"
     );
     Ok(())
 }

@@ -1,16 +1,4 @@
 {
-  "frame_residency_curve": {
-    "current_frame_nodes": 64,
-    "earlier_history_nodes": [
-      0,
-      1000,
-      8000,
-      32000
-    ],
-    "max_resident_heap_growth_percent": 1.0,
-    "max_resident_heap_growth_bytes": 65536,
-    "max_commit_median_ratio": 1.2
-  },
   "runtime_stack": {
     "deep_turn_composition": {
       "budget_bytes": 2097152,
@@ -26,33 +14,24 @@
           "alloc_bytes_max": 739721000,
           "steady_state_turn_alloc_bytes_max": 25321000
         },
-        "advisory_duration": {
-          "ms_max": 410.053,
-          "phases": {
-            "checkpoint_state.component_commit": {
-              "budget_ms": 85.324,
-              "required": true
-            },
-            "checkpoint_state.component_load": {
-              "budget_ms": 251.872,
-              "required": true
-            },
-            "checkpoint_state.execution_restore": {
-              "budget_ms": 195.381,
-              "required": true
-            },
-            "checkpoint_state.incremental_capture": {
-              "budget_ms": 20.452,
-              "required": true
-            },
-            "checkpoint_state.initial_capture": {
-              "budget_ms": 5.75,
-              "required": true
-            },
-            "checkpoint_state.measure_budget": {
-              "budget_ms": 3.956,
-              "required": true
-            }
+        "phases": {
+          "checkpoint_state.component_commit": {
+            "required": true
+          },
+          "checkpoint_state.component_load": {
+            "required": true
+          },
+          "checkpoint_state.execution_restore": {
+            "required": true
+          },
+          "checkpoint_state.incremental_capture": {
+            "required": true
+          },
+          "checkpoint_state.initial_capture": {
+            "required": true
+          },
+          "checkpoint_state.measure_budget": {
+            "required": true
           }
         }
       },
@@ -62,57 +41,42 @@
           "alloc_bytes_max": 394068000,
           "steady_state_turn_alloc_bytes_max": 29032000
         },
-        "advisory_duration": {
-          "ms_max": 957.272,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 10.378,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 13.294,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 603.338,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 29.243,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 128.565,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 19.555,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 11.382,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.056,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 0.11,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 5.235,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.361,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -122,16 +86,12 @@
           "alloc_bytes_max": 1488000,
           "steady_state_turn_alloc_bytes_max": 103000
         },
-        "advisory_duration": {
-          "ms_max": 3.824,
-          "phases": {
-            "direct_llm_client.complete": {
-              "budget_ms": 1.814,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration cfb1ca931d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=509982, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(39000 + 509982 / 12 * 1.5), rounded up to 103000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "direct_llm_client.complete": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration cfb1ca931d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=509982, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(39000 + 509982 / 12 * 1.5), rounded up to 103000. Other measured growth receives no ceiling credit."
+        }
       },
       "durable_agent_child_turn_sqlite": {
         "guarded_span": "whole_run",
@@ -139,60 +99,45 @@
           "alloc_bytes_max": 452504000,
           "steady_state_turn_alloc_bytes_max": 40170510
         },
-        "advisory_duration": {
-          "ms_max": 795.963,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 1.09,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 888.726,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 4.05,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 27.296,
-              "required": true
-            },
-            "process.await_handle": {
-              "budget_ms": 669.658,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 1.27,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 17.078,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.916,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.268,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 1.082,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.403,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 calibrated eight turns; the all guard runs twelve. Attributed warm requested bytes A=0, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(301668908 * 1.5 + 0 * 1.5), rounded up to 452504000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "process.await_handle": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 calibrated eight turns; the all guard runs twelve. Attributed warm requested bytes A=0, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(301668908 * 1.5 + 0 * 1.5), rounded up to 452504000. Other measured growth receives no ceiling credit."
+        }
       },
       "durable_checkpoint_curve_sqlite": {
         "guarded_span": "whole_run",
@@ -200,108 +145,81 @@
           "alloc_bytes_max": 2231168000,
           "steady_state_turn_alloc_bytes_max": 174409000
         },
-        "advisory_duration": {
-          "ms_max": 820.034,
-          "phases": {
-            "checkpoint_curve.bytes.2048.capture": {
-              "budget_ms": 15.904,
-              "required": true
-            },
-            "checkpoint_curve.bytes.2048.commit": {
-              "budget_ms": 48.236,
-              "required": true
-            },
-            "checkpoint_curve.bytes.2048.load": {
-              "budget_ms": 35.544,
-              "required": true
-            },
-            "checkpoint_curve.bytes.2048.serialize": {
-              "budget_ms": 4.588,
-              "required": true
-            },
-            "checkpoint_curve.bytes.32768.capture": {
-              "budget_ms": 28.096,
-              "required": true
-            },
-            "checkpoint_curve.bytes.32768.commit": {
-              "budget_ms": 37.91,
-              "required": true
-            },
-            "checkpoint_curve.bytes.32768.load": {
-              "budget_ms": 106.832,
-              "required": true
-            },
-            "checkpoint_curve.bytes.32768.serialize": {
-              "budget_ms": 8.496,
-              "required": true
-            },
-            "checkpoint_curve.bytes.8192.capture": {
-              "budget_ms": 18.51,
-              "required": true
-            },
-            "checkpoint_curve.bytes.8192.commit": {
-              "budget_ms": 25.826,
-              "required": true
-            },
-            "checkpoint_curve.bytes.8192.load": {
-              "budget_ms": 45.022,
-              "required": true
-            },
-            "checkpoint_curve.bytes.8192.serialize": {
-              "budget_ms": 5.132,
-              "required": true
-            },
-            "checkpoint_curve.components.128.capture": {
-              "budget_ms": 35.696,
-              "required": true
-            },
-            "checkpoint_curve.components.128.commit": {
-              "budget_ms": 78.442,
-              "required": true
-            },
-            "checkpoint_curve.components.128.load": {
-              "budget_ms": 142.92,
-              "required": true
-            },
-            "checkpoint_curve.components.128.serialize": {
-              "budget_ms": 11.514,
-              "required": true
-            },
-            "checkpoint_curve.components.32.capture": {
-              "budget_ms": 18.178,
-              "required": true
-            },
-            "checkpoint_curve.components.32.commit": {
-              "budget_ms": 42.082,
-              "required": true
-            },
-            "checkpoint_curve.components.32.load": {
-              "budget_ms": 49.442,
-              "required": true
-            },
-            "checkpoint_curve.components.32.serialize": {
-              "budget_ms": 4.844,
-              "required": true
-            },
-            "checkpoint_curve.components.8.capture": {
-              "budget_ms": 14.474,
-              "required": true
-            },
-            "checkpoint_curve.components.8.commit": {
-              "budget_ms": 72.322,
-              "required": true
-            },
-            "checkpoint_curve.components.8.load": {
-              "budget_ms": 25.45,
-              "required": true
-            },
-            "checkpoint_curve.components.8.serialize": {
-              "budget_ms": 3.766,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; e71aa8ada6 terminal-graph integrity decoding. Attributed warm requested bytes A=391802542, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(1095642517 * 1.5 + 391802542 * 1.5), rounded up to 2231168000; steady_state_turn_alloc_bytes_max: ceil(125432750 + 391802542 / 12 * 1.5), rounded up to 174409000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "checkpoint_curve.bytes.2048.capture": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.2048.commit": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.2048.load": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.2048.serialize": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.32768.capture": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.32768.commit": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.32768.load": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.32768.serialize": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.8192.capture": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.8192.commit": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.8192.load": {
+            "required": true
+          },
+          "checkpoint_curve.bytes.8192.serialize": {
+            "required": true
+          },
+          "checkpoint_curve.components.128.capture": {
+            "required": true
+          },
+          "checkpoint_curve.components.128.commit": {
+            "required": true
+          },
+          "checkpoint_curve.components.128.load": {
+            "required": true
+          },
+          "checkpoint_curve.components.128.serialize": {
+            "required": true
+          },
+          "checkpoint_curve.components.32.capture": {
+            "required": true
+          },
+          "checkpoint_curve.components.32.commit": {
+            "required": true
+          },
+          "checkpoint_curve.components.32.load": {
+            "required": true
+          },
+          "checkpoint_curve.components.32.serialize": {
+            "required": true
+          },
+          "checkpoint_curve.components.8.capture": {
+            "required": true
+          },
+          "checkpoint_curve.components.8.commit": {
+            "required": true
+          },
+          "checkpoint_curve.components.8.load": {
+            "required": true
+          },
+          "checkpoint_curve.components.8.serialize": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; e71aa8ada6 terminal-graph integrity decoding. Attributed warm requested bytes A=391802542, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(1095642517 * 1.5 + 391802542 * 1.5), rounded up to 2231168000; steady_state_turn_alloc_bytes_max: ceil(125432750 + 391802542 / 12 * 1.5), rounded up to 174409000. Other measured growth receives no ceiling credit."
+        }
       },
       "durable_rlm_checkpoint_turn_sqlite": {
         "guarded_span": "whole_run",
@@ -309,56 +227,42 @@
           "alloc_bytes_max": 213632000,
           "steady_state_turn_alloc_bytes_max": 17661000
         },
-        "advisory_duration": {
-          "ms_max": 269.13,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 0.972,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 1.084,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 151.806,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 3.608,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 23.668,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 1.126,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 15.238,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.862,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.048,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 1.004,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.379,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; 6bc0ef141a schema admission; 203398827d canonical bodies; 67e5d4a45d complete tool shapes; a5e2ebd846 atomic phase-root reclamation. Attributed warm requested bytes A=48708964, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93712082 * 1.5 + 48708964 * 1.5), rounded up to 213632000; steady_state_turn_alloc_bytes_max: ceil(11571768 + 48708964 / 12 * 1.5), rounded up to 17661000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; 6bc0ef141a schema admission; 203398827d canonical bodies; 67e5d4a45d complete tool shapes; a5e2ebd846 atomic phase-root reclamation. Attributed warm requested bytes A=48708964, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93712082 * 1.5 + 48708964 * 1.5), rounded up to 213632000; steady_state_turn_alloc_bytes_max: ceil(11571768 + 48708964 / 12 * 1.5), rounded up to 17661000. Other measured growth receives no ceiling credit."
+        }
       },
       "durable_standard_tool_turn_sqlite": {
         "guarded_span": "whole_run",
@@ -367,45 +271,33 @@
           "steady_state_turn_alloc_bytes_max": 7492000
         },
         "allocation_attribution": "FIG-6133: c647027a83 pinned the durable fixture from runs=3, turns=8; the full guard uses turns=12. 6bc0ef141a added schema admission/compiled validators, including canonical provider-body decoding (203398827d) and tool definitions. A 12-turn heaptrack capture attributes 17,873,502 requested bytes to schema admission outside cold helper assembly and native SQLite allocations. Preserve the prior 1.5x allocation policy: total ceiling = ceil(55,435,642 * 12/8 + 17,873,502 * 1.5) rounded up to 110,000,000; steady ceiling = ceil(5,257,420 + 17,873,502 / 12 * 1.5) rounded up to 7,492,000. Deep schema copies are removed rather than budgeted. Served phase/checkpoint work (aacd900fbe), complete schema shapes (67e5d4a45d), recorded run configuration (115c9e688d), and recorded provider surfaces (4be8dba66e) account for the remaining changed durable path; no separate ceiling increase is assigned to them.",
-        "advisory_duration": {
-          "ms_max": 206.733,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 0.916,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 0.998,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 0.916,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 60.778,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.76,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.749,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 5.668,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 21.984,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 1.054,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "context_transform": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
           }
         }
       },
@@ -415,11 +307,8 @@
           "alloc_bytes_max": 112972000,
           "steady_state_turn_alloc_bytes_max": 9211000
         },
-        "advisory_duration": {
-          "ms_max": 309.726,
-          "phases": {}
-        },
-        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=12985495, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93493000 * 1 + 12985495 * 1.5), rounded up to 112972000; steady_state_turn_alloc_bytes_max: ceil(7587000 + 12985495 / 12 * 1.5), rounded up to 9211000. Other measured growth receives no ceiling credit."
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=12985495, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93493000 * 1 + 12985495 * 1.5), rounded up to 112972000; steady_state_turn_alloc_bytes_max: ceil(7587000 + 12985495 / 12 * 1.5), rounded up to 9211000. Other measured growth receives no ceiling credit.",
+        "phases": {}
       },
       "embed_standard": {
         "guarded_span": "whole_run",
@@ -427,10 +316,7 @@
           "alloc_bytes_max": 45092000,
           "steady_state_turn_alloc_bytes_max": 3647000
         },
-        "advisory_duration": {
-          "ms_max": 107.149,
-          "phases": {}
-        }
+        "phases": {}
       },
       "ingress_admission_projection": {
         "guarded_span": "whole_run",
@@ -438,53 +324,39 @@
           "alloc_bytes_max": 225299000,
           "steady_state_turn_alloc_bytes_max": 18391000
         },
-        "advisory_duration": {
-          "ms_max": 493.148,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 14.831,
-              "required": false
-            },
-            "committed_turn": {
-              "budget_ms": 13.61,
-              "required": false
-            },
-            "effect_loop": {
-              "budget_ms": 272.849,
-              "required": false
-            },
-            "post_commit_delivery": {
-              "budget_ms": 26.927,
-              "required": false
-            },
-            "prepared_turn": {
-              "budget_ms": 107.002,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 4.106,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 8.383,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 6.639,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn_input_ingress.enqueue_to_admission_to_projection": {
-              "budget_ms": 365.589,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 1.47,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": false
+          },
+          "committed_turn": {
+            "required": false
+          },
+          "effect_loop": {
+            "required": false
+          },
+          "post_commit_delivery": {
+            "required": false
+          },
+          "prepared_turn": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "turn_input_ingress.enqueue_to_admission_to_projection": {
+            "required": true
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -494,33 +366,24 @@
           "alloc_bytes_max": 3710000,
           "steady_state_turn_alloc_bytes_max": 303000
         },
-        "advisory_duration": {
-          "ms_max": 35.531,
-          "phases": {
-            "live_replay.append": {
-              "budget_ms": 28.142,
-              "required": true
-            },
-            "live_replay.current_cursor_parse": {
-              "budget_ms": 0.822,
-              "required": true
-            },
-            "live_replay.gap_handling": {
-              "budget_ms": 0.754,
-              "required": true
-            },
-            "live_replay.replay_after_cursor": {
-              "budget_ms": 0.838,
-              "required": true
-            },
-            "live_replay.subscribe_buffered": {
-              "budget_ms": 1.262,
-              "required": true
-            },
-            "live_replay.trim_by_capacity": {
-              "budget_ms": 2.844,
-              "required": true
-            }
+        "phases": {
+          "live_replay.append": {
+            "required": true
+          },
+          "live_replay.current_cursor_parse": {
+            "required": true
+          },
+          "live_replay.gap_handling": {
+            "required": true
+          },
+          "live_replay.replay_after_cursor": {
+            "required": true
+          },
+          "live_replay.subscribe_buffered": {
+            "required": true
+          },
+          "live_replay.trim_by_capacity": {
+            "required": true
           }
         }
       },
@@ -530,49 +393,36 @@
           "alloc_bytes_max": 268841000,
           "steady_state_turn_alloc_bytes_max": 22440000
         },
-        "advisory_duration": {
-          "ms_max": 485.525,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.295,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 5.497,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 201.24,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.79,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 12.375,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 77.647,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.083,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.986,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.783,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -582,17 +432,12 @@
           "alloc_bytes_max": 69643000,
           "steady_state_turn_alloc_bytes_max": 4935000
         },
-        "advisory_duration": {
-          "ms_max": 41.625,
-          "phases": {
-            "openai_responses_sse_parse.parse_payload": {
-              "budget_ms": 30.16,
-              "required": true
-            },
-            "openai_responses_sse_parse.project_parts": {
-              "budget_ms": 0.95,
-              "required": true
-            }
+        "phases": {
+          "openai_responses_sse_parse.parse_payload": {
+            "required": true
+          },
+          "openai_responses_sse_parse.project_parts": {
+            "required": true
           }
         }
       },
@@ -602,33 +447,24 @@
           "alloc_bytes_max": 637241000,
           "steady_state_turn_alloc_bytes_max": 53107000
         },
-        "advisory_duration": {
-          "ms_max": 1956.264,
-          "phases": {
-            "process_list_stress.env_spec_hash": {
-              "budget_ms": 4.68,
-              "required": true
-            },
-            "process_list_stress.list_all": {
-              "budget_ms": 1294.02,
-              "required": true
-            },
-            "process_list_stress.list_global": {
-              "budget_ms": 1153.026,
-              "required": true
-            },
-            "process_list_stress.list_live": {
-              "budget_ms": 1564.33,
-              "required": true
-            },
-            "process_list_stress.render_all_json": {
-              "budget_ms": 486.548,
-              "required": true
-            },
-            "process_list_stress.render_live_json": {
-              "budget_ms": 340.799,
-              "required": true
-            }
+        "phases": {
+          "process_list_stress.env_spec_hash": {
+            "required": true
+          },
+          "process_list_stress.list_all": {
+            "required": true
+          },
+          "process_list_stress.list_global": {
+            "required": true
+          },
+          "process_list_stress.list_live": {
+            "required": true
+          },
+          "process_list_stress.render_all_json": {
+            "required": true
+          },
+          "process_list_stress.render_live_json": {
+            "required": true
           }
         }
       },
@@ -638,137 +474,102 @@
           "alloc_bytes_max": 20000000.0,
           "steady_state_turn_alloc_bytes_max": 800000.0
         },
-        "advisory_duration": {
-          "ms_max": 40.0,
-          "phases": {
-            "resident_graph_append.n0.append": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n0.construct": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n0.cow": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n0.remap": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n0.timestamps": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n128.append": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n128.construct": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n128.cow": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n128.remap": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n128.timestamps": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n32.append": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.construct": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.cow": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.remap": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.timestamps": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n512.append": {
-              "budget_ms": 4.0,
-              "required": true
-            },
-            "resident_graph_append.n512.construct": {
-              "budget_ms": 3.0,
-              "required": true
-            },
-            "resident_graph_append.n512.cow": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n512.remap": {
-              "budget_ms": 3.0,
-              "required": true
-            },
-            "resident_graph_append.n512.timestamps": {
-              "budget_ms": 3.0,
-              "required": true
-            },
-            "resident_graph_append.n0.builder": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n0.snapshot_append": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.builder": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.snapshot_append": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n128.builder": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n128.snapshot_append": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n512.builder": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n512.snapshot_append": {
-              "budget_ms": 2.0,
-              "required": true
-            },
-            "resident_graph_append.n0.event_read": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n32.event_read": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n128.event_read": {
-              "budget_ms": 1.0,
-              "required": true
-            },
-            "resident_graph_append.n512.event_read": {
-              "budget_ms": 1.0,
-              "required": true
-            }
+        "phases": {
+          "resident_graph_append.n0.append": {
+            "required": true
+          },
+          "resident_graph_append.n0.construct": {
+            "required": true
+          },
+          "resident_graph_append.n0.cow": {
+            "required": true
+          },
+          "resident_graph_append.n0.remap": {
+            "required": true
+          },
+          "resident_graph_append.n0.timestamps": {
+            "required": true
+          },
+          "resident_graph_append.n128.append": {
+            "required": true
+          },
+          "resident_graph_append.n128.construct": {
+            "required": true
+          },
+          "resident_graph_append.n128.cow": {
+            "required": true
+          },
+          "resident_graph_append.n128.remap": {
+            "required": true
+          },
+          "resident_graph_append.n128.timestamps": {
+            "required": true
+          },
+          "resident_graph_append.n32.append": {
+            "required": true
+          },
+          "resident_graph_append.n32.construct": {
+            "required": true
+          },
+          "resident_graph_append.n32.cow": {
+            "required": true
+          },
+          "resident_graph_append.n32.remap": {
+            "required": true
+          },
+          "resident_graph_append.n32.timestamps": {
+            "required": true
+          },
+          "resident_graph_append.n512.append": {
+            "required": true
+          },
+          "resident_graph_append.n512.construct": {
+            "required": true
+          },
+          "resident_graph_append.n512.cow": {
+            "required": true
+          },
+          "resident_graph_append.n512.remap": {
+            "required": true
+          },
+          "resident_graph_append.n512.timestamps": {
+            "required": true
+          },
+          "resident_graph_append.n0.builder": {
+            "required": true
+          },
+          "resident_graph_append.n0.snapshot_append": {
+            "required": true
+          },
+          "resident_graph_append.n32.builder": {
+            "required": true
+          },
+          "resident_graph_append.n32.snapshot_append": {
+            "required": true
+          },
+          "resident_graph_append.n128.builder": {
+            "required": true
+          },
+          "resident_graph_append.n128.snapshot_append": {
+            "required": true
+          },
+          "resident_graph_append.n512.builder": {
+            "required": true
+          },
+          "resident_graph_append.n512.snapshot_append": {
+            "required": true
+          },
+          "resident_graph_append.n0.event_read": {
+            "required": true
+          },
+          "resident_graph_append.n32.event_read": {
+            "required": true
+          },
+          "resident_graph_append.n128.event_read": {
+            "required": true
+          },
+          "resident_graph_append.n512.event_read": {
+            "required": true
           }
         }
       },
@@ -778,49 +579,36 @@
           "alloc_bytes_max": 133701000,
           "steady_state_turn_alloc_bytes_max": 10566000
         },
-        "advisory_duration": {
-          "ms_max": 506.042,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 32.761,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 9.233,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 203.716,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 13.419,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 65.748,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 5.523,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 5.324,
-              "required": true
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.837,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.338,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": true
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -830,57 +618,42 @@
           "alloc_bytes_max": 184623000,
           "steady_state_turn_alloc_bytes_max": 14889000
         },
-        "advisory_duration": {
-          "ms_max": 361.855,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 6.047,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 3.36,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 182.377,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 8.907,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 58.977,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 12.73,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 8.58,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.777,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.225,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.024,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.321,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -890,52 +663,39 @@
           "alloc_bytes_max": 235690000,
           "steady_state_turn_alloc_bytes_max": 18091000
         },
-        "advisory_duration": {
-          "ms_max": 481.543,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.241,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 8.037,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 239.59,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 22.122,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 46.256,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 4.224,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 2.16,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 8.963,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.32,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=29011050, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(192173000 * 1 + 29011050 * 1.5), rounded up to 235690000; steady_state_turn_alloc_bytes_max: ceil(14464000 + 29011050 / 12 * 1.5), rounded up to 18091000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=29011050, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(192173000 * 1 + 29011050 * 1.5), rounded up to 235690000; steady_state_turn_alloc_bytes_max: ceil(14464000 + 29011050 / 12 * 1.5), rounded up to 18091000. Other measured growth receives no ceiling credit."
+        }
       },
       "rlm_large_print": {
         "guarded_span": "whole_run",
@@ -943,60 +703,45 @@
           "alloc_bytes_max": 973968000,
           "steady_state_turn_alloc_bytes_max": 82549000
         },
-        "advisory_duration": {
-          "ms_max": 589.501,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 10.92,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 8.705,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 313.112,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 13.841,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 133.435,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.137,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 7.862,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.651,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.164,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.318,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.398,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=128044912, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(781900000 * 1 + 128044912 * 1.5), rounded up to 973968000; steady_state_turn_alloc_bytes_max: ceil(66543000 + 128044912 / 12 * 1.5), rounded up to 82549000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=128044912, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(781900000 * 1 + 128044912 * 1.5), rounded up to 973968000; steady_state_turn_alloc_bytes_max: ceil(66543000 + 128044912 / 12 * 1.5), rounded up to 82549000. Other measured growth receives no ceiling credit."
+        }
       },
       "rlm_large_tool_catalog": {
         "guarded_span": "whole_run",
@@ -1004,49 +749,36 @@
           "alloc_bytes_max": 2228365000,
           "steady_state_turn_alloc_bytes_max": 178436000
         },
-        "advisory_duration": {
-          "ms_max": 2447.11,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.766,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 13.674,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 1400.912,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 9.101,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 49.029,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 10.123,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 147.059,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 3.277,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.522,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1056,57 +788,42 @@
           "alloc_bytes_max": 163800000,
           "steady_state_turn_alloc_bytes_max": 13056000
         },
-        "advisory_duration": {
-          "ms_max": 410.828,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.51,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 7.606,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 227.723,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 8.885,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 60.007,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 7.083,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 10.057,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.805,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.189,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 4.012,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.349,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1116,57 +833,42 @@
           "alloc_bytes_max": 2001378000,
           "steady_state_turn_alloc_bytes_max": 170876000
         },
-        "advisory_duration": {
-          "ms_max": 4063.583,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 14.419,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 25.155,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 4184.845,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 27.134,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 403.699,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 5.863,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 11.061,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.717,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.179,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.954,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.587,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1176,61 +878,45 @@
           "alloc_bytes_max": 372334000,
           "steady_state_turn_alloc_bytes_max": 30006000
         },
-        "advisory_duration": {
-          "ms_max": 950.15,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.765,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 14.934,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 796.251,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 18.691,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 87.412,
-              "required": true
-            },
-            "process.await_handle": {
-              "budget_ms": 274.315,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 4.728,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 13.349,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.843,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.365,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.809,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.373,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "process.await_handle": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1240,61 +926,45 @@
           "alloc_bytes_max": 522293000,
           "steady_state_turn_alloc_bytes_max": 43384000
         },
-        "advisory_duration": {
-          "ms_max": 855.992,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.394,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 10.852,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 802.787,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 13.869,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 58.681,
-              "required": true
-            },
-            "process.await_handle": {
-              "budget_ms": 170.4,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 8.395,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 9.087,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.721,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.279,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 3.243,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.506,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "process.await_handle": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1304,49 +974,36 @@
           "alloc_bytes_max": 137722000,
           "steady_state_turn_alloc_bytes_max": 10910000
         },
-        "advisory_duration": {
-          "ms_max": 400.441,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 6.85,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 32.353,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 143.074,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 13.186,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 78.256,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.881,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 4.316,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.267,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.345,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1356,61 +1013,45 @@
           "alloc_bytes_max": 541681000,
           "steady_state_turn_alloc_bytes_max": 44622000
         },
-        "advisory_duration": {
-          "ms_max": 2326.786,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.377,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 20.436,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 2440.397,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 27.904,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 92.905,
-              "required": true
-            },
-            "process.await_handle": {
-              "budget_ms": 1991.8,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 4.672,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 13.371,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.778,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.383,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 3.27,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.349,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "process.await_handle": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -1420,60 +1061,45 @@
           "alloc_bytes_max": 219565000,
           "steady_state_turn_alloc_bytes_max": 17767000
         },
-        "advisory_duration": {
-          "ms_max": 411.477,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.359,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 13.822,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 205.502,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 19.423,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 87.735,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.786,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 9.95,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_durable_record": {
-              "budget_ms": 0.895,
-              "required": false
-            },
-            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
-              "budget_ms": 1.346,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.484,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.343,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=22214010, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(186243000 * 1 + 22214010 * 1.5), rounded up to 219565000; steady_state_turn_alloc_bytes_max: ceil(14990000 + 22214010 / 12 * 1.5), rounded up to 17767000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_durable_record": {
+            "required": false
+          },
+          "codemode_lash_vm.deferred_resolve.after_resolver_return": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=22214010, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(186243000 * 1 + 22214010 * 1.5), rounded up to 219565000; steady_state_turn_alloc_bytes_max: ceil(14990000 + 22214010 / 12 * 1.5), rounded up to 17767000. Other measured growth receives no ceiling credit."
+        }
       },
       "scoped_effect_controller": {
         "guarded_span": "whole_run",
@@ -1481,49 +1107,36 @@
           "alloc_bytes_max": 83972000,
           "steady_state_turn_alloc_bytes_max": 6427000
         },
-        "advisory_duration": {
-          "ms_max": 753.968,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 9.684,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 9.514,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 197.424,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.743,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 8.56,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 75.279,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 5.985,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 1.005,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.792,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -1533,56 +1146,42 @@
           "alloc_bytes_max": 147720000,
           "steady_state_turn_alloc_bytes_max": 8398000
         },
-        "advisory_duration": {
-          "ms_max": 3538.362,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.3,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 3.046,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 702.116,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.813,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 45.848,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 279.66,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 5.544,
-              "required": true
-            },
-            "sqlite_store_reopen.runtime_reopen": {
-              "budget_ms": 1554.57,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.919,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.74,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration ee91e66c6d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=17952008, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(6153000 + 17952008 / 12 * 1.5), rounded up to 8398000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "sqlite_store_reopen.runtime_reopen": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration ee91e66c6d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=17952008, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(6153000 + 17952008 / 12 * 1.5), rounded up to 8398000. Other measured growth receives no ceiling credit."
+        }
       },
       "standard": {
         "guarded_span": "whole_run",
@@ -1590,49 +1189,36 @@
           "alloc_bytes_max": 83992000,
           "steady_state_turn_alloc_bytes_max": 6432000
         },
-        "advisory_duration": {
-          "ms_max": 816.207,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 12.368,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 37.158,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 108.842,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 168.341,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.747,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 108.842,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 14.121,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 108.842,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 27.062,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "context_transform": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
           }
         }
       },
@@ -1642,49 +1228,36 @@
           "alloc_bytes_max": 93473000,
           "steady_state_turn_alloc_bytes_max": 6591000
         },
-        "advisory_duration": {
-          "ms_max": 593.847,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 5.193,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 18.091,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 138.992,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.899,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 9.297,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 51.337,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 3.134,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.977,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.765,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -1694,52 +1267,39 @@
           "alloc_bytes_max": 126700000,
           "steady_state_turn_alloc_bytes_max": 6565000
         },
-        "advisory_duration": {
-          "ms_max": 328.644,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 3.647,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 4.615,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 67.178,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.764,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 7.029,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 48.852,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 2.78,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.965,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.765,
-              "required": true
-            }
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=20092872, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(96560000 * 1 + 20092872 * 1.5), rounded up to 126700000. Other measured growth receives no ceiling credit.",
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
-        },
-        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=20092872, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(96560000 * 1 + 20092872 * 1.5), rounded up to 126700000. Other measured growth receives no ceiling credit."
+        }
       },
       "store_hardening_hot_paths": {
         "guarded_span": "whole_run",
@@ -1747,129 +1307,96 @@
           "alloc_bytes_max": 368015000,
           "steady_state_turn_alloc_bytes_max": 29677000
         },
-        "advisory_duration": {
-          "ms_max": 13094.113,
-          "phases": {
-            "store_hardening.identity.process_registration": {
-              "budget_ms": 14.916,
-              "required": true
-            },
-            "store_hardening.memory.append_receipt_replay": {
-              "budget_ms": 19.322,
-              "required": true
-            },
-            "store_hardening.memory.append_receipt_fresh": {
-              "budget_ms": 28.751,
-              "required": true
-            },
-            "store_hardening.memory.attachment_adopt": {
-              "budget_ms": 18.162,
-              "required": true
-            },
-            "store_hardening.memory.attachment_intent": {
-              "budget_ms": 6.307,
-              "required": true
-            },
-            "store_hardening.memory.history_cursor_page": {
-              "budget_ms": 36.0,
-              "required": true
-            },
-            "store_hardening.memory.history_fork_contains_active_ancestor": {
-              "budget_ms": 30.0,
-              "required": true
-            },
-            "store_hardening.memory.history_fork_node_anchor": {
-              "budget_ms": 36.0,
-              "required": true
-            },
-            "store_hardening.memory.history_head_page": {
-              "budget_ms": 30.0,
-              "required": true
-            },
-            "store_hardening.memory.prune_terminal_processes": {
-              "budget_ms": 2431.011,
-              "required": true
-            },
-            "store_hardening.postgres.append_receipt_replay": {
-              "budget_ms": 152.308,
-              "required": true
-            },
-            "store_hardening.postgres.append_receipt_fresh": {
-              "budget_ms": 513.112,
-              "required": true
-            },
-            "store_hardening.postgres.attachment_adopt": {
-              "budget_ms": 574.523,
-              "required": true
-            },
-            "store_hardening.postgres.attachment_intent": {
-              "budget_ms": 264.525,
-              "required": true
-            },
-            "store_hardening.postgres.history_cursor_page": {
-              "budget_ms": 200.0,
-              "required": true
-            },
-            "store_hardening.postgres.history_fork_contains_active_ancestor": {
-              "budget_ms": 176.0,
-              "required": true
-            },
-            "store_hardening.postgres.history_fork_node_anchor": {
-              "budget_ms": 255.0,
-              "required": true
-            },
-            "store_hardening.postgres.history_head_page": {
-              "budget_ms": 200.0,
-              "required": true
-            },
-            "store_hardening.postgres.open_enforce": {
-              "budget_ms": 999.888,
-              "required": true
-            },
-            "store_hardening.postgres.open_preverified": {
-              "budget_ms": 154.441,
-              "required": true
-            },
-            "store_hardening.postgres.prune_terminal_processes": {
-              "budget_ms": 965.995,
-              "required": true
-            },
-            "store_hardening.sqlite.append_receipt_replay": {
-              "budget_ms": 57.313,
-              "required": true
-            },
-            "store_hardening.sqlite.append_receipt_fresh": {
-              "budget_ms": 70.801,
-              "required": true
-            },
-            "store_hardening.sqlite.attachment_adopt": {
-              "budget_ms": 69.276,
-              "required": true
-            },
-            "store_hardening.sqlite.attachment_intent": {
-              "budget_ms": 110.446,
-              "required": true
-            },
-            "store_hardening.sqlite.history_cursor_page": {
-              "budget_ms": 40.0,
-              "required": true
-            },
-            "store_hardening.sqlite.history_fork_contains_active_ancestor": {
-              "budget_ms": 30.0,
-              "required": true
-            },
-            "store_hardening.sqlite.history_fork_node_anchor": {
-              "budget_ms": 36.0,
-              "required": true
-            },
-            "store_hardening.sqlite.history_head_page": {
-              "budget_ms": 40.0,
-              "required": true
-            },
-            "store_hardening.sqlite.prune_terminal_processes": {
-              "budget_ms": 109.28,
-              "required": true
-            }
+        "phases": {
+          "store_hardening.identity.process_registration": {
+            "required": true
+          },
+          "store_hardening.memory.append_receipt_replay": {
+            "required": true
+          },
+          "store_hardening.memory.append_receipt_fresh": {
+            "required": true
+          },
+          "store_hardening.memory.attachment_adopt": {
+            "required": true
+          },
+          "store_hardening.memory.attachment_intent": {
+            "required": true
+          },
+          "store_hardening.memory.history_cursor_page": {
+            "required": true
+          },
+          "store_hardening.memory.history_fork_contains_active_ancestor": {
+            "required": true
+          },
+          "store_hardening.memory.history_fork_node_anchor": {
+            "required": true
+          },
+          "store_hardening.memory.history_head_page": {
+            "required": true
+          },
+          "store_hardening.memory.prune_terminal_processes": {
+            "required": true
+          },
+          "store_hardening.postgres.append_receipt_replay": {
+            "required": true
+          },
+          "store_hardening.postgres.append_receipt_fresh": {
+            "required": true
+          },
+          "store_hardening.postgres.attachment_adopt": {
+            "required": true
+          },
+          "store_hardening.postgres.attachment_intent": {
+            "required": true
+          },
+          "store_hardening.postgres.history_cursor_page": {
+            "required": true
+          },
+          "store_hardening.postgres.history_fork_contains_active_ancestor": {
+            "required": true
+          },
+          "store_hardening.postgres.history_fork_node_anchor": {
+            "required": true
+          },
+          "store_hardening.postgres.history_head_page": {
+            "required": true
+          },
+          "store_hardening.postgres.open_enforce": {
+            "required": true
+          },
+          "store_hardening.postgres.open_preverified": {
+            "required": true
+          },
+          "store_hardening.postgres.prune_terminal_processes": {
+            "required": true
+          },
+          "store_hardening.sqlite.append_receipt_replay": {
+            "required": true
+          },
+          "store_hardening.sqlite.append_receipt_fresh": {
+            "required": true
+          },
+          "store_hardening.sqlite.attachment_adopt": {
+            "required": true
+          },
+          "store_hardening.sqlite.attachment_intent": {
+            "required": true
+          },
+          "store_hardening.sqlite.history_cursor_page": {
+            "required": true
+          },
+          "store_hardening.sqlite.history_fork_contains_active_ancestor": {
+            "required": true
+          },
+          "store_hardening.sqlite.history_fork_node_anchor": {
+            "required": true
+          },
+          "store_hardening.sqlite.history_head_page": {
+            "required": true
+          },
+          "store_hardening.sqlite.prune_terminal_processes": {
+            "required": true
           }
         }
       },
@@ -1879,61 +1406,45 @@
           "alloc_bytes_max": 123935000,
           "steady_state_turn_alloc_bytes_max": 6444000
         },
-        "advisory_duration": {
-          "ms_max": 1158.81,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.367,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 14.261,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 132.438,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.718,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 13.515,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 140.688,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 7.866,
-              "required": true
-            },
-            "store_reopen.persisted_load": {
-              "budget_ms": 37.858,
-              "required": true
-            },
-            "store_reopen.runtime_hydration": {
-              "budget_ms": 674.563,
-              "required": true
-            },
-            "store_reopen.store_factory_create": {
-              "budget_ms": 0.311,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.993,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.786,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "store_reopen.persisted_load": {
+            "required": true
+          },
+          "store_reopen.runtime_hydration": {
+            "required": true
+          },
+          "store_reopen.store_factory_create": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -1943,49 +1454,36 @@
           "alloc_bytes_max": 842904000,
           "steady_state_turn_alloc_bytes_max": 63897000
         },
-        "advisory_duration": {
-          "ms_max": 6348.459,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 6.959,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 9.242,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 1645.094,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.844,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 8.879,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 39.127,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 6.403,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.874,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.741,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -1995,53 +1493,39 @@
           "alloc_bytes_max": 135890000,
           "steady_state_turn_alloc_bytes_max": 10738000
         },
-        "advisory_duration": {
-          "ms_max": 476.036,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 4.85,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 5.896,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 220.507,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 20.004,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 69.15,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 5.736,
-              "required": true
-            },
-            "codemode_lash_vm.deferred_resolve": {
-              "budget_ms": 3.997,
-              "required": false
-            },
-            "codemode_lash_vm.resolve_projected_bindings": {
-              "budget_ms": 2.449,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "trace_jsonl.inspect_files": {
-              "budget_ms": 0.906,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 1.251,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "codemode_lash_vm.deferred_resolve": {
+            "required": false
+          },
+          "codemode_lash_vm.resolve_projected_bindings": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "trace_jsonl.inspect_files": {
+            "required": true
+          },
+          "context_transform": {
+            "required": true
           }
         }
       },
@@ -2051,53 +1535,39 @@
           "alloc_bytes_max": 87164000,
           "steady_state_turn_alloc_bytes_max": 6682000
         },
-        "advisory_duration": {
-          "ms_max": 645.803,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 7.741,
-              "required": true
-            },
-            "committed_turn": {
-              "budget_ms": 23.805,
-              "required": true
-            },
-            "effect_loop": {
-              "budget_ms": 182.125,
-              "required": true
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.686,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 8.842,
-              "required": true
-            },
-            "prepared_turn": {
-              "budget_ms": 51.5,
-              "required": true
-            },
-            "prompt_build": {
-              "budget_ms": 7.193,
-              "required": true
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "trace_jsonl.inspect_files": {
-              "budget_ms": 4.72,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.858,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.712,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": true
+          },
+          "committed_turn": {
+            "required": true
+          },
+          "effect_loop": {
+            "required": true
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": true
+          },
+          "prepared_turn": {
+            "required": true
+          },
+          "prompt_build": {
+            "required": true
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "trace_jsonl.inspect_files": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -2107,53 +1577,39 @@
           "alloc_bytes_max": 87282000,
           "steady_state_turn_alloc_bytes_max": 6722000
         },
-        "advisory_duration": {
-          "ms_max": 542.692,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 3.807,
-              "required": false
-            },
-            "committed_turn": {
-              "budget_ms": 10.793,
-              "required": false
-            },
-            "effect_loop": {
-              "budget_ms": 120.891,
-              "required": false
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.649,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 5.605,
-              "required": false
-            },
-            "prepared_turn": {
-              "budget_ms": 53.558,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 9.47,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "turn_cancel.request_to_token_to_seal": {
-              "budget_ms": 215.055,
-              "required": true
-            },
-            "context_transform": {
-              "budget_ms": 0.906,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.744,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": false
+          },
+          "committed_turn": {
+            "required": false
+          },
+          "effect_loop": {
+            "required": false
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": false
+          },
+          "prepared_turn": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "turn_cancel.request_to_token_to_seal": {
+            "required": true
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       },
@@ -2163,21 +1619,15 @@
           "alloc_bytes_max": 16480000,
           "steady_state_turn_alloc_bytes_max": 1354000
         },
-        "advisory_duration": {
-          "ms_max": 99.541,
-          "phases": {
-            "codemode_exec_checkpoint": {
-              "budget_ms": 39.768,
-              "required": true
-            },
-            "standard_llm_checkpoint": {
-              "budget_ms": 28.63,
-              "required": true
-            },
-            "standard_parallel_tools_checkpoint": {
-              "budget_ms": 54.799,
-              "required": true
-            }
+        "phases": {
+          "codemode_exec_checkpoint": {
+            "required": true
+          },
+          "standard_llm_checkpoint": {
+            "required": true
+          },
+          "standard_parallel_tools_checkpoint": {
+            "required": true
           }
         }
       },
@@ -2187,49 +1637,36 @@
           "alloc_bytes_max": 84084000,
           "steady_state_turn_alloc_bytes_max": 6439000
         },
-        "advisory_duration": {
-          "ms_max": 626.29,
-          "phases": {
-            "before_turn_hooks": {
-              "budget_ms": 12.328,
-              "required": false
-            },
-            "committed_turn": {
-              "budget_ms": 21.539,
-              "required": false
-            },
-            "effect_loop": {
-              "budget_ms": 141.054,
-              "required": false
-            },
-            "plugin_hook.after_turn.standard_compaction": {
-              "budget_ms": 0.712,
-              "required": true
-            },
-            "post_commit_delivery": {
-              "budget_ms": 15.775,
-              "required": false
-            },
-            "prepared_turn": {
-              "budget_ms": 107.964,
-              "required": false
-            },
-            "prompt_build": {
-              "budget_ms": 14.112,
-              "required": false
-            },
-            "tool_intent.parent_end": {
-              "budget_ms": 0.69,
-              "required": false
-            },
-            "context_transform": {
-              "budget_ms": 0.892,
-              "required": true
-            },
-            "plugin_hook.context_pressure.standard_compaction": {
-              "budget_ms": 0.718,
-              "required": true
-            }
+        "phases": {
+          "before_turn_hooks": {
+            "required": false
+          },
+          "committed_turn": {
+            "required": false
+          },
+          "effect_loop": {
+            "required": false
+          },
+          "plugin_hook.after_turn.standard_compaction": {
+            "required": true
+          },
+          "post_commit_delivery": {
+            "required": false
+          },
+          "prepared_turn": {
+            "required": false
+          },
+          "prompt_build": {
+            "required": false
+          },
+          "tool_intent.parent_end": {
+            "required": false
+          },
+          "context_transform": {
+            "required": true
+          },
+          "plugin_hook.context_pressure.standard_compaction": {
+            "required": true
           }
         }
       }

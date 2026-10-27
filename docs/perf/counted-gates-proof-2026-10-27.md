@@ -1,0 +1,67 @@
+# Counted regression gate proof, 2026-10-27
+
+FIG-7434. All patches were applied and reverted only in the r33-gates Kiln fork.
+No shared-host wall duration decides a verdict. The CPU event is qualified
+hardware instructions:u; missing or less than 99% running time refuses capture.
+
+| Probe | Injected failure | Reverted full gate |
+|---|---|---|
+| (a) one SQL UPDATE/turn | chat-short writes 92 > 91; compacting 102 > 101 | PASS, five independent processes |
+| (b) 1KiB allocation/guest read | TS worker calls 29,203 > 29,189; Python 12,924 > 12,905; bytes also fail | PASS, five independent processes |
+| (c) multiply/register dispatch | 21 of 40 CPU rows exceed 1%; Python float arithmetic about +5.96% | PASS, all 40 rows |
+| (d) 50ms worker-entry sleep | median requested sleep 50,000,000 ns > 0; calls 1 > 0 over 20 Ready handshakes | PASS, both counted rows |
+| (f) retained 2 MiB/facade handle | chat-short live 4,482,579 B > 2,391,524 B; all four workloads fail | PASS, five independent processes |
+
+Probe (e) is unproven and stale: its patch targets SurfaceTools::execute, which
+ordinary facade replay dispatch no longer runs. The owner explicitly waived
+that proof; no workload or moved injection was added.
+
+The completed counted pairs are pinned to source `56825be218`. The CPU pair uses
+the final optimized artifact captured at `c5e4cdfda8`; its source patch is the
+original `c/injection.patch`. Startup reuses that unchanged harness and separately
+builds only the actual helper main executable with the original `d/injection.patch`.
+A superseded combined startup build was cancelled because it unnecessarily
+rebuilt the harness; it is not a proof result.
+
+The landing count baseline uses five complete captures from the actual hermetic
+executor with eight runtime workers and periodic node maintenance outside the
+foreground window. Each ceiling is maximum plus max-minus-min range. All 60
+original main median ceilings tighten; original hard caps and depth-slope
+references still bind. Foreground write maxima are 91, 101, 144 and 144, each
+with zero observed range. The raw population and source checkpoint are in
+`foreground-executor-raw/` and `foreground-calibration-source.json`.
+
+The earlier local calibration failed the hermetic replay target, exposing
+resource-geometry differences and maintenance writes proportional to executor
+scheduling. Those failures and a 300-second watchdog timeout remain retained.
+The gate now fixes eight runtime workers, retains raw executor receipts, defers
+periodic private-node maintenance, and has a declared 900-second watchdog.
+That watchdog is a liveness bound, never a performance verdict. SQL reads still
+lack complete foreground attribution and do not certify one additional read.
+
+Validation: all 15 edited laws executed and passed; the existing perfreport
+refusal law passed; schema checks passed; the full replay target passed 9/9.
+`scripts/land` runs the required workspace Clippy before pushing.
+
+Evidence directory:
+`/workspace/notes/lash/tasks/lanes/r33/gates.evidence/`
+
+- `paired-count-probe-{a,b,f}/proof.json` and sibling raw receipts/controls.
+- `final-probe-c/capture/decision.json`, `final-probe-c-reverted/capture/decision.json`.
+- `paired-startup-probe-d/capture/decision.json` and reverted sibling.
+- `landing-counts.0.json` through `.4.json`, `landing-counts-baseline.json`.
+- Earlier failed controls, partial captures and superseded calibrations remain
+  retained and are not passing proof pairs.
+
+Scheduled main commands, from its sourced Kiln fork:
+
+```sh
+just perf-gate-instructions
+just perf-gate-startup
+just perf-history-record
+```
+
+The history recipe requires the clean current main head, appends counted values
+with full producer identity to the existing runtime JSONL store, and runs its
+existing change detector. It records no wall/latency fields. Override
+LASH_PERF_HISTORY_FILE to retain that same store outside a disposable fork.

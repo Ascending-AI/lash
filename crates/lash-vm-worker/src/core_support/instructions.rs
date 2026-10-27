@@ -50,20 +50,30 @@ pub struct InstructionReading {
 impl InstructionReading {
     /// Qualify one interval. Counts are never silently scaled for multiplexing.
     pub fn since(self, before: Self) -> Result<Self> {
-        let reading = Self {
-            instructions: self.instructions.saturating_sub(before.instructions),
-            time_enabled: self.time_enabled.saturating_sub(before.time_enabled),
-            time_running: self.time_running.saturating_sub(before.time_running),
+        let subtract = |after: u64, before: u64| {
+            after
+                .checked_sub(before)
+                .ok_or_else(|| io::Error::other("PMU counter moved backwards"))
         };
-        if reading.time_enabled == 0 || reading.running_fraction() < 0.99 {
+        Self {
+            instructions: subtract(self.instructions, before.instructions)?,
+            time_enabled: subtract(self.time_enabled, before.time_enabled)?,
+            time_running: subtract(self.time_running, before.time_running)?,
+        }
+        .qualify()
+    }
+    /// Require a positive, unscaled interval with at least 99% PMU running time.
+    pub fn qualify(self) -> Result<Self> {
+        if self.instructions == 0
+            || self.time_enabled == 0
+            || self.time_running > self.time_enabled
+            || self.running_fraction() < 0.99
+        {
             return Err(io::Error::other(format!(
-                "instructions:u running fraction {:.6} below 99% or empty window (enabled={}, running={})",
-                reading.running_fraction(),
-                reading.time_enabled,
-                reading.time_running
+                "unqualified instructions:u: {self:?}; requires >=99% time running"
             )));
         }
-        Ok(reading)
+        Ok(self)
     }
     pub fn running_fraction(self) -> f64 {
         self.time_running as f64 / self.time_enabled as f64
@@ -76,16 +86,25 @@ impl InstructionCounter {
     /// # Errors
     /// Returns an error when the kernel refuses the counter (paranoid level, no PMU).
     pub fn open_inherited() -> Result<Self> {
+        Self::open(false)
+    }
+
+    /// Count subsequently created threads without also counting child processes.
+    pub fn open_threads() -> Result<Self> {
+        Self::open(true)
+    }
+
+    fn open(threads_only: bool) -> Result<Self> {
         let attr = PerfEventAttr {
             size: 64,
             config: 1,      // PERF_COUNT_HW_INSTRUCTIONS
             read_format: 3, // PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING
             // inherit, exclude kernel, exclude hypervisor; enabled at open.
-            flags: (1 << 1) | (1 << 5) | (1 << 6),
+            flags: (1 << 1) | (1 << 5) | (1 << 6) | if threads_only { 1 << 35 } else { 0 },
             ..Default::default()
         };
         // SAFETY: `attr` is a valid, fully initialized perf_event_attr prefix of `size` bytes.
-        let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, &attr, 0, -1, -1, 0u64) };
+        let fd = unsafe { libc::syscall(libc::SYS_perf_event_open, &attr, 0, -1, -1, 8u64) };
         require(fd >= 0, "perf_event_open instructions:u")?;
         Ok(Self(fd as i32))
     }

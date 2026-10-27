@@ -722,6 +722,20 @@ mod tests {
             Default::default(),
         )
         .unwrap();
+        use crate::perf_support::instructions::InstructionReading;
+        for (running, accepted) in [(98, false), (99, true), (101, false)] {
+            assert_eq!(
+                InstructionReading {
+                    instructions: 100,
+                    time_enabled: 100,
+                    time_running: running,
+                }
+                .qualify()
+                .is_ok(),
+                accepted
+            );
+        }
+        assert!(InstructionReading::default().qualify().is_err());
         let counts = row.instructions.unwrap();
         assert_eq!(counts.minimum_per_operation, 23.0);
         assert_eq!(counts.median_per_operation, 23.0);
