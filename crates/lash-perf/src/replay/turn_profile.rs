@@ -35,6 +35,8 @@ pub async fn run(args: &Args) -> Result<()> {
     );
     let profiles_path = args.out.with_extension("turns.json");
     super::run(&ReplayArgs {
+        instructions: false,
+        worker_resources: false,
         workloads: vec![args.workload.clone()],
         turns: Some(args.turn),
         store: args.store,
