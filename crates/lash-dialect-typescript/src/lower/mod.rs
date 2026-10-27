@@ -1133,15 +1133,14 @@ impl Lowerer<'_> {
         let target = self.helper_callee(function)?;
         // Its header alone: a first use decodes no body (FIG-6931).
         let header = self.library.header(&identity);
-        // A helper's checked Text result is representation proof. Losing it
-        // makes a later member read emit impossible record/list branches,
-        // which admission correctly rejects (FIG-6372).
-        let ty = if ty == Ty::Unknown
-            && header
-                .as_ref()
-                .is_some_and(|header| header.signature.result == lash_kernel_value::Type::Text)
-        {
-            Ty::Text
+        // Checked helper results prove their representation. Losing that
+        // proof emits impossible record/list probes in later member reads.
+        let ty = if ty == Ty::Unknown {
+            match header.as_ref().map(|header| &header.signature.result) {
+                Some(lash_kernel_value::Type::Text) => Ty::Text,
+                Some(lash_kernel_value::Type::List(_)) => Ty::Array,
+                _ => ty,
+            }
         } else {
             ty
         };

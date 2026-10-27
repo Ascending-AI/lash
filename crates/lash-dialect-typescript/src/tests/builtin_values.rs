@@ -9,6 +9,31 @@ use crate::DiagnosticCode;
 /// receiver and arguments the program gives it.
 #[test]
 fn built_in_functions_are_callable_values() {
+    // FIG-7451: execution alone misses admission's List/Record conflict.
+    for (source, expected) in [
+        (
+            r#"const words = "one two three".trim().split(/\s+/).filter(Boolean); await control.finish(String(words.length));"#,
+            lash_kernel_doc::Datum::Text("3".into()),
+        ),
+        (
+            "const array = []; const object = {}; const mixed = [0, -0, '', null, undefined, NaN, false, 1, -2, '0', true, array, object]; const kept = mixed.filter(Boolean); await control.finish((kept.length === 6 && kept[0] === 1 && kept[1] === -2) && (kept[2] === '0' && kept[3] === true && kept[4] === array) && (kept[5] === object));",
+            lash_kernel_doc::Datum::Bool(true),
+        ),
+        (
+            "const values = '0 1 2'.split(/ /); const numbers = values.map(Number); const strings = numbers.map(String); const booleans = values.map(Boolean); const kept = values.filter(Number); await control.finish((numbers.join(',') === '0,1,2' && strings.join(',') === '0,1,2' && booleans.join(',') === 'true,true,true') && (kept.join(',') === '1,2' && values.every(String) && values.some(Number)) && (values.find(Number) === '1' && values.findIndex(Number) === 1));",
+            lash_kernel_doc::Datum::Bool(true),
+        ),
+        (
+            "const values = 'a b c'.split(/ /); const keep = Boolean; const map = values.map; const filter = values['filter']; const length = values['length']; const absent = values.missing; const removed = delete values.missing; await control.finish((map.call(values, String).join(',') === 'a,b,c' && filter.call(values, keep).join(',') === 'a,b,c' && length === 3) && (absent === undefined && removed && values.includes('b')) && (values.slice(1).join(',') === 'b,c'));",
+            lash_kernel_doc::Datum::Bool(true),
+        ),
+    ] {
+        let lowered =
+            super::lower_with_effects(source).unwrap_or_else(|error| panic!("{source}\n{error}"));
+        lash_kernel_check::derive(&lowered.document, super::library())
+            .unwrap_or_else(|error| panic!("{source}\n{error}"));
+        assert_eq!(machine::end(source), Ended::Finished(expected), "{source}");
+    }
     agrees(
         "const numbers = ['1', '2', 'x'].map(Number); const kept = [0, 1, '', 'a'].filter(Boolean); const slice = Array.prototype.slice; function rest() { return Array.prototype.slice.call(arguments, 1); } const largest = Math.max; const atLeastTen = Math.max.bind(null, 10); await control.finish(numbers[1] === 2 && Number.isNaN(numbers[2]) && kept.length === 2 && slice.call([1, 2, 3], 1)[0] === 2 && rest(1, 2, 3).length === 2 && largest.call(null, 4, 7) === 7 && Math.max.apply(null, [1, 5, 2]) === 5 && atLeastTen(3) === 10 && Number.isNaN([3, 9].reduce(Math.max)) && [-1, 2].map(Math.abs)[0] === 1);",
     );
