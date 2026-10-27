@@ -1,0 +1,59 @@
+[
+  {
+    "name": "pure helper",
+    "source": "function headline(count: number): string { return count === 1 ? \"One new card\" : count + \" new cards\"; }\nexport async function digest(): Promise<void> { const found = await people.lookup({ me: true }); await inbox.sendItem({ title: headline(1), body: \"Your daily digest.\" }); }",
+    "names": [
+      "headline",
+      "digest"
+    ]
+  },
+  {
+    "name": "exported helper",
+    "source": "export function headline(count: number): string { return count === 1 ? \"One new card\" : count + \" new cards\"; }\nexport async function digest(): Promise<void> { const found = await people.lookup({ me: true }); await inbox.sendItem({ title: headline(1), body: \"Your daily digest.\" }); }",
+    "names": [
+      "headline",
+      "digest"
+    ]
+  },
+  {
+    "name": "helper result bound to const",
+    "source": "function headline(count: number): string { return count === 1 ? \"One new card\" : count + \" new cards\"; }\nexport async function digest(): Promise<void> { const found = await people.lookup({ me: true }); const title = headline(1); await inbox.sendItem({ title, body: \"Your daily digest.\" }); }",
+    "names": [
+      "headline",
+      "digest"
+    ]
+  },
+  {
+    "name": "async helper",
+    "source": "async function notify(title: string): Promise<void> { await inbox.sendItem({title}); }\nexport async function digest(): Promise<void> { await people.lookup({me: true}); await notify(\"Daily digest\"); }",
+    "names": [
+      "notify",
+      "digest"
+    ]
+  },
+  {
+    "name": "A joke every minute",
+    "source": "/** A joke every minute */\nconst minuteJoke = async (): Promise<void> => {\n  const jokes = [\n    \"Why don't scientists trust atoms? Because they make up everything.\",\n    \"Why did the scarecrow win an award? He was outstanding in his field.\",\n    \"What do you call fake spaghetti? An impasta.\",\n    \"Why did the bicycle fall over? It was two-tired.\",\n    \"Why can't a nose be twelve inches long? Because then it would be a foot.\",\n    \"What do you call a bear with no teeth? A gummy bear.\",\n    \"Why did the math book look sad? It had too many problems.\",\n    \"What do you call cheese that isn't yours? Nacho cheese.\",\n    \"I only know 25 letters of the alphabet. I don't know y.\",\n    \"Why did the computer get cold? It left its Windows open.\",\n    \"What do you call a sleeping dinosaur? A dino-snore.\",\n    \"Why don't eggs tell jokes? They'd crack each other up.\"\n  ];\n  const index = Math.floor(Date.now() / 60000) % jokes.length;\n  /** Send this minute's joke to your Inbox */\n  await inbox.sendItem({ title: \"Your minute of humor\", body: jokes[index] });\n};\nconst jokeWorkflow = await workflows.create({ name: \"A joke every minute\", definition: minuteJoke, triggers: [{ name: \"Every minute\", source: { kind: \"cron.Schedule\", expr: \"* * * * *\", tz: \"UTC\" } }] });\nconsole.log(jokeWorkflow);\n",
+    "cell": true,
+    "names": [
+      "minuteJoke"
+    ]
+  },
+  {
+    "name": "const-bound helper arrow and calls between helpers",
+    "source": "const headline = (count: number): string => count === 1 ? \"One new card\" : count + \" new cards\"; function title(count: number): string { return headline(count); } export async function digest(): Promise<void> { await inbox.sendItem({title: title(1)}); }",
+    "names": [
+      "headline",
+      "title",
+      "digest"
+    ]
+  },
+  {
+    "name": "static module data beside a helper",
+    "source": "const prefix = \"Cards: \"; function title(count: number): string { return prefix + count; } export async function digest(): Promise<void> { await inbox.sendItem({title: title(1)}); }",
+    "names": [
+      "title",
+      "digest"
+    ]
+  }
+]

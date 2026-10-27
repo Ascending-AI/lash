@@ -49,7 +49,7 @@ impl Lowerer<'_> {
         if function.is_async {
             return self.lower_async_function(function, name, self.span);
         }
-        let closure = self.closure(function)?;
+        let closure = self.closure(function, name)?;
         Ok(self.function_token(function, name, closure))
     }
 
@@ -159,7 +159,7 @@ impl Lowerer<'_> {
     }
 
     /// A function's parameters and body as a closure, whatever runs it.
-    pub(super) fn closure(&mut self, function: &ast::Function) -> Lowering<Operand> {
+    pub(super) fn closure(&mut self, function: &ast::Function, name: &str) -> Lowering<Operand> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
@@ -212,7 +212,7 @@ impl Lowerer<'_> {
         written.implicit_text_conversions = frame.implicit_text_conversions;
         self.written = Some(written);
         let start = self.callable_presentation(function);
-        let closure = self.emit_closure(vec![this, args], body, start);
+        let closure = self.emit_named_closure(vec![this, args], body, start, name);
         Ok(Operand {
             plain: None,
             text_prefix: None,
@@ -404,7 +404,12 @@ impl Lowerer<'_> {
         written.implicit_text_conversions = frame.implicit_text_conversions;
         self.written = Some(written.clone());
         Ok((
-            self.emit_closure(params, body, None),
+            self.emit_named_closure(
+                params,
+                body,
+                None,
+                function.name.as_deref().unwrap_or_default(),
+            ),
             frame.context_used,
             written,
         ))
@@ -445,7 +450,12 @@ impl Lowerer<'_> {
         })?;
         self.written = Some(written);
         let start = self.callable_presentation(function);
-        let closure = self.emit_closure(vec![this, args], body, start);
+        let closure = self.emit_named_closure(
+            vec![this, args],
+            body,
+            start,
+            function.name.as_deref().unwrap_or_default(),
+        );
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),
             ..closure

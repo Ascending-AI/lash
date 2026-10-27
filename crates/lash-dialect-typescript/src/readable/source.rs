@@ -140,7 +140,7 @@ pub(super) struct Item {
     pub(super) name: String,
     pub(super) params: Vec<Param>,
     pub(super) result: Option<Type>,
-    pub(super) body: Vec<Stmt>,
+    pub(super) body: Body,
 }
 
 /// Whether `name` can be written as a binding or a reference.
@@ -202,6 +202,22 @@ impl Writer {
     pub(super) fn item(&mut self, item: &Item) {
         self.pad();
         self.caption(item.caption.as_ref());
+        if let Body::Expr(expression) = &item.body {
+            self.out.push_str("export const ");
+            self.out.push_str(&item.name);
+            self.out.push_str(" = ");
+            self.expr(
+                &Expr::arrow(Function {
+                    is_async: item.is_async,
+                    params: item.params.clone(),
+                    result: item.result.clone(),
+                    body: Body::Expr(expression.clone()),
+                }),
+                0,
+            );
+            self.out.push_str(";\n");
+            return;
+        }
         self.out.push_str(if item.is_async {
             "export async function "
         } else {
@@ -218,7 +234,9 @@ impl Writer {
             }
         }
         self.out.push(' ');
-        self.block(&item.body);
+        if let Body::Block(body) = &item.body {
+            self.block(body);
+        }
         self.out.push('\n');
     }
 

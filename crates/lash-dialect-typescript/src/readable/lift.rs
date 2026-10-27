@@ -153,6 +153,7 @@ pub(super) struct Lifter<'a> {
     assigned: BTreeSet<Name>,
     /// Original names retained in lowered function tokens, keyed by binding identity.
     pub(super) bindings: BTreeMap<Name, String>,
+    pub(super) module_helpers: BTreeSet<Name>,
 }
 
 impl<'a> Lifter<'a> {
@@ -231,6 +232,7 @@ impl<'a> Lifter<'a> {
             taken_captions: Vec::new(),
             assigned,
             bindings,
+            module_helpers: BTreeSet::new(),
         }
     }
 
@@ -261,6 +263,7 @@ impl<'a> Lifter<'a> {
             self.preserve_temporaries,
         );
         inner.bindings.extend(self.bindings.clone());
+        inner.module_helpers.extend(self.module_helpers.clone());
         inner
     }
 
@@ -355,7 +358,25 @@ impl<'a> Lifter<'a> {
         {
             statements = rest;
         }
-        let body = self.block(statements, &site)?;
+        // Entry lowering recreates reachable module helpers in its private
+        // scope. Refer to their module declarations so re-lowering recreates
+        // that scope, including its original closure and binding identities.
+        let skip = statements
+            .iter()
+            .take_while(|statement| self.module_capture(statement))
+            .count();
+        for statement in &statements[..skip] {
+            if let k::Stmt::Let { name, .. } = statement
+                && self.document.exports.contains_key(name)
+            {
+                self.module_helpers.insert(name.clone());
+            }
+        }
+        let body = self.block_at(&statements[skip..], &site, skip)?;
+        let body = match self.module_expression(name, &body)? {
+            Some(expression) => source::Body::Expr(expression),
+            None => source::Body::Block(body),
+        };
         Ok(Item {
             is_async: entry.asynchronous,
             caption: self.caption(site),
@@ -364,6 +385,24 @@ impl<'a> Lifter<'a> {
             result,
             body,
         })
+    }
+
+    fn module_capture(&self, statement: &k::Stmt) -> bool {
+        let k::Stmt::Let {
+            name,
+            value: k::Rhs::Expr(value),
+        } = statement
+        else {
+            return false;
+        };
+        if self.document.exports.contains_key(name) {
+            super::closures::authored_name(value) == Some(name.as_str())
+        } else {
+            self.document
+                .main
+                .as_deref()
+                .is_some_and(|main| main.contains(statement))
+        }
     }
 
     /// The annotation `ty` is written with, `None` for `Any`, its record

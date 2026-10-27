@@ -71,7 +71,7 @@ impl Lowerer<'_> {
         name: &str,
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
-        let body = self.closure(function)?;
+        let body = self.closure(function, name)?;
         let Some((Rhs::Expr(Expr::Closure(mut source_body)), note)) = self.take_binding_of(&body)
         else {
             unreachable!("a source body is a fresh closure");
@@ -104,7 +104,7 @@ impl Lowerer<'_> {
         })?;
         self.written = Some(written);
         let start = self.callable_presentation(function);
-        let closure = self.emit_closure(params, block, start);
+        let closure = self.emit_named_closure(params, block, start, name);
         Ok(self.function_token(function, name, closure))
     }
 

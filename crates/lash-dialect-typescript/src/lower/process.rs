@@ -168,13 +168,16 @@ impl Lowerer<'_> {
             .extend(function.captions.entries(&entry, &names));
         let (params, body, packed) = self.lift(function)?;
         let (body, notes) = body.into_parts();
-        let definition = lash_kernel_dialect::authoring::local_function(
+        let mut definition = lash_kernel_dialect::authoring::local_function(
             params,
             body,
             &self.imports.as_map(),
             self.library,
             &self.local_functions,
         );
+        if let Ok(authored) = lash_kernel_value::FunctionName::new(name) {
+            definition.name = authored;
+        }
         let identity = definition.identity();
         let convention = self.entry_convention(packed)?;
         // Only a module's lowering finds an entry (`module_entry`).

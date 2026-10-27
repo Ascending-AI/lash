@@ -190,6 +190,123 @@ impl Printer for crate::TypeScript {
 mod tests {
     use super::*;
 
+    /// FIG-7474: helpers and const-bound arrows must print without losing
+    /// authored function names or changing the complete lowered document.
+    #[test]
+    fn authored_corpus_prints_and_relowers_identically() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            source: String,
+            #[serde(default)]
+            cell: bool,
+            #[serde(default)]
+            names: Vec<String>,
+        }
+        let library = crate::tests::library();
+        let mut packages = BTreeMap::new();
+        for (package, member) in [
+            ("people", "lookup"),
+            ("inbox", "send_item"),
+            ("workflows", "create"),
+            ("corpus", "echo"),
+        ] {
+            packages
+                .entry(lash_kernel_value::PackagePath::parse(package).unwrap())
+                .or_insert_with(BTreeMap::new)
+                .insert(
+                    lash_kernel_value::Segment::new(member).unwrap(),
+                    lash_kernel_dialect::NamespaceMember {
+                        visibility: lash_kernel_value::Visibility::Public,
+                        kind: lash_kernel_dialect::NamespaceKind::Operation(
+                            lash_kernel_dialect::OperationSignature {
+                                signature: lash_kernel_value::Signature {
+                                    params: vec![lash_kernel_value::types::Param {
+                                        name: Name::new("input"),
+                                        ty: lash_kernel_value::types::Type::Any,
+                                        optional: false,
+                                    }],
+                                    result: lash_kernel_value::types::Type::Any,
+                                },
+                                controls: lash_kernel_value::TurnControls::none(),
+                                mode: lash_kernel_value::OperationMode::Waited,
+                            },
+                        ),
+                    },
+                );
+        }
+        let namespaces =
+            lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
+        let environment = Environment::new(library, &namespaces);
+        let mut cases: Vec<Case> = serde_json::from_str(include_str!("corpus.json")).unwrap();
+        let captions: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../lash-kernel-conformance/captions/typescript.json"
+        ))
+        .unwrap();
+        cases.extend(serde_json::from_value::<Vec<Case>>(captions["readback"].clone()).unwrap());
+        let mut failures = Vec::new();
+        for case in &cases {
+            let mode = if case.cell {
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            } else {
+                lash_kernel_dialect::Mode::Module
+            };
+            let lowered = crate::lower(&case.source, &environment, mode)
+                .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+            for name in &case.names {
+                assert!(
+                    lowered
+                        .document
+                        .functions
+                        .values()
+                        .any(|definition| definition.name.as_str() == name),
+                    "{}: authored function {name} was lost",
+                    case.name
+                );
+            }
+            let printed = match print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    failures.push(format!("{}: {error:?}", case.name));
+                    continue;
+                }
+            };
+            let read = crate::lower(&printed.source, &environment, mode)
+                .unwrap_or_else(|error| panic!("{}: {error:?}\n{}", case.name, printed.source));
+            if read.document.canonical_bytes() != lowered.document.canonical_bytes() {
+                failures.push(format!(
+                    "{}: identity mismatch\n{}",
+                    case.name, printed.source
+                ));
+            }
+            assert_eq!(
+                read.captions.entries(),
+                lowered.captions.entries(),
+                "{}",
+                case.name
+            );
+            printed
+                .source_map
+                .as_ref()
+                .unwrap()
+                .validate(&lowered.document, &printed.source)
+                .unwrap();
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        println!(
+            "{} authored printer corpus cases round-tripped",
+            cases.len()
+        );
+    }
+
     /// FIG-7323: copy-out and its optional builtin factory are implicit in
     /// the authored call, including inside an unawaited call's child task.
     #[test]

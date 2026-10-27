@@ -15,7 +15,67 @@ use super::source::{Body, Expr, Function, Param, Type};
 /// binding, its name, its arity, its callable and its properties.
 const TOKEN: &str = "ts.function";
 
+pub(super) fn authored_name(value: &k::Expr) -> Option<&str> {
+    let k::Expr::Tuple(parts) = value else {
+        return None;
+    };
+    let [
+        k::Expr::Literal(k::Literal::Text(tag)),
+        _,
+        k::Expr::Literal(k::Literal::Text(name)),
+        _,
+        k::Expr::Closure(_),
+        _,
+    ] = parts.as_slice()
+    else {
+        return None;
+    };
+    (tag == TOKEN).then_some(name.as_str())
+}
+
 impl Lifter<'_> {
+    /// A module arrow's expression body differs from a statement body in its
+    /// packed closure. Preserve that form when another entry captures it.
+    pub(super) fn module_expression(
+        &mut self,
+        name: &Name,
+        body: &[super::source::Stmt],
+    ) -> Lift<Option<Expr>> {
+        for definition in self.document.functions.values() {
+            let Some(block) = definition.body() else {
+                continue;
+            };
+            for statement in &block.block {
+                let k::Stmt::Let {
+                    value: k::Rhs::Expr(value),
+                    ..
+                } = statement
+                else {
+                    continue;
+                };
+                if authored_name(value) != Some(name.as_str()) {
+                    continue;
+                }
+                if let Some(Function {
+                    body: Body::Expr(_),
+                    ..
+                }) = self.closure(
+                    value,
+                    &Site::new(lash_kernel_value::sites::Unit::Main, Vec::new()),
+                )? && let [
+                    super::source::Stmt {
+                        kind: super::source::StmtKind::Return(Some(value)),
+                        ..
+                    },
+                ] = body
+                {
+                    return Ok(Some(value.clone()));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// The function `value`, at `site`, is the token of, when it is one.
     pub(super) fn closure(&mut self, value: &k::Expr, _site: &Site) -> Lift<Option<Function>> {
         let k::Expr::Tuple(parts) = value else {

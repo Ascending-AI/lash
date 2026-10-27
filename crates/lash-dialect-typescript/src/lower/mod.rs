@@ -1039,15 +1039,28 @@ impl Lowerer<'_> {
         body: Buf,
         start: Option<lash_kernel_doc::CallablePresentation>,
     ) -> Operand {
+        self.emit_named_closure(params, body, start, "")
+    }
+
+    fn emit_named_closure(
+        &mut self,
+        params: Vec<Name>,
+        body: Buf,
+        start: Option<lash_kernel_doc::CallablePresentation>,
+        authored_name: &str,
+    ) -> Operand {
         let name = self.temp();
         let (block, notes) = body.into_parts();
-        let definition = lash_kernel_dialect::authoring::local_function(
+        let mut definition = lash_kernel_dialect::authoring::local_function(
             params,
             block,
             &self.imports.as_map(),
             self.library,
             &self.local_functions,
         );
+        if let Ok(name) = lash_kernel_value::FunctionName::new(authored_name) {
+            definition.name = name;
+        }
         let function = definition.identity();
         self.local_functions.insert(function, definition);
         self.local_notes.insert(function, notes);

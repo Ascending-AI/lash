@@ -102,6 +102,16 @@ impl Lifter<'_> {
         let Some(name) = self.library(function) else {
             return refuse("a call of a function the manifest does not list");
         };
+        if name == "num.to_float"
+            && let [k::Expr::Call { function, args }] = args
+            && self.is(function, "list.len")
+            && let [target] = args.as_slice()
+        {
+            return Ok(Expr::Field(
+                Box::new(self.expr(target)?),
+                "length".to_owned(),
+            ));
+        }
         if let Some(spelling) =
             lash_kernel_dialect::value_constructors::Constructor::spelling(&name)
         {
@@ -156,8 +166,21 @@ impl Lifter<'_> {
             let left = self.expr(left)?;
             return Ok(Expr::Binary(mirrored, Box::new(right), Box::new(left)));
         }
-        let left = self.expr(left)?;
-        let right = self.expr(right)?;
+        let mut operand = |value: &k::Expr| {
+            if op == "==="
+                && let k::Expr::Call { function, args } = value
+                && self.is(function, "ts.number.checked")
+                && let [value] = args.as_slice()
+            {
+                return Ok(Expr::As(
+                    Box::new(self.expr(value)?),
+                    source::Type::Word("number"),
+                ));
+            }
+            self.expr(value)
+        };
+        let left = operand(left)?;
+        let right = operand(right)?;
         Ok(Expr::Binary(op, Box::new(left), Box::new(right)))
     }
 
@@ -321,7 +344,9 @@ impl Lifter<'_> {
         }
         let callee = self.expr(value)?;
         let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
-        Ok(Some(if direct {
+        let authored =
+            matches!(value, k::Expr::Variable(name) if self.module_helpers.contains(name));
+        Ok(Some(if direct && !authored {
             constructor(
                 "callable.invoke_token",
                 std::iter::once(callee).chain(args).collect(),
@@ -482,7 +507,7 @@ impl Lifter<'_> {
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), property.to_owned()))
             }
-            ("ts.get_numeric", [target, key]) => {
+            ("ts.get_numeric" | "ts.get_computed", [target, key]) => {
                 let target = self.expr(target)?;
                 let key = self.expr(key)?;
                 Ok(Expr::Index(Box::new(target), Box::new(key)))
@@ -562,6 +587,8 @@ fn global(namespace: &str) -> Option<&'static str> {
     Some(match namespace {
         "json" => "JSON",
         "math" => "Math",
+        "date" => "Date",
+        "console" => "console",
         "object" => "Object",
         "array" => "Array",
         "number" => "Number",
@@ -577,6 +604,7 @@ fn binary_of(name: &str) -> Option<&'static str> {
         "num.sub" | "ts.sub" => "-",
         "num.mul" | "ts.mul" => "*",
         "num.div" | "ts.div" => "/",
+        "ts.rem" => "%",
         "num.lt" | "ts.lt" => "<",
         "num.le" | "ts.le" => "<=",
         "ts.gt" => ">",
