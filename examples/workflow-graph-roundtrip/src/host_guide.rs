@@ -1,5 +1,55 @@
 //! Compiled host flow quoted by `docs/workflow-hosts.md`.
 
+// ANCHOR: joined-packages
+use std::{collections::BTreeSet, sync::Arc};
+
+use lash::package::{JoinedToolPackageProvider, Segment, ToolPackageProvider};
+use lash::plugins::{
+    FormatVersion, PluginDeclaration, PluginError, PluginSpec, StaticPluginFactory,
+};
+use lash::process::ProcessConfigKey;
+use lash::tools::ToolProvider;
+
+pub fn with_cenote_packages(
+    mut builder: lash::LashCoreBuilder,
+    knowledge: Arc<dyn ToolProvider>,
+    decision: Arc<dyn ToolProvider>,
+) -> Result<lash::LashCoreBuilder, PluginError> {
+    let key = lash::tool_provider_key!("tools");
+    let root =
+        Segment::new("cenote").map_err(|error| PluginError::Registration(error.to_string()))?;
+    let roots: BTreeSet<_> = [root].into();
+    let packages = JoinedToolPackageProvider::new(vec![
+        ToolPackageProvider::new("knowledge", key, roots.clone(), knowledge.clone()),
+        ToolPackageProvider::new("decision", key, roots, decision.clone()),
+    ]);
+    let registrations = [
+        (
+            "knowledge",
+            PluginSpec::new().with_tool_provider(key, knowledge),
+        ),
+        (
+            "decision",
+            PluginSpec::new().with_tool_provider(key, decision),
+        ),
+        (
+            "cenote_packages",
+            PluginSpec::new()
+                .with_package_provider(lash::tool_provider_key!("code"), Arc::new(packages)),
+        ),
+    ];
+    for (owner, spec) in registrations {
+        let component = StaticPluginFactory::new(PluginDeclaration::initial(owner), spec)
+            .as_component(FormatVersion::ONE)?;
+        builder = builder.process_component(
+            Arc::new(component),
+            ProcessConfigKey::<()>::new(owner, FormatVersion::ONE),
+        );
+    }
+    Ok(builder)
+}
+// ANCHOR_END: joined-packages
+
 // ANCHOR: namespace
 use std::collections::BTreeMap;
 

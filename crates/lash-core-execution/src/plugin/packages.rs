@@ -1070,8 +1070,10 @@ pub fn operation_environment_fragment(
 ) -> Result<lash_core_store::environment::EnvironmentFragment, PluginError> {
     config.validate_provider(key)?;
     let mut fragment = lash_core_store::environment::EnvironmentFragment::default();
-    let by_id: std::collections::BTreeMap<_, _> =
-        tools.iter().map(|entry| (entry.tool(), entry)).collect();
+    let by_operation: std::collections::BTreeMap<_, _> = tools
+        .iter()
+        .map(|entry| (&entry.definition.manifest.operation, entry))
+        .collect();
     let mut by_root: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
     for entry in tools {
         by_root
@@ -1092,8 +1094,8 @@ pub fn operation_environment_fragment(
             key,
             definitions,
             |definition| {
-                by_id
-                    .get(&definition.manifest.id)
+                by_operation
+                    .get(&definition.manifest.operation)
                     .and_then(|entry| entry.link.payload.clone())
             },
             &context,
@@ -1105,7 +1107,7 @@ pub fn operation_environment_fragment(
             fragment
                 .routes
                 .extend(contribution.routes.into_iter().map(|mut candidate| {
-                    if let Some(entry) = by_id.get(&candidate.route.tool) {
+                    if let Some(entry) = by_operation.get(&candidate.operation) {
                         candidate.route = entry.link.clone();
                     }
                     candidate

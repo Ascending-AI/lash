@@ -39,6 +39,80 @@ Update the compiled source and its quotations together; ignored Rust fences
 are rejected. The example's [`runtime.rs`](../examples/workflow-graph-roundtrip/src/runtime.rs)
 shows the complete application, component registration and observation feed.
 
+## Share an operation package across registered providers
+
+A root has one package publisher even when its operations have different
+runners. Use `lash::package::JoinedToolPackageProvider` to join the sources'
+`ToolPackageProvider` adapters. Each adapter names its registered owner, key
+and claimed roots. Register each tool provider separately and install only the
+joined package publisher for those roots:
+
+<!-- host-guide: joined-packages -->
+```rust
+use std::{collections::BTreeSet, sync::Arc};
+
+use lash::package::{JoinedToolPackageProvider, Segment, ToolPackageProvider};
+use lash::plugins::{
+    FormatVersion, PluginDeclaration, PluginError, PluginSpec, StaticPluginFactory,
+};
+use lash::process::ProcessConfigKey;
+use lash::tools::ToolProvider;
+
+pub fn with_cenote_packages(
+    mut builder: lash::LashCoreBuilder,
+    knowledge: Arc<dyn ToolProvider>,
+    decision: Arc<dyn ToolProvider>,
+) -> Result<lash::LashCoreBuilder, PluginError> {
+    let key = lash::tool_provider_key!("tools");
+    let root =
+        Segment::new("cenote").map_err(|error| PluginError::Registration(error.to_string()))?;
+    let roots: BTreeSet<_> = [root].into();
+    let packages = JoinedToolPackageProvider::new(vec![
+        ToolPackageProvider::new("knowledge", key, roots.clone(), knowledge.clone()),
+        ToolPackageProvider::new("decision", key, roots, decision.clone()),
+    ]);
+    let registrations = [
+        (
+            "knowledge",
+            PluginSpec::new().with_tool_provider(key, knowledge),
+        ),
+        (
+            "decision",
+            PluginSpec::new().with_tool_provider(key, decision),
+        ),
+        (
+            "cenote_packages",
+            PluginSpec::new()
+                .with_package_provider(lash::tool_provider_key!("code"), Arc::new(packages)),
+        ),
+    ];
+    for (owner, spec) in registrations {
+        let component = StaticPluginFactory::new(PluginDeclaration::initial(owner), spec)
+            .as_component(FormatVersion::ONE)?;
+        builder = builder.process_component(
+            Arc::new(component),
+            ProcessConfigKey::<()>::new(owner, FormatVersion::ONE),
+        );
+    }
+    Ok(builder)
+}
+```
+
+The `knowledge` and `decision` definitions can both name operations in the
+`cenote` package. Each operation keeps its source's manifest, contract, payload
+and execution policy. The environment collector captures each registered source
+once and the publisher projects those observations. Select all three components
+in the base `ProcessEnv` with their `ProcessConfigKey<()>` and unit config,
+then attach `cenote` when preparing the workflow namespace below. Register the
+kernel process plugin as usual.
+
+Two sources claiming the same operation name are refused through
+`PluginError::Package(EnginePortError::Refused(AdmissionRefusal::PathConflict))`,
+even if their manifests agree. A competing publisher or conflicting publication
+ownership is refused with `AdmissionRefusal::NotOwner`. These types are available
+through `lash::plugins` and `lash::package`. An existing single-source
+`ToolPackageProvider::new` needs no changes.
+
 ## Prepare the authoring namespace
 
 Enable `codemode` and the dialect support the host needs; this example also uses

@@ -250,7 +250,7 @@ pub mod package {
         LinkPurpose, LoadedContent, OperationNeed, ReachSelector,
     };
     pub use lash_kernel_value::sites::EffectLocation;
-    pub use lash_tool_support::ToolPackageProvider;
+    pub use lash_tool_support::{JoinedToolPackageProvider, ToolPackageProvider};
     pub use {
         lash_kernel_value::claims::*, lash_kernel_value::names::*, lash_kernel_value::package::*,
         lash_vocabulary::claims::*, lash_vocabulary::package::*,

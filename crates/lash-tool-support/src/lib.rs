@@ -2,6 +2,8 @@
 
 use lash_core::{ToolFailure, ToolOutcome};
 
+mod joined_packages;
+pub use joined_packages::JoinedToolPackageProvider;
 mod selected_tools;
 mod selection;
 mod static_provider;
