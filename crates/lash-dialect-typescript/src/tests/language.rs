@@ -107,7 +107,7 @@ fn spans_map_sites_and_label_comments_are_trivia() {
         map.sites
             .iter()
             .find(|located| located.site.path == path)
-            .map(|located| located.ranges[0].start)
+            .map(|located| located.location.ranges()[0].start)
     };
     assert_eq!(start(&[0]), source.find("console"));
     let last = map.sites.last().unwrap();
@@ -116,7 +116,7 @@ fn spans_map_sites_and_label_comments_are_trivia() {
     assert!(
         map.sites
             .iter()
-            .all(|located| located.ranges[0].start >= source.find('\n').unwrap())
+            .all(|located| located.location.ranges()[0].start >= source.find('\n').unwrap())
     );
 
     let effects = super::machine::effects();

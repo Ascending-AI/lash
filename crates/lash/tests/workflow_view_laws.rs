@@ -191,8 +191,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
     let mut stray = map.clone();
     stray.sites.push(k::SourceSite {
         site: missing.clone(),
-        ranges: Vec::new(),
-        implicit: None,
+        location: k::SourceLocation::Implicit { offset: 0 },
     });
     for (candidate, sidecar, text, expected) in [
         (
@@ -414,7 +413,11 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
         }
         assert!(view.nodes.iter().any(|node| !node.folded.is_empty()));
         for node in &view.nodes {
-            if let Some(within) = &node.within {
+            if let lash::workflow::view::WorkflowNodeBody::Action {
+                within: Some(within),
+                ..
+            } = &node.body
+            {
                 assert_ne!(within, &node.site);
                 assert_eq!(&view.node_at(within).unwrap().site, within);
             }

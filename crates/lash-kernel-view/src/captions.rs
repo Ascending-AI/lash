@@ -14,7 +14,7 @@ use lash_kernel_value::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{BindingKind, WorkflowNodeKind, WorkflowView};
+use crate::{BindingKind, WorkflowNodeBody, WorkflowView};
 
 /// A view's captions, each keyed by where the view draws it. Wording for a
 /// step without a caption is the host's.
@@ -150,15 +150,15 @@ impl WorkflowView {
         // consumes them. A control keeps its own statement's caption.
         let mut owners = BTreeMap::new();
         for (index, node) in self.nodes.iter().enumerate() {
-            if node.kind == WorkflowNodeKind::Control
-                || (node.kind == WorkflowNodeKind::Action && node.within.is_none())
+            if matches!(node.body, WorkflowNodeBody::Control { .. })
+                || matches!(node.body, WorkflowNodeBody::Action { within: None, .. })
             {
                 owners.entry(node.statement.clone()).or_insert(index);
             }
         }
         for (index, node) in self.nodes.iter().enumerate() {
-            match node.kind {
-                WorkflowNodeKind::Action | WorkflowNodeKind::Control => {
+            match &node.body {
+                WorkflowNodeBody::Action { .. } | WorkflowNodeBody::Control { .. } => {
                     if owners.get(&node.statement) == Some(&index)
                         && let Some(caption) = caption(&node.statement)
                     {
@@ -169,13 +169,14 @@ impl WorkflowView {
                         });
                     }
                 }
-                WorkflowNodeKind::Code => {
+                WorkflowNodeBody::Code { members } => {
                     let mut found: Vec<_> = captions
                         .entries()
                         .iter()
                         .filter_map(|entry| Some((entry.target.site()?, &entry.caption)))
                         .filter(|(site, _)| {
-                            node.members
+                            members
+                                .as_slice()
                                 .iter()
                                 .any(|member| *site == member || self.is_arm_of(site, member))
                         })
@@ -189,14 +190,19 @@ impl WorkflowView {
                     nodes.extend(found);
                 }
             }
-            for (arm, control) in node.arms.iter().enumerate() {
-                if let Some(caption) = caption(&control.block) {
-                    arms.push(ArmCaption {
-                        node: index,
-                        arm,
-                        block: control.block.clone(),
-                        caption,
-                    });
+            if let WorkflowNodeBody::Control {
+                arms: control_arms, ..
+            } = &node.body
+            {
+                for (arm, control) in control_arms.iter().enumerate() {
+                    if let Some(caption) = caption(&control.block) {
+                        arms.push(ArmCaption {
+                            node: index,
+                            arm,
+                            block: control.block.clone(),
+                            caption,
+                        });
+                    }
                 }
             }
         }

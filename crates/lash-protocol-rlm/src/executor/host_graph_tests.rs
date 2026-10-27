@@ -265,8 +265,11 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
                 lash_kernel_value::sites::Unit::Main,
                 vec![0],
             ),
-            ranges: vec![lash_kernel_doc::Span::new(0, 1).unwrap()],
-            implicit: None,
+            location: lash_kernel_doc::SourceLocation::Spelled {
+                ranges: lash_kernel_doc::NonEmptySpans::new(
+                    lash_kernel_doc::Span::new(0, 1).unwrap(),
+                ),
+            },
         }],
     )
     .unwrap();

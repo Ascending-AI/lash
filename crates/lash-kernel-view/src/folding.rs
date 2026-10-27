@@ -176,7 +176,10 @@ impl Folded {
             .map(|site| (site.site.clone(), site.within.clone()))
             .collect();
         for node in &mut view.nodes {
-            let mut parent = node.within.take();
+            let crate::WorkflowNodeBody::Action { within, .. } = &mut node.body else {
+                continue;
+            };
+            let mut parent = within.take();
             while let Some(site) = &parent {
                 let Some(consumer) = aliases.get(site) else {
                     break;
@@ -188,14 +191,16 @@ impl Folded {
                     break;
                 }
             }
-            node.within = parent;
+            *within = parent;
         }
         let nodes = &view.nodes;
         let owner = |site: &Site| {
             nodes
                 .iter()
                 .find(|node| {
-                    node.site == *site || node.members.contains(site) || node.folded.contains(site)
+                    node.site == *site
+                        || node.members().contains(site)
+                        || node.folded.contains(site)
                 })
                 .map(|node| &node.site)
         };

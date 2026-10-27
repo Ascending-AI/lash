@@ -135,7 +135,7 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                 // of a node, where no Site could own it.
                 let mut scaffolding = printed.source.as_bytes().to_vec();
                 for mapped in &map.sites {
-                    for range in &mapped.ranges {
+                    for range in mapped.location.ranges() {
                         scaffolding[range.start..range.end].fill(b' ');
                     }
                 }
@@ -146,14 +146,14 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     ));
                 }
                 for mapped in &map.sites {
-                    if mapped.ranges.is_empty()
-                        && !matches!(site_node(&case.document, &mapped.site), Some(k::Node::Block(body)) if body.is_empty() && mapped.implicit.is_some_and(|offset| printed.source.is_char_boundary(offset)))
+                    if mapped.location.ranges().is_empty()
+                        && !matches!(site_node(&case.document, &mapped.site), Some(k::Node::Block(body)) if body.is_empty() && matches!(mapped.location, k::SourceLocation::Implicit { offset } if printed.source.is_char_boundary(offset)))
                     {
                         return Err("executable node has no source range".into());
                     }
                     let node = site_node(&case.document, &mapped.site)
                         .ok_or("map names a nonexistent node")?;
-                    for range in &mapped.ranges {
+                    for range in mapped.location.ranges() {
                         if range.start >= range.end {
                             return Err("mapped range is empty or reversed".into());
                         }
@@ -169,7 +169,7 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                                 && child.site.path.len() > mapped.site.path.len()
                                 && child.site.path.starts_with(&mapped.site.path)
                             {
-                                for child_range in &child.ranges {
+                                for child_range in child.location.ranges() {
                                     let start = child_range.start.max(range.start);
                                     let end = child_range.end.min(range.end);
                                     if start < end {
@@ -414,7 +414,14 @@ mod tests {
             let mut printed = Witness.print(document, captions, options)?;
             let old = printed.source.len();
             printed.source = printed.source.strip_suffix("generic").unwrap().to_owned() + self.0;
-            printed.source_map.as_mut().unwrap().sites[0].ranges[0].end = printed.source.len();
+            let k::SourceLocation::Spelled { ranges } =
+                &mut printed.source_map.as_mut().unwrap().sites[0].location
+            else {
+                panic!("spelled fixture")
+            };
+            let mut changed = ranges.as_slice().to_vec();
+            changed[0].end = printed.source.len();
+            *ranges = changed.try_into().unwrap();
             assert!(old > 0);
             Ok(printed)
         }

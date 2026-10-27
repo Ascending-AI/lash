@@ -477,22 +477,20 @@ impl SourceWriter {
                 return;
             };
             let end = self.source.len();
-            let (ranges, implicit) = if end == frame.start {
-                (vec![], Some(end))
+            let location = if end == frame.start {
+                lash_kernel_doc::SourceLocation::Implicit { offset: end }
             } else {
-                (
-                    vec![Span {
+                lash_kernel_doc::SourceLocation::Spelled {
+                    ranges: lash_kernel_doc::NonEmptySpans::new(Span {
                         start: frame.start,
                         end,
-                    }],
-                    None,
-                )
+                    }),
+                }
             };
             if let Some(sites) = &mut self.sites {
                 sites.push(SourceSite {
                     site: frame.site,
-                    ranges,
-                    implicit,
+                    location,
                 });
             }
         }

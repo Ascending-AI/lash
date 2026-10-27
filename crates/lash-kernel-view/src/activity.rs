@@ -9,7 +9,7 @@ use lash_kernel_value::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{WorkflowNodeKind, WorkflowView};
+use crate::{WorkflowNodeBody, WorkflowView};
 
 /// What an occurrence of an action did. `Recovered` is a failure whose
 /// error a `catch` took, so the run went on (FIG-6817): the process
@@ -73,12 +73,14 @@ impl WorkflowView {
     fn origin_node(&self, origin: &Site) -> Option<&crate::WorkflowNode> {
         self.nodes
             .iter()
-            .find(|node| node.kind == WorkflowNodeKind::Action && node.members.contains(origin))
+            .find(|node| {
+                matches!(node.body, WorkflowNodeBody::Action { .. })
+                    && node.members().contains(origin)
+            })
             .or_else(|| {
                 self.nodes.iter().find(|node| {
-                    node.kind == WorkflowNodeKind::Action
+                    matches!(node.body, WorkflowNodeBody::Action { within: None, .. })
                         && node.statement == *origin
-                        && node.within.is_none()
                 })
             })
     }
@@ -135,7 +137,7 @@ impl WorkflowView {
         Ok(self
             .nodes
             .iter()
-            .filter(|node| node.kind == WorkflowNodeKind::Action)
+            .filter(|node| matches!(node.body, WorkflowNodeBody::Action { .. }))
             .map(|node| {
                 let occurrences: Vec<_> = observations
                     .iter()

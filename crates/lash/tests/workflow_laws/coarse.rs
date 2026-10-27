@@ -5,7 +5,7 @@ use super::*;
 use lash::workflow::document::{AssignOrder, Site, parse_document};
 use lash::workflow::view::{
     self, ActionObservation, ActionState, FlowKind, FlowTarget, ReadableLens, ReadableRefusal,
-    WorkflowNodeKind as Kind,
+    WorkflowNodeBody as Body,
 };
 use std::collections::BTreeSet;
 
@@ -83,7 +83,7 @@ fn coarse_partition() {
     let members: Vec<_> = view
         .nodes
         .iter()
-        .flat_map(|node| node.members.iter())
+        .flat_map(|node| node.members().iter())
         .collect();
     assert_eq!(members.len(), view.statements.len());
     assert_eq!(
@@ -101,19 +101,23 @@ fn coarse_partition() {
         .iter()
         .filter(|node| node.block == site(&view, &[]))
         .collect();
+    assert!(matches!(
+        entry
+            .iter()
+            .map(|node| &node.body)
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [Body::Code { .. }, Body::Action { .. }, Body::Code { .. }]
+    ));
     assert_eq!(
-        entry.iter().map(|node| node.kind).collect::<Vec<_>>(),
-        [Kind::Code, Kind::Action, Kind::Code]
-    );
-    assert_eq!(
-        entry[0].members.len(),
+        entry[0].members().len(),
         4,
         "pure if and its body collapse; closure body is separate"
     );
     assert!(
         view.nodes
             .iter()
-            .all(|node| !node.members.is_empty() || node.kind == Kind::Action)
+            .all(|node| !node.members().is_empty() || matches!(node.body, Body::Action { .. }))
     );
     let shadowed: Vec<_> = view
         .dataflow
@@ -140,7 +144,7 @@ fn coarse_partition() {
     let code = writes_view
         .nodes
         .iter()
-        .find(|node| node.members.contains(&site(&view, &[3])))
+        .find(|node| node.members().contains(&site(&view, &[3])))
         .unwrap();
     assert_eq!(
         code.writes.iter().copied().collect::<BTreeSet<_>>(),
@@ -287,27 +291,34 @@ fn coarse_eval() {
     let first = view
         .action_node(&view.statements[0].actions[0].position())
         .unwrap();
-    assert_eq!(first.within, Some(view.statements[0].actions[2].clone()));
+    let Body::Action { within, .. } = &first.body else {
+        panic!("action")
+    };
+    assert_eq!(*within, Some(view.statements[0].actions[2].clone()));
     let lazy: Vec<_> = view
         .nodes
         .iter()
-        .filter(|node| node.statement == site(&view, &[1]) && node.kind == Kind::Action)
+        .filter(|node| {
+            node.statement == site(&view, &[1]) && matches!(node.body, Body::Action { .. })
+        })
         .collect();
     assert_eq!(lazy.len(), 2);
-    assert_eq!(lazy[0].lazy[0].arm, 1);
-    assert_eq!(lazy[1].lazy[0].arm, 2);
+    for (node, expected) in lazy.iter().zip([1, 2]) {
+        let Body::Action { lazy, .. } = &node.body else {
+            panic!("action")
+        };
+        assert_eq!(lazy[0].arm, expected);
+    }
     let control = view
         .nodes
         .iter()
         .find(|node| node.site == site(&view, &[2]))
         .unwrap();
-    assert_eq!(control.kind, Kind::Control);
-    assert_eq!(control.header.as_ref().unwrap().actions.len(), 1);
-    assert_eq!(
-        control.arms.len(),
-        2,
-        "empty alternatives retain their roles"
-    );
+    let Body::Control { header, arms, .. } = &control.body else {
+        panic!("control")
+    };
+    assert_eq!(header.as_ref().unwrap().actions.len(), 1);
+    assert_eq!(arms.len(), 2, "empty alternatives retain their roles");
     let assignment = view
         .statements
         .iter()
@@ -342,7 +353,8 @@ fn coarse_eval() {
     assert!(
         view.nodes
             .iter()
-            .any(|node| node.departures == [site(&view, &[5])] && node.kind == Kind::Action)
+            .any(|node| node.departures == [site(&view, &[5])]
+                && matches!(node.body, Body::Action { .. }))
     );
 }
 
@@ -418,7 +430,7 @@ fn coarse_call() {
         callee
             .nodes
             .iter()
-            .filter(|node| node.kind == Kind::Action)
+            .filter(|node| matches!(node.body, Body::Action { .. }))
             .count(),
         1
     );
@@ -471,9 +483,9 @@ fn coarse_departure() {
     let code = view
         .nodes
         .iter()
-        .find(|node| node.members.contains(&site(&view, &[2])))
+        .find(|node| node.members().contains(&site(&view, &[2])))
         .unwrap();
-    assert_eq!(code.kind, Kind::Code);
+    assert!(matches!(code.body, Body::Code { .. }));
     assert!(!code.falls_through);
     assert!(code.departures.contains(&site(&view, &[2])));
     assert!(
@@ -775,7 +787,7 @@ async fn coarse_counts() {
         .nodes
         .iter()
         .find(|node| {
-            node.kind == Kind::Control
+            matches!(node.body, Body::Control { .. })
                 && matches!(
                     view.statements
                         .iter()
@@ -822,7 +834,7 @@ async fn coarse_counts() {
     let code = view
         .nodes
         .iter()
-        .find(|node| node.kind == Kind::Code && node.members.len() > 1)
+        .find(|node| matches!(node.body, Body::Code { .. }) && node.members().len() > 1)
         .unwrap();
     let first = view
         .statements

@@ -30,7 +30,9 @@ pub use correspondence::{Correspondence, Survivor};
 pub use declarations::{
     CheckedDeclarations, DeclarationRefusal, check_declarations, required_declarations,
 };
-pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
+pub use source_map::{
+    NonEmptySpans, SourceLanguage, SourceLocation, SourceMap, SourceMapRefusal, SourceSite, Span,
+};
 mod codec_variants;
 mod continuation;
 mod decode;

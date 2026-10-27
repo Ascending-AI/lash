@@ -33,8 +33,8 @@ export function workflowTitle(workflow) {
 // control node is captioned on its statement, and only the node holding the
 // statement's first action may carry it; a code node on its first member.
 export function captionSite(node) {
-  if (node.kind === "code") return node.members[0];
-  return node.members.some((member) => siteKey(member) === siteKey(node.statement))
+  if (node.body.kind === "code") return node.body.members[0];
+  return node.body.members.some((member) => siteKey(member) === siteKey(node.statement))
     ? node.statement
     : undefined;
 }

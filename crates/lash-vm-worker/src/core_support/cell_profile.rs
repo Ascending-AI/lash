@@ -525,7 +525,7 @@ pub(super) fn source_start(
                 .filter(|entry| {
                     entry.site.unit == site.unit && entry.site.path.starts_with(&site.path)
                 })
-                .filter_map(|entry| entry.ranges.first().map(|r| r.start).or(entry.implicit))
+                .map(|entry| entry.location.start())
                 .min()
         })
         .or_else(|| matches!(site.unit, lash_kernel_value::sites::Unit::Main).then_some(0))

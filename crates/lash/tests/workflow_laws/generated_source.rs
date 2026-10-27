@@ -200,8 +200,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                     mapped.sort();
                     assert_eq!(mapped, sites(&document));
                     for entry in &map.sites {
-                        assert!(!entry.ranges.is_empty() || entry.implicit.is_some());
-                        for span in &entry.ranges {
+                        for span in entry.location.ranges() {
                             assert!(span.start < span.end);
                             assert!(printed.source.get(span.start..span.end).is_some());
                         }

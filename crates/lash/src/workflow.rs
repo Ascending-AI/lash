@@ -71,17 +71,17 @@ pub mod document {
         Invalid, InvalidBytes, InvalidFloat, InvalidInteger, InvalidNumberToken, InvalidReason,
         JoinMode, KERNEL_VERSION, KernelVersion, LibraryDependencies, Literal, MAX_NESTING_DEPTH,
         MapEntry, Measure, Member, Metering, MissingHelper, NativeCall, NativeCtor, NativeError,
-        NativeFunction, NewObject, Node, NodeMut, NumberPolicy, NumberToken, Nursery, Operand,
-        Ordinals, ParseError, ParseErrorReason, Place, PreparedAnswer, PreparedNative,
-        ProjectionRole, Protocol, RecordEntry, RegisteredFunction, RegistryError,
+        NativeFunction, NewObject, Node, NodeMut, NonEmptySpans, NumberPolicy, NumberToken,
+        Nursery, Operand, Ordinals, ParseError, ParseErrorReason, Place, PreparedAnswer,
+        PreparedNative, ProjectionRole, Protocol, RecordEntry, RegisteredFunction, RegistryError,
         ReleasedFunctions, Reservation, RestoreSelection, Retry, Rhs, Selection, Semantics,
         SequenceView, SignatureOrigin, SignaturePosition, SignatureRequired, SourceLanguage,
-        SourceMap, SourceMapRefusal, SourceSite, Span, StartConvention, StatementForm,
-        StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TextView, Timestamp, TryStmt,
-        TypeDef, TypeMember, TypeMismatch, ValidatedFunctions, Value, ValueKind, WorkCounter,
-        WrittenSignature, arena, check_declarations, check_statement, core_support, document_work,
-        heap, parse_definition, parse_definition_with_limits, parse_document,
-        parse_document_with_limits, plan, print_definition, print_document,
+        SourceLocation, SourceMap, SourceMapRefusal, SourceSite, Span, StartConvention,
+        StatementForm, StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TextView,
+        Timestamp, TryStmt, TypeDef, TypeMember, TypeMismatch, ValidatedFunctions, Value,
+        ValueKind, WorkCounter, WrittenSignature, arena, check_declarations, check_statement,
+        core_support, document_work, heap, parse_definition, parse_definition_with_limits,
+        parse_document, parse_document_with_limits, plan, print_definition, print_document,
         require_entry_signature, required_declarations, scalar, validate_definition,
         validate_definition_with_limits, validate_document, validate_document_with_limits,
     };
@@ -208,7 +208,6 @@ pub mod view {
     pub use lash_kernel_view::ViewError;
     pub use lash_kernel_view::WorkflowCoverage;
     pub use lash_kernel_view::WorkflowNode;
-    pub use lash_kernel_view::WorkflowNodeKind;
     pub use lash_kernel_view::WorkflowView;
     pub use lash_kernel_view::coverage;
     pub use lash_kernel_view::derive;
@@ -220,6 +219,7 @@ pub mod view {
         NodeCaption, ParamCaption,
     };
     pub use lash_kernel_view::{Comparison, LabelError, MemberDisplay};
+    pub use lash_kernel_view::{NonEmptySites, WorkflowNodeBody};
 }
 
 /// A checked document entered at one entry, with its graph and the library

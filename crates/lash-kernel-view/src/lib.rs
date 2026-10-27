@@ -51,7 +51,7 @@ mod folding;
 mod produced;
 pub use coarse::{
     CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,
-    LineRange, ReadableLens, ReadableRefusal, WorkflowNode, WorkflowNodeKind,
+    LineRange, NonEmptySites, ReadableLens, ReadableRefusal, WorkflowNode, WorkflowNodeBody,
 };
 pub use entry::{EntryParamView, EntryView};
 mod coverage;

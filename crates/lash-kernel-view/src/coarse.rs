@@ -24,14 +24,6 @@ pub struct CallableView {
     pub block: Site,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowNodeKind {
-    Action,
-    Control,
-    Code,
-}
-
 /// Inclusive, one-based lines in an explicitly named printed lens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -80,12 +72,81 @@ pub struct LazyArm {
     pub arm: usize,
 }
 
-/// Identity is (view.document, kind, block, site, last member). Ranges are
+/// Kind-specific workflow data. The tag owns all variant payload fields.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowNodeBody {
+    Action {
+        /// Each statement has one carrier; secondary actions have no members.
+        members: Vec<Site>,
+        within: Option<Site>,
+        lazy: Vec<LazyArm>,
+    },
+    Control {
+        members: Vec<Site>,
+        condition_ordinal: Option<u32>,
+        header: Option<Box<ControlHeader>>,
+        arms: Vec<ControlArm>,
+    },
+    Code {
+        members: NonEmptySites,
+    },
+}
+
+/// The statement coordinates in a nonempty code run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<Site>")]
+pub struct NonEmptySites(Vec<Site>);
+impl NonEmptySites {
+    pub fn new(first: Site) -> Self {
+        Self(vec![first])
+    }
+
+    pub fn as_slice(&self) -> &[Site] {
+        &self.0
+    }
+}
+impl TryFrom<Vec<Site>> for NonEmptySites {
+    type Error = &'static str;
+    fn try_from(members: Vec<Site>) -> Result<Self, Self::Error> {
+        if members.is_empty() {
+            Err("code node needs at least one member")
+        } else {
+            Ok(Self(members))
+        }
+    }
+}
+
+impl JsonSchema for NonEmptySites {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NonEmptySites".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = Vec::<Site>::json_schema(generator);
+        schema.insert("minItems".into(), 1.into());
+        schema
+    }
+}
+impl WorkflowNodeBody {
+    pub fn members(&self) -> &[Site] {
+        match self {
+            Self::Action { members, .. } | Self::Control { members, .. } => members,
+            Self::Code { members } => members.as_slice(),
+        }
+    }
+}
+impl WorkflowNode {
+    pub fn members(&self) -> &[Site] {
+        self.body.members()
+    }
+}
+
+/// Identity is (view.document, body kind, block, site, last member). Ranges are
 /// display metadata. Supporting statements and dataflow remain addressable.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowNode {
-    pub kind: WorkflowNodeKind,
+    pub body: WorkflowNodeBody,
     pub site: Site,
     pub block: Site,
     pub callable: Site,
@@ -93,10 +154,6 @@ pub struct WorkflowNode {
     pub statement: Site,
     /// The node's authoritative count coordinate in RanCounts.
     pub ordinal: u32,
-    pub condition_ordinal: Option<u32>,
-    /// Each statement has exactly one carrier. Additional actions in a
-    /// statement have no members, but retain their owning `statement`.
-    pub members: Vec<Site>,
     pub bindings: Vec<usize>,
     pub reads: Vec<usize>,
     pub writes: Vec<usize>,
@@ -104,10 +161,6 @@ pub struct WorkflowNode {
     /// Exact document action and statement sites folded into this authored
     /// node. Execution counts and replay paths retain these coordinates.
     pub folded: Vec<Site>,
-    pub within: Option<Site>,
-    pub lazy: Vec<LazyArm>,
-    pub header: Option<ControlHeader>,
-    pub arms: Vec<ControlArm>,
     pub departures: Vec<Site>,
     pub falls_through: bool,
 }
@@ -184,7 +237,7 @@ impl WorkflowView {
         self.nodes
             .iter()
             .find(|node| node.site == *site || node.folded.contains(site))
-            .or_else(|| self.nodes.iter().find(|node| node.members.contains(site)))
+            .or_else(|| self.nodes.iter().find(|node| node.members().contains(site)))
     }
 
     pub fn action_node(
@@ -192,7 +245,7 @@ impl WorkflowView {
         site: &lash_kernel_value::sites::PositionLabel,
     ) -> Option<&WorkflowNode> {
         self.nodes.iter().find(|node| {
-            node.kind == WorkflowNodeKind::Action
+            matches!(node.body, WorkflowNodeBody::Action { .. })
                 && (node.site == *site || node.folded.iter().any(|folded| *folded == *site))
         })
     }
@@ -224,11 +277,11 @@ impl WorkflowView {
         let ranges: BTreeMap<_, _> = map
             .sites
             .iter()
-            .map(|entry| (&entry.site, &entry.ranges))
+            .map(|entry| (&entry.site, entry.location.ranges()))
             .collect();
         for node in &mut self.nodes {
-            let sites = if node.kind == WorkflowNodeKind::Code {
-                node.members.clone()
+            let sites = if matches!(node.body, WorkflowNodeBody::Code { .. }) {
+                node.members().to_vec()
             } else {
                 vec![node.site.clone()]
             };
@@ -438,24 +491,27 @@ impl Projection<'_> {
                 Stmt::If { .. } | Stmt::For { .. } | Stmt::While { .. } | Stmt::Try { .. }
             );
             if control {
-                let mut node = self.node(
-                    WorkflowNodeKind::Control,
+                let node = self.node(
+                    WorkflowNodeBody::Control {
+                        members: vec![statement.site.clone()],
+                        condition_ordinal: self.condition_ordinals.get(&statement.site).copied(),
+                        header: self.headers.get(&statement.site).map(
+                            |(role, expression, comparison)| {
+                                Box::new(ControlHeader {
+                                    role: *role,
+                                    expression: expression.clone(),
+                                    actions: statement.actions.clone(),
+                                    comparison: comparison.clone(),
+                                })
+                            },
+                        ),
+                        arms: arms.clone(),
+                    },
                     statement.site.clone(),
                     block,
                     callable,
                     statement,
-                    vec![statement.site.clone()],
                 );
-                node.header =
-                    self.headers
-                        .get(&statement.site)
-                        .map(|(role, expression, comparison)| ControlHeader {
-                            role: *role,
-                            expression: expression.clone(),
-                            actions: statement.actions.clone(),
-                            comparison: comparison.clone(),
-                        });
-                node.arms = arms.clone();
                 self.nodes.push(node);
             }
             for (index, action) in statement.actions.iter().enumerate() {
@@ -468,21 +524,13 @@ impl Projection<'_> {
                     .headers
                     .get(&statement.site)
                     .map_or_else(|| block.clone(), |(_, expression, _)| expression.clone());
-                let mut node = self.node(
-                    WorkflowNodeKind::Action,
-                    action.clone(),
-                    &region,
-                    callable,
-                    statement,
-                    members,
-                );
-                node.within = self
+                let within = self
                     .view
                     .execution_sites
                     .iter()
                     .find(|site| site.site == *action)
                     .and_then(|site| site.within.clone());
-                node.lazy = self
+                let lazy = self
                     .view
                     .dataflow
                     .expressions
@@ -501,6 +549,17 @@ impl Projection<'_> {
                         })
                     })
                     .collect();
+                let node = self.node(
+                    WorkflowNodeBody::Action {
+                        members,
+                        within,
+                        lazy,
+                    },
+                    action.clone(),
+                    &region,
+                    callable,
+                    statement,
+                );
                 self.nodes.push(node);
             }
             for arm in arms {
@@ -516,23 +575,24 @@ impl Projection<'_> {
         };
         // Descendant pure controls belong to the same group; closure bodies do
         // not. Use callable ownership, not a raw path-prefix fold.
-        let members: Vec<_> = self
-            .view
-            .statements
-            .iter()
-            .filter(|statement| {
-                run.iter().any(|root| under(&statement.site, &root.site))
-                    && self.callable(&statement.block) == Some(callable)
-            })
-            .map(|statement| statement.site.clone())
-            .collect();
+        let mut members = NonEmptySites::new(first.site.clone());
+        members.0.extend(
+            self.view
+                .statements
+                .iter()
+                .filter(|statement| {
+                    statement.site != first.site
+                        && run.iter().any(|root| under(&statement.site, &root.site))
+                        && self.callable(&statement.block) == Some(callable)
+                })
+                .map(|statement| statement.site.clone()),
+        );
         let node = self.node(
-            WorkflowNodeKind::Code,
+            WorkflowNodeBody::Code { members },
             first.site.clone(),
             block,
             callable,
             first,
-            members,
         );
         self.nodes.push(node);
     }
@@ -548,15 +608,15 @@ impl Projection<'_> {
 
     fn node(
         &self,
-        kind: WorkflowNodeKind,
+        body: WorkflowNodeBody,
         site: Site,
         block: &Site,
         callable: &Site,
         statement: &StatementView,
-        members: Vec<Site>,
     ) -> WorkflowNode {
+        let members = body.members();
         let owns = |candidate: &Site| {
-            if kind == WorkflowNodeKind::Code {
+            if matches!(body, WorkflowNodeBody::Code { .. }) {
                 members.iter().any(|member| under(candidate, member))
             } else {
                 under(candidate, &statement.site)
@@ -579,9 +639,9 @@ impl Projection<'_> {
             .iter()
             .filter(|binding| {
                 binding.uses.iter().any(|usage| {
-                    if kind == WorkflowNodeKind::Code {
+                    if matches!(body, WorkflowNodeBody::Code { .. }) {
                         members.contains(&usage.statement)
-                    } else if kind == WorkflowNodeKind::Action {
+                    } else if matches!(body, WorkflowNodeBody::Action { .. }) {
                         under(&usage.site, &site)
                     } else {
                         usage.statement == statement.site
@@ -594,7 +654,7 @@ impl Projection<'_> {
             .writes
             .iter()
             .filter(|(written, _)| {
-                if kind == WorkflowNodeKind::Code {
+                if matches!(body, WorkflowNodeBody::Code { .. }) {
                     members.contains(written)
                 } else {
                     **written == statement.site
@@ -604,7 +664,7 @@ impl Projection<'_> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let departures = if kind == WorkflowNodeKind::Code {
+        let departures = if matches!(body, WorkflowNodeBody::Code { .. }) {
             self.view
                 .statements
                 .iter()
@@ -618,44 +678,35 @@ impl Projection<'_> {
         } else {
             Vec::new()
         };
-        let falls_through = if kind == WorkflowNodeKind::Code {
+        let falls_through = if matches!(body, WorkflowNodeBody::Code { .. }) {
             self.view
                 .statements
                 .iter()
                 .filter(|statement| statement.block == *block && members.contains(&statement.site))
                 .all(|statement| falls_through(&statement.statement))
-        } else if kind == WorkflowNodeKind::Control {
+        } else if matches!(body, WorkflowNodeBody::Control { .. }) {
             falls_through(&statement.statement)
         } else {
             !terminal(&statement.statement) || statement.actions.last() != Some(&site)
         };
 
-        let ordinal = if kind == WorkflowNodeKind::Action {
+        let ordinal = if matches!(body, WorkflowNodeBody::Action { .. }) {
             self.action_ordinals[&site]
         } else {
             statement.ordinal
         };
-        let condition_ordinal = (kind == WorkflowNodeKind::Control)
-            .then(|| self.condition_ordinals.get(&statement.site).copied())
-            .flatten();
         WorkflowNode {
-            kind,
+            body,
             ordinal,
-            condition_ordinal,
             site,
             block: block.clone(),
             callable: callable.clone(),
             statement: statement.site.clone(),
-            members,
             bindings,
             reads,
             writes,
             readable: Vec::new(),
             folded: Vec::new(),
-            within: None,
-            lazy: Vec::new(),
-            header: None,
-            arms: Vec::new(),
             departures,
             falls_through,
         }

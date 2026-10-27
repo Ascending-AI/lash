@@ -28,12 +28,12 @@ pub(super) fn source_map(
     let mapped: BTreeSet<_> = map
         .sites
         .iter()
-        .filter(|site| !site.ranges.is_empty())
+        .filter(|site| !site.location.ranges().is_empty())
         .map(|site| &site.site)
         .collect();
     for located in &map.sites {
         write!(text, "{}", located.site)?;
-        for span in &located.ranges {
+        for span in located.location.ranges() {
             write!(
                 text,
                 " [{}..{}] {:?}",
@@ -42,7 +42,7 @@ pub(super) fn source_map(
                 &source[span.start..span.end]
             )?;
         }
-        if let Some(offset) = located.implicit {
+        if let k::SourceLocation::Implicit { offset } = located.location {
             write!(text, " implicit={offset}")?;
         }
         text.push('\n');

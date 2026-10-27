@@ -71,9 +71,9 @@ test("EXAMPLE-CAPTIONS renames, adds and removes one caption by building a new l
   assert.deepEqual(captionFrom("  Email the team ", " \n"), { title: "Email the team" });
   assert.deepEqual(captionFrom("Email", " Only leads. "), { title: "Email", description: "Only leads." });
   const statement = site([2]);
-  assert.deepEqual(captionSite({ kind: "action", statement, members: [statement, site([2, 0])] }), statement);
-  assert.equal(captionSite({ kind: "action", statement, members: [] }), undefined);
-  assert.deepEqual(captionSite({ kind: "code", statement, members: [site([3]), site([4])] }), site([3]));
+  assert.deepEqual(captionSite({ body: { kind: "action", members: [statement, site([2, 0])] }, statement }), statement);
+  assert.equal(captionSite({ body: { kind: "action", members: [] }, statement }), undefined);
+  assert.deepEqual(captionSite({ body: { kind: "code", members: [site([3]), site([4])] }, statement }), site([3]));
 });
 
 // EXAMPLE-CAPTIONS: an uncaptioned condition is worded by the condition its

@@ -319,8 +319,8 @@ function statementAt(site) {
   const node = viewOf(workflow).nodes.find((node) => key(node.site) === key(site));
   if (!node) return;
   const owner = viewOf(workflow).statements.find((statement) => key(statement.site) === key(node.statement));
-  return { ...owner, site: node.site, block: node.block, statement_site: owner.site, node_kind: node.kind,
-    actions: node.kind === "action" ? [node.site] : [] };
+  return { ...owner, site: node.site, block: node.block, statement_site: owner.site, node_kind: node.body.kind,
+    actions: node.body.kind === "action" ? [node.site] : [] };
 }
 
 function traceNote(note, error = false) {
@@ -729,10 +729,10 @@ function canvasScopes() {
   const view = viewOf(workflow);
   return [
     ...view.callables.map((callable) => view.scopes.find((scope) => key(scope.block) === key(callable.block))),
-    ...view.nodes.filter((node) => node.kind === "control").flatMap((node) => [
-      ...node.arms.map((arm, position) => ({ block: arm.block, kind: arm.role, statement: node.statement,
+    ...view.nodes.filter((node) => node.body.kind === "control").flatMap((node) => [
+      ...node.body.arms.map((arm, position) => ({ block: arm.block, kind: arm.role, statement: node.statement,
         caption: armCaption(workflow, view.nodes.indexOf(node), position) })),
-      ...(node.header?.actions.length ? [{ block: node.header.expression, kind: node.header.role, statement: node.statement }] : []),
+      ...(node.body.header?.actions.length ? [{ block: node.body.header.expression, kind: node.body.header.role, statement: node.statement }] : []),
     ]),
   ];
 }
@@ -771,9 +771,9 @@ function printedLine(carrier) {
 }
 function describe(s) {
   if (s.node_kind === "code") {
-    const carrier = viewOf(workflow).nodes.find((node) => node.kind === "code" && key(node.site) === key(s.site));
+    const carrier = viewOf(workflow).nodes.find((node) => node.body.kind === "code" && key(node.site) === key(s.site));
     return { s, info: { name: "Code", app: "Code", icon: "status" },
-      title: "Code", subtitle: `${carrier.members.length} statements`, generic: true };
+      title: "Code", subtitle: `${carrier.body.members.length} statements`, generic: true };
   }
   const effect = effectOf(workflow, s);
   if (effect) {
@@ -881,8 +881,8 @@ function project() {
 function positionAfter(s) {
   const view = viewOf(workflow);
   const carrier = view.nodes.find((node) => key(node.site) === key(s.site));
-  const last = carrier?.kind === "code"
-    ? carrier.members.filter((site) => view.statements.some((row) => key(row.site) === key(site) && key(row.block) === key(s.block))).at(-1)
+  const last = carrier?.body.kind === "code"
+    ? carrier.body.members.filter((site) => view.statements.some((row) => key(row.site) === key(site) && key(row.block) === key(s.block))).at(-1)
     : s.statement_site;
   const index = view.statements.findIndex((row) => key(row.site) === key(last ?? s.site));
   const next = view.statements
@@ -910,7 +910,7 @@ function nodeHeight(node) {
     (node.inputs.length + node.outputs.length) * 27 +
     (node.inputs.length ? 21 : 0) +
     (node.outputs.length ? 21 : 0) +
-    (node.kind === "control" ? (node.carrier.arms.length + Number((node.carrier.header?.actions.length ?? 0) > 0)) * 30 : 0)
+    (node.kind === "control" ? (node.carrier.body.arms.length + Number((node.carrier.body.header?.actions.length ?? 0) > 0)) * 30 : 0)
   );
 }
 // A canvas item's key: its statement's site key, `node:<kind>` for a node
@@ -1046,16 +1046,16 @@ function drawNode(node, x, y) {
   }
   if (node.kind === "control") {
     const index = viewOf(workflow).nodes.indexOf(node.carrier);
-    for (const [position, arm] of node.carrier.arms.entries()) {
+    for (const [position, arm] of node.carrier.body.arms.entries()) {
       const entries = runCounts.scopes.get(key(arm.block));
       const name = armCaption(workflow, index, position)?.title ?? arm.role;
       const button = el("button", "control-arm", `${name}${entries === undefined ? "" : ` · ${entries} entries`}`);
       button.onclick = () => { activeScope = arm.block; renderScopes(); renderCanvas(); fit(); };
       card.append(button);
     }
-    if (node.carrier.header?.actions.length) {
+    if (node.carrier.body.header?.actions.length) {
       const button = el("button", "control-arm", "Inspect header actions");
-      button.onclick = () => { activeScope = node.carrier.header.expression; renderScopes(); renderCanvas(); fit(); };
+      button.onclick = () => { activeScope = node.carrier.body.header.expression; renderScopes(); renderCanvas(); fit(); };
       card.append(button);
     }
   }
@@ -1113,7 +1113,8 @@ function layout(nodes, x, y, incoming) {
   for (const node of nodes) {
     const placed = drawNode(node, x, y);
     for (const prior of ends) {
-      if (!node.carrier?.lazy.length && !prior.carrier?.lazy.length) controlWire(prior, placed, prior.label);
+      const guarded = (item) => item.carrier?.body.kind === "action" && item.carrier.body.lazy.length;
+      if (!guarded(node) && !guarded(prior)) controlWire(prior, placed, prior.label);
     }
     if (node.branch) {
       const top = y - branchHeight(node.children[0]) / 2,
@@ -2121,7 +2122,7 @@ function statementOfItem(item) {
   if (item === undefined) return undefined;
   const wire = wireItems.get(item);
   if (wire) return wire.node.s;
-  const carrier = viewOf(workflow).nodes.find((node) => key(node.site) === item || node.members.some((member) => key(member) === item));
+  const carrier = viewOf(workflow).nodes.find((node) => key(node.site) === item || node.body.members.some((member) => key(member) === item));
   if (carrier) return statementAt(carrier.site);
   return undefined;
 }
@@ -2142,7 +2143,7 @@ function setFocus(next, reveal) {
 }
 function selectItem(item, reveal) {
   if (item && !visualNodes.some((node) => itemOf(node) === item)) {
-    const carrier = viewOf(workflow).nodes.find((node) => node.members.some((site) => key(site) === item));
+    const carrier = viewOf(workflow).nodes.find((node) => node.body.members.some((site) => key(site) === item));
     if (carrier) item = key(carrier.site);
   }
   setFocus(select(focus, item), reveal);

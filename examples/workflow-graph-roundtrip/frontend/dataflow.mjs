@@ -144,13 +144,13 @@ export function buildDataflow(workflow, block) {
   function nodesIn(scope) {
     return view.nodes.filter((node) => siteKey(node.block) === siteKey(scope)).map((carrier) => {
       const owner = rows.get(siteKey(carrier.statement));
-      const action = carrier.kind === "action"
+      const action = carrier.body.kind === "action"
         ? data.actions.find((action) => siteKey(action.site) === siteKey(carrier.site))
         : undefined;
       // Selection keeps the exact canvas Site; the statement is supporting
       // inspection/edit context, never a request to pick its last action.
       const s = { ...owner, site: carrier.site, statement_site: owner.site,
-        node_kind: carrier.kind, members: carrier.members,
+        node_kind: carrier.body.kind, members: carrier.body.members,
         actions: action ? [action.site] : [] };
       const wholeInputs = [];
       let inputs = [], outputs = [];
@@ -175,21 +175,21 @@ export function buildDataflow(workflow, block) {
         outputs = outputPorts(binding, action.result_type);
         if (!binding) outputs = [{ name: "result", type: action.result_type,
           discarded: !action.destination, stored: !!action.destination, path: [] }];
-      } else if (carrier.kind === "code") {
+      } else if (carrier.body.kind === "code") {
         outputs = [...new Set([...carrier.bindings, ...carrier.writes])].flatMap((id) => outputPorts(bindings.get(id)));
         inputs = carrier.reads.filter((id) => !carrier.bindings.includes(id)).map((id) => ({
           name: bindings.get(id)?.name ?? "value", type: bindings.get(id)?.type ?? "any",
           expression: { variable: bindings.get(id)?.name }, references: [id], available: [],
         }));
-      } else if (carrier.header) {
-        const expr = expressions.get(siteKey(carrier.header.expression));
-        if (expr) inputs = [expressionPort(carrier.header.role, expr.type, expr)];
+      } else if (carrier.body.header) {
+        const expr = expressions.get(siteKey(carrier.body.header.expression));
+        if (expr) inputs = [expressionPort(carrier.body.header.role, expr.type, expr)];
       }
       const node = { s, carrier, site: carrier.site, action, binding,
-        kind: carrier.kind, inputs, outputs, wholeInputs };
-      if (carrier.kind === "control" && owner.statement.if) {
+        kind: carrier.body.kind, inputs, outputs, wholeInputs };
+      if (carrier.body.kind === "control" && owner.statement.if) {
         node.branch = true;
-        node.children = carrier.arms.map((arm) => nodesIn(arm.block));
+        node.children = carrier.body.arms.map((arm) => nodesIn(arm.block));
       }
       return node;
     });

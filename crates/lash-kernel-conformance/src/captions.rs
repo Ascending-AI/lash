@@ -592,7 +592,7 @@ fn authored_surface(lowered: &Lowered, source: &str) -> Result<Captions, Harness
         {
             continue;
         }
-        for span in &located.ranges {
+        for span in located.location.ranges() {
             // Python except dispatch is an implementation control tree,
             // not an authored if/else. Its suite statements have their own
             // source ranges; the enclosing try owns the clause caption.

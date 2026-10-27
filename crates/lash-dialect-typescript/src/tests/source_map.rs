@@ -49,7 +49,7 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, String> {
     let mapped: BTreeSet<&Site> = map
         .sites
         .iter()
-        .filter(|located| !located.ranges.is_empty())
+        .filter(|located| !located.location.ranges().is_empty())
         .map(|located| &located.site)
         .collect();
     code_sites(&lowered.document)

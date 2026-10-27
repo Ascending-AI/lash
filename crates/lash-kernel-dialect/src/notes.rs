@@ -150,7 +150,7 @@ pub fn site_layers(
                 located.site.unit == site.unit && site.path.starts_with(&located.site.path)
             })
             .max_by_key(|located| located.site.path.len())
-            .and_then(|located| located.ranges.first())
+            .and_then(|located| located.location.ranges().first())
             .copied();
         let mut reached = std::collections::BTreeSet::new();
         let mut pending = vec![closure.function];
@@ -177,8 +177,9 @@ pub fn site_layers(
         if !layers.sites.iter().any(|located| located.site == site) {
             layers.sites.push(SourceSite {
                 site,
-                ranges: vec![span],
-                implicit: None,
+                location: lash_kernel_doc::SourceLocation::Spelled {
+                    ranges: lash_kernel_doc::NonEmptySpans::new(span),
+                },
             });
         }
     }
@@ -270,8 +271,9 @@ impl Layers {
     fn locate(&mut self, site: Site, span: Span) {
         self.sites.push(SourceSite {
             site,
-            ranges: vec![span],
-            implicit: None,
+            location: lash_kernel_doc::SourceLocation::Spelled {
+                ranges: lash_kernel_doc::NonEmptySpans::new(span),
+            },
         });
     }
 }

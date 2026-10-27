@@ -38,13 +38,13 @@ test("EXAMPLE-SOURCE converts UTF-8 offsets and links only the mapped revision",
   const text = 'const λ = "日本 🦀";\nreturn λ;\n';
   const site = {unit: {function: "demo"}, path: [1]};
   const start = new TextEncoder().encode(text.split("\n")[0] + "\n").length;
-  const map = {document: "held", sites: [{site, ranges: [{start, end: start + 10}]}]};
+  const map = {document: "held", sites: [{site, location: {kind: "spelled", ranges: [{start, end: start + 10}]}}]};
   const ranges = sourceRanges(text, map)[0].ranges[0];
   assert.equal(text.slice(ranges.start, ranges.end), "return λ;");
   const workflow = {identity: "held", authored: {text, sourceMapId: "id", sourceMap: map},
-    view: {nodes: [{site, members: []}]}};
+    view: {nodes: [{site, body: {kind: "action", members: []}}]}};
   assert.deepEqual(sourceLinking(workflow).lines(site), {key: JSON.stringify([site.unit, site.path]), start: 1, end: 1});
   assert.equal(sourceLinking({...workflow, identity: "edited"}), undefined);
   assert.equal(sourceLinking({...workflow, authored: {text}}), undefined);
-  assert.throws(() => sourceRanges(text, {sites: [{site, ranges: [{start: 7, end: 8}]}]}), /UTF-8 boundary/);
+  assert.throws(() => sourceRanges(text, {sites: [{site, location: {kind: "spelled", ranges: [{start: 7, end: 8}]}}]}), /UTF-8 boundary/);
 });

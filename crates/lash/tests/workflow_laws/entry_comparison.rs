@@ -4,7 +4,7 @@
 //! a Python workflow read with no engine.
 use lash::workflow::document::{self as k};
 use lash::workflow::view::{
-    BindingKind, ComparisonView, ValueRef, ValueSource, WorkflowNodeKind, WorkflowView,
+    BindingKind, ComparisonView, ValueRef, ValueSource, WorkflowNodeBody, WorkflowView,
     derive_callable,
 };
 use std::collections::BTreeMap;
@@ -76,8 +76,12 @@ fn binding(view: &WorkflowView, name: &str) -> usize {
 fn comparisons(view: &WorkflowView) -> Vec<Option<ComparisonView>> {
     view.nodes
         .iter()
-        .filter(|node| node.kind == WorkflowNodeKind::Control)
-        .map(|node| node.header.as_ref().expect("a header").comparison.clone())
+        .filter_map(|node| match &node.body {
+            WorkflowNodeBody::Control { header, .. } => {
+                Some(header.as_ref().expect("a header").comparison.clone())
+            }
+            _ => None,
+        })
         .collect()
 }
 

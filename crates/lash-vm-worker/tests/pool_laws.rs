@@ -2332,7 +2332,11 @@ fn guest_recursion_uses_the_configured_depth_and_metered_heap() {
                     .iter()
                     .find(|entry| entry.site.unit == site.unit && entry.site.path.is_empty())
                     .expect("mapped guest function");
-                let span = location.ranges.first().expect("authored function");
+                let span = location
+                    .location
+                    .ranges()
+                    .first()
+                    .expect("authored function");
                 assert!(
                     source[span.start..span.end].contains("descend"),
                     "the user function, not an internal helper"

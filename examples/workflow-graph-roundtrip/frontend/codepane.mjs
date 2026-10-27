@@ -53,7 +53,7 @@ export function sourceRanges(text, map) {
     units += rune.length;
     offsets.set(bytes, units);
   }
-  return map.sites.map(({ site, ranges }) => ({ site, ranges: ranges.map(({ start, end }) => {
+  return map.sites.map(({ site, location }) => ({ site, ranges: (location.kind === "spelled" ? location.ranges : []).map(({ start, end }) => {
     if (!offsets.has(start) || !offsets.has(end) || start > end)
       throw new Error("Source map offset is outside a UTF-8 boundary");
     return { start: offsets.get(start), end: offsets.get(end) };
@@ -67,7 +67,7 @@ export function sourceLinking(workflow) {
     .map(({ site, ranges }) => [siteKey(site), ranges]));
   const line = (offset) => authored.text.slice(0, offset).split("\n").length - 1;
   const spans = (workflow.view?.nodes ?? []).flatMap((node) => {
-    const ranges = [node.site, ...node.members].flatMap((site) => mapped.get(siteKey(site)) ?? []);
+    const ranges = [node.site, ...node.body.members].flatMap((site) => mapped.get(siteKey(site)) ?? []);
     return ranges.length ? [{ key: siteKey(node.site),
       start: Math.min(...ranges.map((range) => line(range.start))),
       end: Math.max(...ranges.map((range) => line(Math.max(range.start, range.end - 1)))) }] : [];

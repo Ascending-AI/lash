@@ -239,33 +239,41 @@ impl crate::WorkflowView {
         // the ordinals are stored on the view rather than re-derived in a host.
         self.nodes
             .iter()
-            .map(|node| NodeCoverage {
-                site: node.site.clone(),
-                runs: count(Some(node.ordinal)),
-                condition_tests: node
-                    .condition_ordinal
-                    .and_then(|ordinal| count(Some(ordinal))),
-                arms: node
-                    .arms
-                    .iter()
-                    .map(|arm| {
-                        let first = self
-                            .statements
-                            .iter()
-                            .find(|statement| statement.block == arm.block)
-                            .map(|statement| statement.ordinal)
-                            .or_else(|| {
-                                self.scopes
-                                    .iter()
-                                    .find(|scope| scope.block == arm.block)
-                                    .map(|scope| scope.ordinal)
-                            });
-                        ScopeCoverage {
-                            block: arm.block.clone(),
-                            entries: count(first),
-                        }
-                    })
-                    .collect(),
+            .map(|node| {
+                let (condition_ordinal, arms) = match &node.body {
+                    crate::WorkflowNodeBody::Control {
+                        condition_ordinal,
+                        arms,
+                        ..
+                    } => (*condition_ordinal, arms.as_slice()),
+                    crate::WorkflowNodeBody::Action { .. }
+                    | crate::WorkflowNodeBody::Code { .. } => (None, &[][..]),
+                };
+                NodeCoverage {
+                    site: node.site.clone(),
+                    runs: count(Some(node.ordinal)),
+                    condition_tests: condition_ordinal.and_then(|ordinal| count(Some(ordinal))),
+                    arms: arms
+                        .iter()
+                        .map(|arm| {
+                            let first = self
+                                .statements
+                                .iter()
+                                .find(|statement| statement.block == arm.block)
+                                .map(|statement| statement.ordinal)
+                                .or_else(|| {
+                                    self.scopes
+                                        .iter()
+                                        .find(|scope| scope.block == arm.block)
+                                        .map(|scope| scope.ordinal)
+                                });
+                            ScopeCoverage {
+                                block: arm.block.clone(),
+                                entries: count(first),
+                            }
+                        })
+                        .collect(),
+                }
             })
             .collect()
     }

@@ -108,6 +108,12 @@ are never silently flattened into the caller's execution sequence. Within a
 selected block, conditions show their true/false branches and calls remain opaque
 nodes. Running still invokes the whole workflow entry, not the inspected block.
 
+The host reads each view node's `body.kind` discriminator. Action ancestry and
+lazy guards, control headers and arms, and code members live in that body;
+shared coordinates and summaries remain on the node. Source-map entries carry
+`location.kind`: `spelled` supplies nonempty `ranges`, and `implicit` supplies
+an `offset` without a displayed range.
+
 The host does not recognize dialect library names or async wrapper patterns.
 Adding a first step targets the selected canonical block. Global additions go
 before its terminal statement. Selection follows the immediately previous

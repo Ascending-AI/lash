@@ -142,7 +142,7 @@ impl Module {
             .sites
             .iter()
             .filter(|mapped| &mapped.site == site)
-            .flat_map(|mapped| mapped.ranges.iter())
+            .flat_map(|mapped| mapped.location.ranges().iter())
             .map(|range| &self.source[range.start..range.end])
             .collect()
     }

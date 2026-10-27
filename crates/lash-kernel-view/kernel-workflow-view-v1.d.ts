@@ -800,6 +800,8 @@ export type NodeCoverage = {
   "site": Site;
 };
 
+export type NonEmptySites = Array<Site>;
+
 /**
  * One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
  */
@@ -1267,15 +1269,14 @@ export type WorkflowCoverage = {
 };
 
 /**
- * Identity is (view.document, kind, block, site, last member). Ranges are
+ * Identity is (view.document, body kind, block, site, last member). Ranges are
  * display metadata. Supporting statements and dataflow remain addressable.
  */
 export type WorkflowNode = {
-  "arms": Array<ControlArm>;
   "bindings": Array<number>;
   "block": Site;
+  "body": WorkflowNodeBody;
   "callable": Site;
-  "condition_ordinal"?: (number | null);
   "departures": Array<Site>;
   "falls_through": boolean;
   /**
@@ -1283,14 +1284,6 @@ export type WorkflowNode = {
    * node. Execution counts and replay paths retain these coordinates.
    */
   "folded": Array<Site>;
-  "header"?: (ControlHeader | null);
-  "kind": WorkflowNodeKind;
-  "lazy": Array<LazyArm>;
-  /**
-   * Each statement has exactly one carrier. Additional actions in a
-   * statement have no members, but retain their owning `statement`.
-   */
-  "members": Array<Site>;
   /**
    * The node's authoritative count coordinate in RanCounts.
    */
@@ -1302,11 +1295,30 @@ export type WorkflowNode = {
    * The owning statement for actions/controls; first member for code.
    */
   "statement": Site;
-  "within"?: (Site | null);
   "writes": Array<number>;
 };
 
-export type WorkflowNodeKind = ("action" | "control" | "code");
+/**
+ * Kind-specific workflow data. The tag owns all variant payload fields.
+ */
+export type WorkflowNodeBody = ({
+  "kind": "action";
+  "lazy": Array<LazyArm>;
+  /**
+   * Each statement has one carrier; secondary actions have no members.
+   */
+  "members": Array<Site>;
+  "within"?: (Site | null);
+} | {
+  "arms": Array<ControlArm>;
+  "condition_ordinal"?: (number | null);
+  "header"?: (ControlHeader | null);
+  "kind": "control";
+  "members": Array<Site>;
+} | {
+  "kind": "code";
+  "members": NonEmptySites;
+});
 
 /**
  * The source spelling of a callable's public signature, without dialect state.

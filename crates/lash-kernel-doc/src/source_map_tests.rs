@@ -22,8 +22,9 @@ fn site(path: &[u32]) -> Site {
 fn location(path: &[u32], start: usize, end: usize) -> SourceSite {
     SourceSite {
         site: site(path),
-        ranges: vec![Span::new(start, end).unwrap()],
-        implicit: None,
+        location: crate::SourceLocation::Spelled {
+            ranges: crate::NonEmptySpans::new(Span::new(start, end).unwrap()),
+        },
     }
 }
 fn map() -> SourceMap {
@@ -66,7 +67,9 @@ fn validation_checks_identity_sites_utf8_offsets_and_order() {
         Span { start: 0, end: 5 },
     ] {
         invalid = map.clone();
-        invalid.sites[0].ranges = vec![range];
+        invalid.sites[0].location = crate::SourceLocation::Spelled {
+            ranges: crate::NonEmptySpans::new(range),
+        };
         assert!(matches!(
             invalid.validate(&document, "é12"),
             Err(SourceMapRefusal::Range { .. })
@@ -74,7 +77,7 @@ fn validation_checks_identity_sites_utf8_offsets_and_order() {
     }
     for offset in [1, 5] {
         invalid = map.clone();
-        invalid.sites[0].implicit = Some(offset);
+        invalid.sites[0].location = crate::SourceLocation::Implicit { offset };
         assert!(matches!(
             invalid.validate(&document, "é12"),
             Err(SourceMapRefusal::Implicit { .. })
@@ -97,8 +100,7 @@ fn validation_checks_identity_sites_utf8_offsets_and_order() {
     );
     let implicit = SourceSite {
         site: site(&[]),
-        ranges: vec![],
-        implicit: Some(4),
+        location: crate::SourceLocation::Implicit { offset: 4 },
     };
     SourceMap::new(&document, "é12", SourceLanguage::Python, vec![implicit]).unwrap();
 }
@@ -125,8 +127,8 @@ fn rekey_retains_edited_survivors_and_refuses_another_base() {
     .unwrap();
     let rekeyed = map.rekey(&correspondence).unwrap();
     rekeyed.validate(&result, "é12").unwrap();
-    assert_eq!(rekeyed.sites[1].ranges, map.sites[0].ranges);
-    assert_eq!(rekeyed.sites[0].ranges, map.sites[1].ranges);
+    assert_eq!(rekeyed.sites[1].location, map.sites[0].location);
+    assert_eq!(rekeyed.sites[0].location, map.sites[1].location);
     let removal = Correspondence::of(
         rekeyed.document,
         map.document,

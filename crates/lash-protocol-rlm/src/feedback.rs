@@ -522,12 +522,12 @@ impl CellObservation {
                 let location = exceeded.site.as_deref().and_then(|site| {
                     let map = map.filter(|map| map.validate_source(source).is_ok())?;
                     let entry = map.sites.iter().find(|entry| entry.site == *site)?;
-                    let offset = entry.ranges.first().map(|span| span.start).or(entry.implicit)?;
+                    let offset = entry.location.start();
                     let (line, column) = line_column(source, offset);
                     let text = source.lines().nth(line - 1).unwrap_or_default().trim();
                     let definition = map.sites.iter().find(|entry| {
                         entry.site.unit == site.unit && entry.site.path.is_empty()
-                    }).and_then(|entry| entry.ranges.first()).and_then(|span| {
+                    }).and_then(|entry| entry.location.ranges().first()).and_then(|span| {
                         source.get(span.start..span.end)?.lines().next()
                     }).unwrap_or(text).trim();
                     Some(format!(" in guest function `{definition}` at line {line}, column {column}\n  {text}"))
@@ -723,13 +723,19 @@ mod tests {
                 vec![
                     SourceSite {
                         site: Site::new(site.unit.clone(), vec![]),
-                        ranges: vec![Span::new(0, source.len()).expect("function range")],
-                        implicit: None,
+                        location: lash_kernel_doc::SourceLocation::Spelled {
+                            ranges: lash_kernel_doc::NonEmptySpans::new(
+                                Span::new(0, source.len()).expect("function range"),
+                            ),
+                        },
                     },
                     SourceSite {
                         site: site.clone(),
-                        ranges: vec![Span::new(offset, source.len()).expect("call range")],
-                        implicit: None,
+                        location: lash_kernel_doc::SourceLocation::Spelled {
+                            ranges: lash_kernel_doc::NonEmptySpans::new(
+                                Span::new(offset, source.len()).expect("call range"),
+                            ),
+                        },
                     },
                 ],
             )

@@ -358,8 +358,9 @@ fn adoption() {
 fn statement_map(document: &Document, source: &str) -> SourceMap {
     let site = SourceSite {
         site: Site::new(Unit::Main, [0]),
-        ranges: vec![Span::new(0, source.len()).unwrap()],
-        implicit: None,
+        location: lash_kernel_doc::SourceLocation::Spelled {
+            ranges: lash_kernel_doc::NonEmptySpans::new(Span::new(0, source.len()).unwrap()),
+        },
     };
     SourceMap::new(document, source, SourceLanguage::TypeScript, vec![site]).unwrap()
 }

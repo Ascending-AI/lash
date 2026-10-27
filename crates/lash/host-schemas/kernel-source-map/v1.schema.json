@@ -12,6 +12,13 @@
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
+    "NonEmptySpans": {
+      "items": {
+        "$ref": "#/$defs/Span"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
     "Site": {
       "additionalProperties": false,
       "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
@@ -41,24 +48,53 @@
       ],
       "type": "string"
     },
+    "SourceLocation": {
+      "description": "Exactly one spelling or an offset for a genuinely unspelled node.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "spelled",
+              "type": "string"
+            },
+            "ranges": {
+              "$ref": "#/$defs/NonEmptySpans"
+            }
+          },
+          "required": [
+            "kind",
+            "ranges"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "implicit",
+              "type": "string"
+            },
+            "offset": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "offset"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SourceSite": {
       "additionalProperties": false,
       "description": "One document node's source locations.",
       "properties": {
-        "implicit": {
-          "description": "A byte offset for a genuinely unspelled node.",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "ranges": {
-          "items": {
-            "$ref": "#/$defs/Span"
-          },
-          "type": "array"
+        "location": {
+          "$ref": "#/$defs/SourceLocation"
         },
         "site": {
           "$ref": "#/$defs/Site"
@@ -66,7 +102,7 @@
       },
       "required": [
         "site",
-        "ranges"
+        "location"
       ],
       "type": "object"
     },

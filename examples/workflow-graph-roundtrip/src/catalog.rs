@@ -356,7 +356,13 @@ mod tests {
             .nodes
             .iter()
             .filter_map(|node| {
-                node.condition_ordinal.map(|ordinal| StatementCoverage {
+                let lash::workflow::view::WorkflowNodeBody::Control {
+                    condition_ordinal, ..
+                } = &node.body
+                else {
+                    return None;
+                };
+                condition_ordinal.map(|ordinal| StatementCoverage {
                     site: node.site.clone(),
                     runs: count(ordinal),
                 })

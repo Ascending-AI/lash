@@ -60,11 +60,10 @@ function workflow(statements, body, expressions = []) {
               ),
         )
         .map((s) => ({
-          kind: s.action ? "action" : "code",
+          body: { kind: s.action ? "action" : "code", members: s.action ? [] : [s.site] },
           site: s.action ? s.actions[0] : s.site,
           statement: s.site,
           block: s.block,
-          members: s.action ? [] : [s.site],
           bindings: [],
           reads: [],
           writes: [],
@@ -96,7 +95,7 @@ function workflow(statements, body, expressions = []) {
 
 test("COARSE-EVAL renders every supplied action carrier without choosing a representative statement action", () => {
   const statement = { site: site([0]), block: site([]), statement: { let: {} }, actions: [site([0, 0, 0]), site([0, 0])] };
-  const nodes = statement.actions.map((at) => ({ kind: "action", site: at, statement: statement.site, block: site([]), members: [], bindings: [], reads: [], writes: [] }));
+  const nodes = statement.actions.map((at) => ({ body: { kind: "action", members: [] }, site: at, statement: statement.site, block: site([]), bindings: [], reads: [], writes: [] }));
   const actions = nodes.map((node) => ({ site: node.site, kind: "call", args: [], available: [], result_type: "any" }));
   const workflow = { view: { nodes, statements: [statement], dataflow: { actions, bindings: [], expressions: [], parameters: [], returns: [], assignments: [] } } };
   const projected = buildDataflow(workflow, site([])).nodes;
@@ -226,8 +225,8 @@ test("break and continue end their scope without throwing or appending unreachab
 
 test("COARSE-PARTITION exposes supplied declarations and writes as code-group ports", () => {
   const owner = {site: site([2]), block: site([]), statement: {assign: {}}};
-  const workflow = {view: {nodes: [{kind: "code", site: owner.site, statement: owner.site, block: owner.block,
-    members: [owner.site], bindings: [0], writes: [0, 1], reads: [1]}], statements: [owner],
+  const workflow = {view: {nodes: [{body: {kind: "code", members: [owner.site]}, site: owner.site, statement: owner.site, block: owner.block,
+    bindings: [0], writes: [0, 1], reads: [1]}], statements: [owner],
     dataflow: {bindings: [{id: 0, name: "created", type: "any"}, {id: 1, name: "written", type: "any"}],
       actions: [], expressions: [], parameters: [], returns: [], assignments: []}}};
   const node = buildDataflow(workflow, site([])).nodes[0];

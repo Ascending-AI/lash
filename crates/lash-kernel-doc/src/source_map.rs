@@ -25,9 +25,64 @@ pub enum SourceLanguage {
 #[serde(deny_unknown_fields)]
 pub struct SourceSite {
     pub site: Site,
-    pub ranges: Vec<Span>,
-    /// A byte offset for a genuinely unspelled node.
-    pub implicit: Option<usize>,
+    pub location: SourceLocation,
+}
+
+/// Exactly one spelling or an offset for a genuinely unspelled node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceLocation {
+    Spelled { ranges: NonEmptySpans },
+    Implicit { offset: usize },
+}
+
+/// One or more source ranges. Decoding cannot introduce an empty spelling.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<Span>")]
+pub struct NonEmptySpans(Vec<Span>);
+impl JsonSchema for NonEmptySpans {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NonEmptySpans".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = Vec::<Span>::json_schema(generator);
+        schema.insert("minItems".into(), 1.into());
+        schema
+    }
+}
+
+impl NonEmptySpans {
+    pub fn new(first: Span) -> Self {
+        Self(vec![first])
+    }
+    pub fn as_slice(&self) -> &[Span] {
+        &self.0
+    }
+}
+impl TryFrom<Vec<Span>> for NonEmptySpans {
+    type Error = &'static str;
+    fn try_from(ranges: Vec<Span>) -> Result<Self, Self::Error> {
+        if ranges.is_empty() {
+            Err("spelled location needs at least one range")
+        } else {
+            Ok(Self(ranges))
+        }
+    }
+}
+
+impl SourceLocation {
+    pub fn ranges(&self) -> &[Span] {
+        match self {
+            Self::Spelled { ranges } => ranges.as_slice(),
+            Self::Implicit { .. } => &[],
+        }
+    }
+    pub fn start(&self) -> usize {
+        match self {
+            Self::Spelled { ranges } => ranges.as_slice()[0].start,
+            Self::Implicit { offset } => *offset,
+        }
+    }
 }
 
 /// Source locations keyed by document identity and the SHA-256 of source bytes.
@@ -147,7 +202,7 @@ impl SourceMap {
 
     fn check_locations(&self, source: &str) -> Result<(), SourceMapRefusal> {
         for entry in &self.sites {
-            for range in &entry.ranges {
+            for range in entry.location.ranges() {
                 if range.start > range.end
                     || !source.is_char_boundary(range.start)
                     || !source.is_char_boundary(range.end)
@@ -160,7 +215,7 @@ impl SourceMap {
             }
         }
         for entry in &self.sites {
-            if let Some(offset) = entry.implicit
+            if let SourceLocation::Implicit { offset } = entry.location
                 && !source.is_char_boundary(offset)
             {
                 return Err(SourceMapRefusal::Implicit {
@@ -194,8 +249,7 @@ impl SourceMap {
             .filter_map(|entry| {
                 Some(SourceSite {
                     site: correspondence.successor(&entry.site)?.clone(),
-                    ranges: entry.ranges.clone(),
-                    implicit: entry.implicit,
+                    location: entry.location.clone(),
                 })
             })
             .collect();
@@ -271,14 +325,7 @@ impl lash_kernel_value::sites::SourceLocations for SourceMap {
             .filter(|located| {
                 located.site.unit == site.unit && site.path.starts_with(&located.site.path)
             })
-            .filter_map(|located| {
-                let start = located
-                    .ranges
-                    .first()
-                    .map(|range| range.start)
-                    .or(located.implicit)?;
-                Some((located.site.path.len(), start))
-            })
+            .map(|located| (located.site.path.len(), located.location.start()))
             .max_by_key(|(depth, _)| *depth)
             .map(|(_, start)| start)
     }

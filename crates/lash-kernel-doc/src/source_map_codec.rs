@@ -3,8 +3,8 @@
 use crate::Correspondence;
 use crate::SourceLanguage;
 use crate::SourceMap;
-use crate::SourceSite;
 use crate::Survivor;
+use crate::{NonEmptySpans, SourceLocation, SourceSite};
 use lash_kernel_value::names::DocumentId;
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::tokens::CodecVariant;
@@ -27,21 +27,48 @@ impl TokenCodec for SourceLanguage {
         }
     }
 }
-impl TokenCodec for SourceSite {
+impl TokenCodec for SourceLocation {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        self.site.encode(out);
-        self.ranges.encode(out);
-        self.implicit.map(|offset| offset as u64).encode(out);
+        match self {
+            Self::Spelled { ranges } => {
+                out.sum(self.codec_variant(), 1);
+                out.seq(ranges.as_slice().len() as u64);
+                for range in ranges.as_slice() {
+                    range.encode(out);
+                }
+            }
+            Self::Implicit { offset } => {
+                out.sum(self.codec_variant(), 1);
+                (*offset as u64).encode(out);
+            }
+        }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        let (variant, fields) = input.sum()?;
+        TokenReader::expect_fields(fields, 1)?;
+        match variant {
+            0 => Ok(Self::Spelled {
+                ranges: NonEmptySpans::try_from(Vec::decode(input)?)
+                    .map_err(|error| TokenError::Invalid(error.into()))?,
+            }),
+            1 => Ok(Self::Implicit {
+                offset: lash_kernel_value::tokens::checked_usize(u64::decode(input)?)?,
+            }),
+            _ => Err(TokenError::UnsupportedVariant { variant }),
+        }
+    }
+}
+impl TokenCodec for SourceSite {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.site.encode(out);
+        self.location.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
         Ok(Self {
             site: Site::decode(input)?,
-            ranges: Vec::decode(input)?,
-            implicit: Option::<u64>::decode(input)?
-                .map(lash_kernel_value::tokens::checked_usize)
-                .transpose()?,
+            location: SourceLocation::decode(input)?,
         })
     }
 }

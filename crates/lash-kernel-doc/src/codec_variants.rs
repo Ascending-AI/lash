@@ -333,3 +333,13 @@ impl CodecVariant for crate::SourceLanguage {
         }
     }
 }
+
+#[doc(hidden)]
+impl CodecVariant for crate::SourceLocation {
+    fn codec_variant(&self) -> u32 {
+        match self {
+            Self::Spelled { .. } => 0,
+            Self::Implicit { .. } => 1,
+        }
+    }
+}

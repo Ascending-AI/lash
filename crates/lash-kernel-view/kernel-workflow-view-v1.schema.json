@@ -2161,6 +2161,13 @@
       ],
       "type": "object"
     },
+    "NonEmptySites": {
+      "items": {
+        "$ref": "#/$defs/Site"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
     "OperationUse": {
       "additionalProperties": false,
       "description": "One operation Import in one immutable Link. All dispatch, modes and pins use this identity.",
@@ -3743,14 +3750,8 @@
     },
     "WorkflowNode": {
       "additionalProperties": false,
-      "description": "Identity is (view.document, kind, block, site, last member). Ranges are\ndisplay metadata. Supporting statements and dataflow remain addressable.",
+      "description": "Identity is (view.document, body kind, block, site, last member). Ranges are\ndisplay metadata. Supporting statements and dataflow remain addressable.",
       "properties": {
-        "arms": {
-          "items": {
-            "$ref": "#/$defs/ControlArm"
-          },
-          "type": "array"
-        },
         "bindings": {
           "items": {
             "format": "uint",
@@ -3762,16 +3763,11 @@
         "block": {
           "$ref": "#/$defs/Site"
         },
+        "body": {
+          "$ref": "#/$defs/WorkflowNodeBody"
+        },
         "callable": {
           "$ref": "#/$defs/Site"
-        },
-        "condition_ordinal": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
         },
         "departures": {
           "items": {
@@ -3784,32 +3780,6 @@
         },
         "folded": {
           "description": "Exact document action and statement sites folded into this authored\nnode. Execution counts and replay paths retain these coordinates.",
-          "items": {
-            "$ref": "#/$defs/Site"
-          },
-          "type": "array"
-        },
-        "header": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ControlHeader"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "kind": {
-          "$ref": "#/$defs/WorkflowNodeKind"
-        },
-        "lazy": {
-          "items": {
-            "$ref": "#/$defs/LazyArm"
-          },
-          "type": "array"
-        },
-        "members": {
-          "description": "Each statement has exactly one carrier. Additional actions in a\nstatement have no members, but retain their owning `statement`.",
           "items": {
             "$ref": "#/$defs/Site"
           },
@@ -3842,16 +3812,6 @@
           "$ref": "#/$defs/Site",
           "description": "The owning statement for actions/controls; first member for code."
         },
-        "within": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Site"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "writes": {
           "items": {
             "format": "uint",
@@ -3862,32 +3822,126 @@
         }
       },
       "required": [
-        "kind",
+        "body",
         "site",
         "block",
         "callable",
         "statement",
         "ordinal",
-        "members",
         "bindings",
         "reads",
         "writes",
         "readable",
         "folded",
-        "lazy",
-        "arms",
         "departures",
         "falls_through"
       ],
       "type": "object"
     },
-    "WorkflowNodeKind": {
-      "enum": [
-        "action",
-        "control",
-        "code"
-      ],
-      "type": "string"
+    "WorkflowNodeBody": {
+      "description": "Kind-specific workflow data. The tag owns all variant payload fields.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "action",
+              "type": "string"
+            },
+            "lazy": {
+              "items": {
+                "$ref": "#/$defs/LazyArm"
+              },
+              "type": "array"
+            },
+            "members": {
+              "description": "Each statement has one carrier; secondary actions have no members.",
+              "items": {
+                "$ref": "#/$defs/Site"
+              },
+              "type": "array"
+            },
+            "within": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Site"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "members",
+            "lazy"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "arms": {
+              "items": {
+                "$ref": "#/$defs/ControlArm"
+              },
+              "type": "array"
+            },
+            "condition_ordinal": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "header": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ControlHeader"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "control",
+              "type": "string"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/$defs/Site"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "members",
+            "arms"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "code",
+              "type": "string"
+            },
+            "members": {
+              "$ref": "#/$defs/NonEmptySites"
+            }
+          },
+          "required": [
+            "kind",
+            "members"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "WrittenSignature": {
       "additionalProperties": false,

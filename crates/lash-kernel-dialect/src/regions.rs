@@ -319,18 +319,9 @@ fn complete_source_sites(document: &k::Document, sites: Vec<k::SourceSite>) -> V
                 .entry(site.clone())
                 .or_insert_with(|| k::SourceSite {
                     site: site.clone(),
-                    ranges: Vec::new(),
-                    implicit: Some(inherited),
+                    location: lash_kernel_doc::SourceLocation::Implicit { offset: inherited },
                 });
-            let offset = entry
-                .ranges
-                .first()
-                .map(|span| span.start)
-                .or(entry.implicit)
-                .unwrap_or(inherited);
-            if entry.ranges.is_empty() && entry.implicit.is_none() {
-                entry.implicit = Some(offset);
-            }
+            let offset = entry.location.start();
             pending.extend(
                 (0u32..)
                     .zip(node.children())
