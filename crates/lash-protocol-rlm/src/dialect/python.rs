@@ -38,7 +38,7 @@ impl DialectPrompts for PythonPrompts {
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         let ExecutionSectionRequest {
             tools,
-            tool_catalog,
+            tool_catalog: _,
             catalogue,
         } = request;
         let label = catalogue.map(|catalogue| {
@@ -62,13 +62,12 @@ impl DialectPrompts for PythonPrompts {
         } else {
             format!("### Tools\n\n{}", tools.join("\n\n"))
         };
-        let example_program =
-            super::example::program(tool_catalog, lash_kernel_dialect::Spelling::Python);
+        // Prompts state facts and contracts, not model coaching.
         let action = "the `execute_code` program";
-        let response_shape = "### Tool transport\n\nRun one cell per `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools inside the program. Tool results and `print` output are read in the next step: look things up in one cell, inspect the output, then act or finish in a later cell.\n";
+        let response_shape = "### Tool transport\n\nRun one cell per `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools inside the program. Tool results and `print` output are visible in the next step.\n";
         let example = format!(
             "### Example execute_code call\n\nexecute_code({})",
-            serde_json::json!({"code": example_program})
+            serde_json::json!({"code": "print(1 + 2)"})
         );
         ExecutionSection {
             prose: format!(

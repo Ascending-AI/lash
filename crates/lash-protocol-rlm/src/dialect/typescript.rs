@@ -116,8 +116,9 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     } else {
         format!("### Tools\n\n{}", tools.join("\n\n"))
     };
+    // Prompts state facts and contracts, not model coaching.
     let action = "the `execute_code` program";
-    let response_shape = "### Tool transport\n\nRun one cell per `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools inside the program; prose before the call is commentary. Tool results and `console.log` output are read in the next step: look things up in one cell, inspect the output, then act or finish in a later cell.\n";
+    let response_shape = "### Tool transport\n\nRun one cell per `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools inside the program; prose before the call is commentary. Tool results and `console.log` output are visible in the next step.\n";
     let durable = typescript_process_prompt(catalogue_has_process_surface(tool_catalog));
     let durable = if durable.is_empty() {
         durable
@@ -146,11 +147,9 @@ An `async` function starts running when it is called, and async callbacks run co
 `console.log(value)` shows output in the next step; printing an image attachment shows the image there. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
     );
     // One worked program, rendered as a provider-native call.
-    let example_program =
-        super::example::program(tool_catalog, lash_kernel_dialect::Spelling::TypeScript);
     let example = format!(
         "### Example execute_code call\n\nexecute_code({})",
-        serde_json::json!({"code": example_program})
+        serde_json::json!({"code": "console.log(1 + 2);"})
     );
     let declarations = tools.trim().to_string();
     ExecutionSection {

@@ -94,8 +94,8 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
         }
     }
 
-    // FIG-7468: a worked finish must accept the same value as the declared
-    // tool. Review the transport and discovery rhythm as rendered text.
+    // FIG-7471: the transport example must not choose a finish value that
+    // contradicts the session's declared finish contract.
     let mut openings = String::new();
     for cell_dialect in [
         crate::dialect::CellDialect::typescript(),
@@ -103,77 +103,37 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
     ] {
         let dialect = SessionDialect::prompt_only(cell_dialect);
         let spelling = dialect.language().spelling();
-        for schema in [
+        let schema = lash_kernel_value::json_schema::JsonSchema::admit(
             serde_json::json!({"type": "string"}),
-            serde_json::json!({"type": "number"}),
-            serde_json::json!({"type": "integer", "minimum": 7}),
-            serde_json::json!({"type": "boolean"}),
-            serde_json::json!({"type": "null"}),
-            serde_json::json!({"type": "array", "items": {"type": "string"}, "minItems": 1}),
-            serde_json::json!({"type": "string", "pattern": "^accepted$"}),
-            serde_json::json!({"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"], "additionalProperties": false}),
-            serde_json::json!({"enum": ["accepted", "declined"]}),
-            serde_json::json!({"$defs": {"Answer": {"type": "boolean"}}, "$ref": "#/$defs/Answer"}),
-        ] {
-            let schema = lash_kernel_value::json_schema::JsonSchema::admit(schema)
-                .expect("valid finish schema");
-            let finish = crate::control_tools::finish_tool_definition(dialect.language())
-                .with_finish_value_schema(schema.clone())
-                .expect("the finish tool is typed");
-            let prompt = dialect
-                .render_execution_section(
-                    Default::default(),
-                    &lash_core::ToolCatalog::from_tool_definitions(vec![finish]),
-                    None,
-                )
-                .expect("the finish tool presents");
-            let opening = prompt.split("\n\nLexical").next().unwrap();
-            if schema.as_value() == &serde_json::json!({"type": "string"}) {
-                openings.push_str(&format!("{spelling:?}\n{opening}\n\n"));
-            }
-            let call = prompt
-                .split("execute_code(")
-                .nth(1)
-                .expect("example call")
-                .lines()
-                .next()
-                .unwrap()
-                .strip_suffix(')')
-                .unwrap();
-            let args: serde_json::Value = serde_json::from_str(call).expect("native arguments");
-            let code = args["code"].as_str().unwrap();
-            if schema.as_value().get("pattern").is_some() {
-                assert_eq!(
-                    code,
-                    match spelling {
-                        lash_kernel_dialect::Spelling::TypeScript => "console.log(1 + 2);",
-                        lash_kernel_dialect::Spelling::Python => "print(1 + 2)",
-                    },
-                    "an unsupported constraint must not teach an invalid finish"
-                );
-                continue;
-            }
-            let literal = code
-                .strip_prefix("await control.finish(")
-                .expect("the example finishes with a schema-derived literal")
-                .trim_end_matches(';')
-                .strip_suffix(')')
-                .unwrap();
-            let format = match spelling {
-                lash_kernel_dialect::Spelling::TypeScript => {
-                    lash_kernel_dialect::SourceFormat::TypeScriptV1
-                }
-                lash_kernel_dialect::Spelling::Python => {
-                    lash_kernel_dialect::SourceFormat::PythonV1
-                }
-            };
-            let value: serde_json::Value =
-                serde_json::from_str(&lash_kernel_dialect::metadata_json(literal, format))
-                    .expect("the example is a native literal");
-            schema
-                .validate(&value)
-                .expect("the example matches the effective finish contract");
-        }
+        )
+        .expect("valid finish schema");
+        let finish = crate::control_tools::finish_tool_definition(dialect.language())
+            .with_finish_value_schema(schema)
+            .expect("the finish tool is typed");
+        let prompt = dialect
+            .render_execution_section(
+                Default::default(),
+                &lash_core::ToolCatalog::from_tool_definitions(vec![finish]),
+                None,
+            )
+            .expect("the finish tool presents");
+        let opening = prompt.split("\n\nLexical").next().unwrap();
+        openings.push_str(&format!("{spelling:?}\n{opening}\n\n"));
+        let call = prompt
+            .split("execute_code(")
+            .nth(1)
+            .expect("example call")
+            .lines()
+            .next()
+            .unwrap()
+            .strip_suffix(')')
+            .unwrap();
+        let args: serde_json::Value = serde_json::from_str(call).expect("native arguments");
+        let code = args["code"].as_str().unwrap();
+        assert!(
+            !code.contains("control.finish"),
+            "the transport example must leave the finish value to the task: {code}"
+        );
     }
     insta::assert_snapshot!(openings, @r#"
 TypeScript
@@ -181,22 +141,22 @@ Use prose for conversation; use the `execute_code` program for action or computa
 
 ### Tool transport
 
-Run one cell per `execute_code` call with `{"code": "<complete program>"}`. Call tools inside the program; prose before the call is commentary. Tool results and `console.log` output are read in the next step: look things up in one cell, inspect the output, then act or finish in a later cell.
+Run one cell per `execute_code` call with `{"code": "<complete program>"}`. Call tools inside the program; prose before the call is commentary. Tool results and `console.log` output are visible in the next step.
 
 ### Example execute_code call
 
-execute_code({"code":"await control.finish(\"Example answer\");"})
+execute_code({"code":"console.log(1 + 2);"})
 
 Python
 Use prose for conversation; use the `execute_code` program for action or computation. Use only tools listed under **Tools**; copy their exact dotted paths and argument shapes, pass one dict of arguments, and await each call.
 
 ### Tool transport
 
-Run one cell per `execute_code` call with `{"code": "<complete program>"}`. Call tools inside the program. Tool results and `print` output are read in the next step: look things up in one cell, inspect the output, then act or finish in a later cell.
+Run one cell per `execute_code` call with `{"code": "<complete program>"}`. Call tools inside the program. Tool results and `print` output are visible in the next step.
 
 ### Example execute_code call
 
-execute_code({"code":"await control.finish(\"Example answer\")"})
+execute_code({"code":"print(1 + 2)"})
 "#);
 }
 
