@@ -441,6 +441,180 @@ fn implicit_text_policy_admits_only_the_selected_static_operands() {
     assert!(cell.is_ok());
 }
 
+/// FIG-7469: Strict admission uses iteration and destructuring facts without
+/// admitting unknown operands or object values.
+#[test]
+fn strict_text_admission_preserves_iteration_binding_types() {
+    use lash_kernel_dialect::workflow::ImplicitTextConversionPolicy as Policy;
+    use lash_kernel_doc::Datum;
+
+    let namespaces = Default::default();
+    let environment = Environment::new(super::library(), &namespaces);
+    let lower = |body: &str| {
+        crate::lower_with_limits(
+            &format!("export async function run(): Promise<string> {{ {body} return 'none'; }}"),
+            &environment,
+            Mode::Module,
+            crate::SourceLimits::standard().with_implicit_text_conversion(Policy::Strict),
+        )
+    };
+    let mut refused = Vec::new();
+    for (body, expected) in [
+        (
+            r#"for (const k of ["a","b"]) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values = { a: 1, b: 2 }; for (const k of Object.keys(values)) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values: string[] = ["a"]; for (const k of values) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values: [string, string] = ["a", "b"]; for (const k of values) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values = ["a"]; for (const k of values) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const keys = Object.keys({ a: 1 }); for (const k of keys) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values: Set<string> = new Set(["a"]); for (const k of values) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"const values: Map<string, string> = new Map([["a", "b"]]); for (const [k, v] of values) { return k + ": " + v; }"#,
+            "a: b",
+        ),
+        (r#"let k = ""; [k] = ["a"]; return "key: " + k;"#, "key: a"),
+        (
+            r#"const { nested: [k] } = { nested: ["a"] }; return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"const [k]: [string] = ["a"]; return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"const { key: k }: { key: string } = { key: "a" }; return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"const [first, ...tail] = ["a", "b"]; for (const k of tail) { return first + ": " + k; }"#,
+            "a: b",
+        ),
+        (
+            r#"const { a, ...rest } = { a: "unused", b: "b" }; const { b: k } = rest; return "key: " + k;"#,
+            "key: b",
+        ),
+        (
+            r#"const [k] = new Set(["a"]); return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"const values: Record<string, string> = { a: "b" }; for (const [k, v] of Object.entries(values)) { return k + ": " + v; }"#,
+            "a: b",
+        ),
+        (
+            r#"function f([k]: [string]): string { return "key: " + k; } return f(["a"]);"#,
+            "key: a",
+        ),
+        (
+            r#"function f({ key: k }: { key: string }): string { return "key: " + k; } return f({ key: "a" });"#,
+            "key: a",
+        ),
+        (
+            r#"function side(): void {} side(); for (const k of ["a"]) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"function side(): void {} side(); for (const k of Object.keys({ a: 1 })) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"function f(...keys: string[]): string { for (const k of keys) { return "key: " + k; } return "none"; } return f("a");"#,
+            "key: a",
+        ),
+        (
+            r#"const values: string[] = ["b"]; for (const k of ["a", ...values]) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (r#"for (const k of "ab") { return "key: " + k; }"#, "key: a"),
+        (
+            r#"for (const k of new Set(["a"])) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"for (const [k, v] of new Map([["a", "b"]])) { return k + ": " + v; }"#,
+            "a: b",
+        ),
+        (
+            r#"const values: { a: string } = { a: "b" }; for (const [k, v] of Object.entries(values)) { return k + ": " + v; }"#,
+            "a: b",
+        ),
+        (
+            r#"for (const [k] of Object.entries({ a: 1 })) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (r#"const [k] = ["a"]; return "key: " + k;"#, "key: a"),
+        (
+            r#"const values: { key: string } = { key: "a" }; const { key: k } = values; return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"const values: [string, string] = ["a", "b"]; const [k] = values; return "key: " + k;"#,
+            "key: a",
+        ),
+        (
+            r#"for (const k in { a: 1 }) { return "key: " + k; }"#,
+            "key: a",
+        ),
+        (
+            r#"for (const [k = "a"] of [[]]) { return "key: " + k; }"#,
+            "key: a",
+        ),
+    ] {
+        match lower(body) {
+            Ok(lowered) => {
+                let (_, result) =
+                    super::machine::end_of_entry(lowered.document.into_document(), "run", vec![]);
+                assert_eq!(result, Datum::Text(expected.into()), "{body}");
+            }
+            Err(error) => refused.push(format!("{body}: {error}")),
+        }
+    }
+    for body in [
+        r#"const values: any = ["a"]; for (const k of values) { return "key: " + k; }"#,
+        r#"for (const k of [{}]) { return "key: " + k; }"#,
+        r#"for (const [k, v] of Object.entries({ a: {} })) { return "value: " + v; }"#,
+        r#"const values = ["a"]; values.push({}); for (const k of values) { return "key: " + k; }"#,
+        r#"const keys = Object.keys({ a: 1 }); keys[0] = {}; for (const k of keys) { return "key: " + k; }"#,
+        r#"const values = ["a"]; const alias = values; alias[0] = {}; for (const k of values) { return "key: " + k; }"#,
+        r#"const { 0: k } = new Set(["a"]); return "key: " + k;"#,
+        r#"const values: any = { a: "b" }; for (const [k, v] of Object.entries(values)) { return "value: " + v; }"#,
+        r#"let values = ["a"]; values = { 0: "b" }; values[0] = {}; const { 0: k } = values; return "key: " + k;"#,
+        r#"try { throw "a"; } catch (k) { return "key: " + k; }"#,
+        r#"const Object = { keys: () => [{}] }; for (const k of Object.keys({})) { return "key: " + k; }"#,
+        r#"let k: any; for (k of ["a"]) { k = {}; return "key: " + k; }"#,
+    ] {
+        let error = lower(body)
+            .err()
+            .unwrap_or_else(|| panic!("must refuse {body}"));
+        assert_eq!(error.code, DiagnosticCode::ImplicitTextConversion, "{body}");
+    }
+    assert!(
+        refused.is_empty(),
+        "Strict refused known bindings:\n{}",
+        refused.join("\n")
+    );
+}
+
 /// ENTRY-STRUCTURAL: forward aliases and interfaces keep the same public
 /// contract when exported directly or crossed as a callable and promoted.
 #[test]

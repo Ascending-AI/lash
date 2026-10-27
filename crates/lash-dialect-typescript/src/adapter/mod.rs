@@ -195,10 +195,12 @@ pub(crate) enum Pattern {
     Array {
         elements: Vec<Option<Pattern>>,
         rest: Option<Box<Pattern>>,
+        annotation: Option<TypeAnnotation>,
     },
     Object {
         properties: Vec<ObjectPatternProperty>,
         rest: Option<Box<Pattern>>,
+        annotation: Option<TypeAnnotation>,
     },
 }
 
@@ -954,7 +956,19 @@ impl Adapter<'_> {
                 target: Box::new(self.convert_pattern(&pattern.left)?),
                 default: Box::new(self.convert_expr(&pattern.right)?),
             },
-            swc::Pat::Rest(pattern) => Pattern::Rest(Box::new(self.convert_pattern(&pattern.arg)?)),
+            swc::Pat::Rest(pattern) => {
+                let mut inner = self.convert_pattern(&pattern.arg)?;
+                if let Some(annotation) = &pattern.type_ann {
+                    let ty = types::convert_type(&annotation.type_ann);
+                    match &mut inner {
+                        Pattern::Ident(_, annotation)
+                        | Pattern::Array { annotation, .. }
+                        | Pattern::Object { annotation, .. } => *annotation = Some(ty),
+                        _ => {}
+                    }
+                }
+                Pattern::Rest(Box::new(inner))
+            }
             swc::Pat::Array(array) => {
                 let mut elements = Vec::new();
                 let mut rest = None;
@@ -974,7 +988,14 @@ impl Adapter<'_> {
                         None => elements.push(None),
                     }
                 }
-                Pattern::Array { elements, rest }
+                Pattern::Array {
+                    elements,
+                    rest,
+                    annotation: array
+                        .type_ann
+                        .as_ref()
+                        .map(|ty| types::convert_type(&ty.type_ann)),
+                }
             }
             swc::Pat::Object(object) => {
                 let mut properties = Vec::new();
@@ -1007,7 +1028,14 @@ impl Adapter<'_> {
                         }
                     }
                 }
-                Pattern::Object { properties, rest }
+                Pattern::Object {
+                    properties,
+                    rest,
+                    annotation: object
+                        .type_ann
+                        .as_ref()
+                        .map(|ty| types::convert_type(&ty.type_ann)),
+                }
             }
             swc::Pat::Invalid(_) => {
                 return Err(reject_defect(

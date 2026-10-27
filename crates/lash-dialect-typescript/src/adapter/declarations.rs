@@ -297,14 +297,16 @@ impl Checker {
                 self.pattern(target)?;
                 self.expr(default)
             }
-            Pattern::Array { elements, rest } => {
+            Pattern::Array { elements, rest, .. } => {
                 elements
                     .iter()
                     .flatten()
                     .try_for_each(|element| self.pattern(element))?;
                 rest.iter().try_for_each(|rest| self.pattern(rest))
             }
-            Pattern::Object { properties, rest } => {
+            Pattern::Object {
+                properties, rest, ..
+            } => {
                 for property in properties {
                     self.property_key(&property.key)?;
                     self.pattern(&property.value)?;
@@ -570,7 +572,7 @@ fn pattern_names(pattern: &Pattern, span: Option<SourceSpan>, names: &mut Vec<De
             target: pattern, ..
         } => pattern_names(pattern, span, names),
         Pattern::Member { .. } => {}
-        Pattern::Array { elements, rest } => {
+        Pattern::Array { elements, rest, .. } => {
             for element in elements.iter().flatten() {
                 pattern_names(element, span, names);
             }
@@ -578,7 +580,9 @@ fn pattern_names(pattern: &Pattern, span: Option<SourceSpan>, names: &mut Vec<De
                 pattern_names(rest, span, names);
             }
         }
-        Pattern::Object { properties, rest } => {
+        Pattern::Object {
+            properties, rest, ..
+        } => {
             for property in properties {
                 pattern_names(&property.value, span, names);
             }

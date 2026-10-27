@@ -929,6 +929,7 @@ impl<'a> Lowerer<'a> {
         let ast::Pattern::Object {
             properties,
             rest: None,
+            ..
         } = pattern
         else {
             return Some(Err(self.namespace_value(&spelled, None)));

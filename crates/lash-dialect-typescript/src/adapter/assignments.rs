@@ -27,7 +27,7 @@ impl Adapter<'_> {
             Pattern::Rest(inner) | Pattern::Assign { target: inner, .. } => {
                 self.check_assignment_pattern(inner, span)
             }
-            Pattern::Array { elements, rest } => {
+            Pattern::Array { elements, rest, .. } => {
                 for element in elements.iter().flatten() {
                     self.check_assignment_pattern(element, span)?;
                 }
@@ -36,7 +36,9 @@ impl Adapter<'_> {
                 }
                 Ok(())
             }
-            Pattern::Object { properties, rest } => {
+            Pattern::Object {
+                properties, rest, ..
+            } => {
                 for property in properties {
                     self.check_assignment_pattern(&property.value, span)?;
                 }

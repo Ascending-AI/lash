@@ -56,7 +56,7 @@ impl Lowerer<'_> {
                 let value = self.or_default(value, default, name)?;
                 self.destructure(target, value, mode)
             }
-            ast::Pattern::Array { elements, rest } => {
+            ast::Pattern::Array { elements, rest, .. } => {
                 let iterator = self.invoke("ts.array.iterator", &[value], Ty::Unknown)?;
                 let iterator = self.pin(iterator);
                 let next = self.invoke(
@@ -94,7 +94,9 @@ impl Lowerer<'_> {
                 }
                 Ok(())
             }
-            ast::Pattern::Object { properties, rest } => {
+            ast::Pattern::Object {
+                properties, rest, ..
+            } => {
                 let value = self.pin(value);
                 let checked = self.invoke(
                     "ts.require_object_coercible",

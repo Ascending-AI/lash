@@ -36,7 +36,10 @@ use crate::adapter::{
 /// real sources settle in a handful of rounds.
 const MAX_ROUNDS: usize = 32;
 
+mod bindings;
 mod forwarding;
+
+use bindings::Shape;
 
 /// A tool call's static dotted spelling. Shadowed roots are excluded from
 /// `effect_results`, conservatively across every scope in the source.
@@ -58,6 +61,7 @@ fn spelling(name: &str) -> usize {
 }
 
 /// One declaration of a name, or one assignment to it.
+#[derive(Clone)]
 enum Source<'a> {
     /// A value the analysis says nothing about.
     Opaque,
@@ -72,10 +76,25 @@ enum Source<'a> {
     Compound(BinaryOp, &'a Expr),
     /// One element of an iterated value.
     ElementOf(&'a Expr),
-    /// The property `.1` of the namespace `.0` stands for, bound by name
-    /// (`const { col } = dataframe`): a package member's function value
-    /// when `.0` is a package path.
-    PackageMember(&'a Expr, &'a str),
+    Property(Box<Source<'a>>, String),
+    Index(Box<Source<'a>>, usize),
+    Default(Box<Source<'a>>, &'a Expr),
+    ArrayRest(Box<Source<'a>>, usize),
+    ObjectRest(Box<Source<'a>>, Vec<String>),
+}
+
+impl Source<'_> {
+    fn annotated(&self) -> bool {
+        match self {
+            Self::Annotated(_) => true,
+            Self::Property(source, _)
+            | Self::Index(source, _)
+            | Self::Default(source, _)
+            | Self::ArrayRest(source, _)
+            | Self::ObjectRest(source, _) => source.annotated(),
+            _ => false,
+        }
+    }
 }
 
 /// One binding, with every declaration and assignment of it.
@@ -127,6 +146,8 @@ struct Collector<'a> {
     plain: super::plain::Collector<'a>,
     function_depth: usize,
     annotations: super::entry::Annotations,
+    contents_unstable: bool,
+    contents_roots: HashSet<&'a str>,
     direct_calls: HashSet<&'a str>,
     constructors: BTreeMap<String, &'static str>,
     active_functions: Vec<usize>,
@@ -139,8 +160,9 @@ pub(crate) struct Facts {
     plain: super::plain::Facts,
     /// Names carried from earlier cells are bindings, even without a source declaration.
     session: BTreeSet<Name>,
-    /// Each binding's type, by its index in the collector.
-    types: Vec<Ty>,
+    /// Each binding's type and contents, by its index in the collector.
+    shapes: Vec<Shape>,
+    contents_stable: bool,
     /// Binding identities whose producers cannot need builtin forwarding.
     non_builtin: BTreeSet<usize>,
     /// Native constructor results are forwarding facts, not numeric inference.
@@ -241,7 +263,11 @@ impl Facts {
                 .map(|name| (*name).to_owned())
                 .collect(),
             plain,
-            types: vec![Ty::Never; collector.bindings.len()],
+            shapes: vec![Shape::new(Ty::Never); collector.bindings.len()],
+            contents_stable: !collector.contents_unstable
+                && collector.contents_roots.iter().all(|root| {
+                    !collector.names.contains_key(root) && !session.contains(&Name::new(*root))
+                }),
             non_builtin: BTreeSet::new(),
             constructors: collector
                 .constructors
@@ -288,9 +314,9 @@ impl Facts {
         for _ in 0..MAX_ROUNDS {
             let mut changed = false;
             for (binding, entry) in collector.bindings.iter().enumerate() {
-                let ty = facts.entry_type(binding, entry);
-                if facts.types[binding] != ty {
-                    facts.types[binding] = ty;
+                let shape = facts.entry_shape(binding, entry);
+                if facts.shapes[binding] != shape {
+                    facts.shapes[binding] = shape;
                     changed = true;
                 }
             }
@@ -299,12 +325,12 @@ impl Facts {
                 break;
             }
         }
-        for (ty, entry) in facts.types.iter_mut().zip(&collector.bindings) {
+        for (shape, entry) in facts.shapes.iter_mut().zip(&collector.bindings) {
             if !settled
-                || *ty == Ty::Never
+                || shape.ty == Ty::Never
                 || (entry.session_scope && session.contains(&Name::new(entry.name.as_str())))
             {
-                *ty = Ty::Unknown;
+                *shape = Shape::new(Ty::Unknown);
             }
         }
         facts.derive_forwarding_facts(&collector);
@@ -411,7 +437,8 @@ impl Facts {
     /// a name the lowerer made up. `spelling` is the program's own text of
     /// it, as the lowerer reads it, not a copy.
     pub(crate) fn of(&self, spelling: &str) -> Option<&Ty> {
-        self.binding(spelling).map(|binding| &self.types[binding])
+        self.binding(spelling)
+            .map(|binding| &self.shapes[binding].ty)
     }
 
     fn binding(&self, name: &str) -> Option<usize> {
@@ -475,37 +502,15 @@ impl Facts {
         })))
     }
 
-    fn entry_type(&self, binding: usize, entry: &Entry<'_>) -> Ty {
-        // A name every declaration annotates is what the annotations say.
+    fn entry_shape(&self, binding: usize, entry: &Entry<'_>) -> Shape {
         let trusted = entry.declarations > 0 && entry.annotated == entry.declarations;
-        let mut ty = Ty::Never;
-        for source in &entry.sources {
-            let part = match source {
-                Source::Annotated(annotation) => self.believed(annotation),
-                _ if trusted => continue,
-                Source::Opaque => Ty::Unknown,
-                Source::Is(ty) => ty.clone(),
-                Source::Step => unary_result(UnaryOp::Minus, &self.types[binding]),
-                Source::Returns(return_ty) => self.function(*return_ty),
-                Source::Value(value) => self.type_of(value),
-                Source::Compound(op, value) => {
-                    binary_result(*op, &self.types[binding], &self.type_of(value))
-                }
-                Source::ElementOf(iterated) => self.type_of(iterated).element(),
-                Source::PackageMember(namespace, name) => effect_path(namespace)
-                    .filter(|path| {
-                        path.split('.').next().is_some_and(|root| {
-                            self.packages.is_root(root) && !self.named.contains(root)
-                        })
-                    })
-                    .and_then(|path| self.packages.call(&format!("{path}.{name}")))
-                    .map_or(Ty::Unknown, |gives| {
-                        Ty::Function(Box::new(gives.called(false)))
-                    }),
-            };
-            ty = ty.join(&part);
-        }
-        ty
+        entry
+            .sources
+            .iter()
+            .filter(|source| !trusted || source.annotated())
+            .map(|source| self.source_shape(source, binding))
+            .fold(Shape::new(Ty::Never), |a, b| a.join(&b))
+            .stored(self.contents_stable && !entry.captured)
     }
 
     /// Resolve source imports before consulting the same package/operation
@@ -567,7 +572,7 @@ impl Facts {
                 .map_or(Ty::Undefined, |value| self.type_of(value)),
             Expr::DeleteChain { .. } => Ty::Bool,
             Expr::Ident(name, _) => match self.binding(name) {
-                Some(binding) => self.types[binding].clone(),
+                Some(binding) => self.shapes[binding].ty.clone(),
                 None if self.session.contains(&Name::new(name)) => Ty::Unknown,
                 None => match name.as_str() {
                     "undefined" => Ty::Undefined,
@@ -594,7 +599,7 @@ impl Facts {
                 ) => {
                     let current = self
                         .binding(name)
-                        .map_or(Ty::Unknown, |binding| self.types[binding].clone());
+                        .map_or(Ty::Unknown, |binding| self.shapes[binding].ty.clone());
                     binary_result(*op, &current, &self.type_of(value))
                 }
                 _ => Ty::Unknown,
@@ -614,7 +619,7 @@ impl Facts {
             Expr::Update { target, .. } => match target {
                 AssignTarget::Ident(name) | AssignTarget::ParenIdent(name) => {
                     self.binding(name).map_or(Ty::Unknown, |binding| {
-                        unary_result(UnaryOp::Minus, &self.types[binding])
+                        unary_result(UnaryOp::Minus, &self.shapes[binding].ty)
                     })
                 }
                 _ => Ty::Unknown,
@@ -858,7 +863,7 @@ impl<'a> Collector<'a> {
             entry.assignments += 1;
         } else {
             entry.declarations += 1;
-            if matches!(source, Source::Annotated(_)) {
+            if source.annotated() {
                 entry.annotated += 1;
             }
         }
@@ -867,6 +872,20 @@ impl<'a> Collector<'a> {
 
     /// A pattern whose names take values the analysis does not follow.
     fn pattern(&mut self, pattern: &'a Pattern, role: Role) {
+        if matches!(
+            pattern,
+            Pattern::Array {
+                annotation: Some(_),
+                ..
+            } | Pattern::Object {
+                annotation: Some(_),
+                ..
+            }
+        ) && !matches!(role, Role::Assigned)
+        {
+            self.bound(pattern, role, Source::Opaque);
+            return;
+        }
         match pattern {
             Pattern::Ident(name, annotation) => {
                 let source = match (annotation, role) {
@@ -879,6 +898,7 @@ impl<'a> Collector<'a> {
             }
             Pattern::Rest(inner) => self.pattern(inner, role),
             Pattern::Member { object, property } => {
+                self.contents_unstable = true;
                 self.plain.write(property);
                 self.expr(object);
                 self.property(property);
@@ -888,7 +908,7 @@ impl<'a> Collector<'a> {
                 self.expr(default);
                 self.pattern(target, role);
             }
-            Pattern::Array { elements, rest } => {
+            Pattern::Array { elements, rest, .. } => {
                 for element in elements.iter().flatten() {
                     self.pattern(element, role);
                 }
@@ -896,7 +916,9 @@ impl<'a> Collector<'a> {
                     self.pattern(rest, role);
                 }
             }
-            Pattern::Object { properties, rest } => {
+            Pattern::Object {
+                properties, rest, ..
+            } => {
                 for property in properties {
                     if let PropertyKey::Computed(key) = &property.key {
                         self.plain.escape(key);
@@ -911,45 +933,84 @@ impl<'a> Collector<'a> {
         }
     }
 
-    /// A pattern that is one name takes `source`; any other is opaque.
+    /// Each extracted binding follows the corresponding part of its source.
     fn bound(&mut self, pattern: &'a Pattern, role: Role, source: Source<'a>) {
-        match (pattern, &source) {
-            (
-                Pattern::Object {
-                    properties,
-                    rest: None,
-                },
-                Source::Value(namespace),
-            ) if effect_path(namespace).is_some() => {
-                // Each name bound from a static path, which may be a
-                // package's namespace.
-                self.plain.escape(namespace);
-                for property in properties {
-                    match (&property.key, &property.value) {
-                        (PropertyKey::Static(key), Pattern::Ident(name, None)) => {
-                            self.name(name, role, Source::PackageMember(namespace, key));
-                        }
-                        (key, value) => {
-                            if let PropertyKey::Computed(key) = key {
-                                self.plain.escape(key);
-                                self.expr(key);
-                            }
-                            self.pattern(value, role);
-                        }
-                    }
-                }
-                return;
+        let source = match pattern {
+            Pattern::Array {
+                annotation: Some(annotation),
+                ..
             }
-            _ => {}
+            | Pattern::Object {
+                annotation: Some(annotation),
+                ..
+            } if !matches!(role, Role::Assigned) => {
+                self.annotations.record(annotation);
+                Source::Annotated(annotation)
+            }
+            _ => source,
+        };
+        if !matches!(pattern, Pattern::Ident(..))
+            && let Source::Value(value) = &source
+        {
+            self.plain.escape(value);
         }
         match pattern {
             Pattern::Ident(name, None) => self.name(name, role, source),
-            _ => {
-                if let Source::Value(value) = source {
-                    self.plain.escape(value);
+            Pattern::Array { elements, rest, .. } => {
+                for (index, element) in elements.iter().enumerate() {
+                    if let Some(element) = element {
+                        self.bound(
+                            element,
+                            role,
+                            Source::Index(Box::new(source.clone()), index),
+                        );
+                    }
                 }
-                self.pattern(pattern, role);
+                if let Some(rest) = rest {
+                    self.bound(
+                        rest,
+                        role,
+                        Source::ArrayRest(Box::new(source), elements.len()),
+                    );
+                }
             }
+            Pattern::Object {
+                properties, rest, ..
+            } => {
+                for property in properties {
+                    match &property.key {
+                        PropertyKey::Static(key) => self.bound(
+                            &property.value,
+                            role,
+                            Source::Property(Box::new(source.clone()), key.clone()),
+                        ),
+                        PropertyKey::Computed(key) => {
+                            self.plain.escape(key);
+                            self.expr(key);
+                            self.pattern(&property.value, role);
+                        }
+                    }
+                }
+                if let Some(rest) = rest {
+                    let keys: Option<Vec<_>> = properties
+                        .iter()
+                        .map(|p| match &p.key {
+                            PropertyKey::Static(key) => Some(key.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if let Some(keys) = keys {
+                        self.bound(rest, role, Source::ObjectRest(Box::new(source), keys));
+                    } else {
+                        self.pattern(rest, role);
+                    }
+                }
+            }
+            Pattern::Assign { target, default } => {
+                self.expr(default);
+                self.bound(target, role, Source::Default(Box::new(source), default));
+            }
+            _ => self.pattern(pattern, role),
         }
     }
 
@@ -1216,6 +1277,7 @@ impl<'a> Collector<'a> {
                 self.name(name, Role::Assigned, source);
             }
             AssignTarget::Member { object, property } => {
+                self.contents_unstable = true;
                 self.plain.write(property);
                 if let Source::Value(value) = source {
                     self.plain.escape(value);
@@ -1227,7 +1289,7 @@ impl<'a> Collector<'a> {
                 if let Source::Value(value) = source {
                     self.plain.escape(value);
                 }
-                self.pattern(pattern, Role::Assigned);
+                self.bound(pattern, Role::Assigned, source);
             }
         }
     }
@@ -1283,6 +1345,7 @@ impl<'a> Collector<'a> {
             }
             Expr::Update { target, .. } => self.target(target, Source::Step),
             Expr::Delete { object, property } => {
+                self.contents_unstable = true;
                 self.plain.write(property);
                 self.expr(object);
                 self.property(property);
@@ -1372,11 +1435,31 @@ impl<'a> Collector<'a> {
                 {
                     self.direct_calls.insert(name);
                 }
+                let reads_contents = matches!(
+                    effect_path(callee).as_deref(),
+                    Some("Object.keys" | "Object.entries")
+                );
+                if reads_contents {
+                    if let Expr::Member { object, .. } = callee.as_ref()
+                        && let Expr::Ident(root, _) = object.as_ref()
+                    {
+                        self.contents_roots.insert(root);
+                    }
+                } else {
+                    self.contents_unstable = true;
+                }
                 self.plain.call(callee, args);
                 self.expr(callee);
                 self.args(args);
             }
             Expr::New { constructor, args } => {
+                if let Expr::Ident(name, _) = constructor.as_ref()
+                    && matches!(name.as_str(), "Map" | "Set")
+                {
+                    self.contents_roots.insert(name);
+                } else {
+                    self.contents_unstable = true;
+                }
                 self.expr(constructor);
                 for arg in args {
                     let (CallArg::Value(value) | CallArg::Spread(value)) = arg;
@@ -1385,6 +1468,7 @@ impl<'a> Collector<'a> {
                 self.args(args);
             }
             Expr::OptionalChain { base, operations } | Expr::DeleteChain { base, operations } => {
+                self.contents_unstable = true;
                 self.plain.escape(base);
                 self.expr(base);
                 for operation in operations {

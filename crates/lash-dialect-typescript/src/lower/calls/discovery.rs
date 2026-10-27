@@ -245,7 +245,7 @@ impl Discovery<'_> {
                 self.pattern(target);
                 self.expr(default);
             }
-            ast::Pattern::Array { elements, rest } => {
+            ast::Pattern::Array { elements, rest, .. } => {
                 for element in elements.iter().flatten() {
                     self.pattern(element);
                 }
@@ -253,7 +253,9 @@ impl Discovery<'_> {
                     self.pattern(rest);
                 }
             }
-            ast::Pattern::Object { properties, rest } => {
+            ast::Pattern::Object {
+                properties, rest, ..
+            } => {
                 for property in properties {
                     self.key(&property.key);
                     self.pattern(&property.value);

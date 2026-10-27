@@ -96,7 +96,7 @@ pub(crate) fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
         Pattern::Rest(inner) => pattern_names(inner, names),
         Pattern::Member { .. } => {}
         Pattern::Assign { target, .. } => pattern_names(target, names),
-        Pattern::Array { elements, rest } => {
+        Pattern::Array { elements, rest, .. } => {
             for element in elements.iter().flatten() {
                 pattern_names(element, names);
             }
@@ -104,7 +104,9 @@ pub(crate) fn pattern_names(pattern: &Pattern, names: &mut Vec<String>) {
                 pattern_names(rest, names);
             }
         }
-        Pattern::Object { properties, rest } => {
+        Pattern::Object {
+            properties, rest, ..
+        } => {
             for property in properties {
                 pattern_names(&property.value, names);
             }
@@ -294,13 +296,15 @@ fn pattern_makes_function(pattern: &Pattern) -> bool {
         Pattern::Assign { target, default } => {
             pattern_makes_function(target) || makes_function(default)
         }
-        Pattern::Array { elements, rest } => {
+        Pattern::Array { elements, rest, .. } => {
             elements.iter().flatten().any(pattern_makes_function)
                 || rest
                     .as_ref()
                     .is_some_and(|rest| pattern_makes_function(rest))
         }
-        Pattern::Object { properties, rest } => {
+        Pattern::Object {
+            properties, rest, ..
+        } => {
             properties.iter().any(|property| {
                 key_makes_function(&property.key) || pattern_makes_function(&property.value)
             }) || rest

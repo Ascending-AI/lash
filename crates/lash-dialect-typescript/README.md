@@ -158,6 +158,13 @@ Legal function redeclarations share the winning function binding;
 lexical early errors still apply. Strict `delete` evaluates non-reference
 operands and returns true; optional property deletion short-circuits normally.
 
+Loop and destructuring bindings retain known element and property types,
+including tuple positions, Object keys and entries, and Map/Set iteration.
+Stored literal container contents are inferred only when the source has no
+possible mutation or call that could expose them; annotations retain their
+trusted types.
+Catch bindings remain unknown because any value can be thrown.
+
 Workflows allow ordinary implicit text conversion by default. Hosts may opt
 into `ImplicitTextConversionPolicy::Refuse` or `Strict` through source limits.
 

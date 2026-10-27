@@ -134,13 +134,15 @@ fn pattern_reads_arguments(pattern: &Pattern) -> bool {
         Pattern::Assign { target, default } => {
             pattern_reads_arguments(target) || reads_arguments(default)
         }
-        Pattern::Array { elements, rest } => {
+        Pattern::Array { elements, rest, .. } => {
             elements.iter().flatten().any(pattern_reads_arguments)
                 || rest
                     .as_ref()
                     .is_some_and(|rest| pattern_reads_arguments(rest))
         }
-        Pattern::Object { properties, rest } => {
+        Pattern::Object {
+            properties, rest, ..
+        } => {
             properties.iter().any(|property| {
                 key_reads_arguments(&property.key) || pattern_reads_arguments(&property.value)
             }) || rest
