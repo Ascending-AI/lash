@@ -2,8 +2,8 @@
 //! the census traces the run's current holdings without the run projecting
 //! or publishing anything. The machine walks what it holds in its arena
 //! ([`ResidentRoots`]): its frames, session bindings, registers and pins,
-//! and each object without an id they reach. The heap traces the rest
-//! through its pages, reading a changed object back from the machine.
+//! and each object without an id they reach. Complete resident objects give
+//! their edges directly; the heap traces cold objects through their pages.
 
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
@@ -43,16 +43,16 @@ pub trait ResidentRoots {
         &mut self,
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault>;
-    /// Whether the run holds `entity` changed since its projection: what
-    /// the heap holds of it is stale.
-    fn changed(&mut self, entity: EntityId) -> bool;
-    /// Walks what the changed `entity` holds: the identities it names to
+    /// Whether the run holds `entity` whole in memory. This includes clean
+    /// objects already read from their pages and every changed object.
+    fn contains(&mut self, entity: EntityId) -> bool;
+    /// Walks what the resident `entity` holds: the identities it names to
     /// `out`, the page forms of immutables on their pages to `pages`.
     ///
     /// # Errors
     ///
     /// `out`'s errors.
-    fn changed_edges(
+    fn entity_edges(
         &mut self,
         entity: EntityId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
@@ -119,7 +119,7 @@ impl CensusGraph for ResidentGraph<'_> {
         self.resident.page_roots(visit)
     }
     fn entity_facts(&mut self, entity: EntityId) -> Result<Option<EntityFacts>, HeapFault> {
-        if self.resident.changed(entity) {
+        if self.resident.contains(entity) {
             return Ok(Some(EntityFacts { has_edges: true }));
         }
         self.heap.entity_facts(entity)
@@ -129,11 +129,11 @@ impl CensusGraph for ResidentGraph<'_> {
         entity: EntityId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        if !self.resident.changed(entity) {
+        if !self.resident.contains(entity) {
             return self.heap.entity_edges(entity, out);
         }
         let mut pages = Vec::new();
-        self.resident.changed_edges(entity, out, &mut pages)?;
+        self.resident.entity_edges(entity, out, &mut pages)?;
         for page in &pages {
             self.heap.stream_edges(page, out)?;
         }

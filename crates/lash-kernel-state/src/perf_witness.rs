@@ -5,6 +5,10 @@ use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct Work {
+    /// Inline leaves parsed from their stored token grammar.
+    pub inline_decodes: u64,
+    /// Point lookups of an object's stored head, excluding directory scans.
+    pub object_head_lookups: u64,
     /// Checkpoint publication work, including projection and budget retries.
     pub seal_attempts: u64,
     pub seal_nodes_hashed: u64,

@@ -374,6 +374,12 @@ impl Index {
 
     /// Sets the insertion sequences a table's page form keeps.
     pub(super) fn resequence(&mut self, seqs: Vec<u64>, next: u64) -> Result<(), NativeError> {
+        if matches!(&self.0, Repr::Shared(layout) if next == u64::from(layout.len()))
+            && seqs.len() as u64 == next
+            && seqs.iter().copied().eq(0..next)
+        {
+            return Ok(());
+        }
         self.own_mut().resequence(seqs, next)
     }
 
@@ -1151,6 +1157,18 @@ mod tests {
         );
         assert!(layout(&arena, words).is_some());
         assert_eq!(layout(&arena, words), layout(&arena, floats));
+        // A reload with unchanged dense sequences keeps the shared layout.
+        let loaded = map(
+            &mut arena,
+            vec![(float(1.0), Value::Int(11)), (float(2.0), Value::Int(12))],
+        );
+        arena.set_sequences(loaded, vec![0, 1], 2).unwrap();
+        assert_eq!(layout(&arena, loaded), layout(&arena, floats));
+        assert_eq!(keys(&arena, loaded), ["0:1.0", "1:2.0"]);
+        // A deletion gap must keep its stored cursor sequences instead.
+        arena.set_sequences(loaded, vec![1, 3], 4).unwrap();
+        assert_eq!(layout(&arena, loaded), None);
+        assert_eq!(keys(&arena, loaded), ["1:1.0", "3:2.0"]);
         assert_eq!(keys(&arena, floats), ["0:1.0", "1:2.0"]);
         assert!(matches!(
             arena.table_get(floats, &Value::Int(1)).unwrap(),

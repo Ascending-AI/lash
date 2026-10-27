@@ -2,8 +2,8 @@
 //! the objects a durable run holds in memory, in place of their
 //! projection. The walk goes into each object without an id, and gives
 //! every object with an id, and every task, to the census's trace, which
-//! reads a changed one back from here ([`Arena::holds_changed`],
-//! [`Arena::reach_changed`]). It assigns no id and writes nothing back.
+//! reads a resident one back from here ([`Arena::holds_resident`],
+//! [`Arena::reach_entity`]). It assigns no id and writes nothing back.
 //!
 //! It also gives the capacity what a region's statement would install
 //! before it installs it ([`Arena::install_bound`],
@@ -128,26 +128,26 @@ impl Arena {
         }
     }
 
-    /// Whether the arena holds `entity` resident and changed since its
-    /// projection: what the heap holds of it is stale.
-    pub fn holds_changed(&self, entity: EntityId) -> bool {
+    /// Whether the arena holds every member of `entity` in memory, so a
+    /// trace can read its current edges without decoding its stored head.
+    pub fn holds_resident(&self, entity: EntityId) -> bool {
         let Some(handle) = self.entities.get(&entity).copied() else {
             return false;
         };
-        self.objects.get(handle).is_some()
+        self.objects.get(handle).is_some_and(|body| !has_cold(body))
             && self
                 .facts
                 .get(handle.index() as usize)
-                .is_some_and(|facts| facts.dirty && !facts.cold)
+                .is_some_and(|facts| !facts.cold)
     }
 
-    /// Walks what the changed object `entity` holds, as [`Self::reach`]
+    /// Walks what the resident object `entity` holds, as [`Self::reach`]
     /// walks a value's members.
     ///
     /// # Errors
     ///
     /// As [`Self::reach`]'s.
-    pub fn reach_changed(
+    pub fn reach_entity(
         &mut self,
         reach: &mut Reach,
         entity: EntityId,

@@ -651,7 +651,12 @@ impl KernelBroker<'_> {
                     machine.insert(reopened)
                 }
             };
-            let park = match running.run(self.slice, cancel.is_cancelled()).await? {
+            let park = match super::pages::shared::while_held(
+                &activation.pages,
+                running.run(self.slice, cancel.is_cancelled()),
+            )
+            .await?
+            {
                 // The first stretch outlasts its slice: the response the
                 // turn held commits now, and the run goes on.
                 MachineStep::Slice => {

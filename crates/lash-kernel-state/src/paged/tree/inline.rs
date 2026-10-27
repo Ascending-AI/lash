@@ -51,7 +51,7 @@ impl<T: Cell> Tree<T> {
         match &mut root.link {
             Link::Sealed(page) => grant(page, children),
             Link::Inline {
-                body: Inline::Rows(node),
+                body: Inline::Rows(node) | Inline::Bound { rows: node, .. },
                 children: own,
             } => {
                 let rows = Rc::make_mut(node);
@@ -117,6 +117,8 @@ impl<T: Cell> Tree<T> {
         authenticate: bool,
         visitor: &mut impl FnMut(&[u8], T),
     ) -> Result<(), HeapFault> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::record(|work| work.inline_decodes += 1);
         let invalid = |e: TokenError| HeapFault::Malformed(e.to_string());
         let count = input.seq().map_err(invalid)?;
         if count == 0 || count > KEYED_LEAF_ROWS || count != expected.len {
@@ -426,16 +428,11 @@ impl<T: Cell> TokenCodec for Tree<T> {
                         .map_err(|e| TokenError::Invalid(e.to_string()))?,
                 )
             } else {
-                Self::read_inline(
-                    family,
-                    summary,
-                    input.subreader(tokens),
-                    &[],
-                    false,
-                    &mut |_, _| {},
-                )
-                .map_err(|e| TokenError::Invalid(e.to_string()))?;
-                Inline::Tokens(Arc::from(tokens))
+                Inline::Bound {
+                    tokens: Arc::from(tokens),
+                    rows: Self::inline_rows(family, summary, input.subreader(tokens))
+                        .map_err(|e| TokenError::Invalid(e.to_string()))?,
+                }
             };
             Some(Link::Inline {
                 body,

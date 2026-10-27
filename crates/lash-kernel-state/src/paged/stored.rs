@@ -42,8 +42,8 @@ pub enum StoredObject {
     Variable(PageValue),
 }
 
-/// What an object's head says before any of its rows are read: what
-/// opening a proxy reads.
+/// A proxy's opening descriptor: a small object whole, or the shape of
+/// a collection whose rows remain lazy.
 #[derive(Clone, Debug)]
 pub enum StoredHead {
     List {
@@ -54,7 +54,7 @@ pub enum StoredHead {
         len: u64,
         next: u64,
     },
-    /// A closure or a shared variable, whose head is its whole contents.
+    /// An object decoded whole, including a list or table of at most one chunk.
     Small(StoredObject),
 }
 
@@ -85,8 +85,9 @@ fn malformed(problem: &str) -> HeapFault {
 }
 
 impl PagedHeap {
-    /// The head of `entity` without its rows, or `None` when the heap
-    /// holds no such entity.
+    /// The head of `entity`, decoding a list or table of at most one arena
+    /// chunk whole. Larger collections retain lazy rows. `None` means the
+    /// heap holds no such entity.
     ///
     /// # Errors
     ///
@@ -97,6 +98,45 @@ impl PagedHeap {
         };
         let access = self.pages();
         Ok(Some(match &head.body {
+            Body::List { rows, .. }
+                if rows.len() <= lash_kernel_doc::arena::Sequence::CHUNK as u64 =>
+            {
+                let mut values = Vec::with_capacity(rows.len() as usize);
+                rows.visit(access, &mut |_, value| {
+                    values.push(value.clone());
+                    true
+                })?;
+                StoredHead::Small(StoredObject::List(values))
+            }
+            Body::Table {
+                kind, rows, next, ..
+            } if rows.len() <= lash_kernel_doc::arena::Sequence::CHUNK as u64 => {
+                let mut entries = Vec::with_capacity(rows.len() as usize);
+                let mut invalid = false;
+                rows.visit(access, &mut |key, entry| {
+                    let Ok(key) = <[u8; 8]>::try_from(key) else {
+                        invalid = true;
+                        return false;
+                    };
+                    let seq = u64::from_be_bytes(key);
+                    if seq >= *next {
+                        invalid = true;
+                        return false;
+                    }
+                    entries.push((seq, entry.key.clone(), entry.value.clone()));
+                    true
+                })?;
+                if invalid || entries.len() as u64 != rows.len() {
+                    return Err(malformed(
+                        "a table's rows disagree with its length or next sequence",
+                    ));
+                }
+                StoredHead::Small(StoredObject::Table {
+                    kind: *kind,
+                    entries,
+                    next: *next,
+                })
+            }
             Body::List { rows, .. } => StoredHead::List { len: rows.len() },
             Body::Table {
                 kind, rows, next, ..
@@ -126,7 +166,7 @@ impl PagedHeap {
     }
 
     /// Values `start ..` of the list `entity`, at most `count`: one chunk,
-    /// read by rank through its index path.
+    /// read in one walk over the intersecting tree nodes.
     ///
     /// # Errors
     ///
@@ -143,11 +183,11 @@ impl PagedHeap {
             };
             let end = start.saturating_add(count).min(rows.len());
             let mut values = Vec::with_capacity(end.saturating_sub(start) as usize);
-            for rank in start..end {
-                let (_, value) = rows
-                    .rank_get(rank, self.pages())?
-                    .ok_or_else(|| malformed("a list rank is missing"))?;
-                values.push(value);
+            rows.visit_ranks(self.pages(), start, end, &mut |value| {
+                values.push(value.clone())
+            })?;
+            if values.len() as u64 != end.saturating_sub(start) {
+                return Err(malformed("a list range is missing"));
             }
             Ok(values)
         })

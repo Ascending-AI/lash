@@ -88,10 +88,10 @@ impl ResidentRoots for Holdings<'_> {
     ) -> Result<(), HeapFault> {
         self.roots.iter().try_for_each(visit)
     }
-    fn changed(&mut self, entity: EntityId) -> bool {
-        self.arena.borrow().holds_changed(entity)
+    fn contains(&mut self, entity: EntityId) -> bool {
+        self.arena.borrow().holds_resident(entity)
     }
-    fn changed_edges(
+    fn entity_edges(
         &mut self,
         entity: EntityId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
@@ -100,7 +100,7 @@ impl ResidentRoots for Holdings<'_> {
         let reach = self.reach.get_or_insert_default();
         self.arena
             .borrow_mut()
-            .reach_changed(reach, entity, &mut |reached| match reached {
+            .reach_entity(reach, entity, &mut |reached| match reached {
                 Reached::Identity(identity) => out(identity),
                 Reached::Page(page) => {
                     pages.push(page.clone());

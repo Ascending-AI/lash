@@ -5260,7 +5260,7 @@
         },
         {
           "const": "agent",
-          "description": "A turn.",
+          "description": "A turn and the physical phases published by its terminal profile.",
           "type": "string"
         },
         {

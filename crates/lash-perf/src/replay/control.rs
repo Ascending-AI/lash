@@ -169,6 +169,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         description: "Identical lookup inputs; orchestration control.".to_owned(),
         protocol,
         instruction_limit: None,
+        memory_limit_mib: None,
         sessions: 1,
         compact_every: None,
         turns: vec![TurnGroup {

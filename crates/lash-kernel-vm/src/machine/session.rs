@@ -861,6 +861,11 @@ impl KernelMachine {
                 not_carried: Vec::new(),
             });
         }
+        self.tasks.end_execution()?;
+        self.regs.clear();
+        self.pins.values.clear();
+        self.pins.borrowed.clear();
+        self.joins = Tree::new(false);
         self.publish_roots()?;
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
@@ -883,6 +888,12 @@ impl KernelMachine {
             self.heap
                 .set_session_root(bindings)
                 .map_err(super::write_halt)?;
+        }
+        // Remove callbacks retained only by this cell's execution or host
+        // bindings before their population forces carry to reread data pages.
+        let population = self.heap.data_only_certificate();
+        if population.closure_entities > 0 || population.task_edges > 0 {
+            self.refine_resident(true)?;
         }
         // Lifecycle roots name sealed trees. A cell may finish before its
         // first park, so its session still has only transient pages here.

@@ -149,7 +149,10 @@ fn build_core_with_sink(
                         crate::cell_bounds::INSTRUCTION_LIMIT,
                         lash::rlm::InstructionBound::instructions,
                     ))
-                    .memory_limit(crate::cell_bounds::MEMORY_LIMIT)
+                    .memory_limit(workload.memory_limit_mib.map_or(
+                        crate::cell_bounds::MEMORY_LIMIT,
+                        lash::rlm::MemoryBound::mebibytes,
+                    ))
                     .build(),
                 if protocol == Protocol::Python {
                     lash::rlm::CellDialect::python()
@@ -357,6 +360,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     if let Some(limit) = workload.instruction_limit {
         geometry["cell_instruction_limit"] = serde_json::json!(limit);
     }
+    geometry["cell_memory_mib"] = serde_json::json!(workload.memory_limit_mib.unwrap_or(512));
     if options.effect_phases.is_some() {
         geometry["effect_phases"] = serde_json::json!(if options.effect_phases_off {
             "off; identity receipts only"

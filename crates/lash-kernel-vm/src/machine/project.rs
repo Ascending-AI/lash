@@ -495,9 +495,8 @@ fn open(
         StoredHead::List { len } if len > chunk => {
             return arena.open_list(handle, len).map_err(arena_fault);
         }
-        StoredHead::List { len } => {
-            let values = heap
-                .read_list_rows(entity, 0, len)?
+        StoredHead::Small(StoredObject::List(values)) => {
+            let values = values
                 .iter()
                 .map(|value| admit(arena, pages, value))
                 .collect::<Result<Vec<_>, _>>()?;
@@ -514,11 +513,11 @@ fn open(
                 .open_table(handle, kind, len, next)
                 .map_err(arena_fault);
         }
-        StoredHead::Table { kind, len, next } => {
-            let entries = heap.read_table_rows(entity, 0, next)?;
-            if entries.len() as u64 != len {
-                return Err(malformed("a table's rows disagree with its length"));
-            }
+        StoredHead::Small(StoredObject::Table {
+            kind,
+            entries,
+            next,
+        }) => {
             let mut pairs = Vec::with_capacity(entries.len() * 2);
             let mut seqs = Vec::with_capacity(entries.len());
             for (seq, key, value) in &entries {
@@ -589,7 +588,9 @@ fn open(
         StoredHead::Small(StoredObject::Variable(value)) => {
             (Body::Cell(admit(arena, pages, &value)?), None)
         }
-        StoredHead::Small(_) => return Err(malformed("a small head of another kind")),
+        StoredHead::List { .. } | StoredHead::Table { .. } => {
+            return Err(malformed("a small object was not decoded whole"));
+        }
     };
     arena.materialized(handle, body).map_err(arena_fault)?;
     if let Some((seqs, next)) = sequences {

@@ -1145,6 +1145,55 @@ async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
     };
 }
 
+/// FIG-7455: computing from resident pages for longer than the lease TTL
+/// must not make the next page exchange discard a healthy worker.
+#[tokio::test]
+async fn resident_computation_outlives_the_lease_without_losing_its_next_read() {
+    use lash_core_execution::runtime::Clock;
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let clock = lash_durable_test::SimClock::new();
+    let ttl = Duration::from_secs(3);
+    let store = Arc::new(Expiring::new(&clock, ttl));
+    let base = page("base", &[]);
+    store.commit(&base);
+    let pages = Arc::new(tokio::sync::Mutex::new(ActivationPages::new(
+        Arc::clone(&store),
+        Some(lease(base.id)),
+        ttl / 3,
+        CapabilityKey::fresh(),
+        24,
+        Box::new(root.spool(StageLeaseId(24)).expect("spool")),
+        clock.clone(),
+        Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    )));
+    let computation = tokio::spawn({
+        let pages = Arc::clone(&pages);
+        let clock = Arc::clone(&clock);
+        async move {
+            super::shared::while_held(&pages, clock.sleep(ttl * 2)).await;
+            let mut pages = pages.lock().await;
+            let capability = pages.issue(base.id);
+            pages
+                .serve(PageRequest::Read {
+                    pages: vec![capability],
+                })
+                .await
+        }
+    });
+    clock.wait_for_sleep(6000).await;
+    for due in (1000..=6000).step_by(1000) {
+        clock.advance_to(due).await;
+        tokio::task::yield_now().await;
+    }
+    let PageReply::Read { pages: read } = computation.await.expect("computation") else {
+        panic!("the renewed computation retains page authority")
+    };
+    assert_eq!(read.len(), 1);
+    assert!(read[0].is_ok(), "the next leased page read succeeds");
+}
+
 /// The parents' directories under the staging directory `dir`.
 fn parent_dirs(dir: &std::path::Path) -> usize {
     std::fs::read_dir(dir)

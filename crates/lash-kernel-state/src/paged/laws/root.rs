@@ -239,6 +239,54 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
         pages.borrow().reads <= 5,
         "one index path, not the member list"
     );
+    for (start, end) in [
+        (0, 0),
+        (0, 65),
+        (63, 129),
+        (52_345, 52_410),
+        (99_999, u64::MAX),
+        (100_000, u64::MAX),
+    ] {
+        let mut got = Vec::new();
+        opened
+            .members
+            .visit_ranks(&access, start, end, &mut |task| got.push(*task))
+            .expect("range");
+        let expected: Vec<_> = (start..end.min(100_000)).map(|at| TaskId(at + 1)).collect();
+        assert_eq!(got, expected, "ranks {start}..{end}");
+    }
+}
+
+/// FIG-7455: contextual inline rows retain the decode already paid for,
+/// while serialization keeps their original token grammar.
+#[test]
+fn contextual_inline_reads_reuse_their_validated_rows() {
+    use super::super::tree::Tree;
+    use lash_kernel_doc::TaskId;
+    let (heap, _) = super::heap::fresh();
+    let rows = Tree::nested_from_rows(
+        vec![(directory::ordinal_key(0), TaskId(7))],
+        true,
+        &heap.access,
+    )
+    .unwrap()
+    .in_family(lash_kernel_doc::heap::FamilyId(8));
+    let tokens = encode_body(&rows);
+    crate::perf_witness::enable_work();
+    let opened: Tree<TaskId> = decode_body(&tokens).unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            opened
+                .rank_get(0, &heap.access)
+                .unwrap()
+                .map(|(_, value)| value),
+            Some(TaskId(7))
+        );
+    }
+    assert_eq!(encode_body(&opened), tokens);
+    let work = crate::perf_witness::take_work().unwrap();
+    crate::perf_witness::disable_work();
+    assert_eq!(work.inline_decodes, 1, "one parse of the contextual leaf");
 }
 
 /// S4: a checkpoint preserves every saved meter, including the next join identity.

@@ -254,6 +254,25 @@ is persisted in `HeapRoot::collection_entities`, seeded at first carry
 without a walk. A no-op data-only carry creates no pacing debt. There is no
 byte-growth carry trigger or persisted `collection_live` field.
 
+A resident sweep reads complete objects from the arena, including clean
+objects already decoded in this activation. Cold or partly resident objects
+still read their authoritative pages. Before carry classification, the machine
+releases execution frames and results while retaining task counters, then
+removes host bindings. If the population contains closures or task edges, it
+sweeps the remaining session and saved environments. Retiring an unreachable
+temporary callback then lets the data-only certificate avoid
+classifying the stored data graph twice (FIG-7455).
+
+A contextual inline leaf keeps its validated decoded rows beside the original
+token grammar. Reads reuse the rows; sealing preserves the grammar and changing
+the family discards the decoded interpretation before resolving it again.
+
+Opening a collection of at most one arena chunk reads its stored head and
+rows together. A list chunk reads its rank interval in one tree walk, rather
+than starting a path for each element. Restoring dense insertion sequences
+preserves the arena's shared key layout; a stored deletion gap keeps its own
+cursor sequences.
+
 The machine keeps live slots and call stacks mutable between publication
 points. Projection supplies semantic sites and roots when a save or census
 needs them; it does not publish every call that returns between saves.
@@ -349,7 +368,8 @@ it renews the lease once a third of its time to live has passed since the
 last renewal, and a failed renewal refuses the exchange as
 `PageRefusal::LeaseLost`. Within that third of a confirmed renewal the
 store's expiry is still two thirds of a ttl away; past it, the store decides.
-A held activation renews on the same schedule while it waits on a tool. The
+A held activation renews on the same schedule while it computes from resident
+pages or waits on a tool. The
 cache answers only for immutable bytes, never for authority. An activation's
 span bounds the host work its exchanges take, not wall time.
 

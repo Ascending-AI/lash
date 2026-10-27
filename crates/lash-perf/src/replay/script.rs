@@ -26,6 +26,9 @@ pub struct Workload {
     /// Explicit compute budget for full manual/scheduled cells; omitted in the counted corpus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instruction_limit: Option<u64>,
+    /// Explicit logical heap for deployment comparisons; defaults to 512 MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit_mib: Option<u64>,
     /// Sessions that run the turns at once, in lockstep rounds on one store.
     #[serde(default = "one")]
     pub sessions: usize,
@@ -168,6 +171,11 @@ impl Workload {
         ensure!(
             self.instruction_limit != Some(0),
             "instruction budget must be positive"
+        );
+        ensure!(
+            self.memory_limit_mib
+                .is_none_or(|mib| (1..=512).contains(&mib)),
+            "logical heap must be within the worker's 1..=512 MiB allowance"
         );
         ensure!(self.sessions >= 1, "`{}` runs no session", self.name);
         ensure!(

@@ -142,3 +142,18 @@ pub async fn renew_when_due<R: super::LeasedReads + ?Sized>(
     clock.sleep_until(due).await;
     let _ = pages.lock().await.keep_alive().await;
 }
+
+/// Keeps an activation's authority alive while its machine computes without
+/// page exchanges. Dropping the work drops its renewal too.
+pub async fn while_held<R: super::LeasedReads + ?Sized, F: std::future::Future>(
+    pages: &Arc<tokio::sync::Mutex<ActivationPages<R>>>,
+    work: F,
+) -> F::Output {
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            result = &mut work => return result,
+            () = renew_when_due(pages) => {}
+        }
+    }
+}

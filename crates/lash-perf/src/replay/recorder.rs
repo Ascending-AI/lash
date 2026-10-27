@@ -198,6 +198,7 @@ pub fn script<'a>(
         description: format!("Captured by `lash-perf replay-record`: {name}."),
         protocol,
         instruction_limit: None,
+        memory_limit_mib: None,
         sessions: 1,
         compact_every: None,
         turns,

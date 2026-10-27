@@ -19,6 +19,7 @@ mod canonical;
 pub(crate) use canonical::boundary_hash;
 mod decoded;
 mod diff;
+mod range;
 pub use diff::Change;
 mod inline;
 mod key;
@@ -271,12 +272,16 @@ enum Link<T: Cell> {
     },
     Dirty(Rc<residency::DirtyNode<T>>),
 }
-/// A self-contained leaf owns its rows. Relative leaves retain their token
-/// grammar until a family context interprets their occurrences.
+/// Inline leaves own decoded rows. Contextual leaves also retain their
+/// original grammar so changing the family reinterprets relative references.
 #[derive(Clone)]
 enum Inline<T: Cell> {
     Rows(Rc<[(Key, T)]>),
     Tokens(Arc<[u8]>),
+    Bound {
+        tokens: Arc<[u8]>,
+        rows: Rc<[(Key, T)]>,
+    },
 }
 impl<T: Cell> Inline<T> {
     fn encode(&self, out: &mut TokenWriter) {
@@ -287,12 +292,12 @@ impl<T: Cell> Inline<T> {
                     row.encode(out);
                 }
             }
-            Self::Tokens(tokens) => out.raw(tokens),
+            Self::Tokens(tokens) | Self::Bound { tokens, .. } => out.raw(tokens),
         }
     }
     fn tokens(&self) -> Arc<[u8]> {
         match self {
-            Self::Tokens(tokens) => Arc::clone(tokens),
+            Self::Tokens(tokens) | Self::Bound { tokens, .. } => Arc::clone(tokens),
             Self::Rows(_) => {
                 let mut out = TokenWriter::new();
                 self.encode(&mut out);
@@ -579,7 +584,7 @@ impl<T: Cell> Tree<T> {
     /// shares.
     fn load(branch: &Branch<T>, access: &Access<'_>, sequence: bool) -> Result<Node<T>, HeapFault> {
         if let Link::Inline {
-            body: Inline::Rows(rows),
+            body: Inline::Rows(rows) | Inline::Bound { rows, .. },
             ..
         } = &branch.link
         {
@@ -599,7 +604,7 @@ impl<T: Cell> Tree<T> {
         crate::perf_witness::sealing(|w| w.seal_nodes_visited += 1);
         match &branch.link {
             Link::Inline {
-                body: Inline::Rows(rows),
+                body: Inline::Rows(rows) | Inline::Bound { rows, .. },
                 ..
             } => Ok(Loaded::Inline(Rc::clone(rows))),
             Link::Dirty(n) if !matches!(&*n.borrow(), Node::Staged(..)) => {
@@ -630,7 +635,9 @@ impl<T: Cell> Tree<T> {
                 }
             }
             Link::Inline { body, children } => match body {
-                Inline::Rows(_) => unreachable!("inline rows have a direct read view"),
+                Inline::Rows(_) | Inline::Bound { .. } => {
+                    unreachable!("inline rows have a direct read view")
+                }
                 Inline::Tokens(tokens) => {
                     Self::inline_node(branch.family, branch.summary, tokens, children, true)
                         .map(Rc::new)
@@ -788,7 +795,7 @@ impl<T: Cell> Tree<T> {
         access: &Access<'_>,
         read: impl FnOnce(Option<&T>) -> R,
     ) -> Result<R, HeapFault> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "perf-witness"))]
         note_lookup::<T>();
         fn walk<T: Cell, R>(
             branch: &Branch<T>,
@@ -825,7 +832,7 @@ impl<T: Cell> Tree<T> {
         rank: u64,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "perf-witness"))]
         note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
@@ -896,7 +903,7 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(None), |r| walk(r, key, access, self.sequence))
     }
     pub fn passed(&self, key: &[u8], access: &Access<'_>) -> Result<u64, HeapFault> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "perf-witness"))]
         note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
@@ -1580,8 +1587,13 @@ thread_local! {
     static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "perf-witness"))]
 fn note_lookup<T: 'static>() {
+    #[cfg(feature = "perf-witness")]
+    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
+        crate::perf_witness::record(|work| work.object_head_lookups += 1);
+    }
+    #[cfg(test)]
     if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
         HEAD_LOOKUPS.set(HEAD_LOOKUPS.get() + 1);
     }

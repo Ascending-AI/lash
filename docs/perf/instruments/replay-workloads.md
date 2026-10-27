@@ -16,6 +16,12 @@ continues to use the gate’s debug build.
 
 ## What runs
 
+For a deployment comparison, a replay script may set `memory_limit_mib` to
+the deployment's logical heap, within 1..=512 MiB. The default is 512 MiB;
+the receipt records the selected value as `cell_memory_mib`. Keep this
+setting identical across a performance pair. For example, Figments' 64 MiB
+cell budget can take a different execution path from the default profiler.
+
 Each workload is a committed script in `crates/lash-perf/workloads/replay/`
 (format `lash-perf-replay/1`, one file per workload). The runner creates
 live sessions on a core that serves its own node over a real store and,

@@ -526,6 +526,45 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
     }
 }
 
+/// FIG-7455: a dead cell-local closure must not make carrying a resident
+/// data graph reconstruct every object from its stored directory.
+#[test]
+fn carrying_resident_records_does_not_read_them_back_from_pages() {
+    let source = r#"
+definition "function build(callback: Any) -> Any\nkernel 1\nmetering statements\nbody { let rows = [] let i = 0 while num.lt(i, 500) { set rows[list.len(rows)] = {key: i} set i = num.add(i, 1) } let temporary = callback do perform 0(0) as Any return rows }"
+main { let host_callback = fn() { return 1 } let records = call build(fn() { return 1 }) do perform 0(0) as Any return list.len(records) }
+"#;
+    for ending in ["return list.len(records)", "finish list.len(records)"] {
+        let mut run = Embedder::with(
+            &source.replace("return list.len(records)", ending),
+            Setup {
+                start: crate::CellStart {
+                    host: vec![(
+                        lash_kernel_value::names::Name::new("host_callback"),
+                        lash_kernel_doc::Datum::Null,
+                    )],
+                    ..Setup::default().start
+                },
+                ..Setup::default()
+            },
+        );
+        assert!(matches!(run.run(), Step::Parked(_)));
+        run.deliver_next();
+        assert!(matches!(run.run(), Step::Parked(_)));
+        run.deliver_next();
+        crate::perf_witness::enable_work();
+        let ended = run.run_to_end(&[]);
+        let work = crate::perf_witness::take_work().unwrap();
+        crate::perf_witness::disable_work();
+        assert!(matches!(ended, crate::End::Finished(ref end) if end.result == int(500)));
+        assert!(
+            work.heap.object_head_lookups < 100,
+            "carry rebuilt the resident graph: {} stored object lookups",
+            work.heap.object_head_lookups
+        );
+    }
+}
+
 /// `K-EFF-003` (FIG-6193): a failed effect's error is decoded under the
 /// document's number policy before the heap freezes it, as a completed
 /// result is, so a number token in its data reaches the catching cell as

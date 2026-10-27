@@ -502,6 +502,21 @@ impl Tasks {
         self.cache[slot] = Some((index, Box::new(task)));
         Ok(())
     }
+    /// Releases a successful cell's execution values while preserving its
+    /// task rows and occurrence counters for the final observation.
+    pub(super) fn end_execution(&mut self) -> Result<(), HeapFault> {
+        for index in 0..self.len() {
+            let task = self
+                .get_mut(index)?
+                .ok_or_else(|| HeapFault::Malformed("a task row is missing".into()))?;
+            task.frames.clear();
+            match &mut task.record.state {
+                TaskStateRecord::Ended(ended) => ended.retire(),
+                state => *state = TaskStateRecord::Ended(EndedTask::Returned(None)),
+            }
+        }
+        Ok(())
+    }
     pub(super) fn after_refinement(&mut self, rows: Tree<TaskRecord>) -> Result<(), HeapFault> {
         self.invalidate_active();
         for (index, task) in self.cache.iter_mut().flatten() {
