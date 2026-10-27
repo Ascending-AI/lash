@@ -45,6 +45,8 @@ type CommitHook = Arc<
 type RetainedBeginHook = Arc<
     dyn Fn(lash_durable::StateRevision) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
 >;
+type RootLeaseHook =
+    Arc<dyn Fn(RootLeaseRequest) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 type AfterCommitHook = Arc<dyn Fn(CommitLabel) + Send + Sync>;
 
 /// A durable store that runs its armed [`CommitHook`] before each owner
@@ -55,6 +57,7 @@ pub struct DurableCommitHook {
     hook: Arc<Mutex<Option<CommitHook>>>,
     retained_begin: Arc<Mutex<Option<RetainedBeginHook>>>,
     after_commit: Arc<Mutex<Option<AfterCommitHook>>>,
+    root_lease: Arc<Mutex<Option<RootLeaseHook>>>,
     calls: Arc<Mutex<std::collections::BTreeMap<&'static str, u64>>>,
     process_opens: Arc<Mutex<std::collections::BTreeMap<ActorKey, u64>>>,
 }
@@ -68,6 +71,7 @@ impl DurableCommitHook {
             hook: Arc::new(Mutex::new(None)),
             retained_begin: Arc::default(),
             after_commit: Arc::default(),
+            root_lease: Arc::default(),
             calls: Arc::default(),
             process_opens: Arc::default(),
         }
@@ -116,6 +120,15 @@ impl DurableCommitHook {
             Some(Arc::new(move |revision| Box::pin(hook(revision))));
     }
 
+    /// Hold a lease acquisition after its caller sampled the root, before storage checks it.
+    pub fn arm_root_lease<F, Fut>(&self, hook: F)
+    where
+        F: Fn(RootLeaseRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        *self.root_lease.lock_recover() = Some(Arc::new(move |request| Box::pin(hook(request))));
+    }
+
     /// Observe successful owner writes after storage, before their acknowledgements return.
     pub fn arm_after_commit(&self, hook: impl Fn(CommitLabel) + Send + Sync + 'static) {
         *self.after_commit.lock_recover() = Some(Arc::new(hook));
@@ -126,6 +139,7 @@ impl DurableCommitHook {
         *self.hook.lock_recover() = None;
         *self.retained_begin.lock_recover() = None;
         *self.after_commit.lock_recover() = None;
+        *self.root_lease.lock_recover() = None;
     }
 
     /// Runs the armed hook, if any, before `tx` commits under `label`.
@@ -156,7 +170,20 @@ impl PageStore for DurableCommitHook {
         &self,
         request: RootLeaseRequest,
     ) -> Result<RootLease, DurableError> {
-        self.page_store()?.acquire_root_lease(request).await
+        let hook = self.root_lease.lock_recover().clone();
+        if let Some(hook) = hook {
+            hook(request.clone()).await;
+        }
+        let result = self.page_store()?.acquire_root_lease(request).await;
+        if matches!(
+            result,
+            Err(DurableError::Graph(
+                lash_core_store::checkpoint_graph::GraphRefusal::RevisionConflict
+            ))
+        ) {
+            self.count("root_revision_conflict");
+        }
+        result
     }
 
     async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {

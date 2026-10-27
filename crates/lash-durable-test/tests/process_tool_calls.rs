@@ -186,8 +186,18 @@ const PROBE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfi
 /// scripts. A process a cell starts runs under the turn's run with the
 /// probe's component.
 async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
+    layered_world(tier, witness, std::convert::identity).await
+}
+
+async fn layered_world(
+    tier: Tier,
+    witness: &Arc<Witness>,
+    layer: impl FnOnce(
+        Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    ) -> Arc<dyn lash_execution_contracts::backend::StoreSet>,
+) -> Option<World> {
     let witness = Arc::clone(witness);
-    World::new(tier, move |backend| {
+    World::layered(tier, layer, move |backend| {
         let probe: Arc<dyn lash_core::ToolProvider> = Arc::new(Probe {
             witness,
             backend: backend.clone(),
@@ -539,6 +549,90 @@ async fn process_tool_call_limit_staged_calls(tier: Tier) {
     assert!(
         shown.contains(&refusal),
         "the turn is shown the refusal at the group past the limit: {refusal}\n{shown}"
+    );
+    world.shutdown().await;
+}
+
+/// FIG-7463: a sibling outcome moving the execution root during a resume's
+/// lease acquisition must preserve both groups of process effects.
+async fn a_sibling_commit_during_checkpoint_lease_preserves_staged_calls(tier: Tier) {
+    use lash_core::testing::DurableCommitHook;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let witness = Arc::new(Witness::default());
+    let hook = Arc::new(std::sync::OnceLock::<Arc<DurableCommitHook>>::new());
+    let Some(world) = layered_world(tier, &witness, {
+        let hook = Arc::clone(&hook);
+        move |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_durable_store(move |inner| {
+                    let hooked = Arc::new(DurableCommitHook::over(inner));
+                    hook.set(Arc::clone(&hooked)).ok().unwrap();
+                    hooked
+                })
+                .into_store_set()
+        }
+    })
+    .await
+    else {
+        return;
+    };
+    let hook = hook.get().unwrap();
+    let sampled = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(tokio::sync::Notify::new());
+    hook.arm_root_lease({
+        let witness = Arc::clone(&witness);
+        let sampled = Arc::clone(&sampled);
+        let committed = Arc::clone(&committed);
+        move |request| {
+            let pause = matches!(
+                request.owner,
+                lash_durable::domain::RootOwner::Exec(lash_durable::domain::ExecKey::Process(_))
+            ) && !sampled.swap(true, Ordering::SeqCst);
+            let witness = Arc::clone(&witness);
+            let committed = Arc::clone(&committed);
+            async move {
+                if pause {
+                    witness.gate.send_replace(true);
+                    committed.notified().await;
+                }
+            }
+        }
+    });
+    hook.arm_after_commit({
+        let sampled = Arc::clone(&sampled);
+        let committed = Arc::clone(&committed);
+        move |label| {
+            if label == lash_durable::CommitLabel::PROCESS_ADVANCE && sampled.load(Ordering::SeqCst)
+            {
+                committed.notify_one();
+            }
+        }
+    });
+    let output = world.run("process-root-race", served::spec(LIMIT), vec![served::cell(
+        "const body = async (): Promise<string> => {\n  \
+           await Promise.all([tools.processProbe({ label: \"twice-0\" }), tools.processProbe({ label: \"twice-1\", hold: true })]);\n  \
+           await Promise.all([tools.processProbe({ label: \"twice-2\" }), tools.processProbe({ label: \"twice-3\" })]);\n  \
+           return \"done\";\n};\n\
+         const held = await processes.start({ definition: body });\n\
+         await control.finish(await held);"
+    )]).await;
+    assert!(
+        sampled.load(Ordering::SeqCst),
+        "the resume sampled a process root"
+    );
+    assert_eq!(
+        hook.calls("root_revision_conflict"),
+        1,
+        "a real sibling commit displaced the sampled root"
+    );
+    for label in ["twice-0", "twice-1", "twice-2", "twice-3"] {
+        witness.only(label);
+    }
+    assert_eq!(
+        output.finished().map(|(_, value)| value.clone()),
+        Some(serde_json::json!("done")),
+        "{output:#?}\n{:?}",
+        world.requests("process-root-race")
     );
     world.shutdown().await;
 }
@@ -1050,6 +1144,7 @@ tiered_laws!(
     tool_call_limit_counts_what_a_process_holds,
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
     process_tool_call_limit_staged_calls,
+    a_sibling_commit_during_checkpoint_lease_preserves_staged_calls,
     typescript_process_body_resolves_journaled_clock_and_randomness,
     omitted_tool_input_is_exactly_empty_object,
 );

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
-use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
+use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, GraphRefusal, NodeId};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
@@ -93,7 +93,7 @@ impl StepActivation {
         let (lease, resumed) = match parked {
             None => (None, None),
             Some((parked, under)) => {
-                let (request, held) = match under {
+                let request = match under {
                     ParkedUnder::Process(step) => {
                         let exec = ExecKey::Process(process.clone());
                         let row = store
@@ -103,7 +103,7 @@ impl StepActivation {
                             .ok_or_else(|| {
                                 fault("the process's root does not name its parked run")
                             })?;
-                        let request = RootLeaseRequest {
+                        RootLeaseRequest {
                             owner: RootOwner::Exec(exec),
                             expected: row.root,
                             fence: LeaseFence::Actor {
@@ -111,8 +111,7 @@ impl StepActivation {
                                 epoch: step.epoch,
                             },
                             ttl_millis: millis(ttl),
-                        };
-                        (request, row.root)
+                        }
                     }
                     ParkedUnder::Record {
                         owner,
@@ -120,17 +119,15 @@ impl StepActivation {
                         ttl: reader,
                     } => {
                         ttl = reader;
-                        let request = RootLeaseRequest {
+                        RootLeaseRequest {
                             owner,
                             expected: record,
                             fence: LeaseFence::Reader,
                             ttl_millis: millis(ttl),
-                        };
-                        (request, record)
+                        }
                     }
                 };
-                let lease = store
-                    .acquire_root_lease(request)
+                let lease = acquire_parked_lease(store.as_ref(), request)
                     .await
                     .map_err(KernelFailure::Lease)?;
                 let read = store.read_pages(&lease, &[parked.root]).await;
@@ -153,7 +150,7 @@ impl StepActivation {
                     }
                 };
                 let resumed = ParkedState {
-                    exec_root: held,
+                    exec_root: lease.root,
                     root: parked.root,
                     header,
                     admissions,
@@ -201,6 +198,43 @@ impl StepActivation {
     pub(crate) async fn end_reads(&mut self) {
         if let Some(lease) = self.lease.take() {
             let _ = self.store.release_root_lease(lease).await;
+        }
+    }
+}
+
+/// A live process reads under its current root. Sibling outcomes may move
+/// that root after it was sampled; reopen only that read, under the same
+/// fence. Record readers and other owners keep their exact-root contract.
+pub(super) async fn acquire_parked_lease(
+    store: &dyn PageStore,
+    mut request: RootLeaseRequest,
+) -> Result<lash_durable::domain::pages::RootLease, DurableError> {
+    loop {
+        match store.acquire_root_lease(request.clone()).await {
+            Err(error @ DurableError::Graph(GraphRefusal::RevisionConflict)) => {
+                let (
+                    RootOwner::Exec(ExecKey::Process(process)),
+                    LeaseFence::Actor { actor, epoch },
+                ) = (&request.owner, &request.fence)
+                else {
+                    return Err(error);
+                };
+                if actor.kind() != lash_durable::ActorKind::Process
+                    || actor.id() != process.as_str()
+                {
+                    return Err(error);
+                }
+                let row = store
+                    .exec_root(&ExecKey::Process(process.clone()))
+                    .await?
+                    .ok_or(DurableError::Graph(GraphRefusal::RootRetired))?;
+                tracing::debug!(
+                    %actor, %epoch, expected = %request.expected, actual = %row.root,
+                    "process checkpoint root moved before lease acquisition; reopening under the same fence"
+                );
+                request.expected = row.root;
+            }
+            result => return result,
         }
     }
 }
