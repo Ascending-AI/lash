@@ -3,13 +3,13 @@ numbers float
 import 3 operation display.show_message(input: Any) -> Any
 import 4 operation gmail.list_recent(input: Any) -> Any
 import 5 operation display.set_status(input: Any) -> Any
-library @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f
-library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
-library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"4720f065b36d867e38cb3538e41c9b5704cde9620e4ad5da7cfc483883ace8e4\",\"signature\":{\"result\":{\"list\":{\"record\":{\"fields\":[{\"name\":\"sender\",\"ty\":\"text\"},{\"name\":\"subject\",\"ty\":\"text\"},{\"name\":\"snippet\",\"ty\":\"text\"},{\"name\":\"unread\",\"ty\":\"bool\"}],\"rest\":\"closed\"}}}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation display.show_message(input: Any) -> Any\nimport 4 operation gmail.list_recent(input: Any) -> Any\nimport 5 operation display.set_status(input: Any) -> Any\nuse ts.copy_boundary = @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let greeting = \"Inbox review started\"\n  do perform 3(invoke ts.copy_boundary({text: greeting}, absent)) as Any then yield\n  let emails = perform 4(invoke ts.copy_boundary({count: 3.0}, absent)) as Any then yield\n  do perform 5(invoke ts.copy_boundary({key: \"inbox\", value: \"Reviewed three mock emails\"}, absent)) as Any then yield\n  return emails via ts.promise.adopt\n}\n"
+library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
+library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"88fe50858bcddab1d35cb8149999848960defe834429554d7377da44bead4572\",\"signature\":{\"result\":{\"list\":{\"record\":{\"fields\":[{\"name\":\"sender\",\"ty\":\"text\"},{\"name\":\"subject\",\"ty\":\"text\"},{\"name\":\"snippet\",\"ty\":\"text\"},{\"name\":\"unread\",\"ty\":\"bool\"}],\"rest\":\"closed\"}}}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation display.show_message(input: Any) -> Any\nimport 4 operation gmail.list_recent(input: Any) -> Any\nimport 5 operation display.set_status(input: Any) -> Any\nuse ts.copy_boundary = @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let greeting = \"Inbox review started\"\n  do perform 3(invoke ts.copy_boundary({text: greeting}, absent)) as Any then yield\n  let emails = perform 4(invoke ts.copy_boundary({count: 3.0}, absent)) as Any then yield\n  do perform 5(invoke ts.copy_boundary({key: \"inbox\", value: \"Reviewed three mock emails\"}, absent)) as Any then yield\n  return emails via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(4720f065b36d867e38cb3538e41c9b5704cde9620e4ad5da7cfc483883ace8e4)): statements=5 scopes=1 sites=12
+unit Library(FunctionId(88fe50858bcddab1d35cb8149999848960defe834429554d7377da44bead4572)): statements=5 scopes=1 sites=12

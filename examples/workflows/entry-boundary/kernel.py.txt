@@ -1,20 +1,20 @@
 kernel 1
 numbers by_spelling
-library @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44
-export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-export declared "{\"kind\":\"function\",\"value\":{\"function\":\"ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+library @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161
+export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+export declared "{\"kind\":\"function\",\"value\":{\"function\":\"e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
 definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nbody {\n  return value\n}\n"
-definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse py.bind = @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44\nbody {\n  return let(t1 = invoke py.bind(\"local\", (), positional1, keywords1, false), \"block\")\n}\n"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return \"top\"\n}\n"
+definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse py.bind = @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161\nbody {\n  return let(t1 = invoke py.bind(\"local\", (), positional1, keywords1, false), \"block\")\n}\n"
 main {
   let local = absent
-  let arrow = &@6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5
-  let declared = &@ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523
+  let arrow = &@d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d
+  let declared = &@e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4
   if true {
-    set local = let(t2 = fn @b6cee439175e40afaae9e2f9a971ee87990dec65444d47afe2e57baba01c3577 presentation() -> Any token("py.function", 1) py_args(0), ("py.function", t2, (), "local", ("py.callable", true)))
+    set local = let(t2 = fn @fc2dc27f97fb1abadfce756a08b473572d729ceceeec25b942f7048b81b1ff54 presentation() -> Any token("py.function", 1) py_args(0), ("py.function", t2, (), "local", ("py.callable", true)))
   }
 }
 
-unit Library(FunctionId(6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5)): statements=1 scopes=1 sites=9
+unit Library(FunctionId(d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d)): statements=1 scopes=1 sites=9
 
-unit Library(FunctionId(ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523)): statements=1 scopes=1 sites=9
+unit Library(FunctionId(e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4)): statements=1 scopes=1 sites=9

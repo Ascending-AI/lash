@@ -1,15 +1,15 @@
 kernel 1
 numbers by_spelling
-library @2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7
-library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-library @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
-library @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f
-library @b582818fd406598106d1da97627a56137bca4308eafd86015db4e876ad051df8
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"369ba3be7c1a3601b766333d319bd7c38f31373c6a69403fb1190aa98b418e17\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"int\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse local.function = @8e06217858b7becb830fcab472009f3fc3a722874e25b37c44bf1c7ab65e3208\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f\nuse py.iterator.step = @2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7\nbody {\n  let size = fn local.function presentation(item: Any) -> Any bare direct\n  let t2 = []\n  for item_1 in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set t2[list.len(t2)] = apply size(item_1)\n  }\n  return t2\n}\n"
-definition "function local.function(item: Any) -> Any\nkernel 1\nmetering statements\nuse py.length = @b582818fd406598106d1da97627a56137bca4308eafd86015db4e876ad051df8\nbody {\n  return invoke py.length(item)\n}\n"
+library @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017
+library @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f
+library @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43
+library @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77
+library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a79ceb81b791249c59ee615224371aad751d5c9d3f1895358417c5b2b66d7342\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"int\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(item: Any) -> Any\nkernel 1\nmetering statements\nuse py.length = @3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f\nbody {\n  return invoke py.length(item)\n}\n"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse local.function = @70222c0ced0bc599f8a197b4b972bf6adeea25c3c1743dfc4f266b1e6f580785\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nbody {\n  let size = fn local.function presentation(item: Any) -> Any bare direct\n  let t2 = []\n  for item_1 in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set t2[list.len(t2)] = apply size(item_1)\n  }\n  return t2\n}\n"
 main {
-  let demo = &@369ba3be7c1a3601b766333d319bd7c38f31373c6a69403fb1190aa98b418e17
+  let demo = &@a79ceb81b791249c59ee615224371aad751d5c9d3f1895358417c5b2b66d7342
 }
 
-unit Library(FunctionId(369ba3be7c1a3601b766333d319bd7c38f31373c6a69403fb1190aa98b418e17)): statements=6 scopes=3 sites=9
+unit Library(FunctionId(a79ceb81b791249c59ee615224371aad751d5c9d3f1895358417c5b2b66d7342)): statements=6 scopes=3 sites=9

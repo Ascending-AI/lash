@@ -1,17 +1,17 @@
 kernel 1
 numbers float
 import 3 operation corpus.echo(input?: Json) -> Json
-library @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f
-library @2395e33a6d037a2c7ab898f333b59d11bf28da384b4c96328710c0014cd33cff
-library @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8
-library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
-library @bd07141141bc0cc112847c3521edca5c0843baced914967a1003671ac6427d8f
-library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-library @fa9c8c5a5d0b2e6fa69c270e9cc9a9a7380175c1f40f0858bd88cf7d850c6024
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nuse ts.copy_boundary = @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f\nuse ts.for_of.item = @fa9c8c5a5d0b2e6fa69c270e9cc9a9a7380175c1f40f0858bd88cf7d850c6024\nuse ts.for_of.next = @2395e33a6d037a2c7ab898f333b59d11bf28da384b4c96328710c0014cd33cff\nuse ts.for_of.open = @bd07141141bc0cc112847c3521edca5c0843baced914967a1003671ac6427d8f\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let out = []\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set out[list.len(out)] = perform 3(invoke ts.copy_boundary(item, absent)) as Json then yield\n  }\n  return out via ts.promise.adopt\n}\n"
+library @0b6166233fe4d88e3dea4ca9c5089bf8113faffc69c7b64f904c1d1a58e3842c
+library @15898d12b00faf4e9da1841cbf5eecb05cadeb95a71d24b2b953bfcaf3bbfd36
+library @2386f92dd1a4d273cf2c725d5e351bc3b91bb08c9ee95dc6168ebf5ae85ff08b
+library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
+library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
+library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"405d79ad4d28097f56517d732b8af2738e61ce12586dfa8f63a5fc5221821744\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse ts.copy_boundary = @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd\nuse ts.for_of.item = @0b6166233fe4d88e3dea4ca9c5089bf8113faffc69c7b64f904c1d1a58e3842c\nuse ts.for_of.next = @15898d12b00faf4e9da1841cbf5eecb05cadeb95a71d24b2b953bfcaf3bbfd36\nuse ts.for_of.open = @2386f92dd1a4d273cf2c725d5e351bc3b91bb08c9ee95dc6168ebf5ae85ff08b\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let out = []\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set out[list.len(out)] = perform 3(invoke ts.copy_boundary(item, absent)) as Json then yield\n  }\n  return out via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47)): statements=4 scopes=2 sites=7
+unit Library(FunctionId(405d79ad4d28097f56517d732b8af2738e61ce12586dfa8f63a5fc5221821744)): statements=4 scopes=2 sites=7

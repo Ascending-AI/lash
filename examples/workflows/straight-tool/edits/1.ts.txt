@@ -2,10 +2,10 @@
 -kernel 1
 -numbers float
 -import 3 operation corpus.echo(input?: Json) -> Json
--library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
--library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
--export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d1accf28885aed38d95f14aac14acfdf37fcddd44388f0a8b1c5f8d8a786054e\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
--definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return perform 3(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
+-library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+-definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 3(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
 -main {
 -  let demo = &demo
 -}
@@ -13,18 +13,18 @@
 +kernel 1
 +numbers float
 +import 3 operation corpus.echo(input?: Json) -> Json
-+library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
-+library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-+definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return perform 3(\"edited λ\") as Json then yield via ts.promise.adopt\n}\n"
++library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
++library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
++definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 3(\"edited λ\") as Json then yield via ts.promise.adopt\n}\n"
 +main {
 +  let demo = &demo
 +}
 
 Correspondence:
 {
-  "base": "120041833438dafe13ac19a085d47ffc0a4b72105148dc968dd34e1f6b06af8f",
-  "result": "413734fd2b8f1833e2bfef1aec69479ed89437b7d6b5238a6ef459531229ff2b",
+  "base": "406679657b7a526e5f404aa6b8cb1a9c8cecda3999f4d8273290bb278f83ecc1",
+  "result": "465c1fbe8af3c50e5b1a8008f13367b8af2e49aa673a25d813c0cfb1d527f22a",
   "entries": [
     {
       "from": {
@@ -67,19 +67,19 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "d1accf28885aed38d95f14aac14acfdf37fcddd44388f0a8b1c5f8d8a786054e"
+          "library": "f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368"
         }
       },
       "to": {
         "unit": {
-          "library": "ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f"
+          "library": "d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d"
         }
       }
     },
     {
       "from": {
         "unit": {
-          "library": "d1accf28885aed38d95f14aac14acfdf37fcddd44388f0a8b1c5f8d8a786054e"
+          "library": "f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368"
         },
         "path": [
           0
@@ -87,7 +87,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f"
+          "library": "d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d"
         },
         "path": [
           0
@@ -97,7 +97,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "d1accf28885aed38d95f14aac14acfdf37fcddd44388f0a8b1c5f8d8a786054e"
+          "library": "f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368"
         },
         "path": [
           0,
@@ -106,7 +106,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f"
+          "library": "d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d"
         },
         "path": [
           0,
@@ -119,8 +119,8 @@ Correspondence:
 }
 
 Captions to review:
-function ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f "Say hello"
-function ce4091b96c69301ce794abe81d9a1863c4cfded9c67d5a21fa2be0cb0d6efb7f/0 "Send a greeting and give back the reply"
+function d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d "Say hello"
+function d295d34985c44a7592ab5aac6fe0441c52a4aaf47818011f22eeb4de61d2699d/0 "Send a greeting and give back the reply"
 
 Reprinted source:
 /** Say hello */

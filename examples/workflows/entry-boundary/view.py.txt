@@ -1,8 +1,8 @@
-unit Library(FunctionId(6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5))
-statement function 6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5/0 ordinal=9 depth=0 block=function 6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5 Return { value: Variable(Name("value")) }
-scope function 6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5 ordinal=8 depth=0 Entry
-caption callable 0 block=function 6b2a575e278e001576a333b79a1ce6a8c2aebd1a4322dd930f698b92bce1bbe5 "Give back the number it is given"
-unit Library(FunctionId(ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523))
-statement function ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523/0 ordinal=13 depth=0 block=function ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523 Return { value: Literal(Text("top")) }
-scope function ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523 ordinal=12 depth=0 Entry
-caption callable 0 block=function ee61f606f42ec4aef6e48959c3728d881bb6d9dba462f5ebd92fb83a91418523 "Answer from the top level"
+unit Library(FunctionId(d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d))
+statement function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d/0 ordinal=9 depth=0 block=function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d Return { value: Variable(Name("value")) }
+scope function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d ordinal=8 depth=0 Entry
+caption callable 0 block=function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d "Give back the number it is given"
+unit Library(FunctionId(e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4))
+statement function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4/0 ordinal=11 depth=0 block=function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 Return { value: Literal(Text("top")) }
+scope function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 ordinal=10 depth=0 Entry
+caption callable 0 block=function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 "Answer from the top level"

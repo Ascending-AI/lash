@@ -1,13 +1,13 @@
 kernel 1
 numbers by_spelling
-library @2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7
-library @4a4c23988d62018dd496bc945ac14644d07d07b1e3928dde04e5d6299e872ef6
-library @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62
-library @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"96f95fe8a99f24334544f636edf128e70501cb97d95bf38e54d77805241bf9f8\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"int\"}}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nuse py.for_in.check = @66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62\nuse py.for_in.open = @9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f\nuse py.iterator.step = @2ef4a061b905ed35b0badbcba2e4194e748ccfbaec90721c1395bcb142d4cfb7\nuse py.number.iadd = @4a4c23988d62018dd496bc945ac14644d07d07b1e3928dde04e5d6299e872ef6\nbody {\n  let total = 0\n  for item in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set total = py.number.iadd(total, item)\n  }\n  return total\n}\n"
+library @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017
+library @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5
+library @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43
+library @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a3724577a21fcbf9adc44f49b134aabc548aedf7fbedba08b76cd47e6a71b41a\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"int\"}}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nuse py.number.iadd = @a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5\nbody {\n  let total = 0\n  for item in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set total = py.number.iadd(total, item)\n  }\n  return total\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(96f95fe8a99f24334544f636edf128e70501cb97d95bf38e54d77805241bf9f8)): statements=4 scopes=2 sites=5
+unit Library(FunctionId(a3724577a21fcbf9adc44f49b134aabc548aedf7fbedba08b76cd47e6a71b41a)): statements=4 scopes=2 sites=5

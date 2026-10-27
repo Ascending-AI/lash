@@ -1,11 +1,11 @@
 kernel 1
 numbers by_spelling
 import 3 operation corpus.echo(input?: Json) -> Json
-library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03\",\"signature\":{\"params\":[{\"name\":\"flag\",\"ty\":\"bool\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(flag: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75\nbody {\n  if flag {\n    return invoke py.reply(perform 3(\"yes\") as Json)\n  }\n  return \"no\"\n}\n"
+library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"06c1c7f5c94bdf5676b0ca9374affca243647e85afdf6e993703263984127438\",\"signature\":{\"params\":[{\"name\":\"flag\",\"ty\":\"bool\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(flag: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  if flag {\n    return invoke py.reply(perform 3(\"yes\") as Json)\n  }\n  return \"no\"\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(3f7e972c8fbfd2823ca0c963ae7d4f5cfcac090b5b21c2071bccc2b3e9b58f03)): statements=3 scopes=3 sites=6
+unit Library(FunctionId(06c1c7f5c94bdf5676b0ca9374affca243647e85afdf6e993703263984127438)): statements=3 scopes=3 sites=6

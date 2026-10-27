@@ -1,18 +1,18 @@
 kernel 1
 numbers by_spelling
 import 3 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
-library @09275f619da9b68c9f5508a3794551958cb4f5b98642732b1c9c06324e90c8ee
-library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
-library @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44
-library @6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719
-library @a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c
-definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse py.add = @a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c\nuse py.bind = @68d18ab4147d01b5cf791f0423543b348bf7f365e7cf4fec7d39f826193edc44\nuse py.getitem = @6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719\nbody {\n  return let(t1 = invoke py.bind(\"add\", ((\"x\", 1, false),), positional1, keywords1, false), let(x = t1[0], invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0))))\n}\n"
+library @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795
+library @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161
+library @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3
+library @cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5
+library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
+definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nuse py.bind = @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161\nuse py.getitem = @cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5\nbody {\n  return let(t1 = invoke py.bind(\"add\", ((\"x\", 1, false),), positional1, keywords1, false), let(x = t1[0], invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0))))\n}\n"
 main {
   let limit = 3
   let shared = [1]
   let add = let(t2 = fn local.function presentation(x: Int) -> Any token("py.function", 1) py_args(1), ("py.function", t2, (("x", 1, false),), "add", ("py.callable", true)))
-  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75(perform 3(t4) as Union(Null, Record{list: List(Json), ..Json}))))
-  do invoke @09275f619da9b68c9f5508a3794551958cb4f5b98642732b1c9c06324e90c8ee(shared, 0, 9)
+  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7(perform 3(t4) as Union(Null, Record{list: List(Json), ..Json}))))
+  do invoke @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795(shared, 0, 9)
 }
 
 unit Main: statements=6 scopes=2 sites=13

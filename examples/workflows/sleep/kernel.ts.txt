@@ -1,13 +1,13 @@
 kernel 1
 numbers float
 import 3 operation typescript.sleep(milliseconds: Int) -> Null
-library @2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754
-library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
-library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"bbef14da3c224b65a71704ee07cea4273bb1676814a72c5653017df15cd52304\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation typescript.sleep(milliseconds: Int) -> Null\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nuse ts.sleep_duration = @2db5fa3cccdca8da03f351f1e50779a58d7eea10a589e1b42a635b37d4082754\nbody {\n  do let(t1 = perform 3(invoke ts.sleep_duration(5.0)) as Null then yield, absent)\n  return \"awake\" via ts.promise.adopt\n}\n"
+library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+library @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"6aca6d6307833655f4e5fb1f0aa1c042aa117ee84aaaebf94d05ad0df802c01b\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation typescript.sleep(milliseconds: Int) -> Null\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nuse ts.sleep_duration = @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0\nbody {\n  do let(t1 = perform 3(invoke ts.sleep_duration(5.0)) as Null then yield, absent)\n  return \"awake\" via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(bbef14da3c224b65a71704ee07cea4273bb1676814a72c5653017df15cd52304)): statements=2 scopes=1 sites=5
+unit Library(FunctionId(6aca6d6307833655f4e5fb1f0aa1c042aa117ee84aaaebf94d05ad0df802c01b)): statements=2 scopes=1 sites=5

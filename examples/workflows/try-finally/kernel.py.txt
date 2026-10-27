@@ -1,12 +1,12 @@
 kernel 1
 numbers by_spelling
 import 3 operation corpus.echo(input?: Json) -> Json
-library @317d8e522f39a0626bddc57f63207bd80faa4e18acf897ec6c7e43f490857a33
-library @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"8a338a6a4688ad7c1aee9afdb8ba40d1f027d49a3b6c7a94f8383155db9e25a5\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @317d8e522f39a0626bddc57f63207bd80faa4e18acf897ec6c7e43f490857a33\nuse py.reply = @3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 3(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 3(\"finally\") as Json)\n  }\n  return `result`\n}\n"
+library @bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92
+library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"fefe99f9baa2592bc7dafc517c1e4e502dbae3f076c916d70dde976e00fbbadc\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 3(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 3(\"finally\") as Json)\n  }\n  return `result`\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(8a338a6a4688ad7c1aee9afdb8ba40d1f027d49a3b6c7a94f8383155db9e25a5)): statements=8 scopes=6 sites=14
+unit Library(FunctionId(fefe99f9baa2592bc7dafc517c1e4e502dbae3f076c916d70dde976e00fbbadc)): statements=8 scopes=6 sites=14

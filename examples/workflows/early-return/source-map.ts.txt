@@ -1,9 +1,9 @@
 language: TypeScript
 exceptions: none
 main/0 [49..334] "async function demo(value: number): Promise<string> {\n  /** Check for a negative value */\n  if (value < 0) {\n    /** Stop and report that it is negative */\n    return \"negative\";\n  }\n  /** Echo the value */\n  await corpus.echo(value);\n  /** Report that it is done */\n  return \"done\";\n}"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/0 [141..231] "if (value < 0) {\n    /** Stop and report that it is negative */\n    return \"negative\";\n  }"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/0/1/0 [209..227] "return \"negative\";"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/1 [258..283] "await corpus.echo(value);"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/1/0 [258..283] "await corpus.echo(value);"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/1/0/0 [258..283] "await corpus.echo(value);"
-function 648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978/2 [318..332] "return \"done\";"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/0 [141..231] "if (value < 0) {\n    /** Stop and report that it is negative */\n    return \"negative\";\n  }"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/0/1/0 [209..227] "return \"negative\";"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/1 [258..283] "await corpus.echo(value);"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/1/0 [258..283] "await corpus.echo(value);"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/1/0/0 [258..283] "await corpus.echo(value);"
+function c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e/2 [318..332] "return \"done\";"

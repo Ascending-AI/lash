@@ -1,15 +1,15 @@
-unit Library(FunctionId(141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd))
-statement function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0 ordinal=3 depth=0 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd If { condition: Call { function: FunctionId(3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1), args: [Variable(Name("value")), Literal(Int(Integer(0)))] }, then_block: [Return { value: Literal(Text("negative")) }], else_block: [] }
-statement function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1/0 ordinal=5 depth=1 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1 Return { value: Literal(Text("negative")) }
-statement function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1 ordinal=7 depth=0 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd Do { value: Act(ActExpr { kind: Call(Local(FunctionId(3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Variable(Name("value"))] })] }) }
-statement function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/2 ordinal=8 depth=0 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd Return { value: Literal(Text("done")) }
-scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd ordinal=2 depth=0 Entry
-scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1 ordinal=4 depth=1 Then
-scope function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/2 ordinal=6 depth=1 Else
-action function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1/0 library id=3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75 name=py.reply exports=[]
-action function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1/0/0 Some(Effect(OperationUse { link: LinkId(2c05fc47be15), slot: ImportSlot(3) }))
-caption callable 0 block=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd "Echo a value unless it is negative"
-caption node 0 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0 "Check for a negative value"
-caption node 0 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/0/1/0 "Stop and report that it is negative"
-caption node 2 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/1 "Echo the value"
-caption node 3 site=function 141fcb2f0af6ef21d17a56d5ea3d758c2a3727932df5cf6d8726c994214b7bcd/2 "Report that it is done"
+unit Library(FunctionId(c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c))
+statement function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0 ordinal=3 depth=0 block=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c If { condition: Call { function: FunctionId(14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b), args: [Variable(Name("value")), Literal(Int(Integer(0)))] }, then_block: [Return { value: Literal(Text("negative")) }], else_block: [] }
+statement function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/1/0 ordinal=5 depth=1 block=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/1 Return { value: Literal(Text("negative")) }
+statement function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1 ordinal=7 depth=0 block=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c Do { value: Act(ActExpr { kind: Call(Local(FunctionId(f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(3), result: Json, then_yield: false }, args: [Variable(Name("value"))] })] }) }
+statement function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/2 ordinal=8 depth=0 block=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c Return { value: Literal(Text("done")) }
+scope function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c ordinal=2 depth=0 Entry
+scope function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/1 ordinal=4 depth=1 Then
+scope function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/2 ordinal=6 depth=1 Else
+action function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1/0 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
+action function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1/0/0 Some(Effect(OperationUse { link: LinkId(c86e0e5c5730), slot: ImportSlot(3) }))
+caption callable 0 block=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c "Echo a value unless it is negative"
+caption node 0 site=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0 "Check for a negative value"
+caption node 0 site=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/1/0 "Stop and report that it is negative"
+caption node 1 site=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1 "Echo the value"
+caption node 2 site=function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/2 "Report that it is done"

@@ -1,27 +1,27 @@
 kernel 1
 numbers float
-library @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544
-library @28b09b6064b3462b4f5a44266d43335b077a902a140d9429b1abb0d6a965a8ec
-library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
-library @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a
-library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"ce75fd0db237406f0c7aefd42a80fe87a730d261262b1b182046cdbd67212640\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-export declared "{\"kind\":\"function\",\"value\":{\"function\":\"c962ec7c9b5c201384f336c0c4f432f9e52b35ea82f37775ee50e1574c74f570\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local(this4: Any, args4: Any) -> Any\nkernel 1\nmetering statements\nuse list.copy = @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\nuse local = @ae0147f9cf6012a4a9361be4cea68450905af5b21f926bf268d09f132f5d17a9\nuse ts.promise.start = @28b09b6064b3462b4f5a44266d43335b077a902a140d9429b1abb0d6a965a8ec\nbody {\n  return invoke ts.promise.start(fn local, this4, list.copy(args4))\n}\n"
-definition "function alsoLocal(this6: Any, args6: Any) -> Any\nkernel 1\nmetering statements\nuse alsoLocal = @46ac56387b7531b82f1ab59d73f3f98eb2c82826d4077e58654e725c627b0376\nuse list.copy = @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\nuse ts.promise.start = @28b09b6064b3462b4f5a44266d43335b077a902a140d9429b1abb0d6a965a8ec\nbody {\n  return invoke ts.promise.start(fn alsoLocal, this6, list.copy(args6))\n}\n"
-definition "function alsoLocal(this5: Any, args5: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return \"block\" via ts.promise.adopt\n}\n"
-definition "function local(this3: Any, args3: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return \"block\" via ts.promise.adopt\n}\n"
-definition "function declared() -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return \"top\" via ts.promise.adopt\n}\n"
-definition "function arrow(value: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  return value via ts.promise.adopt\n}\n"
+library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a
+library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
+library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+library @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a
+export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"eee30810873c69cd47e9a0ab6bbfb1030ea5f0f7d13e449d23a5dcef956170fc\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+export declared "{\"kind\":\"function\",\"value\":{\"function\":\"07c02ad70ef95441a622a575a03ad625b5acd9d03875e9cfdf881c89c52d2731\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function local(this4: Any, args4: Any) -> Any\nkernel 1\nmetering statements\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse local = @fdc3adc8e86e5a6197ae9fa8b29b62ad24ab39122c77ded68194e1eadaafd500\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn local, this4, list.copy(args4))\n}\n"
+definition "function declared() -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return \"top\" via ts.promise.adopt\n}\n"
+definition "function alsoLocal(this5: Any, args5: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return \"block\" via ts.promise.adopt\n}\n"
+definition "function alsoLocal(this6: Any, args6: Any) -> Any\nkernel 1\nmetering statements\nuse alsoLocal = @291877c0dfc3f49731f8ac1195100d98a8bc621cbe4b834d70f9af402fa2dafd\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn alsoLocal, this6, list.copy(args6))\n}\n"
+definition "function arrow(value: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return value via ts.promise.adopt\n}\n"
+definition "function local(this3: Any, args3: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return \"block\" via ts.promise.adopt\n}\n"
 main {
   let arrow = &arrow
   let declared = &declared
   if true {
-    let local_1 = ("ts.function", "", "local", 0.0, fn @065354cd1c71472cff407fba07e3e9124d4b1eb8b55c971781c2632e4a401e0c presentation() -> Any token("ts.function", 4) ts_args(@8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02, @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544), {})
-    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn @3df6626f14411f610d0d764dfcdaffe89cdded1e99bcb986f1e4de0e9147de19 presentation() -> Any token("ts.function", 4) ts_args(@8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02, @048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544), {})
+    let local_1 = ("ts.function", "", "local", 0.0, fn @025fa92e5edf1402d6dc24c2673b2cc5d6af5cb03cc174224a2cfc9fd1ecffd1 presentation() -> Any token("ts.function", 4) ts_args(@d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
+    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn @3df93edb9b720a385ea3c0f7fe069aaeb81c43ab6268e23494d13ccf3eaa9486 presentation() -> Any token("ts.function", 4) ts_args(@d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
   }
 }
 
-unit Library(FunctionId(ce75fd0db237406f0c7aefd42a80fe87a730d261262b1b182046cdbd67212640)): statements=1 scopes=1 sites=13
+unit Library(FunctionId(eee30810873c69cd47e9a0ab6bbfb1030ea5f0f7d13e449d23a5dcef956170fc)): statements=1 scopes=1 sites=13
 
-unit Library(FunctionId(c962ec7c9b5c201384f336c0c4f432f9e52b35ea82f37775ee50e1574c74f570)): statements=1 scopes=1 sites=13
+unit Library(FunctionId(07c02ad70ef95441a622a575a03ad625b5acd9d03875e9cfdf881c89c52d2731)): statements=1 scopes=1 sites=13
