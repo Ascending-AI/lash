@@ -83,6 +83,14 @@ prepared!(Less, |args| match args {
 
 struct Concat;
 impl NativeFunction for Concat {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            text_append: true,
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let (Some(a), Some(b)) = (
             call.args
@@ -118,8 +126,13 @@ impl NativeFunction for Concat {
 
 struct Len;
 impl NativeFunction for Len {
-    fn prepare_collection_length(&self) -> Option<lash_kernel_doc::ValueKind> {
-        Some(lash_kernel_doc::ValueKind::List)
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            resident: Some(lash_kernel_doc::ResidentRead::Length(
+                lash_kernel_doc::plan::Collection::List,
+            )),
+            ..Default::default()
+        }
     }
 
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

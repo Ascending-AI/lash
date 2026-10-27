@@ -57,8 +57,11 @@ impl NativeFunction for ResidentJoin {
         self.0.call(call)
     }
 
-    fn prepare_text_join(&self) -> bool {
-        true
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            text_join: true,
+            ..self.0.specialization()
+        }
     }
 }
 
@@ -69,9 +72,17 @@ struct Native {
     /// Its entry over immediates, which answers what the general call
     /// answers where it needs no arena.
     prepared: Option<PreparedNative>,
+    text_append: bool,
 }
 
 impl NativeFunction for Native {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepared,
+            text_append: self.text_append,
+            ..Default::default()
+        }
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         if !self.arity.contains(&call.args.len()) {
             return Err(raise("arity", "wrong argument count"));
@@ -182,6 +193,7 @@ fn prepared_definition(
     native: fn(NativeCall<'_, '_>) -> Result<Value, NativeError>,
     prepared: Option<PreparedNative>,
 ) -> Function {
+    let text_append = name == "text.concat";
     if let Selection::Native(selected) = selection {
         return Function {
             definition: None,
@@ -193,6 +205,7 @@ fn prepared_definition(
                         .filter(|(name, _)| !name.ends_with('?'))
                         .count()..=params.len(),
                     prepared,
+                    text_append,
                 }) as Arc<dyn NativeFunction>
             }),
         };
@@ -237,6 +250,7 @@ fn prepared_definition(
             function: native,
             arity,
             prepared,
+            text_append,
         })),
     }
 }

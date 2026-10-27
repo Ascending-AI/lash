@@ -398,7 +398,8 @@ struct Former<'a> {
 /// answers without building it: the kernel's `same`, with its prepared
 /// entry's charge.
 pub(crate) fn unit_test(function: Option<&Lib>, args: &[Expr]) -> bool {
-    function.is_some_and(|function| function.is_same() && function.prepared.is_some())
+    function
+        .is_some_and(|function| function.is_same() && function.specialization.prepared.is_some())
         && matches!(
             args,
             [_, Expr { kind: ExprKind::Make { make: Make::Tuple, items, .. }, .. }]
@@ -467,9 +468,15 @@ impl Former<'_> {
                 .is_some_and(|function| {
                     !matches!(function.run, LibRun::Native { .. })
                         && !function.collection_method()
-                        && function.prepared.as_ref().is_some_and(|(entry, _)| {
-                            entry.writes(&|id| self.library.lib(id), &|id| self.library.lib_of(id))
-                        })
+                        && function
+                            .specialization
+                            .prepared
+                            .as_ref()
+                            .is_some_and(|(entry, _)| {
+                                entry.writes(&|id| self.library.lib(id), &|id| {
+                                    self.library.lib_of(id)
+                                })
+                            })
                 })
         })
     }
@@ -680,7 +687,7 @@ impl Former<'_> {
                         }
                     } else {
                         self.operator(*lib, args.len(), true)?;
-                        if function.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
+                        if function.specialization.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
                         {
                             return None;
                         }
@@ -1348,7 +1355,7 @@ impl Former<'_> {
             || self
                 .library
                 .get_lib(lib)
-                .and_then(|function| function.prepared.as_ref())
+                .and_then(|function| function.specialization.prepared.as_ref())
                 .is_some_and(|(entry, _)| {
                     !entry.immediate()
                         && !entry.writes(&|id| self.library.lib(id), &|id| self.library.lib_of(id))
@@ -1360,13 +1367,15 @@ impl Former<'_> {
     /// an operator, or a helper call when `helper`.
     fn operator(&self, lib: LibId, given: usize, helper: bool) -> Option<()> {
         let function = self.library.get_lib(lib)?;
-        if function.prepared.is_none() && !matches!(function.run, LibRun::Native { .. }) {
+        if function.specialization.prepared.is_none()
+            && !matches!(function.run, LibRun::Native { .. })
+        {
             return None;
         }
         // A statement-metered template bills its own ordered events even
         // when its caller is uncharged. Its source admission owns them.
         if !self.charged
-            && function.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
+            && function.specialization.prepared.as_ref().is_some_and(|(entry, _)| matches!(entry, super::Entry::Template { template, .. } if template.metered.is_some()))
         {
             return None;
         }

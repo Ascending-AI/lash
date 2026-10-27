@@ -294,7 +294,7 @@ pub(super) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
     if function.shares_params || exe.code(code).charged {
         return None;
     }
-    let (prepared, _) = function.prepared.as_ref()?;
+    let (prepared, _) = function.specialization.prepared.as_ref()?;
     if matches!(prepared, Entry::Template { template, .. } if template.metered.is_some()) {
         return None;
     }
@@ -571,7 +571,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         return None;
     };
     let function = exe.lib(*lib);
-    let (entry, fast) = function.prepared.as_ref()?;
+    let (entry, fast) = function.specialization.prepared.as_ref()?;
     let extra = entry.depth();
     let depth = if function.operation() {
         Depth::Operation(extra)
@@ -592,7 +592,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         entry: entry.clone(),
         pair: entry.pair(),
         texts: match &function.run {
-            LibRun::Native { native, .. } => native.prepare_text_relation(),
+            LibRun::Native { .. } => function.specialization.native.text_relation,
             _ => None,
         },
         concat: function

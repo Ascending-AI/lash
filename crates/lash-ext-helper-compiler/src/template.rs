@@ -29,6 +29,7 @@ use crate::library::Library;
 
 mod access;
 mod bulk;
+mod element;
 mod forwarding;
 mod metering;
 use metering::tree;
@@ -450,6 +451,7 @@ struct Evaluator<'a> {
     /// The names a closure of the body may capture, whose plan variables
     /// are cells: a heap path declares none of them.
     captured: std::collections::BTreeSet<Name>,
+    element: Option<element::Proof>,
 }
 
 /// Every name a closure in `block` uses that it does not declare itself,
@@ -485,26 +487,27 @@ fn captured(block: &[Stmt], library: &Library) -> Option<std::collections::BTree
 /// The arena read that collection native `name`'s call on `args` makes,
 /// where the heap performs it without the call (FIG-6815): a length or a
 /// table's membership test. Every other native's call stays general.
-fn read(name: &str, args: &[Symbol]) -> Option<Form> {
-    let (collection, operation) = name.split_once('.')?;
-    match (operation, args) {
-        ("len", [target]) => Some(Form::Len {
+fn read(read: lash_kernel_doc::ResidentRead, args: &[Symbol]) -> Option<Form> {
+    use lash_kernel_doc::{
+        ResidentRead,
+        plan::{Collection, Table},
+    };
+    match (read, args) {
+        (ResidentRead::Length(collection), [target]) => Some(Form::Len {
             collection: match collection {
-                "list" => "List",
-                "tuple" => "Tuple",
-                "map" => "Map",
-                "set" => "Set",
-                "record" => "Record",
-                _ => return None,
+                Collection::List => "List",
+                Collection::Tuple => "Tuple",
+                Collection::Map => "Map",
+                Collection::Set => "Set",
+                Collection::Record => "Record",
             },
             target: target.code.clone(),
         }),
-        ("contains", [target, key]) => Some(Form::Lookup {
-            table: match collection {
-                "map" => "Map",
-                "set" => "Set",
-                "record" => "Record",
-                _ => return None,
+        (ResidentRead::Membership(table), [target, key]) => Some(Form::Lookup {
+            table: match table {
+                Table::Map => "Map",
+                Table::Set => "Set",
+                Table::Record => "Record",
             },
             target: target.code.clone(),
             key: key.code.clone(),
@@ -584,6 +587,11 @@ impl Evaluator<'_> {
         form: Form,
         (kind, calls): (Option<ValueKind>, usize),
     ) -> Symbol {
+        if let Some(proof) = &self.element
+            && let Some(value) = proof.heap(&form, state)
+        {
+            return value;
+        }
         let name = self.fresh();
         if let Form::Lookup { target, key, .. } = &form {
             state.probes.push(Probe {
@@ -763,6 +771,18 @@ impl Evaluator<'_> {
     ) -> Option<Symbol> {
         let registered = self.library.registry.get(&function)?;
         let definition = registered.definition();
+        if self.element.is_some() {
+            if depth > 16 || definition.guard.is_some() {
+                return None;
+            }
+            if let Some(native) = registered.native() {
+                return self
+                    .element
+                    .as_mut()?
+                    .call(function, &native.specialization(), &args);
+            }
+            return self.helper(definition, args, state, depth);
+        }
         // `brand.built` answers the body it is written in (`K-LIB-010`),
         // which a template entry is not.
         if definition.name.as_str() == "brand.built" && definition.body().is_none() {
@@ -770,8 +790,9 @@ impl Evaluator<'_> {
         }
         // Kind is known even though the value is not. This is the only
         // intrinsic reduction; all value computations use native entries.
-        if definition.name.as_str() == "kind"
-            && let Some(kind) = args.first()?.kind
+        if registered.native().is_some_and(|native| {
+            native.specialization().symbolic == Some(lash_kernel_doc::SymbolicNative::Kind)
+        }) && let Some(kind) = args.first()?.kind
         {
             let handle = ArenaHandle::new(0, 0);
             let sample = match kind {
@@ -787,7 +808,9 @@ impl Evaluator<'_> {
                 ValueKind::Tuple if self.heap => Value::Tuple(handle),
                 _ => return None,
             };
-            return Symbol::constant((registered.native()?.prepare()?.entry)(&[sample])?);
+            return Symbol::constant((registered.native()?.specialization().immediate?.entry)(
+                &[sample],
+            )?);
         }
         if definition.name.as_str().starts_with("py.")
             || definition.name.as_str().starts_with("ts.")
@@ -804,7 +827,10 @@ impl Evaluator<'_> {
         if self.heap
             && definition.guard.is_none()
             && registered.native().is_some()
-            && let Some(form) = read(definition.name.as_str(), &args)
+            && let Some(form) = registered
+                .native()
+                .and_then(|native| native.specialization().resident)
+                .and_then(|fact| read(fact, &args))
         {
             let kind = self.result_kind(definition);
             let calls = args.iter().map(|arg| arg.calls).sum();
@@ -816,7 +842,7 @@ impl Evaluator<'_> {
             }
             return None;
         }
-        let entry = match registered.native()?.prepare() {
+        let entry = match registered.native()?.specialization().immediate {
             Some(entry) => entry,
             None if self.heap => return Some(self.general(function, definition, &args, state)),
             None => return None,
@@ -838,7 +864,9 @@ impl Evaluator<'_> {
         // `kind` reads the value tag, even when a preceding heap read
         // left that tag unknown to this pass. Its native entry always
         // returns an inline name and requires no arena reservation.
-        let tag = definition.name.as_str() == "kind";
+        let tag = registered.native().is_some_and(|native| {
+            native.specialization().symbolic == Some(lash_kernel_doc::SymbolicNative::Kind)
+        });
         let kind = if tag {
             Some(ValueKind::Text)
         } else {
@@ -1080,6 +1108,9 @@ impl Evaluator<'_> {
                 let Some(test) = self.expr(condition, state, depth) else {
                     return Vec::new();
                 };
+                if self.element.is_some() && test.constant.is_none() {
+                    return Vec::new();
+                }
                 let branches = match test.constant {
                     Some(Value::Bool(true)) => vec![(then_block, None)],
                     Some(Value::Bool(false)) => vec![(else_block, None)],
@@ -1178,6 +1209,7 @@ struct Pass {
     writes: bool,
     record_writes: BTreeMap<(String, u8, bool), u32>,
     member_access: Option<lash_kernel_doc::plan::Element>,
+    member_requires: Vec<(FunctionId, lash_kernel_doc::plan::NativeFact)>,
 }
 
 impl Evaluator<'_> {
@@ -1215,6 +1247,7 @@ impl Evaluator<'_> {
             writes: false,
             record_writes: BTreeMap::new(),
             member_access: None,
+            member_requires: Vec::new(),
         };
         for mask in 0..combinations {
             let mut state = State {
@@ -1314,7 +1347,12 @@ impl Evaluator<'_> {
                 && state.charging.is_none()
                 && let Some(read) = self.member_access(definition, &names, state, value)
             {
-                pass.member_access = Some(match (pass.member_access, read) {
+                for requirement in read.requires {
+                    if !pass.member_requires.contains(&requirement) {
+                        pass.member_requires.push(requirement);
+                    }
+                }
+                pass.member_access = Some(match (pass.member_access, read.operation) {
                     (
                         Some(lash_kernel_doc::plan::Element::Append(left)),
                         lash_kernel_doc::plan::Element::Append(right),
@@ -1497,20 +1535,6 @@ fn record_write(steps: &[Step], value: &Symbol) -> Option<(String, u8, bool)> {
         .then(|| Some((key.as_str().to_owned(), u8::try_from(*native).ok()?, *holds)))?
 }
 
-/// The helpers whose body, on a list, a float that is a whole number at
-/// least zero and at most the list's length and below 2³² − 1, and any
-/// value, makes the element write `set target[key] = value` and answers
-/// `value`, as [`lash_kernel_doc::plan::HeapTemplate::element`]
-/// declares: the TypeScript member write, whose list branch converts such
-/// a key to itself (`ts.number_index`) and writes there. The regions law
-/// that a region's element writes agree with the reference's pins each.
-const ELEMENT_WRITES: &[&str] = &["ts.set"];
-
-/// These generated helpers' numeric-list branch reads the integral key
-/// directly, returns Absent for an empty tuple, and has no closure charge.
-/// `ts.get` keeps its separately charged dynamic closure and is excluded.
-const ELEMENT_READS: &[&str] = &["ts.get_computed", "ts.get_numeric"];
-
 /// A generated template descriptor and its prepared code, if a typed path
 /// of this body can run using certified native entries, or the arena.
 pub(crate) fn emit(
@@ -1531,6 +1555,7 @@ pub(crate) fn emit(
         used: 0,
         heap: false,
         captured: captured(&definition.body()?.block, library)?,
+        element: None,
     };
     let scalar = evaluator.pass(definition, &IMMEDIATE)?;
     // A helper whose native an embedder installs answers through it where
@@ -1598,15 +1623,11 @@ pub(crate) fn emit(
     match heap {
         None => descriptor.push_str("None"),
         Some(heap) => {
-            let element = if heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str()) {
-                "Some(p::Element::Write)".to_owned()
-            } else if let Some(read) = heap.member_access {
-                format!("Some(p::Element::{read:?})")
-            } else if ELEMENT_READS.contains(&definition.name.as_str()) {
-                "Some(p::Element::Read)".to_owned()
-            } else {
-                "None".to_owned()
-            };
+            let element = element::derive(library, definition)
+                .or_else(|| {
+                    element::describe(heap.member_access?, heap.depth, &heap.member_requires)
+                })
+                .unwrap_or_else(|| "None".to_owned());
             let record_write = heap.record_writes.iter().max_by_key(|(_, kinds)| kinds.count_ones())
                 .map_or_else(|| "None".to_owned(), |((key, test, holds), kinds)| {
                     format!("Some(p::RecordWrite {{ key: {key:?}, test: {test}, holds: {holds}, values: {kinds} }})")

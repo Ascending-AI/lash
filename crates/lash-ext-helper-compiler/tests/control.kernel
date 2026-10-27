@@ -7,6 +7,57 @@ use num.mul
 use list.len
 use error.new
 use law.declining
+use kind
+use same
+use tuple.len
+
+# PLAN-INDEP / ELEMENT-SOURCE: the spelling of a helper grants no array
+# semantics. These definitions deliberately change a key, hole or return.
+function ts.get_numeric(target: Any, key: Any) -> Any
+kernel 1
+charge 12
+body { return target[num.add(key, 1.0)] }
+
+function ts.get_computed(target: Any, key: Any) -> Any
+kernel 1
+charge 12
+body {
+  let value = target[key]
+  if same(kind(value), "tuple") {
+    if same(tuple.len(value), 0) { return null }
+  }
+  return value
+}
+
+function ts.set(target: Any, key: Any, value: Any) -> Any
+kernel 1
+charge 12
+body { set target[key] = value return null }
+
+# An allocating prefix is not a read-only Element path, even if discarded.
+function law.allocating_element(target: Any, key: Any) -> Any
+kernel 1
+charge 12
+body {
+  let empty = ()
+  let value = target[key]
+  if same(kind(value), "tuple") {
+    if same(tuple.len(value), 0) { return absent }
+  }
+  return value
+}
+
+# The same semantic operation under an unrelated name must still derive.
+function law.element_read(target: Any, key: Any) -> Any
+kernel 1
+charge 12
+body {
+  let value = target[key]
+  if same(kind(value), "tuple") {
+    if same(tuple.len(value), 0) { return absent }
+  }
+  return value
+}
 
 function law.handlers(mode: Any, log: Any) -> Any
 kernel 1

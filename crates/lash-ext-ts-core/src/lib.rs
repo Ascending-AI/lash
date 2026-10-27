@@ -199,14 +199,18 @@ struct Relate {
 }
 
 impl NativeFunction for Relate {
-    fn prepare_text_relation(&self) -> Option<lash_kernel_doc::scalar::ScalarOp> {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::scalar::ScalarOp;
-        Some(match self.relation {
-            Relation::Lt => ScalarOp::Lt,
-            Relation::Le => ScalarOp::Le,
-            Relation::Gt => ScalarOp::Gt,
-            Relation::Ge => ScalarOp::Ge,
-        })
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            text_relation: Some(match self.relation {
+                Relation::Lt => ScalarOp::Lt,
+                Relation::Le => ScalarOp::Le,
+                Relation::Gt => ScalarOp::Gt,
+                Relation::Ge => ScalarOp::Ge,
+            }),
+            ..Default::default()
+        }
     }
 
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

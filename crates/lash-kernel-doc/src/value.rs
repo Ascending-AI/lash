@@ -132,6 +132,31 @@ pub enum ValueKind {
     Ref,
 }
 
+impl ValueKind {
+    /// Every value kind and its canonical kernel name, in discriminant order.
+    pub const NAMES: [(Self, &'static str); 19] = [
+        (ValueKind::Null, "null"),
+        (ValueKind::Absent, "absent"),
+        (ValueKind::Bool, "bool"),
+        (ValueKind::Int, "integer"),
+        (ValueKind::Float, "float"),
+        (ValueKind::Text, "text"),
+        (ValueKind::Bytes, "bytes"),
+        (ValueKind::Timestamp, "timestamp"),
+        (ValueKind::Tuple, "tuple"),
+        (ValueKind::List, "list"),
+        (ValueKind::Map, "map"),
+        (ValueKind::Set, "set"),
+        (ValueKind::Record, "record"),
+        (ValueKind::Closure, "closure"),
+        (ValueKind::Error, "error"),
+        (ValueKind::Task, "task"),
+        (ValueKind::Function, "function"),
+        (ValueKind::Handle, "handle"),
+        (ValueKind::Ref, "ref"),
+    ];
+}
+
 /// A value copied across the effect boundary: an effect argument, an effect
 /// result, a host read's answer, a run's result (`K-EFF-002`).
 ///

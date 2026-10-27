@@ -85,7 +85,10 @@ pub(super) fn compile_document(
             let entry = prepared.lib(lib);
             // Imported natives and uncertified bodies retain ordinary dispatch.
             (!matches!(entry.run, LibRun::Native { .. } | LibRun::Machine(_))
-                && matches!(entry.prepared, Some((Entry::Template { .. }, _))))
+                && matches!(
+                    entry.specialization.prepared,
+                    Some((Entry::Template { .. }, _))
+                ))
             .then_some((key.clone(), lib))
         })
         .collect();

@@ -89,8 +89,9 @@ mod tests;
 
 pub use arena::Value;
 pub use arena::native::{
-    Args, BytesView, NativeCall, NativeError, NativeFunction, NewObject, Nursery, PreparedAnswer,
-    PreparedNative, Reservation, Retry, Semantics, SequenceView, TableView, TextView,
+    Args, BytesView, NativeCall, NativeError, NativeFunction, NativeSpecialization, NewObject,
+    Nursery, PreparedAnswer, PreparedNative, Reservation, ResidentRead, Retry, Semantics,
+    SequenceView, SymbolicNative, TableView, TextView,
 };
 pub use ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, JoinMode,

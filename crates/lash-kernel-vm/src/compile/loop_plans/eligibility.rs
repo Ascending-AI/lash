@@ -47,7 +47,7 @@ pub(crate) struct Lowered<'a> {
 /// arguments: it has a prepared entry, and an operation's body makes no
 /// cell for a shared parameter at entry, an allocation.
 pub(super) fn operator_site(function: &Lib, count: usize) -> bool {
-    function.prepared.is_some()
+    function.specialization.prepared.is_some()
         && function.arity == count
         && !(function.operation() && function.shares_params)
 }
@@ -124,7 +124,7 @@ pub(super) fn barrier(lowered: &Lowered<'_>, statement: &Stmt) -> bool {
 /// declines, so its heap paths never run.
 pub(super) fn writes(lowered: &Lowered<'_>, lib: LibId) -> bool {
     let function = (lowered.lib)(lib);
-    match &function.prepared {
+    match &function.specialization.prepared {
         Some((entry, _)) if !matches!(function.run, LibRun::Native { .. }) => {
             entry.writes(lowered.lib, lowered.lib_of)
         }
@@ -234,6 +234,7 @@ pub(super) fn general<'a>(stream: &Stream, lib: &dyn Fn(LibId) -> &'a Lib, op: O
 pub(super) fn scalar_site(function: &Lib, count: usize) -> bool {
     (1..=2).contains(&count)
         && function
+            .specialization
             .prepared
             .as_ref()
             .is_some_and(|(entry, fast)| fast.scalar().is_some() && entry.immediate())

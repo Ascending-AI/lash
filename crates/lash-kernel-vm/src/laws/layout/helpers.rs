@@ -299,8 +299,14 @@ pub(in crate::laws) fn helper_probes(
                     callees: &[],
                     depth: 1,
                     writes: false,
-                    element: (receiver == "Map(Any, Any)")
-                        .then_some(lash_kernel_doc::plan::Element::ReadMap),
+                    element: (receiver == "Map(Any, Any)").then_some(
+                        lash_kernel_doc::plan::ElementPath {
+                            operation: lash_kernel_doc::plan::Element::ReadMap,
+                            depth: 1,
+                            room: 2,
+                            requires: &[],
+                        },
+                    ),
                     record_write: None,
                 }),
                 forwards: Default::default(),

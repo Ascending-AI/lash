@@ -159,7 +159,7 @@ pub struct HeapTemplate {
     /// the call in its caller's statement may still fail.
     pub writes: bool,
     /// A collection access certified from its source over unchanged arguments.
-    pub element: Option<Element>,
+    pub element: Option<ElementPath>,
     /// A source-certified record membership guard followed by the write
     /// `target[key] = value`, returning `value`, over three unchanged
     /// arguments. Other operand kinds retain the ordinary template.
@@ -184,6 +184,49 @@ pub enum Element {
     /// Write the third argument and return it. The key is an integral
     /// nonnegative Float below [`ELEMENT_POSITIONS`] and may equal length.
     Write,
+}
+
+/// A body-derived element operation and the native facts used to prove it.
+/// Resolution against the actual registered implementations can withdraw it.
+#[derive(Debug)]
+pub struct ElementPath {
+    pub operation: Element,
+    /// Conservative extra frames derived while following the source path.
+    pub depth: u32,
+    /// Temporary value holdings; the proof refuses paths exceeding this bound.
+    pub room: u32,
+    pub requires: &'static [NativeRequirement],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeRequirement {
+    pub function: FunctionId,
+    pub fact: NativeFact,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeFact {
+    Symbolic(crate::SymbolicNative),
+    Resident(crate::ResidentRead),
+    /// The prepared integer kernel used by the source guard.
+    IntegerPair(crate::scalar::ScalarOp),
+}
+
+impl NativeFact {
+    /// Whether this native implementation supplies the fact the proof used.
+    pub fn accepts(self, native: &crate::NativeSpecialization) -> bool {
+        match self {
+            Self::Symbolic(fact) => native.symbolic == Some(fact),
+            Self::Resident(fact) => native.resident == Some(fact),
+            Self::IntegerPair(op) => {
+                native
+                    .immediate
+                    .and_then(|entry| entry.pair)
+                    .and_then(|pair| pair.ints)
+                    == Some(op)
+            }
+        }
+    }
 }
 
 /// The symbolic record-write path retained by a helper template.

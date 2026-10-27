@@ -22,6 +22,14 @@ fn floats(args: &[Value]) -> Option<Value> {
 }
 
 impl NativeFunction for NumberIndex {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            symbolic: Some(lash_kernel_doc::SymbolicNative::NumberIndex),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         if let Some(value) = floats(call.args.values()) {
             return Ok(value);

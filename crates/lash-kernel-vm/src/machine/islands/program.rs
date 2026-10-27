@@ -1137,9 +1137,15 @@ impl<'e> Build<'e> {
             } => {
                 let Some(mut site) = operator_site(expr, self.exe) else {
                     let function = self.exe.lib(*lib);
-                    let extra = function.prepared.as_ref().map_or(0, |(entry, _)| {
-                        entry.deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
-                    });
+                    let extra =
+                        function
+                            .specialization
+                            .prepared
+                            .as_ref()
+                            .map_or(0, |(entry, _)| {
+                                entry
+                                    .deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id))
+                            });
                     let depth = if function.operation() {
                         Depth::Operation(extra)
                     } else {
@@ -1229,6 +1235,7 @@ impl<'e> Build<'e> {
                 let extra = self
                     .exe
                     .lib(*lib)
+                    .specialization
                     .prepared
                     .as_ref()
                     .map_or(0, |(entry, _)| entry.depth());
@@ -1248,16 +1255,7 @@ impl<'e> Build<'e> {
                             .map(|(kind, units)| Direct::Length(kind, units)))
                         .or_else(|| lib.item_read().map(Direct::Item))
                         .or_else(|| lib.membership().map(Direct::Member))
-                        .or_else(|| match &lib.run {
-                            LibRun::Native { native, .. }
-                                if lib.arity == 2
-                                    && lib.limit.is_none()
-                                    && native.prepare_text_join() =>
-                            {
-                                Some(Direct::TextJoin)
-                            }
-                            _ => None,
-                        })
+                        .or_else(|| lib.text_join().then_some(Direct::TextJoin))
                     },
                 };
                 self.site(site.depth, false);

@@ -35,13 +35,14 @@ pub(crate) enum Entry {
         /// takes them; `None` when the template has no heap paths or a
         /// callee is missing.
         heap: OnceLock<Option<Box<[super::LibId]>>>,
+        element: Option<&'static lash_kernel_doc::plan::ElementPath>,
     },
 }
 
 impl Entry {
-    pub(crate) fn element(&self) -> Option<lash_kernel_doc::plan::Element> {
+    pub(crate) fn element(&self) -> Option<&'static lash_kernel_doc::plan::ElementPath> {
         match self {
-            Self::Template { template, .. } => template.heap.as_ref()?.element,
+            Self::Template { element, .. } => *element,
             Self::Native(_) => None,
         }
     }
@@ -75,7 +76,7 @@ impl Entry {
                 if registered.definition().guard.is_some() {
                     return None;
                 }
-                registered.native()?.prepare()
+                registered.native()?.specialization().immediate
             })
             .collect::<Option<Box<[_]>>>()?;
         if template.entry.is_none() && template.heap.is_none() {
@@ -85,6 +86,25 @@ impl Entry {
             template,
             natives,
             heap: OnceLock::new(),
+            element: template
+                .heap
+                .as_ref()
+                .and_then(|heap| heap.element.as_ref())
+                .and_then(|path| {
+                    path.requires
+                        .iter()
+                        .all(|requirement| {
+                            registry
+                                .get(&requirement.function)
+                                .is_some_and(|registered| {
+                                    registered.definition().guard.is_none()
+                                        && registered.native().is_some_and(|native| {
+                                            requirement.fact.accepts(&native.specialization())
+                                        })
+                                })
+                        })
+                        .then_some(path)
+                }),
         })
     }
 
@@ -172,6 +192,7 @@ impl Entry {
                 template,
                 natives,
                 heap,
+                ..
             } => {
                 let paths = template.heap.as_ref()?;
                 let callees = heap.get_or_init(|| paths.callees.iter().map(lib_of).collect());
@@ -217,6 +238,7 @@ impl Entry {
             heap.depth + below.unwrap_or(0)
         });
         heap.max(self.depth())
+            .max(self.element().map_or(0, |path| path.depth))
     }
 
     /// Whether a heap path may write a guest object: its own, or one of a
@@ -258,7 +280,11 @@ pub(crate) fn inner(function: &super::Lib) -> Option<&Entry> {
     if function.shares_params || matches!(function.run, super::LibRun::Native { .. }) {
         return None;
     }
-    function.prepared.as_ref().map(|(entry, _)| entry)
+    function
+        .specialization
+        .prepared
+        .as_ref()
+        .map(|(entry, _)| entry)
 }
 
 /// Classify only immediate scalars; all other answers keep formula evaluation.

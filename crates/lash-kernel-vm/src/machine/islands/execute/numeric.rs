@@ -68,7 +68,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(never)]
     fn unary_units(&self, site: &OperatorSite, x: Value, value: Value) -> Option<u64> {
         let function = self.exe.lib(site.lib);
-        function.prepared.as_ref()?;
+        function.specialization.prepared.as_ref()?;
         function
             .charge
             .immediate(&[x], super::super::cx::Fresh::default(), &value)

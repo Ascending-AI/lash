@@ -71,9 +71,11 @@ impl Build<'_> {
         use super::super::MemberAccess;
         use lash_kernel_doc::plan::Element;
         let function = self.exe.lib(lib);
-        let (entry, _) = function.prepared.as_ref()?;
+        let (entry, _) = function.specialization.prepared.as_ref()?;
         let charge = |index| function.charge.known_charge(&[None, Some(index)], None);
-        match entry.element()? {
+        let path = entry.element()?;
+        (path.room == 2).then_some(())?;
+        match path.operation {
             Element::Read => Some(MemberAccess::Float(charge(Value::Float(
                 lash_kernel_doc::Float::new(0.0),
             ))?)),
@@ -134,9 +136,10 @@ impl Build<'_> {
         {
             return None;
         }
-        let (entry, _) = function.prepared.as_ref()?;
-        let element = ((entry.element() == Some(lash_kernel_doc::plan::Element::Write))
-            && key.is_none())
+        let (entry, _) = function.specialization.prepared.as_ref()?;
+        let element = ((entry.element().is_some_and(|path| {
+            path.operation == lash_kernel_doc::plan::Element::Write && path.room == 2
+        })) && key.is_none())
         .then(|| {
             function.charge.known_charge(
                 &[
@@ -474,6 +477,7 @@ impl Build<'_> {
             floats: self
                 .exe
                 .lib(unit.lib)
+                .specialization
                 .prepared
                 .as_ref()
                 .and_then(|(_, fast)| fast.scalar())

@@ -18,11 +18,11 @@ impl KernelMachine {
         let function = exe.lib(lib);
         Target::Export(
             lash_kernel_value::CallableId {
-                function: function.id,
+                function: function.specialization.function,
                 link: self.current_link(),
             },
             Box::new(lash_kernel_doc::FunctionExport {
-                function: function.id,
+                function: function.specialization.function,
                 signature: function.header.signature.clone(),
                 convention: lash_kernel_doc::StartConvention::Direct,
                 asynchronous: false,
@@ -245,7 +245,7 @@ impl KernelMachine {
                         &value,
                         boundary.result,
                         lash_kernel_value::CallableId {
-                            function: exe.lib(lib).id,
+                            function: exe.lib(lib).specialization.function,
                             link: self.current_link(),
                         },
                     )?;

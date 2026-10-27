@@ -471,7 +471,7 @@ impl Prepared {
             return None;
         }
         let lib = self.lib(lib);
-        lib.prepared.as_ref().map(|_| lib.arity)
+        lib.specialization.prepared.as_ref().map(|_| lib.arity)
     }
 
     fn prepare_lib(&self, id: LibId) -> LibSlot {
@@ -490,20 +490,19 @@ impl Prepared {
         } else {
             None
         };
+        let native = registered
+            .native()
+            .map_or_else(Default::default, |native| native.specialization());
         let entry =
             if machine.is_some() || header.guard.is_some() || !self.layout.0.is_multiple_of(2) {
                 None
             } else {
                 // A native's prepared entry is its own implementation; a
                 // generated template supplies an entry only where none exists.
-                registered
-                    .native()
-                    .and_then(|native| native.prepare())
-                    .map(Entry::Native)
-                    .or_else(|| {
-                        let template = registered.plan()?.template.as_ref()?;
-                        Entry::template(&self.registry, template)
-                    })
+                native.immediate.map(Entry::Native).or_else(|| {
+                    let template = registered.plan()?.template.as_ref()?;
+                    Entry::template(&self.registry, template)
+                })
             };
         let body_slot = self
             .tables
@@ -544,13 +543,16 @@ impl Prepared {
                 index: id,
                 shares_params: !shared_params.is_empty(),
                 operation: header.implementation == lash_kernel_doc::ImplementationKind::Both,
-                id: function,
                 arity: params.len(),
                 header,
                 run,
                 charge,
                 limit,
-                prepared,
+                specialization: super::library::Specialization {
+                    function,
+                    prepared,
+                    native,
+                },
             },
             shared_params,
         }

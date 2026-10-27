@@ -721,18 +721,32 @@ fn result_items(
     Ok(items)
 }
 impl NativeFunction for Native {
-    fn prepare_collection_length(&self) -> Option<lash_kernel_doc::ValueKind> {
-        use lash_kernel_doc::ValueKind;
-        if !matches!(self.op, Op::Len) {
-            return None;
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::{
+            ResidentRead,
+            plan::{Collection, Table},
+        };
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            resident: match (self.kind, self.op) {
+                (kind, Op::Len) => Some(ResidentRead::Length(match kind {
+                    Kind::List => Collection::List,
+                    Kind::Tuple => Collection::Tuple,
+                    Kind::Map => Collection::Map,
+                    Kind::Set => Collection::Set,
+                    Kind::Record => Collection::Record,
+                })),
+                (Kind::List, Op::Get) => Some(ResidentRead::Item(lash_kernel_doc::ValueKind::List)),
+                (Kind::Tuple, Op::Get) => {
+                    Some(ResidentRead::Item(lash_kernel_doc::ValueKind::Tuple))
+                }
+                (Kind::Map, Op::Contains) => Some(ResidentRead::Membership(Table::Map)),
+                (Kind::Set, Op::Contains) => Some(ResidentRead::Membership(Table::Set)),
+                (Kind::Record, Op::Contains) => Some(ResidentRead::Membership(Table::Record)),
+                _ => None,
+            },
+            ..Default::default()
         }
-        Some(match self.kind {
-            Kind::List => ValueKind::List,
-            Kind::Tuple => ValueKind::Tuple,
-            Kind::Map => ValueKind::Map,
-            Kind::Set => ValueKind::Set,
-            Kind::Record => ValueKind::Record,
-        })
     }
 
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

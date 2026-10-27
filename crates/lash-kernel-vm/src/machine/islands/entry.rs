@@ -169,7 +169,7 @@ impl KernelMachine {
         if function.shares_params || function.header.charge().is_none() {
             return Ok(None);
         }
-        let Some((prepared, _)) = &function.prepared else {
+        let Some((prepared, _)) = &function.specialization.prepared else {
             return Ok(None);
         };
         if matches!(prepared, crate::compile::Entry::Template { template, .. } if template.metered.is_some())

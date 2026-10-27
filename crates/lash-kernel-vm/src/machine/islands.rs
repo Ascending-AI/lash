@@ -28,6 +28,7 @@
 //! reference saves them, so a park or seal after the exit projects the same
 //! bytes.
 
+mod admission;
 mod compiled;
 pub(crate) mod cx;
 mod entry;
@@ -775,9 +776,13 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             None
         } else if self.projection().is_some() {
             let function = self.exe.lib(site.lib);
-            function.prepared.as_ref().and_then(|(entry, fast)| {
-                self.answered(function, fast, args, entry.answer(args, self.charging)?)
-            })
+            function
+                .specialization
+                .prepared
+                .as_ref()
+                .and_then(|(entry, fast)| {
+                    self.answered(function, fast, args, entry.answer(args, self.charging)?)
+                })
         } else if let ([x, y], Some(pair)) = (args, site.pair)
             && let Some((value, Some(units))) =
                 compiled::typed(site, &pair, *x, *y, self.exe, self.charging)
@@ -925,7 +930,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     #[inline(never)]
     fn measured(&self, site: &OperatorSite, args: &[Value]) -> Option<(Value, u64)> {
         let function = self.exe.lib(site.lib);
-        let (_, fast) = function.prepared.as_ref()?;
+        let (_, fast) = function.specialization.prepared.as_ref()?;
         let answer = site.entry.answer(args, true)?;
         self.answered(function, fast, args, answer)
     }
@@ -1104,7 +1109,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             None
         } else if self.charging {
             let function = self.exe.lib(site.lib);
-            function.prepared.as_ref().and_then(|_| {
+            function.specialization.prepared.as_ref().and_then(|_| {
                 function
                     .charge
                     .immediate(&[value, Value::Absent], Fresh::of(0b10), &answer)

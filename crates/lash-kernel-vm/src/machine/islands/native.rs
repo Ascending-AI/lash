@@ -69,7 +69,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .or_else(|| self.membership(site, padded))
             .or_else(|| {
                 let function = self.exe.lib(site.lib);
-                let (entry, fast) = function.prepared.as_ref()?;
+                let (entry, fast) = function.specialization.prepared.as_ref()?;
                 self.depth_fits(site.depth).then_some(())?;
                 let answer = self.answered(
                     function,

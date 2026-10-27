@@ -143,7 +143,7 @@ impl Cx<'_> {
     /// reference's member write makes it; `false`, having written nothing,
     /// where the arena must decode first, so that the statement misses.
     #[inline]
-    pub(crate) fn commit_write(&mut self) -> bool {
+    pub(super) fn commit_write(&mut self, _admission: &super::admission::Accepted<()>) -> bool {
         match self.held.take() {
             Some(held) => {
                 self.transient = self.transient.saturating_sub(held.bound);
@@ -269,7 +269,7 @@ impl Cx<'_> {
         values: &[Value],
         fresh: Fresh,
     ) -> Option<Value> {
-        if let Some((entry, fast)) = &function.prepared
+        if let Some((entry, fast)) = &function.specialization.prepared
             && entry.depth() == 0
             && let Some(answer) = entry.answer(values, self.charging)
         {
@@ -289,7 +289,12 @@ impl Cx<'_> {
         values: &[Value],
         fresh: Fresh,
     ) -> Option<Value> {
-        let answer = function.prepared.as_ref()?.0.answer(values, self.charging);
+        let answer = function
+            .specialization
+            .prepared
+            .as_ref()?
+            .0
+            .answer(values, self.charging);
         self.operated(function, values, fresh, answer)
     }
 
@@ -303,7 +308,7 @@ impl Cx<'_> {
         fresh: Fresh,
         answer: Option<PreparedAnswer>,
     ) -> Option<Value> {
-        let (entry, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.specialization.prepared.as_ref()?;
         if let Some(value) = self.metered_on(function, values) {
             return Some(value);
         }
@@ -314,7 +319,7 @@ impl Cx<'_> {
     }
 
     pub(crate) fn metered_on(&mut self, function: &Lib, values: &[Value]) -> Option<Value> {
-        let (entry, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.specialization.prepared.as_ref()?;
         let (value, mut charges) = entry.metered(values, self.exe, self.charging)?;
         if self.charging && function.header.charge().is_some() {
             let answer = PreparedAnswer {

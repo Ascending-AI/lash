@@ -67,7 +67,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<bool, Stop> {
         if !self.accounting {
             let function = self.exe.lib(lib);
-            let Some((prepared, _)) = function.prepared.as_ref() else {
+            let Some((prepared, _)) = function.specialization.prepared.as_ref() else {
                 return Ok(false);
             };
             let running = self.base + u64::from(self.depth);
@@ -105,12 +105,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 } else {
                     Check::None
                 },
-                before,
-                false,
+                (before, false),
+                occurrence,
             )
         } else {
             let function = self.exe.lib(lib);
-            let Some((prepared, _)) = function.prepared.as_ref() else {
+            let Some((prepared, _)) = function.specialization.prepared.as_ref() else {
                 return Ok(false);
             };
             let Some((heap, callees, natives)) = prepared.heap(&|id| self.exe.library_lib(id))
@@ -118,7 +118,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 return Ok(false);
             };
             let recording = self.recorder.is_some();
-            self.heap(0, true, |cx| {
+            self.heap_at(occurrence, 0, true, |cx| {
                 let (value, charges) = cx.heap_paths(heap, callees, natives, args)?;
                 if site.checked
                     && !crate::compile::import_result_fits(&function.header.signature.result, value)

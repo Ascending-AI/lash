@@ -561,8 +561,12 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
     static PREPARED: AtomicUsize = AtomicUsize::new(0);
     struct PairProbe<const PAIRED: bool>;
     impl<const PAIRED: bool> NativeFunction for PairProbe<PAIRED> {
-        fn prepare_text_relation(&self) -> Option<ScalarOp> {
-            PAIRED.then_some(ScalarOp::Lt)
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            lash_kernel_doc::NativeSpecialization {
+                immediate: self.prepare(),
+                text_relation: PAIRED.then_some(ScalarOp::Lt),
+                ..Default::default()
+            }
         }
         fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             match call.args.values() {

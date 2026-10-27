@@ -867,29 +867,57 @@ pub trait NativeFunction: Send + Sync {
         None
     }
 
-    /// Certifies a collection length read over List, Tuple, Map, Set or Record.
-    /// On that kind, when its length fits a word integer, `call` must return
-    /// that length without allocation, counter work or other side effects.
-    /// Other kinds and cold objects retain the ordinary native call. The
-    /// machine still charges the definition's actual completion formula.
-    fn prepare_collection_length(&self) -> Option<crate::ValueKind> {
-        None
+    /// Describes this implementation's specializations. Every claim must
+    /// agree with `call`; a replacement native supplies its own description.
+    /// The machine resolves this once beside the exact function identity.
+    fn specialization(&self) -> NativeSpecialization {
+        NativeSpecialization {
+            immediate: self.prepare(),
+            ..NativeSpecialization::default()
+        }
     }
+}
 
-    /// Certifies a UTF-16 relation over two texts for the register machine.
-    /// It must equal `call` on every text pair, including heap text, and
-    /// allocate nothing. Only comparison operators qualify. The machine
-    /// borrows resident text and charges the native's actual formula.
-    fn prepare_text_relation(&self) -> Option<crate::scalar::ScalarOp> {
-        None
-    }
+/// Native-owned facts, including arena reads that have no immediate entry.
+/// These are implementation certificates under the native trust boundary,
+/// rather than claims inferred from a library function's name.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NativeSpecialization {
+    pub immediate: Option<PreparedNative>,
+    pub resident: Option<ResidentRead>,
+    /// An allocation-free UTF-16 relation on both inline and heap texts.
+    pub text_relation: Option<crate::scalar::ScalarOp>,
+    /// Concatenates the two unchanged text operands.
+    pub text_append: bool,
+    /// Joins a list of texts with a text separator. Resident joins retain
+    /// the native's formula and output work reservation; other inputs call it.
+    pub text_join: bool,
+    /// A semantic projection used by the helper compiler's symbolic proof.
+    pub symbolic: Option<SymbolicNative>,
+}
 
-    /// Certifies joining a list of texts with a text separator. Successful
-    /// resident joins must equal `call`; the machine retains the native's
-    /// formula and output work reservation. Other inputs use `call`.
-    fn prepare_text_join(&self) -> bool {
-        false
-    }
+/// A read that neither allocates nor mutates its resident operands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResidentRead {
+    Length(crate::plan::Collection),
+    Item(crate::ValueKind),
+    Membership(crate::plan::Table),
+}
+
+/// Narrow native semantics used to reduce a source path under explicit
+/// operand facts. Other operations keep their prepared or general entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SymbolicNative {
+    Kind,
+    Same,
+    ToFloat,
+    Floor,
+    /// Mathematical numeric semantics on both word integers and floats,
+    /// including mixed pairs. No coercion or callback is involved.
+    Numeric(crate::scalar::ScalarOp),
+    /// On two floats, a whole nonnegative key below the second operand
+    /// returns that key, with negative zero normalized to positive zero.
+    NumberIndex,
 }
 
 type ChargedEntry = fn(&[Value]) -> Option<PreparedAnswer>;

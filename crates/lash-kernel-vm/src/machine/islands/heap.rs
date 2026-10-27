@@ -31,8 +31,8 @@ impl<I: ExactSizeIterator<Item = Value>> ExactSizeIterator for MapEntries<I> {
 /// events, which must never be collapsed into that formula's total.
 pub(super) struct HeapAnswer {
     pub(super) value: Value,
-    pub(super) units: u64,
     events: Option<Vec<Weight>>,
+    admission: super::admission::Accepted<()>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,26 +57,33 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         args: &[Value],
         (before, counted): (u64, Option<usize>),
     ) -> Answer {
-        let Some(answer) = (self.admits(site)
-            && counted.is_none_or(|at| self.counters.can_advance(&[at])))
-        .then(|| {
-            let (exe, entry) = (self.exe, &site.entry);
-            let deepest = *site
-                .deepest
-                .get_or_init(|| entry.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)));
-            self.heap_answer(
-                site.lib,
-                args,
-                Some(deepest),
-                site.checked.into(),
-                before,
-                site.root.is_some() && self.accounting,
-            )
-        })
-        .flatten() else {
+        let Some(answer) = self
+            .admits(site)
+            .then(|| {
+                let (exe, entry) = (self.exe, &site.entry);
+                let deepest = *site
+                    .deepest
+                    .get_or_init(|| entry.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)));
+                self.heap_answer(
+                    site.lib,
+                    args,
+                    Some(deepest),
+                    site.checked.into(),
+                    (before, site.root.is_some() && self.accounting),
+                    counted,
+                )
+            })
+            .flatten()
+        else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
-        self.admit_operator(site, args, answer.value, answer.units, (before, counted))?;
+        self.admit_operator(
+            site,
+            args,
+            answer.value,
+            answer.admission.end - self.charged - before,
+            (before, counted),
+        )?;
         Ok(self.commit_heap(answer))
     }
 
@@ -93,12 +100,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             &padded[..self.exe.lib(site.lib).arity],
             None,
             Check::None,
-            0,
-            false,
+            (0, false),
+            None,
         ) else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
-        if !self.admit_native(answer.units) {
+        if !self.admit_native(answer.admission.end - self.charged) {
             return Err(self.at_operands(site.pc, site.reg, args));
         }
         Ok(self.commit_heap(answer))
@@ -133,7 +140,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         strict: bool,
         operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
     ) -> Option<HeapAnswer> {
-        if self.tight {
+        self.heap_at(None, before, strict, operation)
+    }
+
+    pub(super) fn heap_at(
+        &mut self,
+        occurrence: Option<usize>,
+        before: u64,
+        strict: bool,
+        operation: impl FnOnce(&mut Cx<'_>) -> Option<Value>,
+    ) -> Option<HeapAnswer> {
+        if self.tight || occurrence.is_some_and(|at| !self.counters.can_advance(&[at])) {
             return None;
         }
         #[cfg(test)]
@@ -189,21 +206,24 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         // Only a body's heap paths stand where the reference pushes a frame;
         // a prepared or native answer charges its whole formula in place.
         let strict = strict && cx.body_paths;
-        let answer = answer.filter(|_| {
-            before
-                .checked_add(cx.meter.units)
-                .and_then(|total| self.charged.checked_add(total))
-                .is_some_and(|end| {
-                    end <= self.bound
-                        && (!strict || self.slice_end == u64::MAX || end < self.slice_end)
-                })
-                && cx.commit_write()
+        // Cx cannot change these source bounds. Read them after the arena
+        // operation so its physical frame need not retain another window.
+        let window = super::admission::Window::new(self.charged, self.bound, self.slice_end);
+        let accepted = answer.and_then(|value| {
+            let admission = window.admit(
+                (),
+                before,
+                cx.meter.units,
+                None,
+                strict && self.slice_end != u64::MAX,
+            )?;
+            cx.commit_write(&admission).then_some((value, admission))
         });
         self.transient = cx.transient;
-        answer.map(|value| HeapAnswer {
+        accepted.map(|(value, admission)| HeapAnswer {
             value,
-            units: cx.meter.units,
             events,
+            admission,
         })
     }
 
@@ -213,8 +233,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         args: &[Value],
         deepest: Option<u32>,
         checked: Check,
-        before: u64,
-        strict: bool,
+        (before, strict): (u64, bool),
+        occurrence: Option<usize>,
     ) -> Option<HeapAnswer> {
         if let Some(watching) = &self.projection() {
             watching.reset_facts();
@@ -223,7 +243,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let signature = &function.header.signature;
         let operator = deepest.is_some();
         if let Some(extra) = deepest
-            && function.prepared.is_some()
+            && function.specialization.prepared.is_some()
         {
             let running = self.base + u64::from(self.depth);
             if (function.operation() && running > self.call_depth)
@@ -240,14 +260,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return None;
         }
-        if let Some(answer) = self.lookup_answer(function, args, before)
+        if let Some(answer) = self.lookup_answer(function, args, before, occurrence)
             && (checked == Check::None
                 || crate::compile::import_result_fits(&signature.result, answer.value))
         {
             return Some(answer);
         }
-        let answer = self.heap(before, strict, |cx| {
-            let value = if operator && function.prepared.is_some() {
+        let answer = self.heap_at(occurrence, before, strict, |cx| {
+            let value = if operator && function.specialization.prepared.is_some() {
                 cx.operate_on(function, args, Fresh::default())
             } else {
                 cx.native_on(function, args, Fresh::default())
@@ -269,10 +289,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         function: &crate::compile::Lib,
         args: &[Value],
         before: u64,
+        occurrence: Option<usize>,
     ) -> Option<HeapAnswer> {
-        let (entry, _) = function.prepared.as_ref()?;
+        let (entry, _) = function.specialization.prepared.as_ref()?;
         use lash_kernel_doc::plan::Element;
-        let element = entry.element()?;
+        let element = entry.element()?.operation;
         if !matches!(element, Element::ReadInt | Element::ReadMap)
             || OBSERVING
             || self.tight
@@ -315,12 +336,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             0
         };
-        if self.charged.checked_add(before)?.checked_add(units)? > self.bound {
-            return None;
-        }
+        let admission = self.source_admission(occurrence, before, units, None, false)?;
         Some(HeapAnswer {
             value,
-            units,
+            admission,
             events: self.tape.map(|_| {
                 if units == 0 {
                     Vec::new()
@@ -355,7 +374,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             || (self.observed
                 && (site.act.is_some() || site.root.is_some())
                 && matches!(function.run, LibRun::Body(_)))
-            || counted.is_some_and(|at| !self.counters.can_advance(&[at]))
         {
             return Err(self.at(site.pc));
         }
@@ -368,8 +386,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 Depth::None => 0,
             }),
             site.checked.into(),
-            before,
-            site.root.is_some() && self.accounting,
+            (before, site.root.is_some() && self.accounting),
+            counted,
         ) else {
             return Err(self.at(site.pc));
         };
@@ -392,7 +410,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Publish only the facts belonging to this accepted operation, after its
     /// action count and all boundary checks have committed.
     pub(super) fn commit_heap(&mut self, answer: HeapAnswer) -> Value {
-        self.charged += answer.units;
+        let units = answer.admission.end - self.charged;
+        self.charged = answer.admission.end;
         if let Some(tape) = self.tape {
             match answer.events {
                 Some(events) => {
@@ -402,7 +421,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         }
                     }
                 }
-                None if answer.units != 0 => tape.push(Weight::Atomic(answer.units)),
+                None if units != 0 => tape.push(Weight::Atomic(units)),
                 None => {}
             }
         }
@@ -412,6 +431,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// The semantic heap context's room test for an operation that has
     /// no formula, temporary work or staged write. Tapes and observations
     /// retain that context as the reference; tight entries decline there.
+    // FIG-7510 profiles: retain fixed room bounds in the hot access callers.
+    #[inline(always)]
     pub(super) fn resident_room(&self, bytes: u64) -> bool {
         #[cfg(test)]
         if self.scratch.chilled {

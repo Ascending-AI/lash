@@ -146,6 +146,24 @@ A dialect ships a front end, a printer and the build-owned helper functions its 
 - **After a crash** a run resumes from its last saved state. Computation after that save may run again, including declared `Read` tools, including clock and random, printing and logging. An admitted `Once` without an outcome becomes `Interrupted`; an unfinished `Repeatable` can run again under its policy. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
 - Worker processes, worker reset, effect admission before execution and the host boundary stay as they are.
 
+Each prepared function keeps its specialization description beside its exact
+`FunctionId`. The helper compiler derives numeric-list reads and writes by
+running its symbolic evaluator under explicit key, range and hole predicates.
+It follows helper bodies, retains ordered effects and rejects unresolved calls,
+callback charges, extra writes and changed returns. The description records
+the native facts used by the proof; preparation checks those facts against the
+installed implementations. Native-only definitions supply their own resident,
+text and pair capabilities through `NativeFunction::specialization`.
+
+Access and heap-template execution obtain a shared admission result before
+publishing their selected source prefix. Compiled descriptions retain source
+coordinates and resource requirements; the result carries only the accepted
+charge and the publication facts its storage owner needs. An access may commit its own
+shorter prefix when its consumer declines. The semantic heap context retains
+its staged-write rollback owner through admission. Typed-loop snapshots,
+native nursery disposal and moved-text rollback retain their separate storage
+implementations.
+
 ## 6. Parked runs
 
 A parked run is a checkpoint root over the run's persistent heap ([ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)). The machine executes on that heap, so a park seals the pages the stretch since the last park changed and writes one root; there is no separate image of the run. The types are `lash-kernel-state`'s `paged` module; each page is a canonical tree page of the semantic kinds 1000 to 1008, and a root is complete: nothing else is needed to resume it.

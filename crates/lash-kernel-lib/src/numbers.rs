@@ -526,6 +526,36 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 }
 
 impl NativeFunction for NumericFunction {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::SymbolicNative;
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            symbolic: match (self.operation, self.domain) {
+                (Operation::Kind, Domain::Any) => Some(SymbolicNative::Kind),
+                (Operation::Same, Domain::Any) => Some(SymbolicNative::Same),
+                (Operation::ToFloat, Domain::Any | Domain::Number) => Some(SymbolicNative::ToFloat),
+                (Operation::Unary(Unary::Floor), Domain::Any | Domain::Number) => {
+                    Some(SymbolicNative::Floor)
+                }
+                (
+                    Operation::Eq
+                    | Operation::Lt
+                    | Operation::Le
+                    | Operation::Gt
+                    | Operation::Ge
+                    | Operation::Binary(Binary::Add),
+                    Domain::Any | Domain::Number,
+                ) => self
+                    .prepare()
+                    .and_then(|entry| entry.pair)
+                    .and_then(|pair| pair.floats)
+                    .map(SymbolicNative::Numeric),
+                _ => None,
+            },
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let values = call.args.values();
         self.admit(values)?;
@@ -802,27 +832,7 @@ fn plain(
 
 /// Every kind with the name `kind` answers for it, in the order of
 /// [`ValueKind`]'s variants.
-pub(crate) const KIND_NAMES: [(ValueKind, &str); 19] = [
-    (ValueKind::Null, "null"),
-    (ValueKind::Absent, "absent"),
-    (ValueKind::Bool, "bool"),
-    (ValueKind::Int, "integer"),
-    (ValueKind::Float, "float"),
-    (ValueKind::Text, "text"),
-    (ValueKind::Bytes, "bytes"),
-    (ValueKind::Timestamp, "timestamp"),
-    (ValueKind::Tuple, "tuple"),
-    (ValueKind::List, "list"),
-    (ValueKind::Map, "map"),
-    (ValueKind::Set, "set"),
-    (ValueKind::Record, "record"),
-    (ValueKind::Closure, "closure"),
-    (ValueKind::Error, "error"),
-    (ValueKind::Task, "task"),
-    (ValueKind::Function, "function"),
-    (ValueKind::Handle, "handle"),
-    (ValueKind::Ref, "ref"),
-];
+pub(crate) const KIND_NAMES: [(ValueKind, &str); 19] = ValueKind::NAMES;
 
 const _: () = {
     let mut index = 0;

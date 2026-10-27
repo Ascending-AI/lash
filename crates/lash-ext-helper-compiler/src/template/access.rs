@@ -1,6 +1,12 @@
 //! Member operations certified from source guards and registered scalar kernels.
 
 use super::*;
+use lash_kernel_doc::plan::{Element, NativeFact};
+
+pub(super) struct MemberProof {
+    pub(super) operation: Element,
+    pub(super) requires: Vec<(FunctionId, NativeFact)>,
+}
 
 impl Evaluator<'_> {
     pub(super) fn member_access(
@@ -9,23 +15,22 @@ impl Evaluator<'_> {
         kinds: &[&str],
         state: &State,
         value: &Symbol,
-    ) -> Option<lash_kernel_doc::plan::Element> {
-        use lash_kernel_doc::plan::Element;
+    ) -> Option<MemberProof> {
         use lash_kernel_value::Type;
         let [target, index] = definition.signature.params.as_slice() else {
             return None;
         };
         let steps = &state.steps;
-        match (&target.ty, &index.ty, &definition.signature.result) {
+        let mut requires = Vec::new();
+        let operation = match (&target.ty, &index.ty, &definition.signature.result) {
             (Type::Any, Type::Any, Type::Any)
                 if kinds == ["Map(_)", "Text(_)"] && map_read(steps, value) =>
             {
-                Some(Element::ReadMap)
+                Element::ReadMap
             }
-            (Type::List(item), Type::Int, Type::Any)
-                if **item == Type::Any && self.integer_read(kinds, steps, value) =>
-            {
-                Some(Element::ReadInt)
+            (Type::List(item), Type::Int, Type::Any) if **item == Type::Any => {
+                requires = self.integer_read(kinds, steps, value)?;
+                Element::ReadInt
             }
             (Type::Map(map), Type::Text, Type::Any)
                 if map.key == Type::Any
@@ -33,7 +38,7 @@ impl Evaluator<'_> {
                     && kinds == ["Map(_)", "Text(_)"]
                     && map_read(steps, value) =>
             {
-                Some(Element::ReadMap)
+                Element::ReadMap
             }
             (Type::Any, Type::Any, Type::Null)
                 if kinds.first() == Some(&"List(_)")
@@ -42,15 +47,24 @@ impl Evaluator<'_> {
                     && append(steps) =>
             {
                 let kind = state.vars.get(&index.name)?.kind?;
-                Some(Element::Append(1 << kind as u32))
+                Element::Append(1 << kind as u32)
             }
-            _ => None,
-        }
+            _ => return None,
+        };
+        Some(MemberProof {
+            operation,
+            requires,
+        })
     }
 
-    fn integer_read(&self, kinds: &[&str], steps: &[Step], value: &Symbol) -> bool {
+    fn integer_read(
+        &self,
+        kinds: &[&str],
+        steps: &[Step],
+        value: &Symbol,
+    ) -> Option<Vec<(FunctionId, NativeFact)>> {
         if kinds != ["List(_)", "Int(_)"] {
-            return false;
+            return None;
         }
         let [
             Step::Entry {
@@ -89,18 +103,19 @@ impl Evaluator<'_> {
             },
         ] = steps
         else {
-            return false;
+            return None;
         };
         let kernel = |native: usize| {
             self.library
                 .registry
                 .get(self.callees.get(native)?)?
                 .native()?
-                .prepare()?
+                .specialization()
+                .immediate?
                 .pair?
                 .ints
         };
-        lower == "Value::Int(0), args[1]"
+        (lower == "Value::Int(0), args[1]"
             && lower_test == nonnegative
             && target == "args[0]"
             && upper == &format!("args[1], {length}")
@@ -109,7 +124,18 @@ impl Evaluator<'_> {
             && index == "args[1]"
             && value.code == *answer
             && kernel(*le) == Some(lash_kernel_doc::scalar::ScalarOp::Le)
-            && kernel(*lt) == Some(lash_kernel_doc::scalar::ScalarOp::Lt)
+            && kernel(*lt) == Some(lash_kernel_doc::scalar::ScalarOp::Lt))
+        .then_some(())?;
+        Some(vec![
+            (
+                *self.callees.get(*le)?,
+                NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Le),
+            ),
+            (
+                *self.callees.get(*lt)?,
+                NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Lt),
+            ),
+        ])
     }
 }
 

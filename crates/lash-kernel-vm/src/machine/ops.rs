@@ -708,7 +708,7 @@ impl KernelMachine {
         } else {
             None
         };
-        if let Some((prepared, _)) = &function.prepared
+        if let Some((prepared, _)) = &function.specialization.prepared
             && self.template_depth_fits(task, prepared.depth(), entry.as_ref())?
             && let Some((value, charges)) = prepared.metered(
                 &self.regs[args..args + function.arity],
@@ -720,7 +720,7 @@ impl KernelMachine {
             self.metered_answered(exe, lib, args, value, charges, out)?;
             return Ok(Answer::Done);
         }
-        if let Some((prepared, fast)) = &function.prepared
+        if let Some((prepared, fast)) = &function.specialization.prepared
             && (prepared.depth() <= u32::from(entry.is_some())
                 || self.template_depth_fits(task, prepared.depth(), entry.as_ref())?)
             && let Some(value) =
@@ -862,7 +862,7 @@ impl KernelMachine {
             self.observe(Event::NativeEnter { task, lib });
         }
         if prepared
-            && let Some((entry, _)) = &function.prepared
+            && let Some((entry, _)) = &function.specialization.prepared
             && self.template_depth_fits(task, entry.depth(), admission)?
             && let Some((value, charges)) = entry.metered(
                 &self.regs[args..end],
@@ -874,7 +874,7 @@ impl KernelMachine {
             return Ok(Answer::Done);
         }
         if prepared
-            && let Some((entry, fast)) = &function.prepared
+            && let Some((entry, fast)) = &function.specialization.prepared
             && (entry.depth() <= u32::from(function.operation())
                 || self.template_depth_fits(task, entry.depth(), admission)?)
             && let Some(value) = entry.answer(&self.regs[args..end], self.charging)
@@ -1022,7 +1022,7 @@ impl KernelMachine {
                     Err(NativeError::Guard(guard)) => {
                         return Err(bound(
                             Bound::Guard {
-                                function: function.id,
+                                function: function.specialization.function,
                             },
                             guard.limit,
                         )

@@ -1117,7 +1117,7 @@ impl<'e, T: Domain> Builder<'e, T> {
     /// table: the fused node's, which the entry's general path agrees with.
     fn kernel(&self, lib: LibId, checked: bool) -> Option<(ScalarOp, [u64; 16])> {
         let function = self.exe.lib(lib);
-        let (entry, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.specialization.prepared.as_ref()?;
         let op = T::kernel(entry.pair()?)?;
         // A kernel that never answers this domain leaves every run to the
         // general path.
@@ -1151,7 +1151,7 @@ impl<'e, T: Domain> Builder<'e, T> {
 
     fn unary(&self, lib: LibId, checked: bool) -> Option<Unary> {
         let function = self.exe.lib(lib);
-        let (entry, fast) = function.prepared.as_ref()?;
+        let (entry, fast) = function.specialization.prepared.as_ref()?;
         if function.arity != 1 {
             return None;
         }

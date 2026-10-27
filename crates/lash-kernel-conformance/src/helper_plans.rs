@@ -589,6 +589,70 @@ fn compare_control(source: &str, charge: u64) -> Observed {
     expected
 }
 
+/// ELEMENT-SOURCE / PLAN-INDEP: a changed body withdraws its element claim,
+/// including key conversion, holes, construction and the returned operand. An unrelated
+/// name with the same operation still specializes. The body differential
+/// retains charges, held bytes and every bounded prefix as its oracle.
+#[test]
+fn element_specializations_follow_the_exact_body_instead_of_its_name() {
+    for name in [
+        "ts.get_numeric",
+        "ts.get_computed",
+        "ts.set",
+        "law.allocating_element",
+    ] {
+        let plan = control::PLANS
+            .iter()
+            .find(|plan| plan.name == name)
+            .unwrap();
+        assert!(
+            plan.template
+                .as_ref()
+                .and_then(|template| template.heap.as_ref())
+                .and_then(|heap| heap.element.as_ref())
+                .is_none(),
+            "{name}: changed steps must withdraw the element claim"
+        );
+    }
+    let plan = control::PLANS
+        .iter()
+        .find(|plan| plan.name == "law.element_read")
+        .unwrap();
+    assert_eq!(
+        plan.template
+            .as_ref()
+            .unwrap()
+            .heap
+            .as_ref()
+            .unwrap()
+            .element
+            .as_ref()
+            .unwrap()
+            .operation,
+        lash_kernel_doc::plan::Element::Read
+    );
+    let source = "main { let xs = [10, 20, ()] let shifted = invoke ts.get_numeric(xs, 0.0) let hole = invoke ts.get_computed(xs, 2.0) let ordinary = invoke law.element_read(xs, 2.0) let allocated = invoke law.allocating_element(xs, 2.0) let changed = invoke ts.set(xs, 1.0, 30) return (shifted, hole, ordinary, allocated, changed, xs) }";
+    let complete = compare_control(source, 1_000_000);
+    assert_eq!(
+        complete.end,
+        crate::ExpectedEnd::Finished(Datum::Tuple(vec![
+            Datum::Int(20.into()),
+            Datum::Null,
+            Datum::Absent,
+            Datum::Absent,
+            Datum::Null,
+            Datum::List(vec![
+                Datum::Int(10.into()),
+                Datum::Int(30.into()),
+                Datum::Tuple(vec![])
+            ])
+        ]))
+    );
+    for charge in 0..100 {
+        compare_control(source, charge);
+    }
+}
+
 /// K-FORM-014..017: catch sees only guest raises, cleanup runs in order,
 /// and its departure replaces the return or raise it interrupted.
 #[test]

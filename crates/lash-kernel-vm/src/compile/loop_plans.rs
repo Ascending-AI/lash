@@ -1222,7 +1222,7 @@ impl Formation<'_> {
         if !operator_site(function, count) {
             return None;
         }
-        let (_, fast) = function.prepared.as_ref()?;
+        let (_, fast) = function.specialization.prepared.as_ref()?;
         *formula_max = match (*formula_max, fast.scalar()) {
             (Some(sum), Some(table)) if scalar_site(function, count) => {
                 Some(sum.checked_add(table.max())?)

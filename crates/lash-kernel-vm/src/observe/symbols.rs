@@ -135,7 +135,7 @@ impl GuestSymbols {
                         LibRun::Body(_) => LibKind::Body,
                     },
                     name: lib.header.name.to_string(),
-                    function: lib.id,
+                    function: lib.specialization.function,
                 }
             })
             .collect();

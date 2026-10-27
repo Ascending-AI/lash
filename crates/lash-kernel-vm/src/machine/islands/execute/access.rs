@@ -1,5 +1,6 @@
 //! Typed member reads admit their complete source charge before committing.
 
+use super::super::admission::{Accepted, DepthNeed, Prefix, Request};
 use super::super::compiled::{
     AccessShape, AccessSite, MemberAccess, OperatorSite, Read, WriteSite,
 };
@@ -8,8 +9,7 @@ use super::*;
 struct ReadAnswer {
     member: Value,
     consumed: Option<Value>,
-    end: u64,
-    full: bool,
+    admission: Accepted<Prefix>,
 }
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
@@ -86,15 +86,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         values: &[Value; 2],
         charge: MemberAccess,
     ) -> Option<Answer> {
-        if OBSERVING
-            || !self.swift
-            || self.deferred_end.is_some()
-            || self.arena.any_cold()
-            || !self.depth_fits(site.depth)
-            || !self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES)
-        {
-            return None;
-        }
+        let resources = self.direct_resources(
+            DepthNeed::Compiled(site.depth),
+            2 * lash_kernel_state::arena::VALUE_BYTES,
+        )?;
         let (value, units, append) = match (charge, *values) {
             (MemberAccess::Map(charge), [Value::Map(map), Value::Text(key)]) => (
                 self.arena.table_get_text(map, &key).ok()??,
@@ -146,27 +141,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         let (before, root) = self.root_prefix(site.root).ok()?;
         let counted = site.counted.or(root);
-        if counted.is_some_and(|at| !self.counters.can_advance(&[at])) {
-            return None;
-        }
-        let end = self
-            .charged
-            .checked_add(before)?
-            .checked_add(units)?
-            .checked_add(site.close.map_or(0, |close| u64::from(close.total)))?;
-        if end > self.bound || end >= self.slice_end {
-            return None;
-        }
+        let admission = self.admit_direct_source(resources, counted, before, units, site.close)?;
         if let Some((list, at, value)) = append {
             self.arena.list_set(list, at, value).ok()?;
         }
-        if let Some(at) = counted
-            && let Err(stop) = self.count(at)
-        {
+        if let Err(stop) = self.commit_admission(admission, counted) {
             return Some(Err(stop));
         }
-        self.charged = end;
-        self.covered = false;
         Some(Ok(value))
     }
 
@@ -182,17 +163,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return self.element_store(site, close, values, units);
         }
-        if OBSERVING
-            || !self.swift
-            || self.deferred_end.is_some()
-            || self.arena.any_cold()
-            || self.base + u64::from(self.depth) + u64::from(site.depth) > self.call_depth
-            || !self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES)
-            || site.values & (1 << values[2].kind() as u32) == 0
-            || site
-                .occurrence
-                .is_some_and(|at| !self.counters.can_advance(&[at]))
-        {
+        if site.values & (1 << values[2].kind() as u32) == 0 {
             return None;
         }
         let statement = statement?;
@@ -208,14 +179,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let Value::Record(record) = values[0] else {
             return None;
         };
-        let end = self
-            .charged
-            .checked_add(site.before)?
-            .checked_add(close.map_or(0, |close| u64::from(close.total)))?
-            .checked_add(units)?;
-        if end > self.bound || end >= self.slice_end {
-            return None;
-        }
+        let admission = self.direct_admission(
+            Request {
+                depth: DepthNeed::Exact(site.depth),
+                room: 2 * lash_kernel_state::arena::VALUE_BYTES,
+                occurrence: site.occurrence,
+            },
+            site.before,
+            units,
+            close,
+        )?;
         let slot = self.sites.guard(statement);
         let (member, found) = find_property(self.arena, record, slot, &site.guard).ok()?;
         if found != slot {
@@ -255,14 +228,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     .ok()?;
             }
         }
-        if let Some(at) = site.occurrence
-            && let Err(stop) = self.count(at)
-        {
-            return Some(Err(stop));
-        }
-        self.charged = end;
-        self.covered = false;
-        Some(Ok(()))
+        Some(self.commit_admission(admission, site.occurrence))
     }
 
     fn element_store(
@@ -272,18 +238,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         values: &[Value; 3],
         units: u64,
     ) -> Option<Result<(), Stop>> {
-        if OBSERVING
-            || !self.swift
-            || self.deferred_end.is_some()
-            || self.arena.any_cold()
-            || self.base + u64::from(self.depth) + u64::from(site.depth) > self.call_depth
-            || !self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES)
-            || site
-                .occurrence
-                .is_some_and(|at| !self.counters.can_advance(&[at]))
-        {
-            return None;
-        }
+        let admission = self.direct_admission(
+            Request {
+                depth: DepthNeed::Exact(site.depth),
+                room: 2 * lash_kernel_state::arena::VALUE_BYTES,
+                occurrence: site.occurrence,
+            },
+            site.before,
+            units,
+            close,
+        )?;
         let (Value::List(list), Value::Float(key)) = (values[0], values[1]) else {
             return None;
         };
@@ -295,23 +259,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if at as f64 != key || at > self.arena.len(list).ok()? {
             return None;
         }
-        let end = self
-            .charged
-            .checked_add(site.before)?
-            .checked_add(units)?
-            .checked_add(close.map_or(0, |close| u64::from(close.total)))?;
-        if end > self.bound || end >= self.slice_end {
-            return None;
-        }
         self.arena.list_set(list, at, values[2]).ok()?;
-        if let Some(at) = site.occurrence
-            && let Err(stop) = self.count(at)
-        {
-            return Some(Err(stop));
-        }
-        self.charged = end;
-        self.covered = false;
-        Some(Ok(()))
+        Some(self.commit_admission(admission, site.occurrence))
     }
 
     #[inline(never)]
@@ -405,7 +354,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         site: &AccessSite,
         answer: ReadAnswer,
     ) -> Result<Next, Stop> {
-        self.charged = answer.end;
+        let prefix = answer.admission.request;
+        self.charged = answer.admission.end;
+        self.covered = false;
         frame.slots[site.at] = SlotState::Value(answer.member);
         if let (Some(consumer), Some(value)) = (&site.consumer, answer.consumed) {
             frame.slots[consumer.at] = SlotState::Value(value);
@@ -414,16 +365,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             };
             *index = consumer.next;
         }
-        let (after, leaves, _statements, arms) = match (&site.short, answer.full) {
-            (Some(short), false) => (short.after, short.leaves, short.statements, &short.arms),
-            _ => (site.after, site.leaves, site.statements, &site.arms),
-        };
+        let (after, leaves, _statements, arms) =
+            match (&site.short, matches!(prefix, Prefix::Complete)) {
+                (Some(short), false) => (short.after, short.leaves, short.statements, &short.arms),
+                _ => (site.after, site.leaves, site.statements, &site.arms),
+            };
         for block in arms {
             frame.control.push(Position::Block(*block, 1));
         }
         frame.pc = after;
         frame.statement = None;
-        self.covered = false;
         #[cfg(test)]
         super::super::GUARDED_READS.with(|n| n.set(n.get() + 1));
         #[cfg(any(test, feature = "perf-witness"))]
@@ -576,12 +527,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some(answer) = self.access_tail(frame, site, value, units, saved) {
             return Some(answer);
         }
-        let end = self.charged.checked_add(units)?;
-        (site.short.is_some() && end <= self.bound && end < self.slice_end).then_some(ReadAnswer {
+        site.short.as_ref()?;
+        let admission = self
+            .admission_window()
+            .admit(Prefix::Access, 0, units, None, true)?;
+        Some(ReadAnswer {
             member: value,
             consumed: None,
-            end,
-            full: false,
+            admission,
         })
     }
 
@@ -611,7 +564,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 (Value::Float(_), Some(units)) => units,
                 _ => {
                     let function = self.exe.lib(hole.lib);
-                    function.prepared.as_ref()?;
+                    function.specialization.prepared.as_ref()?;
                     function.charge.immediate(
                         &[value, Value::Absent],
                         Fresh::of(0b10),
@@ -663,12 +616,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             None
         };
-        let end = self.charged.checked_add(units)?;
-        (end <= self.bound && end < self.slice_end).then_some(ReadAnswer {
+        let admission = self
+            .admission_window()
+            .admit(Prefix::Complete, 0, units, None, true)?;
+        Some(ReadAnswer {
             member: value,
             consumed,
-            end,
-            full: true,
+            admission,
         })
     }
 }

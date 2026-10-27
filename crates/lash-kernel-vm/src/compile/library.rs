@@ -6,7 +6,6 @@ pub(crate) struct Lib {
     pub(crate) index: LibId,
     pub(crate) shares_params: bool,
     pub(crate) operation: bool,
-    pub(crate) id: FunctionId,
     /// Its definition's header: what a call reads of it without the body.
     pub(crate) header: Arc<lash_kernel_doc::FunctionHeader>,
     pub(crate) run: LibRun,
@@ -19,7 +18,15 @@ pub(crate) struct Lib {
     /// the inline fast path of the operator op that calls it
     /// (`Op::Operator`, or a nested call its entry marks). Odd layouts and
     /// arena-dependent natives use the general call.
+    pub(crate) specialization: Specialization,
+}
+
+/// The exact admitted function's resolved specialization facts. Register sites
+/// project these facts; they never select a native implementation by name.
+pub(crate) struct Specialization {
+    pub(crate) function: FunctionId,
     pub(crate) prepared: Option<(Entry, Fast)>,
+    pub(crate) native: lash_kernel_doc::NativeSpecialization,
 }
 
 impl Lib {
@@ -50,7 +57,7 @@ impl Lib {
     /// A text addition forwards both operands to the kernel concat native.
     /// The compiler derives the helper fact over every text representation.
     pub(crate) fn text_append(&self, exe: &Executable) -> Option<LibId> {
-        let callee = match (&self.run, &self.prepared) {
+        let callee = match (&self.run, &self.specialization.prepared) {
             (LibRun::Native { .. }, _) => self.index,
             (LibRun::Body(_), Some((Entry::Template { template, .. }, _)))
                 if template.metered.is_none() =>
@@ -64,11 +71,19 @@ impl Lib {
             _ => return None,
         };
         let primitive = exe.lib(callee);
-        (primitive.header.name.as_str() == "text.concat"
+        (primitive.specialization.native.text_append
             && primitive.arity == 2
             && primitive.limit.is_none()
             && matches!(primitive.run, LibRun::Native { .. }))
         .then_some(callee)
+    }
+
+    /// A resident join certified by the exact native implementation.
+    pub(crate) fn text_join(&self) -> bool {
+        self.specialization.native.text_join
+            && self.arity == 2
+            && self.limit.is_none()
+            && matches!(self.run, LibRun::Native { .. })
     }
 
     /// Whether it is the kernel's `same`, whose test of a value against the
@@ -76,7 +91,7 @@ impl Lib {
     /// test) is whether the value is a tuple of no members: a plan region
     /// and an island answer that test without building the tuple.
     pub(crate) fn is_same(&self) -> bool {
-        self.header.name.as_str() == "same"
+        self.specialization.native.symbolic == Some(lash_kernel_doc::SymbolicNative::Same)
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 2
     }
@@ -84,7 +99,7 @@ impl Lib {
     /// Whether it is `kind`, whose answer is a function of its operand's
     /// value kind alone.
     pub(crate) fn is_kind(&self) -> bool {
-        self.header.name.as_str() == "kind"
+        self.specialization.native.symbolic == Some(lash_kernel_doc::SymbolicNative::Kind)
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 1
     }
@@ -102,10 +117,21 @@ impl Lib {
     /// A collection's primitive length and its constant native formula.
     pub(crate) fn collection_length(&self) -> Option<(lash_kernel_doc::ValueKind, u64)> {
         use lash_kernel_doc::ValueKind;
-        let LibRun::Native { native, .. } = &self.run else {
+        if !matches!(self.run, LibRun::Native { .. }) {
+            return None;
+        }
+        let Some(lash_kernel_doc::ResidentRead::Length(collection)) =
+            self.specialization.native.resident
+        else {
             return None;
         };
-        let kind = native.prepare_collection_length()?;
+        let kind = match collection {
+            lash_kernel_doc::plan::Collection::List => ValueKind::List,
+            lash_kernel_doc::plan::Collection::Tuple => ValueKind::Tuple,
+            lash_kernel_doc::plan::Collection::Map => ValueKind::Map,
+            lash_kernel_doc::plan::Collection::Set => ValueKind::Set,
+            lash_kernel_doc::plan::Collection::Record => ValueKind::Record,
+        };
         (matches!(
             kind,
             ValueKind::List
@@ -115,7 +141,7 @@ impl Lib {
                 | ValueKind::Record
         ) && self.arity == 1
             && self.limit.is_none()
-            && self.prepared.is_none()
+            && self.specialization.prepared.is_none()
             && self.charge.measurements().is_empty())
         .then(|| (kind, self.charge.evaluate(|_, _| 0)))
     }
@@ -126,13 +152,12 @@ impl Lib {
         if !matches!(self.run, LibRun::Native { .. })
             || self.arity != 2
             || self.limit.is_some()
-            || self.prepared.is_some()
+            || self.specialization.prepared.is_some()
         {
             return None;
         }
-        match self.header.name.as_str() {
-            "list.get" => Some(lash_kernel_doc::ValueKind::List),
-            "tuple.get" => Some(lash_kernel_doc::ValueKind::Tuple),
+        match self.specialization.native.resident {
+            Some(lash_kernel_doc::ResidentRead::Item(kind)) => Some(kind),
             _ => None,
         }
     }
@@ -144,18 +169,15 @@ impl Lib {
     /// the key up, and charges its formula measured on the values. `None`
     /// for every other function.
     pub(crate) fn membership(&self) -> Option<lash_kernel_doc::plan::Table> {
-        use lash_kernel_doc::plan::Table;
         if !matches!(self.run, LibRun::Native { .. })
             || self.arity != 2
             || self.limit.is_some()
-            || self.prepared.is_some()
+            || self.specialization.prepared.is_some()
         {
             return None;
         }
-        match self.header.name.as_str() {
-            "map.contains" => Some(Table::Map),
-            "set.contains" => Some(Table::Set),
-            "record.contains" => Some(Table::Record),
+        match self.specialization.native.resident {
+            Some(lash_kernel_doc::ResidentRead::Membership(table)) => Some(table),
             _ => None,
         }
     }

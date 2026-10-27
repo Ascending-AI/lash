@@ -270,7 +270,7 @@ impl Build<'_> {
         };
         let function = self.exe.lib(lib);
         function.limit.is_none().then_some(())?;
-        let (entry, _) = function.prepared.as_ref()?;
+        let (entry, _) = function.specialization.prepared.as_ref()?;
         entry.immediate().then_some(())?;
         let depth = match function.run {
             LibRun::Body(_) => Depth::Template(super::super::answer_depth(self.exe, lib)?),
@@ -344,7 +344,7 @@ impl Build<'_> {
             && function.arity == 1
             && !function.operation()
             && function.limit.is_none()
-            && function.prepared.is_some()
+            && function.specialization.prepared.is_some()
             && matches!(function.run, LibRun::Native { .. }))
         .then_some(())?;
         let [test] = &**args else {
@@ -482,7 +482,14 @@ impl Build<'_> {
         let Kind::Operator { lib, .. } = &unpin(addition).kind else {
             return None;
         };
-        let advance = self.exe.lib(*lib).prepared.as_ref()?.0.clone();
+        let advance = self
+            .exe
+            .lib(*lib)
+            .specialization
+            .prepared
+            .as_ref()?
+            .0
+            .clone();
         let mut roles = [target, index, value, list, in_place];
         roles.sort_unstable();
         (roles.windows(2).all(|pair| pair[0] != pair[1])
@@ -538,7 +545,7 @@ impl Build<'_> {
             && !function.operation()
             && matches!(function.run, LibRun::Native { .. }))
         .then_some(())?;
-        let advance = function.prepared.as_ref()?.0.clone();
+        let advance = function.specialization.prepared.as_ref()?.0.clone();
         (advance.depth() == 0
             && advance.pair()?.ints == Some(lash_kernel_doc::scalar::ScalarOp::Add))
         .then_some(())?;
@@ -664,11 +671,13 @@ impl Build<'_> {
             _ => return None,
         };
         let function = self.exe.lib(lib);
-        (function.header.name.as_str() == name
-            && function.arity == 2
+        ((if name == "list.get" {
+            function.item_read() == Some(lash_kernel_doc::ValueKind::List)
+        } else {
+            function.header.name.as_str() == name && function.specialization.prepared.is_some()
+        }) && function.arity == 2
             && !function.operation()
             && function.limit.is_none()
-            && (name == "list.get" || function.prepared.is_some())
             && matches!(function.run, LibRun::Native { .. }))
         .then_some(())?;
         let [a, b] = &**args else {

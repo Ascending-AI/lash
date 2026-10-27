@@ -219,7 +219,7 @@ impl KernelMachine {
             self.check_call_arguments(
                 running.exe,
                 lash_kernel_value::CallableId {
-                    function: function.id,
+                    function: function.specialization.function,
                     link: self.current_link(),
                 },
                 &function.header.signature,

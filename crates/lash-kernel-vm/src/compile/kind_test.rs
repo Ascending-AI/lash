@@ -14,7 +14,7 @@ pub(crate) fn test<'e>(
     lib: LibId,
     args: &'e [Expr],
 ) -> Option<(&'e Expr, Value)> {
-    if !exe.lib(lib).is_same() || exe.lib(lib).prepared.is_none() {
+    if !exe.lib(lib).is_same() || exe.lib(lib).specialization.prepared.is_none() {
         return None;
     }
     let [
@@ -34,7 +34,7 @@ pub(crate) fn test<'e>(
         return None;
     };
     (exe.lib(*lib).is_kind()
-        && exe.lib(*lib).prepared.is_some()
+        && exe.lib(*lib).specialization.prepared.is_some()
         && !invoke.is_some_and(|invoke| invoke.call)
         && args.len() == 1
         && matches!(literal, Value::Text(_)))
