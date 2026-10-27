@@ -197,6 +197,19 @@ lash_store_sql::statements! {
         stored_nodes = "SELECT hash, content, encoding FROM blobs
              WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
+        /// Discover all absent staged paths in one snapshot. A stored node
+        /// stops descent, so re-supplying a shared closure reads only its
+        /// frontier. The keyed child map is accessed only for absent parents.
+        install_frontier = "WITH RECURSIVE reached AS (
+            SELECT value AS hash FROM json_each(?1)
+            UNION
+            SELECT child.value FROM reached,
+                 json_each(json_extract(?2, '$.' || reached.hash)) AS child
+            WHERE NOT EXISTS (SELECT 1 FROM blobs WHERE hash = unhex(reached.hash))
+        ) SELECT unhex(reached.hash), stored.content, stored.encoding
+          FROM reached LEFT JOIN blobs AS stored ON stored.hash = unhex(reached.hash)
+          ORDER BY reached.hash";
+
         /// One bounded frontier of `[hash, read_opaque_body]` requests.
         /// Graph-only reads retain opaque identities without their payloads.
         hydration_nodes = "SELECT stored.hash,
@@ -1170,8 +1183,8 @@ pub(super) fn install(
             }
         };
     }
-    // External references need one read statement, held bodies one per
-    // frontier depth. Absent bodies install in bounded batches, followed by
+    // External references and the changed staged frontier each need one
+    // set-based read. Absent bodies install in bounded batches, followed by
     // one edge write.
     let named: BTreeSet<&NodeId> = graph
         .external
@@ -1210,8 +1223,8 @@ pub(super) fn install(
     if graph.nodes.is_empty() {
         return Ok(Ok(installed));
     }
-    // The staged nodes are read from the roots of the supplied DAG down, a
-    // frontier per statement, each stored row compared as it streams. A
+    // The staged nodes are read from the roots of the supplied DAG down by
+    // one recursive statement, each stored row compared as it streams. A
     // stored node's children are stored (an edge keeps its child), so what
     // the commit supplies only beneath stored nodes is neither read nor
     // inserted again: validation is bounded by the changed frontier, not
@@ -1222,38 +1235,44 @@ pub(super) fn install(
     let staged = &graph.nodes;
     let slot = |id: &NodeId| staged.binary_search_by(|node| node.id.cmp(id)).ok();
     let mut state = vec![Staged::Unread; staged.len()];
-    let mut frontier: Vec<usize> = {
-        let mut followed = vec![false; staged.len()];
-        for node in staged {
-            for child in &node.children {
-                if let Some(index) = slot(child) {
-                    followed[index] = true;
-                }
+    let mut followed = vec![false; staged.len()];
+    let mut children = BTreeMap::new();
+    for node in staged {
+        children.insert(
+            node.id.to_hex(),
+            node.children.iter().map(NodeId::to_hex).collect::<Vec<_>>(),
+        );
+        for child in &node.children {
+            if let Some(index) = slot(child) {
+                followed[index] = true;
             }
         }
-        (0..staged.len())
-            .filter(|index| !followed[*index])
-            .collect()
-    };
+    }
+    let roots = digest_array(
+        staged
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !followed[*index])
+            .map(|(_, node)| &node.id),
+    );
     let mut absent = 0;
-    while !frontier.is_empty() {
-        for index in &frontier {
-            state[*index] = Staged::Absent;
-        }
-        {
-            let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
-            let mut rows = statement.query([digest_array(
-                frontier.iter().map(|index| &staged[*index].id),
-            )])?;
-            while let Some(row) = rows.next()? {
-                let hash = crate::codec::hash_column(row, 0)?;
-                let Some(index) = NodeId::from_hex(&hash).and_then(|id| slot(&id)) else {
-                    continue;
-                };
-                let node = &staged[index];
-                if answer!(Ok::<_, rusqlite::Error>(encoding_of(row.get(2)?)))
-                    != BlobEncoding::Graph
-                {
+    let mut statement = tx.prepare_cached(SQL.sqlite.install_frontier.sql())?;
+    let mut rows = statement.query(rusqlite::params![roots, json_array(&children)])?;
+    while let Some(row) = rows.next()? {
+        let hash = crate::codec::hash_column(row, 0)?;
+        // Children outside the supplied graph are validated by the external
+        // reference read above, and have no staged body to compare or insert.
+        let Some(index) = NodeId::from_hex(&hash).and_then(|id| slot(&id)) else {
+            continue;
+        };
+        let node = &staged[index];
+        match row.get::<_, Option<i64>>(2)? {
+            None => {
+                state[index] = Staged::Absent;
+                absent += 1;
+            }
+            Some(encoding) => {
+                if answer!(Ok::<_, rusqlite::Error>(encoding_of(encoding))) != BlobEncoding::Graph {
                     return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
                 }
                 if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
@@ -1262,23 +1281,9 @@ pub(super) fn install(
                 state[index] = Staged::Present;
             }
         }
-        let mut next = Vec::new();
-        for index in frontier {
-            if state[index] != Staged::Absent {
-                continue;
-            }
-            absent += 1;
-            for child in &staged[index].children {
-                if let Some(child) = slot(child)
-                    && state[child] == Staged::Unread
-                {
-                    state[child] = Staged::Queued;
-                    next.push(child);
-                }
-            }
-        }
-        frontier = next;
     }
+    drop(rows);
+    drop(statement);
     if absent == 0 {
         return Ok(Ok(installed));
     }
@@ -1352,8 +1357,6 @@ pub(super) fn install(
 enum Staged {
     /// Beneath stored nodes only, or not reached yet.
     Unread,
-    /// On the next frontier.
-    Queued,
     /// Read and not stored: inserted with its edges.
     Absent,
     /// Stored, and compared byte for byte.

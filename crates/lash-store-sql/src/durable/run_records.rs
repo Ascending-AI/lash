@@ -17,22 +17,6 @@ crate::statements! {
         ordinal_taken = "SELECT 1 FROM run_records
              WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3";
 
-        /// Append owner `?1`'s run `?2` fact `?3` of kind `?4` for call `?5`,
-        /// RoundFact node `?6`, written at epoch `?7`, when it follows the
-        /// run's fact at `?3 - 1` (or is the run's first) and neither its
-        /// ordinal nor, for an outcome, its call's outcome is taken: one
-        /// row when it was appended, none when it was refused. The primary
-        /// key and the outcome index refuse a taken ordinal and a second
-        /// outcome, so a refusal is read back only when it happened.
-        append = "INSERT INTO run_records
-                 (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
-             WHERE ?3 = 0 OR EXISTS (
-                 SELECT 1 FROM run_records
-                 WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3 - 1)
-             ON CONFLICT DO NOTHING
-             RETURNING ordinal";
-
         /// Owner `?1`'s run `?2` fact `?3`'s node.
         root = "SELECT record_ref FROM run_records
              WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3";

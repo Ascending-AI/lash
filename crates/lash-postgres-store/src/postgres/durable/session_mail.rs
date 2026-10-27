@@ -23,6 +23,24 @@ lash_store_sql::statements! {
     /// The session-mail statements only PostgreSQL issues: `UNNEST` binds a
     /// run's admitted mail as one list.
     struct PostgresSessionMailStatements @ "durable_session_mail_postgres" {
+        /// One snapshot of standing, bound run and all unbound mail.
+        mailbox = "SELECT
+            (SELECT count(*) FROM session_meta WHERE session_id = ?1),
+            (SELECT count(*) FROM deleted_sessions WHERE session_id = ?1),
+            (SELECT count(*) FROM session_meta WHERE session_id = ?1 AND closing_intent IS NOT NULL),
+            (SELECT admitted_run FROM pending_turn_inputs
+                WHERE session_id = ?1 AND admitted_run IS NOT NULL
+                  AND {{nonterminal_turn_input_state(state)}}
+             UNION ALL SELECT admitted_run FROM queued_work_batches
+                WHERE session_id = ?1 AND admitted_run IS NOT NULL AND terminal_cause IS NULL LIMIT 1) AS bound_run,
+            (SELECT COALESCE(json_agg(json_build_array(input_id, enqueue_seq, source_key, run_spec_hash,
+                state, ingress_json, trace_cause_json, origin_json) ORDER BY enqueue_seq), '[]'::json)::text
+             FROM pending_turn_inputs WHERE session_id = ?1 AND admitted_run IS NULL
+               AND {{undelivered_turn_input_state(state)}}) AS inputs,
+            (SELECT COALESCE(json_agg(json_build_array(batch_id, enqueue_seq, delivery_policy, payload_json,
+                CASE WHEN cancel_request_json IS NULL THEN 0 ELSE 1 END) ORDER BY enqueue_seq), '[]'::json)::text
+             FROM queued_work_batches WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL)";
+
         /// Take a cross-target actor before its history without waiting on
         /// an actor another source envelope may hold in the opposite order.
         lock_target = "SELECT actor_key FROM actors WHERE actor_key = ?1 FOR UPDATE NOWAIT";
@@ -30,9 +48,8 @@ lash_store_sql::statements! {
         /// The currently existing rows, without acquiring new locks after history.
         actor_keys = "SELECT actor_key FROM actors WHERE actor_key = ANY(?1) ORDER BY actor_key";
 
-        /// Bind each input `?2[i]` of session `?1` to run `?3`, its admitting
-        /// owner, or keep it bound there, as the neutral `bind_input` does
-        /// one input; returns each input it bound.
+        /// Bind all named inputs to their run, retaining an existing binding
+        /// to that run. Return each input still open and available.
         bind_inputs = "UPDATE pending_turn_inputs AS input
              SET admitted_run = ?3, admitted_by = ?3
              FROM UNNEST(?2::text[]) AS named(input_id)
@@ -41,8 +58,8 @@ lash_store_sql::statements! {
                AND input.state IN ('deferred_next_turn', 'pending_active')
              RETURNING input.input_id";
 
-        /// Bind each batch `?2[i]` of session `?1` to run `?3`, as the
-        /// neutral `bind_batch` does one batch; returns each batch it bound.
+        /// Bind all named batches to their run, retaining an existing binding
+        /// to that run. Return each batch still open and available.
         bind_batches = "UPDATE queued_work_batches AS batch
              SET admitted_run = ?3, admitted_by = ?3
              FROM UNNEST(?2::text[]) AS named(batch_id)
@@ -55,7 +72,10 @@ lash_store_sql::statements! {
 
 static POSTGRES_SQL: std::sync::LazyLock<PostgresSessionMailStatements> =
     std::sync::LazyLock::new(|| {
-        PostgresSessionMailStatements::render(lash_store_sql::Dialect::postgres())
+        PostgresSessionMailStatements::render(
+            lash_store_sql::Dialect::postgres()
+                .with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
+        )
     });
 
 impl super::PostgresDurableStore {
@@ -296,53 +316,53 @@ pub(super) async fn read(
     tx: &mut PgConnection,
     session: &SessionId,
 ) -> Result<SessionMailbox, DurableError> {
-    let (live, closing) = standing(tx, session).await?;
+    let row = crate::observed_sql::query(POSTGRES_SQL.mailbox.sql())
+        .bind(session.as_str())
+        .fetch_one(crate::observed_sql::executor(tx))
+        .await
+        .map_err(sqlx_failure)?;
     let mut mailbox = SessionMailbox {
-        live,
-        closing,
+        live: get::<i64>(&row, 0)? > 0 && get::<i64>(&row, 1)? == 0,
+        closing: get::<i64>(&row, 2)? > 0,
         ..SessionMailbox::default()
     };
     if !mailbox.live {
         return Ok(mailbox);
     }
-    let bound: Option<String> = crate::observed_sql::query_scalar(SQL.session_mail.bound_run.sql())
-        .bind(session.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    mailbox.bound_run = bound
+    mailbox.bound_run = get::<Option<String>>(&row, 3)?
         .map(TurnId::parse)
         .transpose()
         .map_err(|error| undecodable("bound run", error))?;
-    let inputs = crate::observed_sql::query(SQL.session_mail.open_inputs.sql())
-        .bind(session.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    for row in &inputs {
+    type Input = (
+        String,
+        i64,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        String,
+    );
+    let inputs: Vec<Input> = serde_json::from_str(&get::<String>(&row, 4)?)
+        .map_err(|error| undecodable("input rows", error))?;
+    for (input, seq, source, spec, state, ingress, trace, origin) in inputs {
         mailbox.inputs.push(decode_input(
-            get(row, 0)?,
-            get(row, 1)?,
-            get(row, 2)?,
-            get(row, 3)?,
-            (&get::<String>(row, 4)?, &get::<String>(row, 5)?),
-            get::<Option<String>>(row, 6)?.as_deref(),
-            &get::<String>(row, 7)?,
+            input,
+            seq,
+            source,
+            spec,
+            (&state, &ingress),
+            trace.as_deref(),
+            &origin,
         )?);
     }
-    let batches = crate::observed_sql::query(SQL.session_mail.open_batches.sql())
-        .bind(session.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    for row in &batches {
-        mailbox.batches.push(decode_batch(
-            get(row, 0)?,
-            get(row, 1)?,
-            &get::<String>(row, 2)?,
-            &get::<String>(row, 3)?,
-            get::<i32>(row, 4)? > 0,
-        )?);
+    let batches: Vec<(String, i64, String, String, i32)> =
+        serde_json::from_str(&get::<String>(&row, 5)?)
+            .map_err(|error| undecodable("batch rows", error))?;
+    for (batch, seq, policy, payload, cancel) in batches {
+        mailbox
+            .batches
+            .push(decode_batch(batch, seq, &policy, &payload, cancel > 0)?);
     }
     Ok(mailbox)
 }
@@ -722,4 +742,13 @@ pub(crate) async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx:
     .execute(crate::observed_sql::executor(pool))
     .await
     .map(|_| ())
+}
+
+/// Project the production mailbox's bound-run probe for its history-work laws.
+#[cfg(test)]
+pub(crate) fn bound_run_query() -> String {
+    format!(
+        "SELECT bound_run FROM ({}) AS mailbox WHERE bound_run IS NOT NULL",
+        POSTGRES_SQL.mailbox.sql()
+    )
 }

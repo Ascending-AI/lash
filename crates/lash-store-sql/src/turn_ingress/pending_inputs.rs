@@ -75,15 +75,7 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
-        /// The session and immutable submission digest of the row that already
-        /// holds input id `?1`, in any session: a provisioned id is unique
-        /// across the store, so the enqueue that provisioned it adopts the row
-        /// or refuses a foreign one (FIG-3513). Another session's concurrent
-        /// admission of the same id is not serialized by this session's
-        /// authority; the id's unique constraint refuses the second insert.
-        select_session_by_input_id = "SELECT session_id, submission_digest
-             FROM pending_turn_inputs
-             WHERE input_id = ?1";
+
 
         /// Input `?2` of session `?1`, in any state.
         /// A settled row's `input_json` reads `NULL` once the revision its

@@ -4,6 +4,21 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only SQLite
     /// issues.
     pub(crate) struct TurnIngressSqliteStatements @ "turn_ingress" {
+        /// Resolve the whole admission's identities under its session writer.
+        /// The caller overlays rows it inserts so repeated drafts in this
+        /// same batch retain their sequential idempotency semantics.
+        input_admission_identities = "WITH wanted AS MATERIALIZED (SELECT value->>0 AS source_key, value->>1 AS input_id FROM json_each(?2))
+            SELECT 0, held.session_id, held.input_id, held.source_key, held.submission_digest
+              FROM wanted JOIN pending_turn_inputs AS held
+                ON held.session_id = ?1 AND held.source_key = wanted.source_key
+            UNION
+            SELECT 0, held.session_id, held.input_id, held.source_key, held.submission_digest
+              FROM wanted JOIN pending_turn_inputs AS held ON held.input_id = wanted.input_id
+            UNION
+            SELECT 1, held.session_id, CAST(NULL AS TEXT), held.source_key, CAST(NULL AS TEXT)
+              FROM wanted JOIN forsaken_turn_inputs AS held
+                ON held.session_id = ?1 AND held.source_key = wanted.source_key";
+
         /// States of inputs bound to run `?2` in session `?1`, read under
         /// the write transaction that records its park.
         run_bound_input_states = "SELECT pti.state FROM pending_turn_inputs pti

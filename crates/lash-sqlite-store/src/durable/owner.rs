@@ -189,7 +189,31 @@ pub(super) fn apply_owner(
         open_roots: turns::OpenRoots::read(open_roots),
     };
     let mut session_heads = Vec::new();
-    for domain in write.domain() {
+    let mut remaining = write.domain();
+    while let Some((domain, rest)) = remaining.split_first() {
+        remaining = rest;
+        if matches!(
+            domain,
+            DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append { .. })
+        ) {
+            let count = 1 + remaining
+                .iter()
+                .take_while(|write| {
+                    matches!(
+                        write,
+                        DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append { .. })
+                    )
+                })
+                .count();
+            let start = write.domain().len() - rest.len() - 1;
+            if let Err(error) =
+                run_records::apply_appends(tx, &committing, &write.domain()[start..start + count])?
+            {
+                return refuse(error);
+            }
+            remaining = &rest[count - 1..];
+            continue;
+        }
         let applied = match domain {
             DomainWrite::SessionCommit(head) => turns::apply_session_commit(
                 tx,
@@ -231,10 +255,8 @@ pub(super) fn apply_owner(
     if let Err(error) = environment::finish(tx, write.domain())? {
         return refuse(error);
     }
-    for lease in write.released_root_leases() {
-        if let Some(root) = pages::release_in(tx, *lease)? {
-            committing.retired.stored(root);
-        }
+    for root in pages::release_many_in(tx, write.released_root_leases())? {
+        committing.retired.stored(root);
     }
     graph::hold_retired(tx, committing.retired, now)?;
     if let Some(formats) = write.formats() {

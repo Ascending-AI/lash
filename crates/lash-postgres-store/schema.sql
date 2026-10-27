@@ -1422,10 +1422,11 @@ DECLARE
     v_tchildren BYTEA[];
     v_answer JSONB;
     v_frame TEXT;
+    v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry a0d25687a48b2614); a call
+    -- Generated from this build's statements (registry 2997f22d9407e851); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'a0d25687a48b2614'
+    IF p_registry IS DISTINCT FROM '2997f22d9407e851'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1471,6 +1472,27 @@ BEGIN
     END IF;
     IF v_rev IS NULL THEN
         RAISE EXCEPTION 'lash_owner_commit: the owner fence refused' USING ERRCODE = 'LX003';
+    END IF;
+    -- Environment owners precede graph locks, including owners named by
+    -- an external version reference. Re-read authority after the locks.
+    SELECT ARRAY(SELECT owner_id FROM lash_environment_owners
+            WHERE manifest_ref = ANY((p_named)::bytea[])
+               OR owner_id IN (SELECT value->>0 FROM jsonb_array_elements((COALESCE(p_steps->'environment', '[]'::jsonb))::jsonb))
+            ORDER BY owner_id FOR UPDATE SKIP LOCKED) INTO v_environment;
+    SELECT NOT EXISTS (
+            SELECT 1 FROM lash_environment_owners
+            WHERE manifest_ref = ANY((p_named)::bytea[]) AND (state <> 'published' OR NOT (owner_id = ANY((v_environment)::text[])))
+            ) AND NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements((COALESCE(p_steps->'environment', '[]'::jsonb))::jsonb) AS supplied(value)
+            LEFT JOIN lash_environment_owners AS owner ON owner.owner_id = supplied.value->>0
+            WHERE owner.owner_id IS NULL OR NOT (owner.owner_id = ANY((v_environment)::text[])) OR owner.state <> 'published'
+               OR (NOT (owner.manifest_ref = ANY((p_named)::bytea[])) AND owner.version_id <> supplied.value->>1))
+            AND NOT EXISTS (SELECT 1 FROM lash_environment_owners WHERE owner_id = ANY((v_environment)::text[])
+                AND (owner_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                  OR version_id !~ '^[0-9a-f]{64}$' OR preparing_epoch < 0
+                  OR left(actor_key, 2) <> 's/' OR length(actor_key) <= 2)) INTO v_reached;
+    IF NOT v_reached THEN
+        RAISE EXCEPTION 'lash_owner_commit: environment refused' USING ERRCODE = 'LX004';
     END IF;
     -- The checkpoint bodies a head commit supplies are stored before the
     -- graph that names them (FIG-5942).
@@ -1577,16 +1599,31 @@ BEGIN
             UPDATE lash_model_call_pins SET answered = TRUE WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
-        WHEN 'durable_run_record.append' THEN
+        WHEN 'durable_run_fact_batch_postgres.append' THEN
             v_rows := 0;
-            FOR v_row IN INSERT INTO lash_run_records
-                 (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-             SELECT (v_p->>0), ((v_p->>1)::BIGINT), ((v_p->>2)::BIGINT), (v_p->>3), (v_p->>4), (decode(v_p->>5, 'hex')), ((v_p->>6)::BIGINT)
-             WHERE ((v_p->>2)::BIGINT) = 0 OR EXISTS (
-                 SELECT 1 FROM lash_run_records
-                 WHERE owner_key = (v_p->>0) AND run_seq = ((v_p->>1)::BIGINT) AND ordinal = ((v_p->>2)::BIGINT) - 1)
-             ON CONFLICT DO NOTHING
-             RETURNING ordinal LOOP
+            FOR v_row IN WITH incoming AS MATERIALIZED (SELECT position AS pos, value->>0 AS owner_key, (value->>1)::bigint AS run_seq, (value->>2)::bigint AS ordinal, value->>3 AS kind, value->>4 AS call_id, decode(value->>5, 'hex') AS record_ref, (value->>6)::bigint AS written_epoch FROM jsonb_array_elements((v_p->>0)::jsonb) WITH ORDINALITY AS batch(value, position))
+             INSERT INTO lash_run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+             SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM incoming AS item WHERE
+                   EXISTS (SELECT 1 FROM lash_run_records AS held WHERE held.owner_key = item.owner_key
+                     AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal)
+                   OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                     AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                     AND earlier.ordinal = item.ordinal)
+                   OR (item.ordinal <> 0 AND NOT EXISTS (
+                     SELECT 1 FROM lash_run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal - 1)
+                     AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.ordinal = item.ordinal - 1))
+                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                     EXISTS (SELECT 1 FROM lash_run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                     OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+             ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;

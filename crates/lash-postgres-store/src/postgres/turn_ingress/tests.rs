@@ -231,15 +231,8 @@ async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when
         .execute(&mut *connection)
         .await
         .unwrap();
-    let sql = lash_store_sql::durable::session_mail::SessionMailStatements::render(
-        lash_store_sql::Dialect::postgres().with_vocabulary(super::TURN_INPUT_LIFECYCLE),
-    );
-    let plan = explain(
-        &mut connection,
-        sql.bound_run.sql(),
-        &[PlanParam::Text("history")],
-    )
-    .await;
+    let bound_query = crate::durable::session_mail::bound_run_query();
+    let plan = explain(&mut connection, &bound_query, &[PlanParam::Text("history")]).await;
     assert!(
         plan.contains("idx_lash_pending_turn_inputs_open_bound_run"),
         "bound_run reads settled history:\n{plan}",
@@ -265,7 +258,7 @@ async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when
             .execute(&mut *connection)
             .await
             .unwrap();
-            let actual: Option<String> = sqlx::query_scalar(sql.bound_run.sql())
+            let actual: Option<String> = sqlx::query_scalar(&bound_query)
                 .bind("history")
                 .fetch_optional(&mut *connection)
                 .await
@@ -291,7 +284,7 @@ async fn postgres_bound_run_skips_settled_history_without_changing_bindings_when
     .execute(&mut *connection)
     .await
     .unwrap();
-    let queued: String = sqlx::query_scalar(sql.bound_run.sql())
+    let queued: String = sqlx::query_scalar(&bound_query)
         .bind("history")
         .fetch_one(&mut *connection)
         .await

@@ -494,38 +494,71 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
         support::validate_turn_input_source_key(draft)?;
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
+    let wanted: Vec<_> = batch
+        .drafts()
+        .iter()
+        .map(|draft| serde_json::json!([draft.source_key, draft.input_id]))
+        .collect();
+    let wanted = encode_json(&wanted)?;
+    let mut sources = std::collections::BTreeMap::new();
+    let mut identities = std::collections::BTreeMap::new();
+    let mut forsaken_keys = std::collections::BTreeSet::new();
+    let rows = tx
+        .prepare_cached(sql.family_sqlite.input_admission_identities.sql())
+        .map_err(sqlite_error)?
+        .query_map(params![session_id.as_str(), wanted], |row| {
+            Ok((
+                row.get::<_, i32>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sqlite_error)?;
+    for (kind, session, input, source, digest) in rows {
+        if kind == 1 {
+            if let Some(source) = source {
+                forsaken_keys.insert(source);
+            }
+        } else if let Some((input, digest)) = input.zip(digest) {
+            if session == session_id.as_str()
+                && let Some(source) = source
+            {
+                sources.insert(source, (input.clone(), digest.clone()));
+            }
+            identities.insert(input, (session, digest));
+        } else {
+            return Err(StoreError::Backend(
+                "admission identity is missing its digest".into(),
+            ));
+        }
+    }
     let mut interned = std::collections::BTreeSet::new();
     let mut admitted = Vec::with_capacity(batch.drafts().len());
     for (nonce, draft) in (first_nonce..).zip(batch.drafts()) {
         let submission_digest = support::turn_input_submission_digest(draft)?;
-        let by_source_key = match draft.source_key.as_deref() {
-            Some(source_key) => tx
-                .prepare_cached(sql.pending_inputs.select_id_by_source_key.sql())
-                .map_err(sqlite_error)?
-                .query_row(params![session_id.as_str(), source_key], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })
-                .optional()
-                .map_err(sqlite_error)?,
-            None => None,
+        let by_source_key = draft
+            .source_key
+            .as_ref()
+            .and_then(|key| sources.get(key))
+            .cloned();
+        let by_input_id = if by_source_key.is_none() {
+            draft
+                .input_id
+                .as_ref()
+                .and_then(|id| identities.get(id.as_str()))
+                .cloned()
+        } else {
+            None
         };
-        let by_input_id = match (&by_source_key, draft.input_id.as_deref()) {
-            (None, Some(input_id)) => tx
-                .prepare_cached(sql.pending_inputs.select_session_by_input_id.sql())
-                .map_err(sqlite_error)?
-                .query_row(params![input_id], |row| Ok((row.get(0)?, row.get(1)?)))
-                .optional()
-                .map_err(sqlite_error)?,
-            _ => None,
-        };
-        let forsaken = match (&by_source_key, draft.source_key.as_deref()) {
-            (None, Some(source_key)) => tx
-                .prepare_cached(sql.forsaken_inputs.select_exists.sql())
-                .map_err(sqlite_error)?
-                .query_row(params![session_id.as_str(), source_key], |row| row.get(0))
-                .map_err(sqlite_error)?,
-            _ => false,
-        };
+        let forsaken = by_source_key.is_none()
+            && draft
+                .source_key
+                .as_ref()
+                .is_some_and(|key| forsaken_keys.contains(key));
         let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,
@@ -609,6 +642,18 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 (input_id, Some(inserted))
             }
         };
+        if inserted.is_some() {
+            if let Some(source) = &draft.source_key {
+                sources.insert(
+                    source.clone(),
+                    (input_id.to_string(), submission_digest.clone()),
+                );
+            }
+            identities.insert(
+                input_id.to_string(),
+                (session_id.to_string(), submission_digest.clone()),
+            );
+        }
         if draft.pin {
             // The pin is written with the acceptance, new or replayed, so
             // the input is pinned before its run can start.

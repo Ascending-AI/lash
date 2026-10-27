@@ -10,7 +10,7 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         let (session, owner) = (session.clone(), owner.to_owned());
 
-        self.read(move |tx| model_calls::pins(tx, &session, &owner))
+        self.query(move |tx| model_calls::pins(tx, &session, &owner))
             .await
     }
 
@@ -210,7 +210,7 @@ impl DurableReads for SqliteDurableStore {
         session: &lash_kernel_value::identity::SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         let session = session.clone();
-        self.read(move |tx| session_mail::read(tx, &session)).await
+        self.query(move |tx| session_mail::read(tx, &session)).await
     }
 
     async fn prompt_snapshot(

@@ -4,21 +4,22 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only PostgreSQL
     /// issues.
     pub(crate) struct TurnIngressPostgresStatements @ "turn_ingress" {
-        /// The input and immutable digest session `?1` filed under source
-        /// key `?2`, or whether it forsook that key. Always returns one row,
-        /// with NULL input columns when no input holds the key.
-        ///
-        /// Admission holds the session's write authority through commit,
-        /// as forsake does: both absences hold until then. Reading the
-        /// tombstone beside replay costs no extra round trip (FIG-6345).
-        input_admission_by_source_key = "SELECT inputs.input_id, inputs.submission_digest,
-                inputs.input_id IS NULL AND EXISTS (
-                    SELECT 1 FROM forsaken_turn_inputs
-                    WHERE session_id = ?1 AND source_key = ?2
-                )
-             FROM (SELECT 1) AS request
-             LEFT JOIN pending_turn_inputs AS inputs
-               ON inputs.session_id = ?1 AND inputs.source_key = ?2";
+        /// Resolve the whole admission's identities under its session writer.
+        /// The caller overlays rows it inserts so repeated drafts in this
+        /// same batch retain their sequential idempotency semantics.
+        input_admission_identities = "WITH wanted AS MATERIALIZED (SELECT value->>0 AS source_key, value->>1 AS input_id FROM jsonb_array_elements(?2::jsonb))
+            SELECT 0, held.session_id, held.input_id, held.source_key, held.submission_digest
+              FROM wanted JOIN pending_turn_inputs AS held
+                ON held.session_id = ?1 AND held.source_key = wanted.source_key
+            UNION
+            SELECT 0, held.session_id, held.input_id, held.source_key, held.submission_digest
+              FROM wanted JOIN pending_turn_inputs AS held ON held.input_id = wanted.input_id
+            UNION
+            SELECT 1, held.session_id, CAST(NULL AS TEXT), held.source_key, CAST(NULL AS TEXT)
+              FROM wanted JOIN forsaken_turn_inputs AS held
+                ON held.session_id = ?1 AND held.source_key = wanted.source_key";
+
+
 
         /// Lock run `?2`'s bound inputs in queue order before a park write,
         /// so withdrawal either follows the park or prevents it.

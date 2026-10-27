@@ -57,6 +57,10 @@ lash_store_sql::statements! {
              WHERE blobs.hash IN (SELECT unhex(value) FROM json_each(?1))
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
+        /// Release the complete owner handoff, returning roots for holds.
+        release_leases = "DELETE FROM root_leases
+            WHERE lease_id IN (SELECT value FROM json_each(?1)) RETURNING root_ref";
+
         /// The oldest hold.
         hold_next = "SELECT root_ref FROM retirement_holds
              ORDER BY queued_at_ms, root_ref LIMIT 1";
@@ -578,6 +582,21 @@ pub(super) fn acquire_in(
         fence: request.fence,
         expires_at: DurableInstant(now.0 + request.ttl_millis),
     }))
+}
+
+pub(super) fn release_many_in(
+    tx: &Connection,
+    leases: &BTreeSet<RootLeaseId>,
+) -> rusqlite::Result<Vec<String>> {
+    if leases.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<_> = leases.iter().map(|lease| lease.0.cast_signed()).collect();
+    tx.prepare_cached(SQL.sqlite.release_leases.sql())?
+        .query_map([graph::json_array(&ids)], |row| {
+            crate::codec::hash_column(row, 0)
+        })?
+        .collect()
 }
 
 pub(super) fn release_in(tx: &Connection, lease: RootLeaseId) -> rusqlite::Result<Option<String>> {

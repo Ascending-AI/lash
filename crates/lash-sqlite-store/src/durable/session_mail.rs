@@ -18,6 +18,46 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL};
 
+lash_store_sql::statements! {
+    struct SqliteSessionMailStatements @ "durable_session_mail_sqlite" {
+        /// Standing, bound run and all unbound mail share one SQL snapshot.
+        mailbox = "SELECT
+            (SELECT count(*) FROM session_meta WHERE session_id = ?1),
+            (SELECT count(*) FROM deleted_sessions WHERE session_id = ?1),
+            (SELECT count(*) FROM session_meta WHERE session_id = ?1 AND closing_intent IS NOT NULL),
+            (SELECT admitted_run FROM pending_turn_inputs
+                WHERE session_id = ?1 AND admitted_run IS NOT NULL
+                  AND {{nonterminal_turn_input_state(state)}}
+             UNION ALL SELECT admitted_run FROM queued_work_batches
+                WHERE session_id = ?1 AND admitted_run IS NOT NULL AND terminal_cause IS NULL LIMIT 1) AS bound_run,
+            (SELECT json_group_array(json_array(input_id, enqueue_seq, source_key, run_spec_hash,
+                state, ingress_json, trace_cause_json, origin_json)) FROM (
+                 SELECT input_id, enqueue_seq, source_key, run_spec_hash, state, ingress_json,
+                     trace_cause_json, origin_json FROM pending_turn_inputs
+                 WHERE session_id = ?1 AND admitted_run IS NULL
+                   AND {{undelivered_turn_input_state(state)}} ORDER BY enqueue_seq)) AS inputs,
+            (SELECT json_group_array(json_array(batch_id, enqueue_seq, delivery_policy, payload_json,
+                CASE WHEN cancel_request_json IS NULL THEN 0 ELSE 1 END)) FROM (
+                 SELECT batch_id, enqueue_seq, delivery_policy, payload_json, cancel_request_json
+                 FROM queued_work_batches WHERE session_id = ?1 AND admitted_run IS NULL
+                   AND terminal_cause IS NULL ORDER BY enqueue_seq))";
+        bind_inputs = "UPDATE pending_turn_inputs SET admitted_run = ?3, admitted_by = ?3
+            WHERE session_id = ?1 AND input_id IN (SELECT value FROM json_each(?2))
+              AND (admitted_run IS NULL OR admitted_run = ?3)
+              AND state IN ('deferred_next_turn', 'pending_active') RETURNING input_id";
+        bind_batches = "UPDATE queued_work_batches SET admitted_run = ?3, admitted_by = ?3
+            WHERE session_id = ?1 AND batch_id IN (SELECT value FROM json_each(?2))
+              AND (admitted_run IS NULL OR admitted_run = ?3)
+              AND terminal_cause IS NULL RETURNING batch_id";
+    }
+}
+
+static SQLITE: std::sync::LazyLock<SqliteSessionMailStatements> = std::sync::LazyLock::new(|| {
+    SqliteSessionMailStatements::render(
+        crate::schema_layout::MAIN.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
+    )
+});
+
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Corrupt,
@@ -45,38 +85,44 @@ fn standing(tx: &Connection, session: &SessionId) -> rusqlite::Result<(bool, boo
 
 /// The session's open mail, read in one snapshot.
 pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbox> {
-    let (live, closing) = standing(tx, session)?;
+    let (meta, deleted, closing, bound, inputs, batches) = tx
+        .prepare_cached(SQLITE.mailbox.sql())?
+        .query_row([session.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
     let mut mailbox = SessionMailbox {
-        live,
-        closing,
+        live: count(meta) && !count(deleted),
+        closing: count(closing),
         ..SessionMailbox::default()
     };
     if !mailbox.live {
         return Ok(Ok(mailbox));
     }
-    let bound: Option<String> = tx
-        .prepare_cached(SQL.session_mail.bound_run.sql())?
-        .query_row([session.as_str()], |row| row.get(0))
-        .optional()?;
     mailbox.bound_run = match bound.map(TurnId::parse).transpose() {
         Ok(run) => run,
         Err(error) => return Ok(Err(undecodable("bound run", error))),
     };
-    let inputs = tx
-        .prepare_cached(SQL.session_mail.open_inputs.sql())?
-        .query_map([session.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, String>(7)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    type Input = (
+        String,
+        i64,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        String,
+    );
+    let inputs: Vec<Input> = match serde_json::from_str(&inputs) {
+        Ok(inputs) => inputs,
+        Err(error) => return Ok(Err(undecodable("input rows", error))),
+    };
     for (input, seq, source_key, run_spec_hash, state, ingress_json, trace_cause, origin_json) in
         inputs
     {
@@ -93,18 +139,10 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
             Err(error) => return Ok(Err(error)),
         }
     }
-    let batches = tx
-        .prepare_cached(SQL.session_mail.open_batches.sql())?
-        .query_map([session.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let batches: Vec<(String, i64, String, String, i64)> = match serde_json::from_str(&batches) {
+        Ok(batches) => batches,
+        Err(error) => return Ok(Err(undecodable("batch rows", error))),
+    };
     for (batch, seq, policy, payload_json, cancel) in batches {
         match decode_batch(batch, seq, &policy, &payload_json, count(cancel)) {
             Ok(batch) => mailbox.batches.push(batch),
@@ -454,28 +492,34 @@ fn admit(
             item: item.to_owned(),
         })))
     };
-    for input in inputs {
-        let bound = tx
-            .prepare_cached(SQL.session_mail.bind_input.sql())?
-            .query_row(
-                rusqlite::params![session.as_str(), input.as_str(), run.as_str()],
-                |_| Ok(()),
-            )
-            .optional()?;
-        if bound.is_none() {
-            return moved(input.as_str());
+    for (statement, ids) in [
+        (
+            &SQLITE.bind_inputs,
+            inputs.iter().map(InputId::as_str).collect::<Vec<_>>(),
+        ),
+        (
+            &SQLITE.bind_batches,
+            batches.iter().map(BatchId::as_str).collect::<Vec<_>>(),
+        ),
+    ] {
+        if ids.is_empty() {
+            continue;
         }
-    }
-    for batch in batches {
         let bound = tx
-            .prepare_cached(SQL.session_mail.bind_batch.sql())?
-            .query_row(
-                rusqlite::params![session.as_str(), batch.as_str(), run.as_str()],
-                |_| Ok(()),
-            )
-            .optional()?;
-        if bound.is_none() {
-            return moved(batch.as_str());
+            .prepare_cached(statement.sql())?
+            .query_map(
+                rusqlite::params![
+                    session.as_str(),
+                    super::graph::json_array(&ids),
+                    run.as_str()
+                ],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?;
+        // Preserve the original first-moved identity and tolerate duplicate
+        // names, as rebinding the same row repeatedly did.
+        if let Some(id) = ids.iter().find(|id| !bound.contains(**id)) {
+            return moved(id);
         }
     }
     Ok(Ok(()))
@@ -495,28 +539,19 @@ pub(crate) fn cut_session_wakes(conn: &Connection, armed: bool) -> rusqlite::Res
     })
 }
 
+/// Project the production mailbox's bound-run probe for its history-work laws.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) fn bound_run_query() -> String {
+    format!(
+        "SELECT bound_run FROM ({}) AS mailbox WHERE bound_run IS NOT NULL",
+        SQLITE.mailbox.sql()
+    )
+}
 
-    /// INPUT-BIND-WORK: one durable column is one statement per input.
-    #[tokio::test]
-    async fn each_admitted_input_is_bound_with_one_statement() {
-        let conn = crate::tests::input_run_sql_fixture();
-        crate::observed_sql::enable(&conn);
-        let (answer, receipt) =
-            lash_core_ids::operational_metrics::sql::collect("session.admit", "sqlite", async {
-                admit(
-                    &conn,
-                    &"session".into(),
-                    &"run".into(),
-                    &["input".into()],
-                    &[],
-                )
-            })
-            .await;
-        answer.expect("SQL").expect("admit");
-        assert_eq!(receipt.statements, 1, "one fewer statement per bound input");
-        eprintln!("INPUT_BIND_STATEMENTS {}", receipt.statements);
-    }
+#[cfg(test)]
+pub(crate) fn open_inputs_query() -> String {
+    format!(
+        "SELECT item.value ->> 0 FROM ({}) AS mailbox JOIN json_each(mailbox.inputs) AS item ORDER BY CAST(item.key AS INTEGER)",
+        SQLITE.mailbox.sql()
+    )
 }

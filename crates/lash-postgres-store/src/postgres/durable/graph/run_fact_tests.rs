@@ -42,21 +42,25 @@ async fn a_run_scoped_fact_walk_takes_one_round_trip() {
     install_staged(&mut connection, staging.nodes())
         .await
         .expect("install");
-    let facts =
-        lash_store_sql::durable::run_records::RunRecordStatements::render(Dialect::postgres());
-    for (run, ordinal, root) in roots {
-        sqlx::query(facts.append.sql())
-            .bind(owner.stored())
-            .bind(run as i64)
-            .bind(ordinal as i64)
-            .bind("admit")
-            .bind(Option::<String>::None)
-            .bind(crate::keys::key(root.to_hex()))
-            .bind(1_i64)
-            .execute(&mut *connection)
-            .await
-            .expect("fact row");
-    }
+    let rows: Vec<_> = roots
+        .iter()
+        .map(|(run, ordinal, root)| {
+            serde_json::json!([
+                owner.stored(),
+                run,
+                ordinal,
+                "admit",
+                null,
+                root.to_hex(),
+                1
+            ])
+        })
+        .collect();
+    sqlx::query(super::super::run_records::APPEND.statement().sql())
+        .bind(serde_json::to_string(&rows).expect("fixture rows"))
+        .execute(&mut *connection)
+        .await
+        .expect("fact rows");
     drop(connection);
     for run in [Some(RunSeq(8)), None] {
         let work = async {

@@ -108,7 +108,7 @@ pub(crate) fn release_material_batch(
 mod reads;
 mod run_records;
 mod session_close;
-mod session_mail;
+pub(crate) mod session_mail;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_mail::cut_session_wakes;
 mod snapshots;

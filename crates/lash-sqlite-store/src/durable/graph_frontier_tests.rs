@@ -158,12 +158,13 @@ async fn an_install_reuses_a_stored_root_instead_of_revisiting_its_chain() {
                 super::install_staged(connection, &chain)?.unwrap();
                 encode(&mut staging, "a new root over the stored chain", Some(head));
                 let again = staging.into_nodes();
-                let statement = connection.prepare_cached(super::SQL.sqlite.stored_nodes.sql())?;
+                let statement =
+                    connection.prepare_cached(super::SQL.sqlite.install_frontier.sql())?;
                 statement.reset_status(rusqlite::StatementStatus::VmStep);
                 drop(statement);
                 super::install_staged(connection, &again)?.unwrap();
                 let reads = connection
-                    .prepare_cached(super::SQL.sqlite.stored_nodes.sql())?
+                    .prepare_cached(super::SQL.sqlite.install_frontier.sql())?
                     .get_status(rusqlite::StatementStatus::VmStep);
                 // A stored head whose bytes changed under its digest is
                 // compared at the frontier and refused.

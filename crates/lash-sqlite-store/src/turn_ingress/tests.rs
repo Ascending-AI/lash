@@ -68,6 +68,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
     let conn = catalog();
     let sql = turn_ingress_sql();
     for statement in [
+        sql.family_sqlite.input_admission_identities.sql(),
         sql.family.has_admissible_work.sql(),
         sql.family.pending_session_work_ordering.sql(),
         sql.family.turn_address_ended.sql(),
@@ -91,7 +92,6 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.delete_by_session.sql(),
         sql.pending_inputs.insert_new.sql(),
         sql.pending_inputs.select_id_by_source_key.sql(),
-        sql.pending_inputs.select_session_by_input_id.sql(),
         sql.pending_inputs_sqlite.settlement_facts.sql(),
         sql.pending_inputs_sqlite.select_suffix.sql(),
         sql.pending_inputs_sqlite.select_pending_active.sql(),
@@ -301,10 +301,8 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
                 '{}', 'digest', 0, 'past-' || n, 0 FROM history",
     )
     .expect("seed settled history retaining its run bindings");
-    let sql = lash_store_sql::durable::session_mail::SessionMailStatements::render(
-        crate::schema_layout::MAIN.with_vocabulary(super::TURN_INPUT_LIFECYCLE),
-    );
-    let mut probe = conn.prepare(sql.bound_run.sql()).unwrap();
+    let bound = crate::durable::session_mail::bound_run_query();
+    let mut probe = conn.prepare(&bound).unwrap();
     for &state in TurnInputStateKind::ALL {
         for bound in [false, true] {
             let ingress = if state == TurnInputStateKind::DeferredNextTurn || state.is_terminal() {
@@ -397,10 +395,8 @@ fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
                          'pending_active', '{}', 'digest', 0)",
         )
         .expect("open inputs of both delivery kinds");
-        let sql = lash_store_sql::durable::session_mail::SessionMailStatements::render(
-            crate::schema_layout::MAIN.with_vocabulary(super::TURN_INPUT_LIFECYCLE),
-        );
-        let mut probe = conn.prepare(sql.open_inputs.sql()).expect("mailbox query");
+        let inputs_query = crate::durable::session_mail::open_inputs_query();
+        let mut probe = conn.prepare(&inputs_query).expect("mailbox query");
         let inputs = probe
             .query_map(["history"], |row| row.get::<_, String>(0))
             .unwrap()

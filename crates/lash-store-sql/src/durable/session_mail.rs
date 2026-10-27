@@ -17,43 +17,12 @@ crate::statements! {
                  (SELECT COUNT(*) FROM session_meta
                      WHERE session_id = ?1 AND closing_intent IS NOT NULL)";
 
-        /// The run session `?1`'s bound, unsettled ingress names, if any.
-        /// The vocabulary predicate matches the stores' open-bound-run partial
-        /// indexes: retained settled bindings never lengthen this probe.
-        bound_run = "SELECT admitted_run FROM pending_turn_inputs
-             WHERE session_id = ?1 AND admitted_run IS NOT NULL
-               AND {{nonterminal_turn_input_state(state)}}
-             UNION ALL
-             SELECT admitted_run FROM queued_work_batches
-             WHERE session_id = ?1 AND admitted_run IS NOT NULL
-               AND terminal_cause IS NULL
-             LIMIT 1";
-
-        /// Session `?1`'s open, unbound inputs that a turn may admit, in
-        /// ingress order: next-turn inputs, and active-turn inputs with the
-        /// delivery they name, and the cause each retained.
-        open_inputs = "SELECT input_id, enqueue_seq, source_key, run_spec_hash, state, ingress_json,
-                    trace_cause_json, origin_json
-             FROM pending_turn_inputs
-             WHERE session_id = ?1 AND admitted_run IS NULL
-               AND {{undelivered_turn_input_state(state)}}
-             ORDER BY enqueue_seq";
-
         /// The unbound active-turn inputs the cancellation transaction may
         /// affect, in ingress order. The owner decodes each immutable address
         /// before applying the cancelled run's disposition.
         cancel_inputs = "SELECT input_id, input_json, ingress_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NULL AND state = 'pending_active'
-             ORDER BY enqueue_seq";
-
-        /// Session `?1`'s open, unbound queued work batches, in ingress
-        /// order, each with whether a host requested its entered operation
-        /// run's cancel.
-        open_batches = "SELECT batch_id, enqueue_seq, delivery_policy, payload_json,
-                    CASE WHEN cancel_request_json IS NULL THEN 0 ELSE 1 END
-             FROM queued_work_batches
-             WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq";
 
         /// Enter the operation run of open plugin task `?2` of session `?1`
@@ -91,17 +60,6 @@ crate::statements! {
                AND entered_at_ms IS NOT NULL AND cancel_request_json IS NULL
              RETURNING batch_id";
 
-        /// Bind input `?2` of session `?1` to run `?3`, its admitting owner,
-        /// or keep it bound there: a running run's every phase rebinds the
-        /// steering input its checkpoints delivered. No row when it is no
-        /// longer open, or another run holds it.
-        bind_input = "UPDATE pending_turn_inputs
-             SET admitted_run = ?3, admitted_by = ?3
-             WHERE session_id = ?1 AND input_id = ?2
-               AND (admitted_run IS NULL OR admitted_run = ?3)
-               AND state IN ('deferred_next_turn', 'pending_active')
-             RETURNING input_id";
-
         /// Session `?1`'s open, unbound inputs whose id or source key is
         /// `?2`, in ingress order: the candidates for the input the session
         /// admits as run `?2`, which the naming rule then picks among.
@@ -136,15 +94,5 @@ crate::statements! {
                  terminal_cause = 'cancelled', terminal_at_ms = ?3
              WHERE session_id = ?1 AND admitted_run = ?2 AND terminal_cause IS NULL";
 
-        /// Bind batch `?2` of session `?1` to run `?3`, its admitting owner,
-        /// or keep it bound there: a running run's every phase rebinds the
-        /// queued turn work its checkpoints delivered. No row when it is no
-        /// longer open, or another run holds it.
-        bind_batch = "UPDATE queued_work_batches
-             SET admitted_run = ?3, admitted_by = ?3
-             WHERE session_id = ?1 AND batch_id = ?2
-               AND (admitted_run IS NULL OR admitted_run = ?3)
-               AND terminal_cause IS NULL
-             RETURNING batch_id";
     }
 }

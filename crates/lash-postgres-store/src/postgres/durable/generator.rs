@@ -275,6 +275,12 @@ pub(crate) fn function_ddl() -> String {
         crate::blobs::blob_sql().postgres.insert_chunk.sql(),
         &["p_body_hashes", "p_bodies"],
     );
+    let environment_args = ["p_named", "COALESCE(p_steps->'environment', '[]'::jsonb)"];
+    let lock_environment = inline(super::environment::commit_owners().sql(), &environment_args);
+    let valid_environment = inline(
+        super::environment::commit_versions_valid().sql(),
+        &[environment_args[0], environment_args[1], "v_environment"],
+    );
     let lock_nodes = perform(&inline(
         graph::lock_nodes().sql(),
         &["p_named", "p_digests"],
@@ -408,6 +414,7 @@ DECLARE
     v_tchildren BYTEA[];
     v_answer JSONB;
     v_frame TEXT;
+    v_environment TEXT[];
 BEGIN
     -- Generated from this build's statements (registry {registry}); a call
     -- built from others is refused, as is any isolation but read committed.
@@ -440,6 +447,13 @@ BEGIN
     END IF;
     IF v_rev IS NULL THEN
         RAISE EXCEPTION 'lash_owner_commit: the owner fence refused' USING ERRCODE = 'LX003';
+    END IF;
+    -- Environment owners precede graph locks, including owners named by
+    -- an external version reference. Re-read authority after the locks.
+    {lock_environment} INTO v_environment;
+    {valid_environment} INTO v_reached;
+    IF NOT v_reached THEN
+        RAISE EXCEPTION 'lash_owner_commit: environment refused' USING ERRCODE = 'LX004';
     END IF;
     -- The checkpoint bodies a head commit supplies are stored before the
     -- graph that names them (FIG-5942).

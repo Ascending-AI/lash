@@ -89,12 +89,10 @@ fn explain(conn: &Connection, statement: &str) -> rusqlite::Result<String> {
 fn bound_run_discovery_work_ignores_settled_commands() {
     use rusqlite::OptionalExtension as _;
     let conn = lookup_connection();
-    let mail = lash_store_sql::durable::session_mail::SessionMailStatements::render(
-        crate::schema_layout::MAIN.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
-    );
+    let bound = crate::durable::session_mail::bound_run_query();
     let read = || {
         let found: Option<String> = conn
-            .query_row(mail.bound_run.sql(), ["session"], |row| row.get(0))
+            .query_row(&bound, ["session"], |row| row.get(0))
             .optional()
             .expect("read the bound run");
         assert_eq!(found, None);
@@ -131,7 +129,7 @@ fn bound_run_discovery_work_ignores_settled_commands() {
     )
     .expect("an open command is bound");
     let bound: String = conn
-        .query_row(mail.bound_run.sql(), ["session"], |row| row.get(0))
+        .query_row(&bound, ["session"], |row| row.get(0))
         .expect("discover the bound command after retained tombstones");
     assert_eq!(bound, "run");
 }

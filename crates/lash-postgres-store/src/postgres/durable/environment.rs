@@ -487,6 +487,31 @@ impl EnvironmentStore for PostgresDurableStore {
 }
 lash_store_sql::statements! {
     pub(crate) struct PostgresEnvironmentStatements @ "durable_environment_postgres" {
+        /// Lock the whole commit's version-owner set before taking graph
+        /// locks. Supplied versions are [owner, version] pairs; named graph
+        /// references discover their owners through the canonical manifest.
+        /// Skip contention: a dropped autocommit future cannot roll back a
+        /// server still waiting on an owner. The held-set guard declines
+        /// that call, then the explicit transaction owns the cancellable wait.
+        commit_owners = "SELECT ARRAY(SELECT owner_id FROM environment_owners
+            WHERE manifest_ref = ANY(?1::bytea[])
+               OR owner_id IN (SELECT value->>0 FROM jsonb_array_elements(?2::jsonb))
+            ORDER BY owner_id FOR UPDATE SKIP LOCKED)";
+        /// Read after the locks, so retirement that won the lock is visible.
+        /// Every supplied owner must exist with its exact published version;
+        /// every named version must remain published.
+        commit_versions_valid = "SELECT NOT EXISTS (
+            SELECT 1 FROM environment_owners
+            WHERE manifest_ref = ANY(?1::bytea[]) AND (state <> 'published' OR NOT (owner_id = ANY(?3::text[])))
+            ) AND NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(?2::jsonb) AS supplied(value)
+            LEFT JOIN environment_owners AS owner ON owner.owner_id = supplied.value->>0
+            WHERE owner.owner_id IS NULL OR NOT (owner.owner_id = ANY(?3::text[])) OR owner.state <> 'published'
+               OR (NOT (owner.manifest_ref = ANY(?1::bytea[])) AND owner.version_id <> supplied.value->>1))
+            AND NOT EXISTS (SELECT 1 FROM environment_owners WHERE owner_id = ANY(?3::text[])
+                AND (owner_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                  OR version_id !~ '^[0-9a-f]{64}$' OR preparing_epoch < 0
+                  OR left(actor_key, 2) <> 's/' OR length(actor_key) <= 2))";
         lock_owner = "SELECT owner_id FROM environment_owners WHERE owner_id = ?1 FOR UPDATE";
         peel_owner = "SELECT owner_id FROM environment_owners WHERE owner_id = ?1 FOR UPDATE SKIP LOCKED";
         owners_of = "SELECT owner_id FROM environment_owners WHERE manifest_ref = ANY(?1) ORDER BY owner_id";
@@ -503,4 +528,13 @@ async fn owner_body(
     owner(tx, id)
         .await?
         .ok_or_else(|| Refusal::Missing(id.clone()).into())
+}
+
+/// Static statements shared with the generated one-call owner commit.
+pub(super) fn commit_owners() -> &'static lash_store_sql::Rendered {
+    &PG.commit_owners
+}
+
+pub(super) fn commit_versions_valid() -> &'static lash_store_sql::Rendered {
+    &PG.commit_versions_valid
 }

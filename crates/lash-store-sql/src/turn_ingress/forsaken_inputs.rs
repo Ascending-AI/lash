@@ -26,10 +26,7 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (session_id, source_key) DO NOTHING";
 
-        /// Whether session `?1` forsook source key `?2`, read under the
-        /// session's write authority by an admission of a new draft.
-        select_exists = "SELECT EXISTS (SELECT 1 FROM forsaken_turn_inputs
-             WHERE session_id = ?1 AND source_key = ?2)";
+
 
         /// Reclaim session `?1`'s tombstones with the session.
         delete_by_session = "DELETE FROM forsaken_turn_inputs WHERE session_id = ?1";

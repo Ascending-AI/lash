@@ -22,20 +22,75 @@ use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(Dialect::postgres()));
 
+lash_store_sql::statements! {
+    struct RunFactBatchStatements @ "durable_run_fact_batch_postgres" {
+        /// Validate the batch's ordinal chain and outcome uniqueness against
+        /// both stored rows and its earlier rows before inserting the set.
+        append = "WITH incoming AS MATERIALIZED (SELECT position AS pos, value->>0 AS owner_key, (value->>1)::bigint AS run_seq, (value->>2)::bigint AS ordinal, value->>3 AS kind, value->>4 AS call_id, decode(value->>5, 'hex') AS record_ref, (value->>6)::bigint AS written_epoch FROM jsonb_array_elements(?1::jsonb) WITH ORDINALITY AS batch(value, position))
+             INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+             SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM incoming AS item WHERE
+                   EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                     AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal)
+                   OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                     AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                     AND earlier.ordinal = item.ordinal)
+                   OR (item.ordinal <> 0 AND NOT EXISTS (
+                     SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal - 1)
+                     AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.ordinal = item.ordinal - 1))
+                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                     EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                     OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+             ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal";
+    }
+}
+static BATCH: LazyLock<RunFactBatchStatements> =
+    LazyLock::new(|| RunFactBatchStatements::render(Dialect::postgres()));
+
+fn append_rows(epoch: Epoch, writes: &[&RunFactWrite]) -> Result<String, DurableError> {
+    let mut rows = Vec::with_capacity(writes.len());
+    for write in writes {
+        let RunFactWrite::Append {
+            owner,
+            run,
+            ordinal,
+            kind,
+            call,
+            record,
+        } = write
+        else {
+            return Err(corrupt("run fact batch", "contains a prune"));
+        };
+        rows.push(serde_json::json!([
+            owner.stored(),
+            integer::<i64>(run.0)?,
+            integer::<i64>(ordinal.0)?,
+            kind.as_str(),
+            call.as_ref().map(ToolCallId::as_str),
+            record.to_hex(),
+            epoch.0
+        ]));
+    }
+    serde_json::to_string(&rows).map_err(|error| corrupt("run fact batch", &error.to_string()))
+}
+
 /// The run-fact statements an owner commit runs as steps.
-pub(super) static APPEND: Entry = Entry::new(
-    || &SQL.append,
-    &[
-        Ty::Text,
-        Ty::Int,
-        Ty::Int,
-        Ty::Text,
-        Ty::Text,
-        Ty::Key,
-        Ty::Int,
-    ],
-    Shape::Returning,
-);
+pub(super) static APPEND: Entry = Entry::new(|| &BATCH.append, &[Ty::Text], Shape::Returning);
+
+pub(super) fn append_step(epoch: Epoch, writes: &[&RunFactWrite]) -> Result<Step, DurableError> {
+    Ok(Step::new(
+        &APPEND,
+        vec![Value::text(append_rows(epoch, writes)?)],
+        Some(writes.len() as u64),
+    ))
+}
 pub(super) static DELETE_OWNER: Entry =
     Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Returning).retiring("record_ref");
 /// Every fact of the owners under a key: a terminal's cells.
@@ -48,25 +103,7 @@ pub(super) static PRUNE: Entry =
 /// that must answer its row, a prune one delete.
 pub(super) fn steps(epoch: Epoch, write: &RunFactWrite) -> Result<Option<Vec<Step>>, DurableError> {
     Ok(Some(match write {
-        RunFactWrite::Append {
-            owner,
-            run,
-            ordinal,
-            kind,
-            call,
-            record,
-        } => vec![Step::one(
-            &APPEND,
-            vec![
-                Value::text(owner.stored()),
-                Value::int(integer::<i64>(run.0)?),
-                Value::int(integer::<i64>(ordinal.0)?),
-                Value::text(kind.as_str()),
-                Value::Text(call.as_ref().map(|call| call.as_str().to_owned())),
-                Value::key(record.to_hex()),
-                Value::int(epoch.0),
-            ],
-        )],
+        RunFactWrite::Append { .. } => vec![append_step(epoch, &[write])?],
         RunFactWrite::Prune { owner, before } => vec![Step::any(
             &PRUNE,
             vec![

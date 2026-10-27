@@ -153,37 +153,43 @@ pub(super) fn validate_graph(
         .chain(&graph.external_roots)
         .map(GraphNode::to_hex)
         .collect();
-    let rows = tx
-        .prepare_cached(SQLITE.peeled.sql())?
-        .query_map([graph::json_array(&named)], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    for id in rows {
-        let id = match serde_json::from_value::<VersionOwnerId>(serde_json::Value::String(id)) {
-            Ok(id) => id,
-            Err(e) => return Ok(Err(env::corrupt(e))),
+    let ids: Vec<_> = versions.keys().map(ToString::to_string).collect();
+    let mut statement = tx.prepare_cached(SQLITE.validation_authorities.sql())?;
+    let mut rows = statement.query(rusqlite::params![
+        graph::json_array(&named),
+        graph::json_array(&ids)
+    ])?;
+    while let Some(row) = rows.next()? {
+        let record = match env::authority(
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ) {
+            Ok(record) => record,
+            Err(error) => return Ok(Err(error)),
         };
-        let record = match required(tx, &id)? {
-            Ok(r) => r,
-            Err(e) => return Ok(Err(e)),
-        };
-        versions.insert(
-            id.clone(),
-            (
-                RoundEnvironment {
-                    owner: id,
-                    version: record.owner.version().clone(),
-                },
-                Some(record),
-            ),
-        );
+        let id = record.owner.id().clone();
+        if row.get::<_, bool>(5)? {
+            versions.insert(
+                id.clone(),
+                (
+                    RoundEnvironment {
+                        owner: id,
+                        version: record.owner.version().clone(),
+                    },
+                    Some(record),
+                ),
+            );
+        } else if let Some((_, observed)) = versions.get_mut(&id) {
+            *observed = Some(record);
+        }
     }
     for (_, (round, observed)) in versions {
         let record = match observed {
             Some(record) => record,
-            None => match required(tx, &round.owner)? {
-                Ok(r) => r,
-                Err(e) => return Ok(Err(e)),
-            },
+            None => return Ok(Err(Refusal::Missing(round.owner).into())),
         };
         if record.owner.version() != &round.version {
             return Ok(Err(Refusal::Content.into()));
@@ -411,6 +417,14 @@ impl EnvironmentStore for SqliteDurableStore {
 
 lash_store_sql::statements! {
     pub(crate) struct SqliteEnvironmentStatements @ "durable_environment_sqlite" {
+        /// The commit's complete authority set, without owner bodies or
+        /// one lookup per owner. SQLite's writer lock fixes the snapshot.
+        validation_authorities = "SELECT owner_id, version_id, state, actor_key, preparing_epoch,
+            manifest_ref IN (SELECT unhex(value) FROM json_each(?1))
+            FROM environment_owners
+            WHERE manifest_ref IN (SELECT unhex(value) FROM json_each(?1))
+               OR owner_id IN (SELECT value FROM json_each(?2))
+            ORDER BY owner_id";
         peeled = "SELECT owner_id FROM environment_owners WHERE manifest_ref IN
             (SELECT unhex(value) FROM json_each(?1)) ORDER BY owner_id";
     }
@@ -488,12 +502,12 @@ mod tests {
                 )
                 .unwrap();
                 let before = connection
-                    .prepare_cached(ENV.authority.sql())?
+                    .prepare_cached(SQLITE.validation_authorities.sql())?
                     .get_status(rusqlite::StatementStatus::Run);
                 let supplied = env::supplied_versions(&graph);
                 let verdict = validate_graph(connection, &graph, &supplied, &BTreeSet::new())?;
                 let after = connection
-                    .prepare_cached(ENV.authority.sql())?
+                    .prepare_cached(SQLITE.validation_authorities.sql())?
                     .get_status(rusqlite::StatementStatus::Run);
                 Ok((verdict, after - before))
             })

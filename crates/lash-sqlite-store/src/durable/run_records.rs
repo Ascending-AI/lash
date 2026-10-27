@@ -20,6 +20,65 @@ use super::{Answer, Committing, corrupt, integer, node_ref};
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(crate::schema_layout::MAIN));
 
+lash_store_sql::statements! {
+    struct RunFactBatchStatements @ "durable_run_fact_batch_sqlite" {
+        /// Validate the batch's ordinal chain and outcome uniqueness against
+        /// both stored rows and its earlier rows before inserting the set.
+        append = "WITH incoming AS MATERIALIZED (SELECT CAST(key AS INTEGER) AS pos, value->>0 AS owner_key, value->>1 AS run_seq, value->>2 AS ordinal, value->>3 AS kind, value->>4 AS call_id, unhex(value->>5) AS record_ref, value->>6 AS written_epoch FROM json_each(?1))
+             INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+             SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM incoming AS item WHERE
+                   EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                     AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal)
+                   OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                     AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                     AND earlier.ordinal = item.ordinal)
+                   OR (item.ordinal <> 0 AND NOT EXISTS (
+                     SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal - 1)
+                     AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.ordinal = item.ordinal - 1))
+                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                     EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
+                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                     OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
+                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
+                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+             ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal";
+    }
+}
+static BATCH: LazyLock<RunFactBatchStatements> =
+    LazyLock::new(|| RunFactBatchStatements::render(crate::schema_layout::MAIN));
+
+fn append_rows(epoch: Epoch, writes: &[&RunFactWrite]) -> Result<String, DurableError> {
+    let mut rows = Vec::with_capacity(writes.len());
+    for write in writes {
+        let RunFactWrite::Append {
+            owner,
+            run,
+            ordinal,
+            kind,
+            call,
+            record,
+        } = write
+        else {
+            return Err(corrupt("run fact batch", "contains a prune"));
+        };
+        rows.push(serde_json::json!([
+            owner.stored(),
+            integer::<i64>(run.0).map_err(super::store_failure)?,
+            integer::<i64>(ordinal.0).map_err(super::store_failure)?,
+            kind.as_str(),
+            call.as_ref().map(ToolCallId::as_str),
+            record.to_hex(),
+            epoch.0
+        ]));
+    }
+    serde_json::to_string(&rows).map_err(|error| corrupt("run fact batch", &error.to_string()))
+}
+
 /// `run_records`, created by I0 (FIG-5194); its statements are V0's.
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS run_records (
@@ -49,25 +108,13 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             ordinal,
             kind,
             call,
-            record,
+            record: _,
         } => {
-            let owner_key = owner.stored();
-            let appended = tx
-                .prepare_cached(SQL.append.sql())?
-                .query_row(
-                    rusqlite::params![
-                        owner_key,
-                        integer::<i64>(run.0)?,
-                        integer::<i64>(ordinal.0)?,
-                        kind.as_str(),
-                        call.as_ref().map(ToolCallId::as_str),
-                        record.0.as_slice(),
-                        commit.epoch.0,
-                    ],
-                    |_| Ok(()),
-                )
-                .optional()?;
-            if appended.is_some() {
+            let rows = match append_rows(commit.epoch, &[write]) {
+                Ok(rows) => rows,
+                Err(error) => return Ok(Err(error)),
+            };
+            if append_batch(tx, &rows)? == 1 {
                 return Ok(Ok(()));
             }
             let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
@@ -87,6 +134,47 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             Ok(Ok(()))
         }
     }
+}
+
+fn append_batch(tx: &Connection, rows: &str) -> rusqlite::Result<usize> {
+    Ok(tx
+        .prepare_cached(BATCH.append.sql())?
+        .query_map([rows], |_| Ok(()))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .len())
+}
+
+/// Contiguous appends share one insert. A refused set is classified in the
+/// original order using the same statement with singleton sets, under the
+/// same writer lock; the caller rolls the entire commit back on refusal.
+pub(super) fn apply_appends(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    writes: &[lash_durable::domain::DomainWrite],
+) -> Answer<()> {
+    let facts: Vec<_> = writes
+        .iter()
+        .filter_map(|write| match write {
+            lash_durable::domain::DomainWrite::RunFact(fact) => Some(fact),
+            _ => None,
+        })
+        .collect();
+    let rows = match append_rows(commit.epoch, &facts) {
+        Ok(rows) => rows,
+        Err(error) => return Ok(Err(error)),
+    };
+    if append_batch(tx, &rows)? == facts.len() {
+        return Ok(Ok(()));
+    }
+    for fact in facts {
+        if let Err(error) = apply(tx, commit, fact)? {
+            return Ok(Err(error));
+        }
+    }
+    Ok(Err(corrupt(
+        "run fact batch",
+        "refused without a conflicting row",
+    )))
 }
 
 /// Whether owner `owner_key`'s run `run` has a fact at `ordinal`.
@@ -320,7 +408,9 @@ mod tests {
                     rusqlite::params![root.0.as_slice(), node.as_ref()],
                 )?;
                 conn.query_row(
-                    SQL.append.sql(),
+                    "INSERT INTO run_records
+                        (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
                     rusqlite::params![
                         stored_owner,
                         1,
@@ -380,9 +470,10 @@ mod tests {
                     rusqlite::params![root.0.as_slice(), staging.nodes()[&root].bytes.as_ref()],
                 )
                 .expect("root blob");
-                // The append is conditional and answers the ordinal it wrote.
                 conn.query_row(
-                    SQL.append.sql(),
+                    "INSERT INTO run_records
+                        (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
                     rusqlite::params![
                         owner.stored(),
                         run,

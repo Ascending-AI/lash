@@ -5,6 +5,7 @@
 //! function generated from this build's statements by
 //! [`super::generator`] and declared in `schema.sql`. It runs the commit's envelope (the writer fence
 //! shared, the owner fence and its turn-cancel read, the database clock),
+//! locks and validates its environment-version owners before graph locks,
 //! installs the commit's graph, key-share locking every staged node another
 //! writer stored, runs each step's statement as static SQL dispatched by the
 //! statement's name, holds the roots the steps retired for retirement steps
@@ -348,6 +349,8 @@ fn mechanics() -> Vec<&'static str> {
         connection_sql().lock_xact_fleet_fence_shared.sql(),
         SQL.postgres.owner_envelope.sql(),
         crate::blobs::blob_sql().postgres.insert_chunk.sql(),
+        super::environment::commit_owners().sql(),
+        super::environment::commit_versions_valid().sql(),
         graph::lock_nodes().sql(),
         executor.external_absent.sql(),
         graph::insert_nodes().sql(),
@@ -434,11 +437,6 @@ impl Call {
             .domain()
             .iter()
             .any(|w| matches!(w, DomainWrite::Environment(_)))
-            || tx.graph().values().any(|node| {
-                node.envelope().is_ok_and(|e| {
-                    e.kind == lash_core_store::checkpoint_graph::NodeKind::ENVIRONMENT_VERSION
-                })
-            })
         {
             return None;
         }
@@ -474,7 +472,27 @@ impl Call {
             .collect();
         // A head commit's checkpoint graph is installed with the commit's.
         let mut checkpoint_nodes = std::collections::BTreeMap::new();
-        for write in tx.domain() {
+        let mut remaining = tx.domain();
+        while let Some((write, rest)) = remaining.split_first() {
+            remaining = rest;
+            if let DomainWrite::RunFact(fact @ lash_durable::domain::RunFactWrite::Append { .. }) =
+                write
+            {
+                let mut facts = vec![fact];
+                for write in rest {
+                    match write {
+                        DomainWrite::RunFact(
+                            fact @ lash_durable::domain::RunFactWrite::Append { .. },
+                        ) => facts.push(fact),
+                        _ => break,
+                    }
+                }
+                remaining = &rest[facts.len() - 1..];
+                steps.push(step_json(
+                    &run_records::append_step(tx.epoch(), &facts).ok()?,
+                ));
+                continue;
+            }
             let program = match write {
                 DomainWrite::SessionCommit(write) => {
                     // One head commit a call, by the session's own actor,
@@ -538,6 +556,16 @@ impl Call {
             let checked =
                 lash_durable::domain::graph_commit::check_graph(graph, tx.reads(), &publications)
                     .ok()?;
+            // The server locks every named or supplied version owner before
+            // graph locks, as the explicit transaction does. Refusals fall
+            // back there for their typed classification.
+            let versions = lash_durable::environment::supplied_versions(&checked).ok()?;
+            call.steps["environment"] = serde_json::json!(
+                versions
+                    .iter()
+                    .map(|(_, round)| [round.owner.to_string(), round.version.to_string()])
+                    .collect::<Vec<_>>()
+            );
             let named: std::collections::BTreeSet<_> = checked
                 .external
                 .iter()
