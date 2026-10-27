@@ -249,9 +249,10 @@ pub fn materialize_workflow(
                 }
             }
         }
+        let slot = |slot| slots[&(node.callable.link, slot)];
         let mut convention = node.convention.clone();
         for target in convention.targets_mut() {
-            remap_target(target, &ids, &slots, node.callable.link);
+            remap_target(target, &ids, &slot);
         }
         if n == 0 {
             root_convention = convention.clone();
@@ -268,12 +269,7 @@ pub fn materialize_workflow(
                     normalized_paths =
                         source::declarations(&mut body.block, &parameter_names, source);
                 }
-                remap(
-                    NodeMut::Block(&mut body.block),
-                    &ids,
-                    &slots,
-                    node.callable.link,
-                );
+                remap(NodeMut::Block(&mut body.block), &ids, &slot);
                 body.imports = std::mem::take(&mut body.imports)
                     .into_iter()
                     .map(|(slot, import)| (slots[&(node.callable.link, slot)], import))
@@ -481,6 +477,9 @@ pub fn materialize_workflow(
         .filter(|id| helpers.contains(id))
         .collect();
     document.library.0.extend(used_helpers);
+    // Helper bodies retain their fixed import slots. Assign those first, then
+    // relocate the copied imports and every reference to them as one document.
+    let authored_imports = std::mem::take(&mut document.imports);
     lash_kernel_doc::library_requirements(&mut document, helpers).map_err(
         |refusal| match refusal {
             lash_kernel_doc::LibraryRequirementRefusal::MissingHelper { function } => {
@@ -493,6 +492,36 @@ pub fn materialize_workflow(
             },
         },
     )?;
+    let mut relocated = BTreeMap::new();
+    let mut next = ImportSlot(0);
+    for (old, import) in authored_imports {
+        while document.imports.contains_key(&next) {
+            next.0 += 1;
+        }
+        document.imports.insert(next, import);
+        relocated.insert(old, next);
+    }
+    let slot = |slot| relocated[&slot];
+    let ids = BTreeMap::new();
+    for definition in document.functions.values_mut() {
+        if let Some(body) = definition.body_mut() {
+            remap(NodeMut::Block(&mut body.block), &ids, &slot);
+            body.imports = std::mem::take(&mut body.imports)
+                .into_iter()
+                .map(|(old, import)| (slot(old), import))
+                .collect();
+        }
+    }
+    if let Some(main) = &mut document.main {
+        remap(NodeMut::Block(main), &ids, &slot);
+    }
+    for export in document.exports.values_mut() {
+        if let Export::Function(function) = export {
+            for target in function.convention.targets_mut() {
+                remap_target(target, &ids, &slot);
+            }
+        }
+    }
     let reidentified = document
         .reidentify_functions()
         .map_err(|message| MaterializeRefusal::Document { message })?;
@@ -604,24 +633,22 @@ fn collect_names(node: Node<'_>, names: &mut BTreeSet<Name>) {
 fn remap_target(
     target: &mut FunctionTarget,
     ids: &BTreeMap<FunctionId, FunctionId>,
-    slots: &BTreeMap<(LinkId, ImportSlot), ImportSlot>,
-    link: LinkId,
+    slot: &impl Fn(ImportSlot) -> ImportSlot,
 ) {
     match target {
         FunctionTarget::Local(id) => *id = ids.get(id).copied().unwrap_or(*id),
-        FunctionTarget::Import(slot) => *slot = slots[&(link, *slot)],
+        FunctionTarget::Import(s) => *s = slot(*s),
     }
 }
 fn remap(
     mut node: NodeMut<'_>,
     ids: &BTreeMap<FunctionId, FunctionId>,
-    slots: &BTreeMap<(LinkId, ImportSlot), ImportSlot>,
-    link: LinkId,
+    slots: &impl Fn(ImportSlot) -> ImportSlot,
 ) {
     for id in node.functions_mut() {
         *id = ids.get(id).copied().unwrap_or(*id);
     }
-    let slot = |s: &mut ImportSlot| *s = slots[&(link, *s)];
+    let slot = |s: &mut ImportSlot| *s = slots(*s);
     let target = |t: &mut FunctionTarget| {
         if let FunctionTarget::Import(s) = t {
             slot(s);
@@ -669,7 +696,7 @@ fn remap(
         _ => {}
     }
     for child in node.children() {
-        remap(child, ids, slots, link);
+        remap(child, ids, slots);
     }
 }
 

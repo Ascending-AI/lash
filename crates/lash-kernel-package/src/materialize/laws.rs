@@ -60,6 +60,105 @@ fn open(
         helpers,
     )
 }
+
+/// FIG-7475: two defining Links may reuse a slot for different tools while
+/// a reached helper retains its clock slot. Neither tool may be rebound.
+#[test]
+fn materialize_imports_preserves_link_scopes_and_helper_bindings() {
+    let helper = parse_definition(
+        "function helper.clock() -> Timestamp\nkernel 1\nmetering statements\nimport 0 operation typescript.clock() -> Timestamp\nbody { let now = perform 0() as Timestamp return now }",
+    ).unwrap();
+    let helper_id = helper.identity();
+    let helper_name = helper.name.clone();
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(helper, None).unwrap();
+    let helpers = BuildHelpers::new(registry, [helper_id]).unwrap();
+    let (_, template) = fixture();
+    let mut content = LinkedContent::default();
+    let mut functions = Vec::new();
+    for (slot, operation, value) in [
+        (3, "inbox.send_item", "first"),
+        (0, "audit.record", "second"),
+    ] {
+        let mut definition = parse_definition(&format!(
+            "function app.saved() -> Text\nkernel 1\nmetering statements\nimport {slot} operation {operation}(value: Text) -> Text\nbody {{ let answer = perform {slot}(\"{value}\") as Text return answer }}",
+        )).unwrap();
+        let mut document = Document::new(NumberPolicy::Float, vec![]);
+        if slot == 3 {
+            let body = definition.body_mut().unwrap();
+            body.functions.insert(helper_id, helper_name.clone());
+            body.block.insert(
+                0,
+                binding(
+                    Name::new("now"),
+                    Expr::Act(Box::new(ActExpr {
+                        kind: ActKind::Call(Callee::Local(helper_id)),
+                        args: vec![],
+                    })),
+                ),
+            );
+            document.library.insert(helper_id);
+        }
+        document.imports = definition.body().unwrap().imports.clone();
+        let mut function = template.clone();
+        function.captures.clear();
+        function.signature = definition.signature.clone();
+        function.callable.function = definition.identity();
+        document.functions.insert(definition.identity(), definition);
+        library_requirements(&mut document, &helpers).unwrap();
+        validate_document(&document, &helpers).unwrap();
+        let link = lash_kernel_value::package::Link {
+            document: document.identity(),
+            fills: BTreeMap::new(),
+        };
+        function.callable.link = link.identity();
+        function.captions = Captions::empty(document.identity());
+        content
+            .documents
+            .insert(document.identity(), document.into());
+        content.links.insert(link.identity(), link);
+        functions.push(function);
+    }
+    let second = functions.pop().unwrap();
+    let mut root = functions.pop().unwrap();
+    root.captures
+        .insert(Name::new("other"), CaptureValue::Function(Box::new(second)));
+    let opened = open(&content, &root, &helpers).unwrap();
+    assert_eq!(
+        opened.document.imports[&ImportSlot(0)].name.to_string(),
+        "typescript.clock"
+    );
+    let calls: BTreeSet<_> = opened
+        .document
+        .units()
+        .flat_map(|(_, block)| block)
+        .filter_map(|stmt| {
+            let Stmt::Let {
+                value: Rhs::Action(Action::Perform { slot, args, .. }),
+                ..
+            } = stmt
+            else {
+                return None;
+            };
+            let [Atom::Literal(Literal::Text(value))] = args.as_slice() else {
+                return None;
+            };
+            Some((
+                value.clone(),
+                opened.document.imports[slot].name.to_string(),
+            ))
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("first".into(), "inbox.send_item".into()),
+            ("second".into(), "audit.record".into()),
+        ]
+        .into()
+    );
+}
+
 /// MATERIALIZE-VALUES: scalar and ordered container kinds survive; large/live/opaque paths refuse.
 #[test]
 fn materialize_values_keeps_exact_kinds_and_refuses_unrepresentable_paths() {
