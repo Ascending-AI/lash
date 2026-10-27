@@ -37,7 +37,7 @@ pub enum TraceSpanKind {
     /// A host call that admits durable work: a trace's root or the caller's
     /// child.
     Producer,
-    /// A turn.
+    /// A turn and the physical phases published by its terminal profile.
     Agent,
     /// One logical model call.
     Model,

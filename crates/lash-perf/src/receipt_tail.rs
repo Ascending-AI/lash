@@ -373,6 +373,7 @@ mod tests {
             &json!({
                 "kind": "lash.boundary-observations", "cap": 1001, "dropped_operations": 0,
                 "dropped_records": 0, "observations": observations,
+                "populations": [], "untracked_population_records": 0,
             }),
             10,
         )

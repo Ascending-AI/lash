@@ -867,7 +867,12 @@ prompt/environment build, model call, tool calls, cell execution, checkpoint
 encode, commit, connection queue/gate waits, pool checkout and worker checkout
 or IPC when reached. Names use underscores in place of spaces and slashes.
 Commit children carry `lash.owner.revision`. These are physical spans, published
-with the terminal, and inherit its sampling choice. Nested intervals overlap.
+with the terminal, and inherit its sampling choice. They use the `Agent` span
+kind and pass through its export policy and the host's bounded enrichment.
+`TurnProfile::phase_positions` recovers each phase's identity from the terminal
+record id and interval index, so every sink sees the same spans. Phase spans
+carry correlation ids but omit the terminal's input/output content and usage.
+Nested intervals overlap.
 Use the deepest active interval to partition the wall clock; adding their
 inclusive durations double-counts work. A phase span measures elapsed time,
 including scheduling, rather than CPU time.

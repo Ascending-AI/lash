@@ -49,6 +49,35 @@ pub struct TurnSqlWork {
 }
 
 impl TurnProfile {
+    /// The phase ledger's published spans, derived from the terminal record's
+    /// id and interval order. Every sink can recover the same identities and
+    /// inherited sampling decision without retaining exporter state.
+    pub fn phase_positions<'a>(
+        &'a self,
+        record: &'a str,
+        parent: &'a crate::TracePosition,
+    ) -> impl Iterator<Item = (&'a TurnPhaseInterval, crate::TracePosition)> + 'a {
+        self.phases.iter().enumerate().map(move |(index, phase)| {
+            let at = |offset| {
+                crate::TraceTimestamp::from_unix_ms(
+                    self.started_at_unix_ns.saturating_add(offset) / 1_000_000,
+                )
+            };
+            let position = crate::TracePosition {
+                span: crate::telemetry::derive_turn_phase_span(&parent.span, record, index),
+                parent: Some(parent.span.clone()),
+                links: crate::TraceLinks::new(),
+                role: crate::SpanRole::Whole,
+                kind: crate::TraceSpanKind::Agent,
+                started_at: at(phase.start_ns),
+                ended_at: Some(at(phase.end_ns)),
+                scope: parent.scope.clone(),
+                attempt: parent.attempt.clone(),
+            };
+            (phase, position)
+        })
+    }
+
     /// Disjoint critical-path shares, including time outside named phases.
     pub fn exclusive_ns(&self) -> BTreeMap<String, u64> {
         let mut cuts = vec![0, self.elapsed_ns];

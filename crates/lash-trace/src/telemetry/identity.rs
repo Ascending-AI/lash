@@ -102,11 +102,23 @@ const SPAN_DOMAIN: &[u8] = b"lash.span\0";
 /// The span lash gives the container `key` under `parent`: a pure function of
 /// retained data, so every owner computes the same one. Its trace id, flags
 /// and tracestate are the parent's.
+pub fn derive_span(parent: &TraceCarrier, key: &SpanKey<'_>) -> TraceCarrier {
+    derive_key(parent, key)
+}
+
+pub(crate) fn derive_turn_phase_span(
+    parent: &TraceCarrier,
+    record: &str,
+    index: usize,
+) -> TraceCarrier {
+    derive_key(parent, &("turn_phase", record, index))
+}
+
 #[expect(
     clippy::expect_used,
     reason = "a span key serializes into memory and has no failing case"
 )]
-pub fn derive_span(parent: &TraceCarrier, key: &SpanKey<'_>) -> TraceCarrier {
+fn derive_key(parent: &TraceCarrier, key: &impl Serialize) -> TraceCarrier {
     let mut hasher = Sha256::new();
     hasher.update(SPAN_DOMAIN);
     hasher.update(parent.trace_id().to_bytes());

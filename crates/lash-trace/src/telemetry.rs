@@ -1119,6 +1119,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 mod identity;
+pub(crate) use identity::derive_turn_phase_span;
 pub use identity::{
     LashIdentity, ProducerOutcome, ProducerSpan, SpanKey, TraceIdentity, derive_span,
 };

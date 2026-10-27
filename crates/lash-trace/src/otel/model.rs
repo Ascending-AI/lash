@@ -248,6 +248,7 @@ impl OtelTelemetry {
                     attempt: Some(attempt),
                     usage: None,
                     extension: None,
+                    phase: None,
                 },
             );
         }

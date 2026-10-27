@@ -264,7 +264,7 @@ impl OtelTelemetry {
         attributes.push(A::EventType.value(record.event.kind().as_str()));
         correlation_attributes(position.scope.as_ref(), &record.context, &mut attributes);
         projection.attributes(record, &mut attributes);
-        if position.kind != TraceSpanKind::ModelAttempt {
+        if position.kind != TraceSpanKind::ModelAttempt && projection.phase.is_none() {
             content_attributes::attributes(record, &mut attributes);
         }
         let mut name = projection.name();
@@ -284,8 +284,10 @@ impl OtelTelemetry {
                     policy: &self.policy,
                 };
                 let mut writer = TraceAttributeWriter::new(position.kind, &self.policy.limits);
-                contributed(record, &mut writer);
-                if position.kind != TraceSpanKind::ModelAttempt {
+                if projection.phase.is_none() {
+                    contributed(record, &mut writer);
+                }
+                if position.kind != TraceSpanKind::ModelAttempt && projection.phase.is_none() {
                     for (key, value) in &record.content.references {
                         let _ = writer.set(key.clone(), value.clone());
                     }
@@ -306,10 +308,27 @@ impl OtelTelemetry {
         if let Some(custom) = enrich::assemble(&mut attributes, contributions, &omissions) {
             name = custom.into_owned();
         }
+        let (start, end) = match projection.phase {
+            Some((phase, base)) => {
+                let at = |offset| {
+                    std::time::UNIX_EPOCH
+                        + std::time::Duration::from_nanos(base)
+                        + std::time::Duration::from_nanos(offset)
+                };
+                (at(phase.start_ns), at(phase.end_ns))
+            }
+            None => (
+                position.started_at.to_system_time(),
+                position
+                    .ended_at
+                    .unwrap_or(record.timestamp)
+                    .to_system_time(),
+            ),
+        };
         let builder = SpanBuilder::from_name(name)
             .with_kind(projection.kind())
             .with_events(extension_events(projection.extension))
-            .with_start_time(position.started_at.to_system_time())
+            .with_start_time(start)
             .with_attributes(attributes)
             .with_links(links);
         let mut span = {
@@ -323,37 +342,23 @@ impl OtelTelemetry {
         if projection.failed(record) {
             span.set_status(Status::error("domain operation failed"));
         }
-        let end = position.ended_at.unwrap_or(record.timestamp);
-        span.end_with_timestamp(end.to_system_time());
-        if let TraceEvent::TurnCompleted {
+        span.end_with_timestamp(end);
+    }
+
+    fn export_turn_phases(&self, record: &TraceRecord, parent: &TracePosition) {
+        let TraceEvent::TurnCompleted {
             profile: Some(profile),
             ..
         } = &record.event
-        {
-            let parent = Context::new().with_remote_span_context(own.clone());
-            let base =
-                std::time::UNIX_EPOCH + std::time::Duration::from_nanos(profile.started_at_unix_ns);
-            for phase in &profile.phases {
-                let mut attributes = vec![KeyValue::new("lash.turn.phase", phase.phase.clone())];
-                if let Some(revision) = phase.revision {
-                    attributes.push(KeyValue::new("lash.owner.revision", revision));
-                }
-                let builder = SpanBuilder::from_name(format!(
-                    "lash.turn.{}",
-                    phase.phase.replace([' ', '/'], "_")
-                ))
-                .with_start_time(base + std::time::Duration::from_nanos(phase.start_ns))
-                .with_attributes(attributes);
-                let mut child = {
-                    let _preset = provider::PresetGuard::set(
-                        SpanId::from_bytes(self.span_id().to_bytes()),
-                        None,
-                        own.trace_state().clone(),
-                    );
-                    self.tracer.build_with_context(builder, &parent)
-                };
-                child.end_with_timestamp(base + std::time::Duration::from_nanos(phase.end_ns));
-            }
+        else {
+            return;
+        };
+        for (phase, position) in profile.phase_positions(&record.id, parent) {
+            let Some(mut projection) = Projection::for_record(record, &position) else {
+                continue;
+            };
+            projection.phase = Some((phase, profile.started_at_unix_ns));
+            self.export_projection(record, &position, None, projection);
         }
     }
 }
@@ -458,6 +463,7 @@ impl TraceSink for OtelTelemetry {
         if position.publishes() && position.is_sampled() {
             self.export(record, position, producer);
             self.export_model_attempts(record, position);
+            self.export_turn_phases(record, position);
         }
         Ok(())
     }
@@ -768,6 +774,7 @@ struct Projection<'a> {
     attempt: Option<&'a crate::TraceModelAttempt>,
     usage: Option<Result<LlmUsage, TokenUsageOverflow>>,
     extension: Option<&'a crate::ExtensionSpanRecord>,
+    phase: Option<(&'a crate::TurnPhaseInterval, u64)>,
 }
 impl<'a> Projection<'a> {
     fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
@@ -781,6 +788,7 @@ impl<'a> Projection<'a> {
             attempt: None,
             usage: None,
             extension: None,
+            phase: None,
         };
         match (position.kind, &record.event) {
             (TraceSpanKind::Extension | TraceSpanKind::Point, TraceEvent::ExtensionSpan(span)) => {
@@ -849,6 +857,9 @@ impl<'a> Projection<'a> {
         Some(projection)
     }
     fn name(&self) -> String {
+        if let Some((phase, _)) = self.phase {
+            return format!("lash.turn.{}", phase.phase.replace([' ', '/'], "_"));
+        }
         if let Some(extension) = self.extension {
             return extension.name.clone();
         }
@@ -869,6 +880,9 @@ impl<'a> Projection<'a> {
         }
     }
     fn failed(&self, record: &TraceRecord) -> bool {
+        if self.phase.is_some() {
+            return false;
+        }
         if let Some(attempt) = self.attempt {
             return matches!(
                 attempt.attempt.outcome,
@@ -903,6 +917,13 @@ impl<'a> Projection<'a> {
     }
 
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
+        if let Some((phase, _)) = self.phase {
+            out.push(KeyValue::new("lash.turn.phase", phase.phase.clone()));
+            if let Some(revision) = phase.revision {
+                out.push(KeyValue::new("lash.owner.revision", revision));
+            }
+            return;
+        }
         if let Some(attempt) = self.attempt {
             if let Some(span) = &attempt.span {
                 if span.terminal_delivery_timed_out {

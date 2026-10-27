@@ -40,11 +40,21 @@ fn trace_of(caller: u8) -> TraceId {
     TraceId::from_bytes(self::caller(caller).trace_id().to_bytes())
 }
 
-/// Whether `event` is a model call's closing record whose attempt ledger
-/// names span `id`. A `lash.model.attempt` span is ledger-only (FIG-6301):
-/// the closer publishes it.
-fn ledger_names(event: &lash::tracing::TraceEvent, id: SpanId) -> bool {
-    let attempts = match event {
+/// Whether a closing record's model-attempt or physical-phase ledger names
+/// span `id`. The closer publishes these spans for every sink.
+fn ledger_names(record: &lash::tracing::TraceRecord, id: SpanId) -> bool {
+    if let lash::tracing::TraceEvent::TurnCompleted {
+        profile: Some(profile),
+        ..
+    } = &record.event
+    {
+        return record.position.as_ref().is_some_and(|parent| {
+            profile
+                .phase_positions(&record.id, parent)
+                .any(|(_, position)| position.span.span_id().to_bytes() == id.to_bytes())
+        });
+    }
+    let attempts = match &record.event {
         lash::tracing::TraceEvent::LlmCallCompleted { attempts, .. }
         | lash::tracing::TraceEvent::LlmCallFailed { attempts, .. } => attempts,
         _ => return false,
@@ -180,15 +190,15 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
     };
     for span in &exported {
         let id = span.span_context.span_id();
-        // A `lash.model.attempt` span has no record of its own (FIG-6301): its
-        // call's closing record publishes it from the attempt ledger.
+        // Model attempts and turn phases are published by their closing
+        // record's ledger, with the same identity every sink can recover.
         let record = records
             .iter()
-            .filter_map(|record| Some((&record.event, record.position.as_ref()?)))
-            .find(|(event, position)| {
+            .filter_map(|record| Some((record, record.position.as_ref()?)))
+            .find(|(record, position)| {
                 position.publishes()
                     && (SpanId::from_bytes(position.span.span_id().to_bytes()) == id
-                        || ledger_names(event, id))
+                        || ledger_names(record, id))
             })
             .map(|(_, position)| position)
             .unwrap_or_else(|| panic!("{} has a sink record", span.name));
@@ -214,6 +224,10 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
         );
     }
     let kept: Vec<_> = on(KEEP).map(|span| span.name.clone()).collect();
+    assert!(
+        kept.iter().any(|name| name == "lash.turn.claim"),
+        "the sampled trace exports its physical claim: {kept:?}"
+    );
     for name in ["lash.send", "invoke_agent", "chat"] {
         assert!(
             kept.iter()
