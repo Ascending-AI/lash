@@ -5,6 +5,7 @@
 //!
 //! See `docs/perf/instruments/replay-workloads.md`.
 
+mod capture;
 pub mod control;
 mod effect_phases;
 pub mod gate;
@@ -158,8 +159,16 @@ pub struct GateArgs {
     #[arg(long, conflicts_with = "bless")]
     pub baseline: Option<PathBuf>,
     /// One raw population for the gate coordinator.
-    #[arg(long, hide = true, conflicts_with = "bless")]
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with = "bless",
+        requires = "capture_workload"
+    )]
     pub capture: bool,
+    /// One workload in a fresh counted producer process.
+    #[arg(long, hide = true, requires = "capture")]
+    pub capture_workload: Option<String>,
 }
 
 #[derive(Default)]
@@ -208,12 +217,7 @@ async fn run_workloads(
             identity: receipt.identity.clone(),
             worker_resources,
             instructions,
-            store: match store {
-                StoreChoice::CountedSqliteFile(dir) if workload.name != "ts-codemode" => {
-                    StoreChoice::SqliteFile(dir.clone())
-                }
-                _ => store.clone(),
-            },
+            store: store.clone(),
             turns: *turns,
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
@@ -231,20 +235,10 @@ async fn run_workloads(
         );
         let result = if matches!(store, StoreChoice::CountedSqliteFile(_)) {
             let workload = workload.clone();
-            let counted = matches!(options.store, StoreChoice::CountedSqliteFile(_));
             std::thread::spawn(move || {
-                let _identities =
-                    counted.then(lash_core_store::environment::sequential_identities_for_testing);
-                let mut runtime = if counted {
-                    tokio::runtime::Builder::new_current_thread()
-                } else {
-                    let mut runtime = tokio::runtime::Builder::new_multi_thread();
-                    runtime.worker_threads(8);
-                    runtime
-                };
-                // Dropping this runtime finishes detached observers from this
-                // workload before the next workload's process-wide counters.
-                runtime
+                let _identities = lash_core_store::environment::sequential_identities_for_testing();
+                tokio::runtime::Builder::new_current_thread()
+                    .max_blocking_threads(1)
                     .enable_all()
                     .build()?
                     .block_on(runner::run(&workload, &options))
@@ -357,7 +351,7 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
 pub async fn run_gate(args: &GateArgs) -> Result<i32> {
     let budgets = gate::Budgets::committed()?;
     let corpus = script::corpus()?;
-    let workloads = budgets
+    let mut workloads = budgets
         .subset
         .iter()
         .map(|entry| {
@@ -368,56 +362,13 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
                 .with_context(|| format!("the gate names unknown workload `{}`", entry.workload))
         })
         .collect::<Result<Vec<_>>>()?;
+    if let Some(name) = &args.capture_workload {
+        workloads.retain(|(workload, _)| workload.name == *name);
+        anyhow::ensure!(workloads.len() == 1, "unknown counted workload {name}");
+    }
     let mut receipts = Vec::new();
     if !args.capture {
-        // A scheduled gate starts a fresh process. Calibrating within this
-        // runtime misses process-local allocator/cache variation.
-        for run in 0..5 {
-            let out = args.out.with_extension(format!("{run}.json"));
-            match std::fs::remove_file(&out) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
-            }
-            let captured = std::process::Command::new(std::env::current_exe()?)
-                .arg("replay-gate")
-                .arg("--capture")
-                .arg("--store-dir")
-                .arg(args.store_dir.join(format!("run-{run}")))
-                .arg("--out")
-                .arg(&out)
-                .output()?;
-            let mut log = captured.stdout;
-            log.extend_from_slice(&captured.stderr);
-            std::fs::write(args.out.with_extension(format!("{run}.log")), log)?;
-            // Failed or partial producers never enter the five-run statistic.
-            anyhow::ensure!(
-                captured.status.success() && out.exists(),
-                "calibration child {run} did not produce a receipt"
-            );
-            let receipt: ReplayReceipt = serde_json::from_slice(&std::fs::read(out)?)?;
-            anyhow::ensure!(
-                receipt.workloads.len() == workloads.len(),
-                "incomplete calibration population"
-            );
-            for (script, turns) in &workloads {
-                let row = receipt
-                    .workloads
-                    .iter()
-                    .find(|w| w.workload == script.name)
-                    .context("missing calibration workload")?;
-                anyhow::ensure!(
-                    row.script_digest == script.digest()
-                        && row.turns
-                            == turns
-                                .unwrap_or(script.turn_count())
-                                .min(script.turn_count())
-                        && row.sessions == script.sessions,
-                    "calibration workload geometry changed"
-                );
-            }
-            receipts.push(receipt);
-        }
+        receipts = capture::population(args, &workloads)?;
     } else {
         let stores = GateStores::create()?;
         receipts.push(

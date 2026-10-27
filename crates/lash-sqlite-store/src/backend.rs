@@ -331,6 +331,18 @@ impl SqliteStoreSet {
         self.inner.location.database_uri()
     }
 
+    /// Fix the enqueue nonce of a private deterministic fixture. Call before
+    /// opening sessions; never use with shared or live stores.
+    #[cfg(feature = "testing")]
+    #[doc(hidden)]
+    pub fn with_commit_count_seed_for_testing(self, seed: u64) -> Self {
+        self.inner
+            .process_env_store
+            .commit_count
+            .store(seed, std::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
     /// The factory every session of this store set is created and reopened
     /// through.
     pub fn session_store_factory(&self) -> Arc<SqliteStore> {

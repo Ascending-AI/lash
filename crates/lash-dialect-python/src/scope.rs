@@ -628,6 +628,9 @@ fn typed_locals(
     str_builtin: bool,
 ) -> BTreeSet<String> {
     let mut candidates: BTreeSet<String> = bindings.locals.difference(excluded).cloned().collect();
+    if candidates.is_empty() {
+        return candidates;
+    }
     let str_builtin = str_builtin && !bindings.locals.contains("str");
     let range_builtin = range_builtin && !bindings.locals.contains("range");
     loop {
@@ -642,7 +645,7 @@ fn typed_locals(
         let rejected = proof.rejected;
         let before = candidates.len();
         candidates.retain(|name| !rejected.contains(name));
-        if candidates.len() == before {
+        if candidates.is_empty() || candidates.len() == before {
             return candidates;
         }
     }

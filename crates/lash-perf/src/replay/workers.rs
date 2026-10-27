@@ -77,6 +77,7 @@ pub(crate) fn service(
     instruction_limit: Option<u64>,
     resources: bool,
     instructions: bool,
+    staging_parent: Option<&std::path::Path>,
 ) -> anyhow::Result<lash::vm::WorkerService> {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config =
@@ -108,6 +109,7 @@ pub(crate) fn service(
             config.entry.args.push("--replay-instructions".into());
         }
     }
+    config.staging_dir = staging_parent.map(|parent| parent.join("spools"));
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;

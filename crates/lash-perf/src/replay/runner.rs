@@ -45,27 +45,8 @@ pub struct RunOptions {
     pub heap: super::ReplayHeapArgs,
 }
 
-#[derive(Debug)]
-struct CountedClock(Instant);
-
-#[async_trait::async_trait]
-impl lash_core::Clock for CountedClock {
-    fn now(&self) -> Instant {
-        self.0
-    }
-
-    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::UNIX_EPOCH + chrono::TimeDelta::seconds(1_700_000_000)
-    }
-
-    async fn sleep(&self, duration: Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep_until(&self, deadline: Instant) {
-        tokio::time::sleep(deadline.saturating_duration_since(self.0)).await;
-    }
-}
+mod counted_clock;
+use counted_clock::CountedClock;
 
 fn sqlite_options(counted: bool) -> lash_sqlite_store::SqliteStoreSetOptions {
     let mut options = lash_sqlite_store::SqliteStoreSetOptions::standard(
@@ -108,6 +89,11 @@ async fn open_stores(
             )
             .await
             .map_err(|error| anyhow::anyhow!("open the SQLite store set: {error}"))?;
+            let stores = if counted {
+                stores.with_commit_count_seed_for_testing(0)
+            } else {
+                stores
+            };
             let probe = StoreProbe::sqlite(&stores)?;
             let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(stores);
             let stores = if counted {
@@ -240,6 +226,10 @@ fn build_core_with_sink(
             Duration::from_secs(3600),
         )?;
         builder
+            .prompt_render_pool(lash::plugins::PromptRenderPoolConfig {
+                workers: std::num::NonZeroUsize::MIN,
+                ..lash::plugins::PromptRenderPoolConfig::standard()
+            })
             .tool_live_policy(live)
             .observer_pacing(lash::ObserverPacing {
                 follow: poll,
@@ -255,7 +245,11 @@ fn build_core_with_sink(
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .delta_coalescing(if counted {
+            lash::DeltaCoalescing::off()
+        } else {
+            lash::DeltaCoalescing::recommended()
+        })
         .serve_test_llm_profile(provider::model(book), provider::metadata()?);
     let builder = if workload.host.is_some() {
         let host = super::capabilities::HostTools::new(workload.host.as_ref())?;
@@ -287,6 +281,7 @@ struct Lane {
     session: lash::LashSession,
     inputs: Vec<(ScriptedTurn, String)>,
     counted: bool,
+    completion: Option<lash_durable::runner::KeyWatch>,
 }
 
 /// The node's settings with page retirement left to the rounds' gaps: the
@@ -370,8 +365,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
         "sessions": workload.sessions, "compact_every": workload.compact_every,
         "runtime_workers": tokio::runtime::Handle::current().metrics().num_workers(),
+        "prompt_render_workers": matches!(options.store, StoreChoice::CountedSqliteFile(_)).then_some(1),
         "input_policy": if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
-            "fixed injected clock, send IDs, lease incarnation, sequential environment identities and same-length logical publication domain; private physical files; local wakes only; facade recovery polls deferred beyond run; tool-live flush 60s and slot linger 3600s"
+            "fresh process per workload; frozen clock and timers; fixed send IDs, lease incarnation, sequential environment identities and same-length logical publication domain; private physical files; local wakes only; facade recovery polls deferred beyond run; tool-live flush 60s and slot linger 3600s; uncoalesced presentation; one prompt renderer and one blocking worker; local acknowledged terminal before outcome read; fixed enqueue nonce and private staging directory"
         } else {
             "system clock; ordinary identity sources"
         },
@@ -438,6 +434,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 workload.instruction_limit,
                 options.worker_resources,
                 options.instructions,
+                match &options.store {
+                    StoreChoice::CountedSqliteFile(dir) => Some(dir.as_path()),
+                    _ => None,
+                },
             )
         })
         .transpose()?;
@@ -568,11 +568,23 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             .open()
             .await
             .map_err(|error| anyhow::anyhow!("open {id}: {error}"))?;
+        let completion = if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+            Some(
+                backend
+                    .stores()
+                    .wake_sink()
+                    .observe(lash_durable::ActorKey::session(id.as_str())?, None)
+                    .await,
+            )
+        } else {
+            None
+        };
         lanes.push(Lane {
             index,
             session,
             inputs,
             counted: matches!(options.store, StoreChoice::CountedSqliteFile(_)),
+            completion,
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
@@ -648,7 +660,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
-            futures_util::future::join_all(lanes.iter().map(|lane| async {
+            futures_util::future::join_all(lanes.iter_mut().map(|lane| async {
                 let started = Instant::now();
                 let client = options
                     .turn_report
@@ -982,7 +994,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
 /// Send `lane`'s turn `turn` and follow it to its outcome; refuse anything
 /// but an answer.
 async fn send(
-    lane: &Lane,
+    lane: &mut Lane,
     turn: usize,
     observe_result: bool,
     host_tools: Option<&super::capabilities::HostTools>,
@@ -1038,6 +1050,14 @@ async fn send(
         lash_core_ids::operational_metrics::turn::phase("admission", None, send.into_future())
             .await
             .map_err(|error| anyhow::anyhow!("send: {error}"))?;
+    if let Some(completion) = &mut lane.completion {
+        // This private single-node fixture observes the terminal once. Live
+        // follower reads would otherwise race each intermediate commit.
+        let subject = lash_core_store::store::FollowSubject::Input(handle.input_id().clone());
+        while completion.committed_turn(&subject).is_none() {
+            completion.changed().await;
+        }
+    }
     let outcome =
         lash_core_ids::operational_metrics::turn::phase("readback", None, handle.outcome())
             .await

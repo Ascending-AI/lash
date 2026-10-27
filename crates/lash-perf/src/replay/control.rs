@@ -243,6 +243,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
                 None,
                 false,
                 false,
+                None,
             )
         })
         .transpose()?;

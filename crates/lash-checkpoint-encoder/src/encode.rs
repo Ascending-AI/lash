@@ -28,7 +28,8 @@
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, hash_map::DefaultHasher};
+use std::hash::BuildHasherDefault;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_kernel_value::tokens::CanonicalFault;
@@ -239,7 +240,9 @@ impl PreparedGraph {
 
 #[derive(Default)]
 struct EncodingCache {
-    entries: hashlink::LinkedHashMap<EncodingKey, PreparedGraph>,
+    // Keys contain content digests. A fixed table seed makes identical
+    // eviction histories rehash at the same point without changing identities.
+    entries: hashlink::LinkedHashMap<EncodingKey, PreparedGraph, BuildHasherDefault<DefaultHasher>>,
     bytes: usize,
     #[cfg(test)]
     eviction_candidates: usize,
@@ -1348,17 +1351,26 @@ mod cache_tests {
     /// PREPARATION-EVICTION-WORK: finding the least recent entry under the
     /// shared lock examines only the entry evicted, not every resident body.
     #[test]
-    fn preparation_eviction_does_not_scan_resident_bodies() {
+    fn preparation_eviction_has_bounded_repeatable_work() {
         let mut cache = EncodingCache::default();
+        let mut peer = EncodingCache::default();
         let root = NodeId([0; 32]);
         let key = |n: u32| (EncodingKind::Node(NodeKind(n)), [0; 32]);
         for n in 0..CACHE_ENTRIES as u32 {
             cache.insert(key(n), b"input", root, Vec::new());
+            peer.insert(key(n), b"input", root, Vec::new());
         }
         cache.eviction_candidates = 0;
         for n in CACHE_ENTRIES as u32..(CACHE_ENTRIES * 3) as u32 {
             assert!(cache.get(&key(0), b"input").is_some());
+            assert!(peer.get(&key(0), b"input").is_some());
             cache.insert(key(n), b"input", root, Vec::new());
+            peer.insert(key(n), b"input", root, Vec::new());
+            assert_eq!(
+                cache.entries.capacity(),
+                peer.entries.capacity(),
+                "identical eviction histories must grow the index at the same step {n}"
+            );
         }
         assert_eq!(cache.entries.len(), CACHE_ENTRIES);
         assert_eq!(

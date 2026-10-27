@@ -26,24 +26,20 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("{stdout}");
     eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-    assert!(
-        output.status.success(),
-        "the replay gate failed: {}",
-        stdout
-            .lines()
-            .filter(|line| line.starts_with("replay gate: VIOLATION"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
     assert!(receipt.exists());
     // REPLAY-DETERMINISM: every fresh capture of this counted fixture must
     // give exactly the same host-byte history slope, before aggregation.
-    let slopes: Vec<_> = (0..5)
+    let captures: Vec<serde_json::Value> = (0..5)
         .map(|run| {
-            let raw: serde_json::Value = serde_json::from_slice(
+            serde_json::from_slice(
                 &std::fs::read(receipt.with_extension(format!("{run}.json"))).unwrap(),
             )
-            .unwrap();
+            .unwrap()
+        })
+        .collect();
+    let slopes: Vec<_> = captures
+        .iter()
+        .map(|raw| {
             raw["workloads"]
                 .as_array()
                 .unwrap()
@@ -57,6 +53,53 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     assert!(
         slopes.iter().all(|slope| *slope == slopes[0]),
         "same-commit host allocation slopes differ: {slopes:?}"
+    );
+    for first in captures[0]["workloads"].as_array().unwrap() {
+        let name = first["workload"].as_str().unwrap();
+        for (metric, summary) in first["summary"].as_object().unwrap() {
+            if summary["kind"] != "counted" {
+                continue;
+            }
+            for (run, capture) in captures.iter().enumerate().skip(1) {
+                let next = capture["workloads"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["workload"] == name)
+                    .unwrap();
+                assert_eq!(
+                    summary, &next["summary"][metric],
+                    "same-build counted summary differs: {name}/{metric}, run {run}"
+                );
+                let series = |row: &serde_json::Value| {
+                    let mut series = Vec::new();
+                    for phase in ["rounds", "compactions"] {
+                        for round in row[phase].as_array().unwrap() {
+                            series.push((
+                                phase,
+                                round["turn"].clone(),
+                                round["metrics"][metric].clone(),
+                            ));
+                        }
+                    }
+                    series
+                };
+                assert_eq!(
+                    series(first),
+                    series(next),
+                    "same-build counted turns differ: {name}/{metric}, run {run}"
+                );
+            }
+        }
+    }
+    assert!(
+        output.status.success(),
+        "the replay gate failed: {}",
+        stdout
+            .lines()
+            .filter(|line| line.starts_with("replay gate: VIOLATION"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
