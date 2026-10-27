@@ -22,6 +22,8 @@ python3 tools/buck2/outputs.py --report .kiln/compare-build.json \
 Reference paths are optional. Repeat `--qjs` for upstream QuickJS and dquickts;
 receipt names `qjs-0`, `qjs-1` follow argument order and retain binary hashes.
 `--node` produces both `node-jitless` and `node-jit` rows; `--python` runs CPython.
+`--monty` selects the Monty CLI and requires `--python` so every Monty result
+is checked directly against CPython at both trip counts in every sample.
 All engines for a dialect receive the same checked-in workload source. Only
 clocks, invocation and result transport wrappers differ. External startup and
 JSON transport are excluded from reference timings. Lash includes fresh cell
@@ -37,7 +39,15 @@ kiln gate lash <fork> -- bash -c 'ulimit -v 8388608; /usr/bin/time -v python3 sc
   > .kiln/compare-references.log 2>&1
 ```
 
-The cache's `engines.json` names paths and pinned revisions. Builds use the
+Use `--engine monty` to fetch only Monty. The fetcher reuses the embedded
+instrument's archive verification and extracts only the named CLI executable.
+The current pin is pydantic-monty-runtime 1.4.0, the newest PyPI release checked
+on 2026-10-27, with archive SHA-256
+`ff6301049a8e2f3407188dd174a749f2f2af6f82a2bc993c707dbebf44dcf651`.
+It is the optimized Linux x86_64 manylinux_2_28 wheel, requiring glibc 2.28+.
+
+The cache's `engines.json` names paths and pinned revisions, and records
+Monty's URL, version, archive checksum and executable checksum. Builds use the
 upstream Makefile defaults, two compiler jobs, and build dquickts' snapshot
 host separately. Run measurements under the same hard memory cap and retain
 RSS and instruction evidence:
@@ -46,7 +56,8 @@ RSS and instruction evidence:
 kiln gate lash <fork> -- bash -c 'ulimit -v 8388608; /usr/bin/time -v perf stat -e instructions:u -- "$@"' -- \
   <optimized-lash-perf> compare --out .kiln/compare.json \
   --instructions \
-  --qjs <upstream-qjs> --qjs <dquickts-qjs> --node <node> --python /usr/bin/python3
+  --qjs <upstream-qjs> --qjs <dquickts-qjs> --node <node> --python /usr/bin/python3 \
+  --monty <cache>/monty-bin
 ```
 
 Receipts record comparison geometry version 2. Ordinary comparisons open no
@@ -64,8 +75,27 @@ median differential instructions/op with
 the same two-point formula below. This scoped counter avoids subtracting huge
 whole-process startup costs to measure small loop increments. Counter refusal is
 an explicit comparison failure. A measured interval with less than 99% PMU
-running time is refused; counts are never silently scaled. Reference rows retain their ordinary timings;
-this option counts only Lash cells.
+running time is refused; counts are never silently scaled.
+
+With `--instructions`, references run a separate low/high process pair per
+sample, alternating the count order. Both processes execute the same fixed
+`--warmups` calls at the low count before the measured call. `perf stat
+--no-scale -e instructions:u` counts each whole process; parsing, startup,
+fixed warmups, output and teardown cancel to first order in the two-point
+slope. Literal compilation, allocator effects and adaptive JIT behavior may
+not cancel exactly. These are incremental instruction estimates, not a scoped
+resident execution counter. The in-guest clock still times only the final
+benchmark call. Without `--instructions`, the existing resident multi-pair
+clock runner remains in use. Raw sources, stdout, stderr and perf TSV files
+are retained beside the receipt. Every reference counter must run at least
+99% of enabled time; missing or multiplexed counts fail the comparison.
+
+The output starts with all selected Python workloads, sorted by decreasing
+Lash/Monty instruction ratio, beside the Lash-TS/`qjs-0` instruction ratio.
+Each engine retains its source and executable SHA-256. A Monty language
+limitation is retained as `unsupported: <error>` with the complete CLI
+traceback; it never removes a workload. Resource, transport, counter and
+checksum failures still refuse the comparison.
 
 Each workload has a low count and a high count (`low * --factor`, default 100).
 One operation is the original microbench's unit (four property accesses or

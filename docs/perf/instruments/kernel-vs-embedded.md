@@ -98,7 +98,7 @@ profile, host CPU/kernel and source digests are retained in `receipt.json`.
 | Engine | Distribution | Archive SHA-256 |
 |---|---|---|
 | QuickJS | [Upstream 2025-09-13 Linux x86_64 release](https://bellard.org/quickjs/binary_releases/) | `648dc418356b7fa627f78bdf43b12a1cfd94bc220fc36520e1320e36c9328d10` |
-| Monty | [pydantic-monty-runtime 1.1.0 manylinux_2_28_x86_64 wheel](https://pypi.org/project/pydantic-monty-runtime/1.1.0/) | `7cee4303924ad44a858ec3efdde4123cadbf032cb23006a2d260c73d68748d60` |
+| Monty | [pydantic-monty-runtime 1.4.0 manylinux_2_28_x86_64 wheel](https://pypi.org/project/pydantic-monty-runtime/1.4.0/) | `ff6301049a8e2f3407188dd174a749f2f2af6f82a2bc993c707dbebf44dcf651` |
 
 Monty's [CLI](https://pydantic.dev/docs/monty/reference/cli/) executes Python
 files directly. This avoids counting a CPython binding or a Python-side pool

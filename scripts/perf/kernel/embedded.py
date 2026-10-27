@@ -30,9 +30,9 @@ RELEASES = {
         "qjs", "upstream QuickJS 2025-09-13",
     ),
     "monty": (
-        "https://files.pythonhosted.org/packages/59/60/b2ee672278e291a05fec28f5e50906e2ccfff5899df4cd949693b495175e/pydantic_monty_runtime-1.1.0-py3-none-manylinux_2_28_x86_64.whl",
-        "7cee4303924ad44a858ec3efdde4123cadbf032cb23006a2d260c73d68748d60",
-        "pydantic_monty_runtime-1.1.0.data/scripts/monty", "Monty 1.1.0",
+        "https://files.pythonhosted.org/packages/d3/4a/fdf0ff01c3ee23f5af7a017e970967fc88d6d263a79db03d3dfce5c028a1/pydantic_monty_runtime-1.4.0-py3-none-manylinux_2_28_x86_64.whl",
+        "ff6301049a8e2f3407188dd174a749f2f2af6f82a2bc993c707dbebf44dcf651",
+        "pydantic_monty_runtime-1.4.0.data/scripts/monty", "Monty 1.4.0",
     ),
 }
 
@@ -67,13 +67,14 @@ def digest(value):
                           separators=(",", ":"), allow_nan=False).encode())
 
 
-def engine_tools(fetch):
+def engine_tools(fetch, *, names=None, tools=None):
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise ValueError("pinned release distributions require Linux x86_64")
-    tools = ROOT / "target/kernel-embedded-tools"
+    tools = tools or ROOT / "target/kernel-embedded-tools"
     binaries = {}
-    for name, (url, checksum, member, _) in RELEASES.items():
-        archive = tools / (name + ".zip")
+    for name in names or RELEASES:
+        url, checksum, member, _ = RELEASES[name]
+        archive = tools / (name + "-" + checksum + ".zip")
         if not archive.exists():
             if not fetch:
                 raise ValueError("use --fetch-engines to opt into pinned release downloads")

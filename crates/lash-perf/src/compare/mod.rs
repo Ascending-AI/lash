@@ -27,6 +27,9 @@ pub struct Args {
     pub node: Option<PathBuf>,
     #[arg(long)]
     pub python: Option<PathBuf>,
+    /// Monty CLI from the pinned reference fetcher; CPython checks equal work.
+    #[arg(long, requires = "python")]
+    pub monty: Option<PathBuf>,
     #[arg(long, default_value_t = 5)]
     pub runs: usize,
     #[arg(long, default_value_t = 1)]
@@ -108,6 +111,14 @@ pub(crate) struct Row {
     execution_census: Option<lash_kernel_vm::perf_witness::execution::Census>,
 }
 #[derive(Serialize)]
+struct UnsupportedRow {
+    engine: String,
+    workload: String,
+    source_hash: String,
+    engine_identity: String,
+    error: String,
+}
+#[derive(Serialize)]
 pub(crate) struct Receipt {
     pub recorded_at: String,
     pub commit: String,
@@ -118,6 +129,7 @@ pub(crate) struct Receipt {
     pub geometry: serde_json::Value,
     pub rows: Vec<Row>,
     errors: Vec<String>,
+    unsupported: Vec<UnsupportedRow>,
     durable: Vec<serde_json::Value>,
 }
 fn elapsed(at: Instant) -> f64 {
@@ -411,9 +423,10 @@ pub fn run(args: &Args) -> Result<()> {
         cpu,
         load_before: load(),
         load_after: String::new(),
-        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
+        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","reference_instructions":"paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
         rows: Vec::new(),
         errors: Vec::new(),
+        unsupported: Vec::new(),
         durable: Vec::new(),
     };
     let kernel = kernel::Kernel::new().map_err(anyhow::Error::from_boxed)?;
@@ -459,29 +472,51 @@ pub fn run(args: &Args) -> Result<()> {
                     });
                 match measured {
                     Ok(row) => receipt.rows.push(row),
-                    Err(e) => receipt.errors.push(format!(
-                        "{} {dialect} {}: {e:#}",
-                        reference.name, workload.name
-                    )),
+                    Err(e) => {
+                        if let Some(unsupported) = e.downcast_ref::<reference::Unsupported>() {
+                            receipt.unsupported.push(UnsupportedRow {
+                                engine: reference.name.clone(),
+                                workload: workload.name.into(),
+                                source_hash: hash(workload.py.as_bytes()),
+                                engine_identity: reference.identity.clone(),
+                                error: unsupported.0.clone(),
+                            });
+                        } else {
+                            receipt.errors.push(format!(
+                                "{} {dialect} {}: {e:#}",
+                                reference.name, workload.name
+                            ));
+                        }
+                    }
                 }
             }
             let group = &mut receipt.rows[start..];
-            if let Some(lash) = group.iter().position(|r| r.engine == "lash") {
+            let oracle = group
+                .iter()
+                .position(|r| r.engine == "cpython")
+                .or_else(|| group.iter().position(|r| r.engine == "lash"));
+            if let Some(oracle) = oracle {
                 for i in 0..group.len() {
-                    if i == lash {
-                        continue;
-                    }
-                    if group[i]
-                        .samples
-                        .iter()
-                        .zip(&group[lash].samples)
-                        .any(|(a, b)| (0..2).any(|j| !same_result(&a[j].result, &b[j].result)))
+                    if i != oracle
+                        && group[i]
+                            .samples
+                            .iter()
+                            .zip(&group[oracle].samples)
+                            .any(|(a, b)| (0..2).any(|j| !same_result(&a[j].result, &b[j].result)))
                     {
                         receipt.errors.push(format!(
-                            "{} {dialect} {}: result differs from lash",
-                            group[i].engine, workload.name
+                            "{} {dialect} {}: result differs from {}",
+                            group[i].engine, workload.name, group[oracle].engine
                         ));
-                    } else if group[i].median.slope_ns > 0.0 && group[lash].median.slope_ns > 0.0 {
+                    }
+                }
+            }
+            if let Some(lash) = group.iter().position(|r| r.engine == "lash") {
+                for i in 0..group.len() {
+                    if i != lash
+                        && group[i].median.slope_ns > 0.0
+                        && group[lash].median.slope_ns > 0.0
+                    {
                         let ratio = group[lash].median.slope_ns / group[i].median.slope_ns;
                         let name = group[i].engine.clone();
                         group[lash].ratios.insert(name, ratio);
@@ -537,7 +572,8 @@ pub fn run(args: &Args) -> Result<()> {
     Ok(())
 }
 fn table(receipt: &Receipt) -> String {
-    let mut text = String::from(
+    let mut text = python_table(receipt);
+    text.push_str(
         "| Dialect | Workload | Engine | Min slope ns/op | Median slope ns/op | Fixed intercept ns | Lash/reference (median slope) |\n|---|---|---|---:|---:|---:|---|\n",
     );
     for row in &receipt.rows {
@@ -563,15 +599,16 @@ fn table(receipt: &Receipt) -> String {
         );
     }
     if receipt.rows.iter().any(|row| row.instructions.is_some()) {
-        text.push_str("\n| Dialect | Workload | Min instructions/op | Median instructions/op |\n|---|---|---:|---:|\n");
+        text.push_str("\n| Dialect | Workload | Engine | Min instructions/op | Median instructions/op |\n|---|---|---|---:|---:|\n");
         for row in &receipt.rows {
             if let Some(counts) = &row.instructions {
                 use std::fmt::Write as _;
                 let _ = writeln!(
                     text,
-                    "| {} | {} | {:.2} | {:.2} |",
+                    "| {} | {} | {} | {:.2} | {:.2} |",
                     row.dialect,
                     row.workload,
+                    row.engine,
                     counts.minimum_per_operation,
                     counts.median_per_operation
                 );
@@ -607,6 +644,88 @@ fn table(receipt: &Receipt) -> String {
     }
     text
 }
+fn python_table(receipt: &Receipt) -> String {
+    use std::fmt::Write as _;
+    let mut text = String::from(
+        "| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |\n|---|---:|---:|---:|---:|\n",
+    );
+    let counts = |name: &str, dialect: &str, workload: &str| {
+        receipt
+            .rows
+            .iter()
+            .find(|r| r.engine == name && r.dialect == dialect && r.workload == workload)
+            .and_then(|r| r.instructions.as_ref())
+            .map(|r| r.median_per_operation)
+    };
+    let number = |n: Option<f64>| n.map_or_else(|| "unavailable".into(), |n| format!("{n:.2}"));
+    let ratio = |a: Option<f64>, b: Option<f64>| {
+        a.zip(b)
+            .filter(|(a, b)| *a > 0.0 && *b > 0.0)
+            .map_or_else(|| "unavailable".into(), |(a, b)| format!("{:.2}×", a / b))
+    };
+    let mut workloads = workloads::ALL
+        .iter()
+        .filter(|w| {
+            receipt
+                .rows
+                .iter()
+                .any(|r| r.workload == w.name && r.dialect == "python")
+        })
+        .collect::<Vec<_>>();
+    workloads.sort_by(|a, b| {
+        let ratio = |w: &workloads::Workload| {
+            counts("lash", "python", w.name)
+                .zip(counts("monty", "python", w.name))
+                .filter(|(a, b)| *a > 0.0 && *b > 0.0)
+                .map_or(f64::NEG_INFINITY, |(a, b)| a / b)
+        };
+        ratio(b).total_cmp(&ratio(a))
+    });
+    for workload in workloads {
+        let name = workload.name;
+        let lash = counts("lash", "python", name);
+        let monty = counts("monty", "python", name);
+        let unsupported = receipt
+            .unsupported
+            .iter()
+            .find(|r| r.engine == "monty" && r.workload == name);
+        let monty_text = unsupported.map_or_else(
+            || number(monty),
+            |r| {
+                format!(
+                    "unsupported: {}",
+                    r.error
+                        .lines()
+                        .last()
+                        .unwrap_or(&r.error)
+                        .replace('|', "\\|")
+                )
+            },
+        );
+        let _ = writeln!(
+            text,
+            "| {name} | {} | {monty_text} | {} | {} |",
+            number(lash),
+            ratio(lash, monty),
+            ratio(
+                counts("lash", "typescript", name),
+                counts("qjs-0", "typescript", name)
+            )
+        );
+    }
+    for row in &receipt.unsupported {
+        let _ = writeln!(
+            text,
+            "\n{} / {} unsupported:\n```text\n{}\n```",
+            row.engine,
+            row.workload,
+            row.error.trim()
+        );
+    }
+    text.push('\n');
+    text
+}
+
 fn profiles(args: &Args, dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     for workload in workloads::ALL

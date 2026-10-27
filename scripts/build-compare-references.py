@@ -5,6 +5,8 @@ Run through `kiln gate lash <fork> -- python3 scripts/build-compare-references.p
 --cache target/compare-references`. The parent must apply the 8 GiB virtual cap.
 """
 import argparse
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -22,11 +24,25 @@ def run(*cmd, cwd=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", type=Path, required=True)
+    parser.add_argument("--engine", action="append", choices=[*PINS, "monty"],
+                        help="select references; default builds/fetches all")
     args = parser.parse_args()
     cache = args.cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
     receipts = {}
-    for name, (url, revision) in PINS.items():
+    for name in args.engine or [*PINS, "monty"]:
+        if name == "monty":
+            spec = importlib.util.spec_from_file_location(
+                "embedded", Path(__file__).parent / "perf/kernel/embedded.py")
+            embedded = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(embedded)
+            binary = embedded.engine_tools(True, names=["monty"], tools=cache)["monty"]
+            url, checksum, _, version = embedded.RELEASES["monty"]
+            receipts[name] = {"url": url, "archive_sha256": checksum, "version": version,
+                              "binary": binary,
+                              "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
+            continue
+        url, revision = PINS[name]
         root = cache / f"{name}-{revision}"
         if not root.exists():
             run("git", "init", str(root))
