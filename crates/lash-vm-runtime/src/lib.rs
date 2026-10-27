@@ -52,17 +52,18 @@ pub use lash_vm_client::{RemoteMachine, RemoteMachines, RunHost};
 
 pub use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
 pub use process::{
-    EFFECT_ARGUMENTS, EFFECT_UNKNOWN, HelperAdoptionRefusal, KERNEL_RUN_STEP, KernelDocuments,
-    KernelEngineSteps, KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
-    KernelProcessDefinition, KernelProcessEngine, KernelProcessFailureCode, KernelProcessInput,
-    KernelRecordedSettings, KernelRunPolicy, KernelSettingsError, LASH_VM_ENGINE_KIND,
-    PlannedMigration, ProcessReplayRequest, RefusedKernelCell, RefusedKernelProcess, ReplayFault,
-    ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay, StoredSourceMap, TOOL_FAILED,
-    TaskPath, UnmigratedKernelSession, Unreplayable, Unretained, WorkflowEnvironment,
-    WorkflowEnvironmentRequest, WorkflowPublishRequest, admit_kernel_process,
-    carry_parked_checkpoint, carry_snapshot, definition_draft, definition_of_start,
-    entry_signature, kernel_process_engine_registration, map_link_refusal, migrate_function_value,
-    migration_refusal, plan_adoption, plan_migration, survey_kernel_processes,
+    CellCode, EFFECT_ARGUMENTS, EFFECT_UNKNOWN, HelperAdoptionRefusal, KERNEL_RUN_STEP,
+    KernelDocuments, KernelEngineSteps, KernelMigrationRefusal, KernelMigrationSurvey,
+    KernelMigrationSurveyError, KernelProcessDefinition, KernelProcessEngine,
+    KernelProcessFailureCode, KernelProcessInput, KernelRecordedSettings, KernelRunPolicy,
+    KernelSettingsError, LASH_VM_ENGINE_KIND, PlannedMigration, ProcessReplayRequest,
+    RefusedKernelCell, RefusedKernelProcess, ReplayFault, ReplayPath, ReplaySegments,
+    SegmentAnswer, SegmentReplay, StoredSourceMap, TOOL_FAILED, TaskPath, UnmigratedKernelSession,
+    Unreplayable, Unretained, WorkflowEnvironment, WorkflowEnvironmentRequest,
+    WorkflowPublishRequest, admit_kernel_process, carry_parked_checkpoint, carry_snapshot,
+    definition_draft, definition_of_start, entry_signature, kernel_process_engine_registration,
+    map_link_refusal, migrate_function_value, migration_refusal, plan_adoption, plan_migration,
+    survey_kernel_processes,
 };
 
 pub use process_plugin::{

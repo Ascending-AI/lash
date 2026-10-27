@@ -641,6 +641,18 @@ impl CallOutcome {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
+        self.stage_with_body(staging).map(|(outcome, _)| outcome)
+    }
+
+    /// Stages the outcome and returns its identity and the exact archival
+    /// body's identity. The staging area may omit nodes already installed.
+    ///
+    /// # Errors
+    /// Any refusal of the staging area.
+    pub fn stage_with_body(
+        &self,
+        staging: &mut GraphStaging,
+    ) -> Result<(NodeId, NodeId), GraphRefusal> {
         let body = CallBody::stage_fields(
             staging,
             &self.call_id,
@@ -660,10 +672,11 @@ impl CallOutcome {
             presentation,
             &mut encoded,
         );
-        Ok(staging.encode(
+        let outcome = staging.encode(
             NodeKind::CALL_OUTCOME,
             TypedBody::logical(&encoded.into_bytes()),
-        )?)
+        )?;
+        Ok((outcome, body))
     }
 
     /// Load the live outcome and its shared archival body.

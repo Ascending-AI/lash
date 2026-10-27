@@ -983,7 +983,7 @@ impl DurableSnapshotStore {
         pages: &SharedPages,
         published: (NodeId, CommitId),
     ) -> Result<lash_durable::ActorCommit, QuietPointRefusal> {
-        members.forget();
+        let update = members.prepare_update(&tx).await.map_err(refused)?;
         *self
             .latest
             .lock()
@@ -1003,9 +1003,11 @@ impl DurableSnapshotStore {
                     }
                 }
                 page_owner.settle(published.1).map_err(refused)?;
+                members.apply_update(update).map_err(refused)?;
                 Ok(committed)
             }
             Err(error) => {
+                members.forget();
                 self.forget_root();
                 if ambiguous(&error) {
                     let row = self
@@ -1046,6 +1048,9 @@ impl DurableSnapshotStore {
     /// this execution: its owner binding, its children's kinds, or a phase
     /// that names a membership when ended or none when parked.
     pub async fn latest_root(&self) -> Result<Option<std::sync::Arc<RootRead>>, QuietPointRefusal> {
+        if *self.held() == Some(None) {
+            return Ok(None);
+        }
         if let Some(read) = self
             .latest
             .lock()

@@ -22,7 +22,7 @@ use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_value::package::LinkId;
 use lash_kernel_value::sites::Site;
 
-use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
+use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState, RecordedOutcome};
 use super::host_graph::{CallStatus, CellEnd, HostState};
 
 /// version_surface = "coexist"
@@ -172,7 +172,16 @@ pub(super) fn load_cell(
                             .to_owned(),
                     );
                 }
-                graph.outcomes.insert(summary.call_id.clone(), *outcome);
+                let body =
+                    lash_vm_broker::round_graph::CallOutcome::body_node(&mut decoder, *outcome)
+                        .map_err(text)?;
+                graph.outcomes.insert(
+                    summary.call_id.clone(),
+                    RecordedOutcome {
+                        node: *outcome,
+                        body,
+                    },
+                );
                 graph.installed.insert(*outcome);
                 LedgerCallState::Completed {
                     record: Box::new(lash_core::ToolCallRecord {
@@ -259,7 +268,7 @@ pub(crate) fn snapshot_tool_calls(
                 .get(&call.call_id)
                 .copied()
                 .ok_or_else(|| format!("call {} has no recorded outcome", call.call_id))?;
-            lash_vm_broker::round_graph::CallOutcome::body_node(&mut decoder, outcome)
+            lash_vm_broker::round_graph::CallOutcome::body_node(&mut decoder, outcome.node)
                 .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;

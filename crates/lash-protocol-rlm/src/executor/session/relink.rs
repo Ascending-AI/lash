@@ -19,47 +19,38 @@ impl CodeModeExecutionState {
         documents: &lash_vm_runtime::KernelDocuments,
         boundary: &lash_vm_runtime::HostBoundary,
         claim: &lash_core::ReferrerClaim,
+        code: &mut lash_vm_runtime::CellCode,
     ) -> Result<BTreeSet<lash_kernel_value::LinkId>, RelinkError> {
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();
         for (name, function) in &mut functions {
             let saved = function.clone().into_saved();
-            documents
-                .admit_identified_document(claim, &function.document)
-                .await
-                .map_err(RelinkError::Package)?;
             let fulfilled = documents
-                .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
-                    document: function.document.id(),
-                    selector: lash_execution_contracts::process::linking::ReachSelector::AllExports,
-                    snapshot: boundary.snapshot.clone(),
-                    context: boundary.context.clone(),
-                    purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
-                })
-                .await
-                .map_err(RelinkError::Package)?;
-            documents
-                .hold(
-                    claim,
-                    &lash_execution_contracts::process::linking::ContentRef::Link(
-                        fulfilled.inspection.link,
-                    ),
+                .fulfil_cell(
+                    &function.document,
+                    &lash_execution_contracts::process::linking::FulfilRequest {
+                        document: function.document.id(),
+                        selector:
+                            lash_execution_contracts::process::linking::ReachSelector::AllExports,
+                        snapshot: boundary.snapshot.clone(),
+                        context: boundary.context.clone(),
+                        purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+                    },
+                    code,
                 )
                 .await
                 .map_err(RelinkError::Package)?;
             match lash_kernel_dialect::relink_saved(&saved, &fulfilled.content) {
-                Ok(relinked) if relinked.callable == function.callable => {}
+                Ok(relinked) if relinked.callable == function.callable => {
+                    code.retain_link(function.link);
+                }
                 Ok(relinked) => {
                     function.callable = relinked.callable;
                     function.link = relinked.callable.link;
-                    let content = documents
-                        .load_linked(function.link)
-                        .await
-                        .map_err(|error| RelinkError::Library(error.to_string()))?;
                     let reach = documents
                         .inspect(
-                            &content,
+                            &code.content,
                             function.link,
                             &lash_kernel_package::ReachSelection::AllExports,
                         )
@@ -70,7 +61,8 @@ impl CodeModeExecutionState {
                         .map_err(|error| RelinkError::Library(error.to_string()))?;
                     let loaded = lash_vm_broker::kernel::loader::declare_reach(
                         &function.document,
-                        &content
+                        &code
+                            .content
                             .documents
                             .iter()
                             .map(|(id, document)| (*id, Arc::clone(document)))
@@ -99,6 +91,13 @@ impl CodeModeExecutionState {
         }
         for (name, _, _, _) in &dropped {
             functions.remove(name);
+        }
+        let roots: BTreeSet<_> = functions.values().map(|function| function.link).collect();
+        if !roots.is_empty() {
+            documents
+                .hold_cell_code(claim, code, &roots, &[])
+                .await
+                .map_err(RelinkError::Package)?;
         }
         // A relinked record names its new closure, which the cell's run
         // then names unread: it is staged in the turn's spool beside the
@@ -230,12 +229,6 @@ impl CodeModeExecutionState {
         } else {
             next
         };
-        Ok(self
-            .view
-            .functions
-            .as_ref()
-            .into_iter()
-            .flat_map(|functions| functions.values().map(|function| function.link))
-            .collect())
+        Ok(roots)
     }
 }

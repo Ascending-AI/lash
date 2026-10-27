@@ -501,6 +501,7 @@ async fn cell_calls(
     machine: &TurnMachine,
     cx: &ActorContext,
     id: lash_sansio::EffectId,
+    acknowledged: Option<CellToolCalls>,
 ) -> Result<CellToolCalls, TurnError> {
     use lash_core_execution::runtime::actor::round::graph::ReportView;
     use lash_core_execution::runtime::actor::round::{self, PolicyView};
@@ -515,11 +516,14 @@ async fn cell_calls(
     let session = driver.session_id.clone();
     let run = driver.turn_id.clone();
     let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
-    let (records, ledger) = match stored_cell(cx, exec).await? {
-        Some(stored) => executor.snapshot_tool_calls(&stored).map_err(|error| {
-            TurnError::Exec(format!("the cell call ledger does not read: {error}"))
-        })?,
-        None => (Vec::new(), ReportView::default()),
+    let (records, ledger) = match acknowledged {
+        Some(CellToolCalls { records, ledger }) => (records, ledger),
+        None => match stored_cell(cx, exec).await? {
+            Some(stored) => executor.snapshot_tool_calls(&stored).map_err(|error| {
+                TurnError::Exec(format!("the cell call ledger does not read: {error}"))
+            })?,
+            None => (Vec::new(), ReportView::default()),
+        },
     };
     let reads = cx.durable_reads()?;
     let facts = reads.run_facts(&OwnerKey::Cell(session, run, cell)).await?;
@@ -614,14 +618,24 @@ impl RuntimeTurnDriver<'_> {
         machine: &TurnMachine,
         id: lash_sansio::EffectId,
     ) -> Result<CellToolCalls, RuntimeError> {
-        cell_calls(self, machine, &self.scoped_effect_controller, id)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::ExecutionStateCaptureFailed,
-                    error.to_string(),
-                )
-            })
+        let acknowledged = self
+            .cell_end
+            .take_calls()
+            .map(|(records, ledger)| CellToolCalls { records, ledger });
+        cell_calls(
+            self,
+            machine,
+            &self.scoped_effect_controller,
+            id,
+            acknowledged,
+        )
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                error.to_string(),
+            )
+        })
     }
 }
 
@@ -1264,7 +1278,7 @@ impl TurnDrive for RuntimeDrive {
         cx: &ActorContext,
         id: lash_sansio::EffectId,
     ) -> Result<CellToolCalls, TurnError> {
-        cell_calls(&self.driver, &self.machine, cx, id).await
+        cell_calls(&self.driver, &self.machine, cx, id, None).await
     }
 
     fn finishing_cell_calls(&mut self, calls: &CellToolCalls) {

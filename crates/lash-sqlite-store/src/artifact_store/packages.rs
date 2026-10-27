@@ -1,6 +1,23 @@
 //! Immutable package retention through the artifact owner.
 use super::*;
 
+lash_store_sql::statements! {
+    struct PackageReadStatements @ "package_reads_sqlite" {
+        /// An opaque package record and every referrer edge in one snapshot.
+        /// Package records have no graph children; documents use the node reader.
+        record = "SELECT body.content, body.encoding,
+                (SELECT json_group_array(json_array(edge.referrer_kind, edge.referrer_id))
+                 FROM artifact_referrer_edges AS edge
+                 WHERE edge.namespace = refs.namespace AND edge.artifact_ref = refs.artifact_ref)
+             FROM artifact_refs AS refs
+             LEFT JOIN blobs AS body ON body.hash = refs.blob_ref
+             WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2";
+    }
+}
+
+static PACKAGE_READ_SQL: LazyLock<PackageReadStatements> =
+    LazyLock::new(|| PackageReadStatements::render(crate::schema_layout::MAIN));
+
 #[async_trait::async_trait]
 impl lash_durable::packages::PackageStorage for SqliteStore {
     async fn hold_package_batch(
@@ -216,9 +233,49 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         &self,
         reference: &str,
     ) -> Result<Option<Vec<u8>>, lash_durable::DurableError> {
-        use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
-        self.get_module_artifact(reference)
+        if !lash_durable::packages::is_package_reference(reference)
+            || !crate::namespace::is_valid_opaque_key(reference)
+        {
+            use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+            return self
+                .get_module_artifact(reference)
+                .await
+                .map_err(Into::into);
+        }
+        let reference = reference.to_owned();
+        self.read_connection()
+            .call(move |conn| {
+                let stored: Option<(Option<Vec<u8>>, Option<i64>, String)> = conn
+                    .prepare_cached(PACKAGE_READ_SQL.record.sql())?
+                    .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
+                    .optional()?;
+                let Some((body, encoding, edges)) = stored else {
+                    return Ok(None);
+                };
+                let edges: Vec<(String, String)> =
+                    serde_json::from_str(&edges).map_err(|error| {
+                        sqlite_conversion_error(stored_data_corrupt(
+                            "package referrer edges",
+                            error,
+                        ))
+                    })?;
+                for (kind, id) in edges {
+                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+                }
+                let body = body.filter(|_| encoding == Some(0)).ok_or_else(|| {
+                    sqlite_conversion_error(stored_data_corrupt(
+                        "package record",
+                        "missing opaque body",
+                    ))
+                })?;
+                crate::codec::decode_artifact_blob(&body)
+                    .map(Some)
+                    .map_err(sqlite_conversion_error)
+            })
             .await
+            .map_err(artifact_sqlite_error)
             .map_err(Into::into)
     }
     async fn end_package_records(

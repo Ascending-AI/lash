@@ -58,7 +58,13 @@ pub struct CellEndHandoff {
     holds: bool,
     ended: Arc<std::sync::Mutex<Option<EndedCell>>>,
     execution: Arc<std::sync::Mutex<Option<lash_core_store::resolutions::ExecutionId>>>,
+    calls: Arc<std::sync::Mutex<Option<RecordedCellCalls>>>,
 }
+
+type RecordedCellCalls = (
+    Vec<crate::ToolCallRecord>,
+    crate::plugin::CellCallReferences,
+);
 
 /// The root an ended cell leaves for the commit that consumes its answer
 /// to retire.
@@ -81,6 +87,7 @@ impl CellEndHandoff {
             holds: true,
             ended: Arc::default(),
             execution: Arc::default(),
+            calls: Arc::default(),
         }
     }
 
@@ -93,6 +100,17 @@ impl CellEndHandoff {
 
     pub fn take(&self) -> Option<EndedCell> {
         self.ended.lock_recover().take()
+    }
+
+    /// The cell's acknowledged archival calls, if its live executor supplied
+    /// them. A cold consumer reads the snapshot instead.
+    pub fn take_calls(
+        &self,
+    ) -> Option<(
+        Vec<crate::ToolCallRecord>,
+        crate::plugin::CellCallReferences,
+    )> {
+        self.calls.lock_recover().take()
     }
 }
 
@@ -754,6 +772,17 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn cell_ended(&self, ended: EndedCell) {
         *self.cell_end.ended.lock_recover() = Some(ended);
+    }
+
+    /// Hand the consuming turn the exact archival references already held by
+    /// acknowledged cell checkpoints. Outcomes committed after the last
+    /// checkpoint remain in the run ledger and are merged by the consumer.
+    pub fn cell_calls_committed(
+        &self,
+        records: Vec<crate::ToolCallRecord>,
+        references: crate::plugin::CellCallReferences,
+    ) {
+        *self.cell_end.calls.lock_recover() = Some((records, references));
     }
 
     pub fn record_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {

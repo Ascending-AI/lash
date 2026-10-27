@@ -75,9 +75,9 @@ pub use lash_vm_client::{
     WorkerConfinement, WorkerEntry, WorkerTuning,
 };
 pub use lash_vm_runtime::{
-    KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER, KernelDocuments, KernelProcessPluginFactory,
-    KernelServicesComponent, KernelServicesPluginFactory, WorkflowEnvironmentRequest,
-    WorkflowPublishRequest, definition_draft,
+    CellCode, KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER, KernelDocuments,
+    KernelProcessPluginFactory, KernelServicesComponent, KernelServicesPluginFactory,
+    WorkflowEnvironmentRequest, WorkflowPublishRequest, definition_draft,
 };
 /// The names of the dialects lash ships. A host passes one where it names
 /// the dialect its process documents are written in

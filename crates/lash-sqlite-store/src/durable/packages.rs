@@ -117,7 +117,7 @@ impl ExecutionResolutions for SqliteDurableStore {
     }
     async fn load(&self, key: &ResolutionKey) -> Result<Option<ResolutionRecord>, DurableError> {
         let key = key.clone();
-        self.read(move |tx| load(tx, &key)).await
+        self.query(move |tx| load(tx, &key)).await
     }
 
     async fn commit_acknowledged(

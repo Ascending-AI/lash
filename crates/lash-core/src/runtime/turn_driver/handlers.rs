@@ -713,6 +713,7 @@ impl RuntimeTurnDriver<'_> {
         self.answered_cell_execution = None;
         drop(self.cell_end.take_execution());
         drop(self.cell_end.take());
+        drop(self.cell_end.take_calls());
         self.held_response.clone_from(&held);
         let invoked = self
             .invoke_turn_exec_effect(machine, invocation, code.clone(), event_tx)

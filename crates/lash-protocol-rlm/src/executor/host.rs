@@ -249,13 +249,20 @@ pub(super) struct HostGraph {
     /// Each admitted call's Admission, by call.
     pub admissions: BTreeMap<lash_core::ToolCallId, NodeId>,
     /// Each settled call's CallOutcome, by call.
-    pub outcomes: BTreeMap<lash_core::ToolCallId, NodeId>,
+    pub outcomes: BTreeMap<lash_core::ToolCallId, RecordedOutcome>,
     /// The CellEnvelope, once a park staged it.
     pub envelope: Option<NodeId>,
     /// The nodes an acknowledged park installed beside the summary pages.
     pub installed: BTreeSet<NodeId>,
     /// What the park in flight staged, until its commit is acknowledged.
     pub staged: Option<BTreeSet<NodeId>>,
+}
+
+/// The exact archival body named by a staged or acknowledged outcome.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RecordedOutcome {
+    pub node: NodeId,
+    pub body: NodeId,
 }
 
 pub(super) fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
@@ -856,11 +863,17 @@ impl KernelEffects for CellHost<'_> {
             let Some(admission) = graph.admissions.get(&record.call_id).copied() else {
                 continue;
             };
-            let outcome = call_outcome(record, admission)
-                .stage(staging)
+            let (outcome, body) = call_outcome(record, admission)
+                .stage_with_body(staging)
                 .map_err(fault)?;
             staged.insert(outcome);
-            graph.outcomes.insert(record.call_id.clone(), outcome);
+            graph.outcomes.insert(
+                record.call_id.clone(),
+                RecordedOutcome {
+                    node: outcome,
+                    body,
+                },
+            );
             graph.state.settle(&record.call_id, outcome, &record.output);
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;

@@ -270,6 +270,9 @@ fn clean_model_code(code: &str) -> String {
 /// A cell that was lowered and admitted: what it runs and what its host
 /// holds of it.
 struct LinkedCell {
+    /// The fresh cell's validated code, carried through setup without reloading.
+    code: processes::LoadedCode,
+    frame_links: BTreeSet<lash_kernel_value::LinkId>,
     /// Certifiable invocations, derived from the envelope's immutable Link.
     invoked: std::collections::BTreeSet<lash_kernel_value::OperationUse>,
     envelope: CellEnvelope,
@@ -436,7 +439,13 @@ async fn run_linked_cell(
         .backend()
         .stores()
         .execution_resolutions();
-    for use_ in linked.envelope.environment.uses.keys() {
+    for (use_, binding) in &linked.envelope.environment.uses {
+        if !matches!(
+            binding,
+            lash_core_store::tool_surface::UseBinding::Deferred(_)
+        ) {
+            continue;
+        }
         match resolutions
             .load(&lash_core_store::resolutions::ResolutionKey {
                 execution: execution.clone(),
@@ -502,6 +511,8 @@ async fn run_linked_cell(
         scope.session_id, scope.agent_frame_id
     ));
     let LinkedCell {
+        code: loaded,
+        frame_links,
         invoked,
         envelope,
         document,
@@ -655,22 +666,6 @@ async fn run_linked_cell(
             );
         }
     };
-    let loaded = match state.documents.as_ref() {
-        Some(documents) => {
-            processes::load(documents, &start, &host.envelope.environment.authored).await
-        }
-        None => Err("the cell has no document owner".into()),
-    };
-    let loaded = match loaded {
-        Ok(loaded) => loaded,
-        Err(message) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
-            );
-        }
-    };
     let selection = match cell_helper_selection(snapshots, &loaded.content, Arc::clone(&helpers))
         .await
     {
@@ -700,6 +695,7 @@ async fn run_linked_cell(
             );
         }
     };
+    let retained_code = loaded.clone();
     let prepared = match (services.kernel.library(), state.documents.as_ref()) {
         (Ok(functions), Some(documents)) => processes::prepare(
             loaded,
@@ -861,13 +857,11 @@ async fn run_linked_cell(
                 .lowering_functions()
                 .values()
                 .map(|function| function.link)
+                .filter(|link| !frame_links.contains(link))
                 .collect();
-            for link in links {
+            if !links.is_empty() {
                 documents
-                    .hold(
-                        &claim,
-                        &lash_execution_contracts::process::linking::ContentRef::Link(link),
-                    )
+                    .hold_cell_code(&claim, &retained_code, &links, &[])
                     .await
                     .map_err(|error| error.to_string())?;
             }
@@ -1087,6 +1081,20 @@ async fn run_linked_cell(
                 &died,
             );
         }
+    }
+    if !response.suspended && !ctx.has_nested_effect_error() {
+        let graph = host.graph.lock_recover();
+        let mut records = Vec::new();
+        let mut entries = Vec::new();
+        for record in &response.tool_calls {
+            if let Some(outcome) = graph.outcomes.get(&record.call_id)
+                && graph.installed.contains(&outcome.node)
+            {
+                records.push(record.clone());
+                entries.push(outcome.body);
+            }
+        }
+        ctx.cell_calls_committed(records, lash_vm_broker::round_graph::ReportView { entries });
     }
     if let Some(pages) = activation
         && !held

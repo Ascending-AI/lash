@@ -79,3 +79,18 @@ helpers copy recorded routes and pins by OperationUse and translate providers an
 codecs only to explicitly registered process twins. Core validates the chosen
 start independently. Worker native declarations travel in WorkerLibrary; each run
 carries its reached linked code independently of that library.
+
+A fresh code-mode cell prepares one `CellCode` bundle for its saved declarations
+and new document. `KernelDocuments::fulfil_cell` adds identified documents and
+their Links to that bundle; inspection and worker setup consume the same
+canonical bodies. `hold_cell_code` acquires selected roots and their dependency
+closure atomically under the caller's claim. Each activation prepares its own
+bundle. Independent `load_linked_identified` reads still validate current stored
+records, and preparation never grants a storage lifetime.
+
+An answering cell passes the original archival call-body references from its
+acknowledged checkpoints through `CellEndHandoff`. The consuming turn merges
+outcomes committed after the last checkpoint from the run ledger. Cold and
+stopped-cell reports still read their stored snapshot. Fixed operation bindings
+already carry their route and contract; only deferred bindings load resolution
+winners during cell setup.

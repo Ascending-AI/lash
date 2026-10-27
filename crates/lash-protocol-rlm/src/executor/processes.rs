@@ -13,13 +13,7 @@ pub(super) struct PreparedExecution {
     pub loaded: lash_vm_broker::kernel::loader::Assembled,
 }
 
-pub(super) struct LoadedCode {
-    pub content: lash_kernel_package::LinkedContent,
-    pub documents: std::collections::BTreeMap<
-        lash_kernel_value::DocumentId,
-        lash_kernel_doc::IdentifiedDocument,
-    >,
-}
+pub(super) type LoadedCode = lash_vm_runtime::CellCode;
 
 pub(super) async fn load(
     documents: &lash_vm_runtime::KernelDocuments,
@@ -31,6 +25,9 @@ pub(super) async fn load(
         .await
         .map_err(|error| error.to_string())?;
     for link in authored.iter().filter(|link| **link != start.link) {
+        if content.links.contains_key(link) {
+            continue;
+        }
         let (saved, saved_documents) = documents
             .load_linked_identified(*link)
             .await
@@ -40,10 +37,7 @@ pub(super) async fn load(
         content.links.extend(saved.links);
         content.packages.extend(saved.packages);
     }
-    Ok(LoadedCode {
-        content,
-        documents: identified,
-    })
+    Ok(LoadedCode::loaded(content, identified))
 }
 
 pub(super) fn prepare(
@@ -56,9 +50,25 @@ pub(super) fn prepare(
 ) -> Result<PreparedExecution, String> {
     let helpers = documents.helpers().as_ref();
     let LoadedCode {
-        content,
-        documents: identified,
+        mut content,
+        documents: mut identified,
+        ..
     } = loaded;
+    let mut retained = std::collections::BTreeSet::new();
+    for root in authored.iter().copied().chain([start.link]) {
+        retained.extend(
+            content
+                .retain_reach(root)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    content
+        .links
+        .retain(|id, _| retained.contains(&lash_kernel_package::RetainedContent::Link(*id)));
+    content
+        .documents
+        .retain(|id, _| retained.contains(&lash_kernel_package::RetainedContent::Document(*id)));
+    identified.retain(|id, _| content.documents.contains_key(id));
     let selected = |link, selector: &lash_kernel_package::ReachSelection| {
         match selection {
             lash_kernel_doc::Selection::Fresh => documents.inspect(&content, link, selector),

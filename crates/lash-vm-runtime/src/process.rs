@@ -130,7 +130,7 @@ impl InlineRequest {
     }
 }
 pub(crate) use documents::ProcessPreparations;
-pub use documents::{KernelDocuments, StoredSourceMap, Unretained, map_link_refusal};
+pub use documents::{CellCode, KernelDocuments, StoredSourceMap, Unretained, map_link_refusal};
 pub use helpers::{HelperAdoptionRefusal, plan_adoption};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError, PlannedMigration,

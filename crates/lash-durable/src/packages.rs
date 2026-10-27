@@ -121,6 +121,8 @@ pub enum PackageHold<'a> {
         artifacts: &'a [ArtifactName],
     },
     Publication(&'a PublicationRecord),
+    /// Retain an existing Link and its stored dependency metadata.
+    RetainLink(&'a LinkId),
 }
 
 /// A prepared immutable root and its closure, passed intact to storage.
@@ -138,6 +140,8 @@ pub trait PackageStore: Send + Sync {
     /// Admit documents, Links and accepted publications atomically. A refusal
     /// leaves no root or edge from this batch. Existing dependencies are read
     /// outside the writer and checked again with the claim's fence inside it.
+    /// Links supplied by this batch participate in dependency discovery before
+    /// publication, so a new Link may import another new Link in the batch.
     async fn acquire_batch(
         &self,
         claim: &ReferrerClaim,
@@ -386,6 +390,14 @@ async fn closure<S: PackageStorage + ?Sized>(
     store: &S,
     roots: Vec<String>,
 ) -> Result<std::collections::BTreeSet<String>, DurableError> {
+    closure_with(store, roots, &std::collections::BTreeMap::new()).await
+}
+
+async fn closure_with<S: PackageStorage + ?Sized>(
+    store: &S,
+    roots: Vec<String>,
+    prepared: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<std::collections::BTreeSet<String>, DurableError> {
     let mut found = std::collections::BTreeSet::new();
     let mut active = std::collections::BTreeSet::new();
     let mut pending: Vec<(String, bool)> = roots
@@ -413,11 +425,18 @@ async fn closure<S: PackageStorage + ?Sized>(
             found.insert(reference);
             continue;
         }
-        let bytes = store
-            .load_package_record(&reference)
-            .await?
-            .ok_or_else(|| PackageRefusal::Missing(reference.clone()))?;
-        let children = content_dependencies(&reference, &bytes)?;
+        let stored;
+        let bytes = match prepared.get(&reference) {
+            Some(bytes) => bytes,
+            None => {
+                stored = store
+                    .load_package_record(&reference)
+                    .await?
+                    .ok_or_else(|| PackageRefusal::Missing(reference.clone()))?;
+                &stored
+            }
+        };
+        let children = content_dependencies(&reference, bytes)?;
         pending.push((reference, true));
         pending.extend(children.into_iter().map(|child| (child, false)));
     }
@@ -432,8 +451,10 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
         holds: &[PackageHold<'_>],
     ) -> Result<(), DurableError> {
         let mut records = Vec::with_capacity(holds.len());
+        let mut prepared = std::collections::BTreeMap::new();
+        let mut roots = Vec::new();
         for hold in holds {
-            let (reference, bytes, document, roots) = match hold {
+            let (reference, bytes, document, dependencies) = match hold {
                 PackageHold::Document { id, body } => {
                     if *id
                         != lash_kernel_value::names::DocumentId::from_bytes(
@@ -457,21 +478,52 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
                     let roots = content_dependencies(&reference, &bytes)?;
                     (reference, Some(bytes), false, roots)
                 }
+                PackageHold::RetainLink(id) => {
+                    let reference = link_reference(id);
+                    (reference.clone(), None, false, vec![reference])
+                }
                 PackageHold::Publication(record) => {
                     let key = record.key();
-                    if self.publication(&key).await?.as_ref() != Some(*record) {
-                        return Err(PackageRefusal::Identity(publication_reference(&key)).into());
-                    }
                     let reference = publication_reference(&key);
+                    let bytes = self
+                        .load_package_record(&reference)
+                        .await?
+                        .ok_or_else(|| PackageRefusal::Identity(reference.clone()))?;
+                    let stored: PublicationRecord = decode(&bytes)?;
+                    if stored.key() != key
+                        || stored.path.as_slice().first() != Some(&stored.context.root)
+                        || stored != **record
+                    {
+                        return Err(PackageRefusal::Identity(reference).into());
+                    }
+                    prepared.insert(reference.clone(), bytes);
                     (reference.clone(), None, false, vec![reference])
                 }
             };
+            roots.extend(dependencies);
+            if let Some(bytes) = &bytes
+                && let Some(previous) = prepared.insert(reference.clone(), bytes.clone())
+                && previous != *bytes
+            {
+                return Err(PackageRefusal::Immutable(reference).into());
+            }
             records.push(PackageRecordHold {
                 reference,
                 bytes,
                 document,
-                dependencies: closure(self, roots).await?.into_iter().collect(),
+                dependencies: Vec::new(),
             });
+        }
+        // Every member has the same claim and commits in one transaction.
+        // Discover the union once, using this batch's immutable records for
+        // freshly prepared Links that storage cannot read yet.
+        let dependencies = closure_with(self, roots, &prepared).await?;
+        let supplied = records
+            .iter()
+            .map(|record| record.reference.clone())
+            .collect();
+        if let Some(first) = records.first_mut() {
+            first.dependencies = dependencies.difference(&supplied).cloned().collect();
         }
         self.hold_package_batch(claim, &records).await
     }
@@ -753,9 +805,26 @@ mod work_laws {
         async fn hold_package_batch(
             &self,
             _: &ReferrerClaim,
-            _: &[PackageRecordHold],
+            batch: &[PackageRecordHold],
         ) -> Result<(), DurableError> {
-            unreachable!("content hydration law does not admit new records")
+            let mut next = self.records.lock().expect("work-law fixture").clone();
+            for record in batch {
+                if let Some(bytes) = &record.bytes
+                    && let Some(previous) = next.insert(record.reference.clone(), bytes.clone())
+                    && previous != *bytes
+                {
+                    return Err(PackageRefusal::Immutable(record.reference.clone()).into());
+                }
+            }
+            for record in batch {
+                for reference in std::iter::once(&record.reference).chain(&record.dependencies) {
+                    if !next.contains_key(reference) {
+                        return Err(PackageRefusal::Missing(reference.clone()).into());
+                    }
+                }
+            }
+            *self.records.lock().expect("work-law fixture") = next;
+            Ok(())
         }
 
         async fn unheld_publication_records(
@@ -821,6 +890,71 @@ mod work_laws {
         ) -> Result<(), DurableError> {
             unreachable!("retention does not end a referrer")
         }
+    }
+
+    /// FIG-7447: one atomic batch can retain a new Link and the new Link it
+    /// imports, in either order. No dependency needs an earlier publication.
+    #[tokio::test]
+    async fn a_link_batch_resolves_dependencies_supplied_by_the_same_batch() {
+        use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+        let store = CountedStorage::default();
+        let document = lash_kernel_value::names::DocumentId::from_bytes([0x47; 32]);
+        store
+            .records
+            .lock()
+            .expect("fixture")
+            .insert(document.to_string(), vec![7]);
+        let child = lash_kernel_value::package::Link {
+            document,
+            fills: BTreeMap::new(),
+        };
+        let parent = lash_kernel_value::package::Link {
+            document,
+            fills: [(
+                lash_kernel_value::names::ImportSlot(0),
+                lash_kernel_value::package::Fill::Export {
+                    link: child.identity(),
+                    export: lash_kernel_value::names::ExportName {
+                        name: "value".into(),
+                        member: None,
+                    },
+                },
+            )]
+            .into(),
+        };
+        let child = LinkRecord {
+            id: child.identity(),
+            link: child,
+        };
+        let parent = LinkRecord {
+            id: parent.identity(),
+            link: parent,
+        };
+        let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+            .expect("fixture");
+        store
+            .acquire_batch(
+                &claim,
+                &[
+                    PackageHold::Link {
+                        record: &parent,
+                        artifacts: &[],
+                    },
+                    PackageHold::Link {
+                        record: &child,
+                        artifacts: &[],
+                    },
+                ],
+            )
+            .await
+            .expect("new dependency and parent are acquired together");
+        let records = store.records.lock().expect("fixture");
+        assert!(records.contains_key(&link_reference(&parent.id)));
+        assert!(records.contains_key(&link_reference(&child.id)));
+        assert!(
+            store.reads.lock().expect("fixture").is_empty(),
+            "new records cannot be read before the batch commits"
+        );
     }
 
     /// FIG-7135: retaining code discovers dependencies from package records,

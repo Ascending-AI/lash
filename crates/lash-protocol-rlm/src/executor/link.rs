@@ -6,7 +6,7 @@ use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
 pub(super) async fn link_cell(
     state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
-    code: &str,
+    source: &str,
     services: &CellServices,
 
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -48,16 +48,31 @@ pub(super) async fn link_cell(
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
         ctx.cell_execution_registered(execution_id(snapshots.exec()));
-        let invoked = state
+        let documents = state
             .documents
             .as_ref()
-            .ok_or_else(|| host_failure("the cell has no document owner"))?
-            .invoked_operations(&lash_kernel_value::LinkedStart {
+            .ok_or_else(|| host_failure("the cell has no document owner"))?;
+        let code = processes::load(
+            documents,
+            &lash_kernel_value::LinkedStart {
                 link: envelope.link,
                 selector: lash_kernel_value::StartSelector::Main,
-            })
-            .await
-            .map_err(package_error)?;
+            },
+            &envelope.environment.authored,
+        )
+        .await
+        .map_err(host_failure)?;
+        let invoked = code
+            .content
+            .inspect_invocations(
+                envelope.link,
+                &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
+                documents.helpers().as_ref(),
+            )
+            .map_err(|error| package_error(lash_vm_runtime::map_link_refusal(error)))?
+            .operations
+            .into_keys()
+            .collect();
         return Ok(LinkedCell {
             invoked,
             document: envelope.document.clone(),
@@ -68,6 +83,8 @@ pub(super) async fn link_cell(
             graph: resumed.graph,
             open_sites: resumed.open_sites,
             resumed: true,
+            code,
+            frame_links: BTreeSet::new(),
         });
     }
 
@@ -131,8 +148,9 @@ pub(super) async fn link_cell(
             other => host_failure(other.to_string()),
         })?;
     // Saved declarations belong to the frame, with each cell's current Link.
+    let mut code = lash_vm_runtime::CellCode::default();
     let authored = state
-        .relink(&documents, &boundary, &frame_claim)
+        .relink(&documents, &boundary, &frame_claim, &mut code)
         .await
         .map_err(|error| match error {
             session::RelinkError::Package(error) => package_error(error),
@@ -148,7 +166,7 @@ pub(super) async fn link_cell(
         .workers
         .request_for_run(Request::Lower {
             dialect: state.dialect().to_owned(),
-            source: code.to_owned(),
+            source: source.to_owned(),
             namespaces,
             bindings: names,
             functions: state
@@ -170,7 +188,7 @@ pub(super) async fn link_cell(
             let observation = CellObservation::of_refusal(refusal);
             trace::emit_step_trace(ctx, Err(&observation.code()));
             return Err(Refused::Cell(Box::new(observation.failure_with_repairs(
-                code,
+                source,
                 None,
                 services.prompts.as_ref(),
                 Some(&packages.snapshot),
@@ -200,7 +218,7 @@ pub(super) async fn link_cell(
         .execution_claim()
         .map_err(|error| host_failure(error.to_string()))?;
     let mut fulfilled = documents
-        .fulfil_identified(
+        .fulfil_cell(
             &document,
             &lash_execution_contracts::process::linking::FulfilRequest {
                 document: document.id(),
@@ -211,16 +229,17 @@ pub(super) async fn link_cell(
                 context,
                 purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
             },
+            &mut code,
         )
         .await
         .map_err(package_error)?;
     for link in &authored {
         let saved = documents
-            .inspect_link(
+            .inspect_cell(
+                &code.content,
                 *link,
                 &lash_execution_contracts::process::linking::ReachSelector::AllExports,
             )
-            .await
             .map_err(package_error)?;
         fulfilled.inspection.operations.extend(saved.operations);
         fulfilled.inspection.machine.extend(&saved.machine);
@@ -243,13 +262,14 @@ pub(super) async fn link_cell(
             .values()
             .map(|function| function.callable),
     );
+    let frame_links = authored.clone();
     environment.authored.extend(authored);
     environment.authored.insert(fulfilled.inspection.link);
     documents
-        .hold_cell_execution(
+        .hold_cell_code(
             &claim,
-            &document,
-            &fulfilled.content,
+            &code,
+            &[fulfilled.inspection.link].into(),
             &environment.publications,
         )
         .await
@@ -297,7 +317,7 @@ pub(super) async fn link_cell(
                     .map(|origin| (function.environment, origin))
             })
             .collect(),
-        code: CellEnvelope::code_digest(code),
+        code: CellEnvelope::code_digest(source),
         dialect: state.dialect().to_owned(),
         link: fulfilled.inspection.link,
         inspection: fulfilled.inspection,
@@ -309,20 +329,25 @@ pub(super) async fn link_cell(
     };
     let document = envelope.document.clone();
     if let Some(map) = &envelope.source_map {
-        map.validate_identified(&document, code).map_err(|error| {
-            host_failure(format!(
-                "the worker's source map is not the cell's: {error}"
-            ))
-        })?;
+        map.validate_identified(&document, source)
+            .map_err(|error| {
+                host_failure(format!(
+                    "the worker's source map is not the cell's: {error}"
+                ))
+            })?;
     }
 
-    let invoked = documents
-        .invoked_operations(&lash_kernel_value::LinkedStart {
-            link: envelope.link,
-            selector: lash_kernel_value::StartSelector::Main,
-        })
-        .await
-        .map_err(package_error)?;
+    let invoked = code
+        .content
+        .inspect_invocations(
+            envelope.link,
+            &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
+            documents.helpers().as_ref(),
+        )
+        .map_err(|error| package_error(lash_vm_runtime::map_link_refusal(error)))?
+        .operations
+        .into_keys()
+        .collect();
     Ok(LinkedCell {
         invoked,
         envelope,
@@ -331,6 +356,8 @@ pub(super) async fn link_cell(
         graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),
         resumed: false,
+        code,
+        frame_links,
     })
 }
 

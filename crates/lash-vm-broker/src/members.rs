@@ -75,6 +75,14 @@ pub(crate) struct Members {
     waits: PinnedWaits,
 }
 
+/// The cell's own record changes, prepared before an owner commit and
+/// adopted only after its acknowledgement.
+pub(crate) struct MemberUpdate {
+    appended: RunFacts,
+    before: Option<RunSeq>,
+    waits: PinnedWaits,
+}
+
 /// Why driving an owner's members failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Undriven {
@@ -128,6 +136,90 @@ impl Members {
         self.rows = None;
     }
 
+    pub(crate) async fn prepare_update(
+        &mut self,
+        tx: &lash_durable::ActorTx,
+    ) -> Result<Option<MemberUpdate>, Undriven> {
+        use lash_durable::domain::{DomainWrite, RunFactWrite, WaitLifecycle, WaitRow, WaitWrite};
+        let mut appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
+        appended.rows.retain(|row| row.owner == self.owner);
+        let before = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::RunFact(RunFactWrite::Prune { owner, before })
+                    if *owner == self.owner =>
+                {
+                    Some(*before)
+                }
+                _ => None,
+            })
+            .max();
+        if appended.is_empty() && before.is_none() {
+            return Ok(None);
+        }
+        self.load_rows().await?;
+        let waits =
+            PinnedWaits::default().with(tx.domain().iter().filter_map(|write| match write {
+                DomainWrite::Wait(WaitWrite::Pin { id, scope, purpose }) => Some(WaitRow {
+                    id: *id,
+                    owner: tx.actor().clone(),
+                    scope: scope.clone(),
+                    purpose: purpose.clone(),
+                    lifecycle: WaitLifecycle::Pending,
+                    created_epoch: self.cx.epoch(),
+                }),
+                _ => None,
+            }));
+        Ok(Some(MemberUpdate {
+            appended,
+            before,
+            waits,
+        }))
+    }
+
+    pub(crate) fn apply_update(&mut self, update: Option<MemberUpdate>) -> Result<(), Undriven> {
+        use lash_core_store::checkpoint_graph::{BlobEncoding, GraphRefusal, check_envelope};
+        let Some(update) = update else {
+            return Ok(());
+        };
+        let mut facts = self
+            .rows
+            .take()
+            .map(|rows| rows.facts().clone())
+            .unwrap_or_default();
+        facts.extend(update.appended);
+        if let Some(before) = update.before {
+            facts.rows.retain(|row| row.run >= before);
+        }
+        // Retain exactly the remaining record graphs. A long cell must not
+        // keep the payloads of consumed outcomes after its pruning commits.
+        let mut reached = std::collections::BTreeSet::new();
+        let mut pending: Vec<_> = facts.rows.iter().map(|row| row.record).collect();
+        while let Some(id) = pending.pop() {
+            if !reached.insert(id) {
+                continue;
+            }
+            let node = facts
+                .nodes
+                .get(&id)
+                .ok_or(GraphRefusal::MissingNode(id))
+                .map_err(|error| RoundError::from(lash_durable::DurableError::from(error)))?;
+            if node.encoding == BlobEncoding::Graph {
+                let envelope = check_envelope(&node.bytes, id, &facts.read_limits)
+                    .map_err(GraphRefusal::from)
+                    .map_err(|error| RoundError::from(lash_durable::DurableError::from(error)))?;
+                if !lash_core_store::checkpoint_graph::node::is_semantic(envelope.kind) {
+                    pending.extend(envelope.children.iter());
+                }
+            }
+        }
+        facts.nodes.retain(|id, _| reached.contains(id));
+        self.rows = Some(RunRecords::new(facts));
+        self.waits.extend(update.waits);
+        Ok(())
+    }
+
     fn lifecycle(&mut self) -> Result<&mut Lifecycle, Undriven> {
         let lifecycle = match self.lifecycle.take() {
             Some(lifecycle) => lifecycle,
@@ -151,7 +243,6 @@ impl Members {
     /// committed: each one's body may run once.
     pub(crate) fn admitted(&mut self, members: &[AdmittedExecution]) -> Result<(), Undriven> {
         self.lifecycle()?.admitted(members);
-        self.rows = None;
         Ok(())
     }
 

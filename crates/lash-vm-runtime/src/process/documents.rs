@@ -86,6 +86,34 @@ pub enum StoredSourceMap {
     Read { map: SourceMap, source: String },
     Unretained(Unretained),
 }
+/// The immutable code read or prepared for one cell activation. Independent
+/// cold reads create another bundle; this value carries no retention grant.
+#[derive(Clone, Default)]
+pub struct CellCode {
+    pub content: LinkedContent,
+    pub documents: BTreeMap<DocumentId, IdentifiedDocument>,
+    prepared: BTreeSet<LinkId>,
+}
+
+impl CellCode {
+    /// Code loaded from existing records, with no newly prepared Link.
+    pub fn loaded(
+        content: LinkedContent,
+        documents: BTreeMap<DocumentId, IdentifiedDocument>,
+    ) -> Self {
+        Self {
+            content,
+            documents,
+            prepared: BTreeSet::new(),
+        }
+    }
+
+    /// This saved declaration still names its previously stored Link.
+    pub fn retain_link(&mut self, link: LinkId) {
+        self.prepared.remove(&link);
+    }
+}
+
 #[derive(Clone)]
 pub struct KernelDocuments {
     store: Arc<dyn ModuleArtifactStore>,
@@ -388,51 +416,6 @@ impl KernelDocuments {
         Ok(())
     }
 
-    /// Retain a freshly fulfilled cell and its accepted publication facts in
-    /// one transaction. Preparation owns no storage lifetime; the execution
-    /// claim arms its existing cleanup obligation at this atomic acquisition.
-    pub async fn hold_cell_execution(
-        &self,
-        claim: &ReferrerClaim,
-        document: &IdentifiedDocument,
-        link: &Link,
-        publications: &[PublicationRecord],
-    ) -> Result<(), EnginePortError> {
-        use lash_durable::packages::PackageHold;
-        let record = LinkRecord {
-            id: link.identity(),
-            link: link.clone(),
-        };
-        let artifacts = [document_artifact(&document.id())];
-        let mut holds = vec![
-            PackageHold::Document {
-                id: document.id(),
-                body: document.body(),
-            },
-            PackageHold::Link {
-                record: &record,
-                artifacts: &artifacts,
-            },
-        ];
-        holds.extend(publications.iter().map(PackageHold::Publication));
-        #[cfg(feature = "testing")]
-        {
-            lash_vm_client::packages::helper_document_work::published(document);
-            lash_vm_client::packages::helper_document_work::staged(document);
-        }
-        self.packages
-            .acquire_batch(claim, &holds)
-            .await
-            .map_err(store_error)?;
-        self.prepared
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .linked
-            .links
-            .remove(&record.id);
-        Ok(())
-    }
-
     pub async fn get_shared(
         &self,
         id: &DocumentId,
@@ -644,21 +627,138 @@ impl KernelDocuments {
         content
             .documents
             .insert(document.id(), Arc::clone(document.shared()));
+        self.extend_namespace(&mut content, snapshot).await?;
+        Ok(content)
+    }
+
+    async fn extend_namespace(
+        &self,
+        content: &mut LinkedContent,
+        snapshot: &NamespaceSnapshot,
+    ) -> Result<BTreeMap<DocumentId, IdentifiedDocument>, EnginePortError> {
+        let mut identified = BTreeMap::new();
         for ad in &snapshot.advertisements {
             if let PackageAdvertisement::Enumerated(package) = &ad.advertisement {
                 for member in package.members.values() {
                     if let MemberKind::Export { link, .. } = member.kind
                         && !content.links.contains_key(&link)
                     {
-                        let loaded = self.load_linked(link).await?;
+                        let (loaded, documents) = self.load_linked_identified(link).await?;
                         content.documents.extend(loaded.documents);
                         content.links.extend(loaded.links);
+                        identified.extend(documents);
                     }
                 }
             }
         }
-        Ok(content)
+        Ok(identified)
     }
+
+    /// Fulfil one fresh cell's document in the code bundle that its other
+    /// saved declarations share. Dependencies are loaded once for this bundle;
+    /// it is never retained across independent cell activations.
+    pub async fn fulfil_cell(
+        &self,
+        document: &IdentifiedDocument,
+        request: &FulfilRequest,
+        code: &mut CellCode,
+    ) -> Result<Fulfilled, EnginePortError> {
+        self.check_identified_document(document)?;
+        if document.id() != request.document {
+            return Err(EnginePortError::Corrupt {
+                artifact: document_artifact(&request.document),
+                message: "fulfilment document differs from its request".into(),
+            });
+        }
+        code.documents.insert(document.id(), document.clone());
+        code.content
+            .documents
+            .insert(document.id(), Arc::clone(document.shared()));
+        code.documents.extend(
+            self.extend_namespace(&mut code.content, &request.snapshot)
+                .await?,
+        );
+        let fulfilled = self.fulfil_content(request, &mut code.content)?;
+        code.prepared.insert(fulfilled.inspection.link);
+        Ok(fulfilled)
+    }
+
+    /// Acquire the selected roots of a validated cell bundle atomically.
+    /// This supplies fresh code directly and retains existing dependencies
+    /// under the same store fence; preparation alone owns no lifetime.
+    pub async fn hold_cell_code(
+        &self,
+        claim: &ReferrerClaim,
+        code: &CellCode,
+        roots: &BTreeSet<LinkId>,
+        publications: &[PublicationRecord],
+    ) -> Result<(), EnginePortError> {
+        use lash_durable::packages::PackageHold;
+        let content = &code.content;
+        for root in roots {
+            content.retain_reach(*root).map_err(map_link_refusal)?;
+        }
+        let links: Vec<_> = roots
+            .iter()
+            .filter(|id| code.prepared.contains(id))
+            .map(|id| {
+                let link = &content.links[id];
+                (
+                    LinkRecord {
+                        id: *id,
+                        link: link.clone(),
+                    },
+                    [document_artifact(&link.document)],
+                )
+            })
+            .collect();
+        let document_ids: BTreeSet<_> = links
+            .iter()
+            .map(|(record, _)| record.link.document)
+            .collect();
+        let documents: Vec<_> = document_ids
+            .iter()
+            .map(|id| {
+                code.documents
+                    .get(id)
+                    .ok_or_else(|| EnginePortError::Missing {
+                        artifact: document_artifact(id),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        for document in &documents {
+            self.check_identified_document(document)?;
+            #[cfg(feature = "testing")]
+            {
+                lash_vm_client::packages::helper_document_work::published(document);
+                lash_vm_client::packages::helper_document_work::staged(document);
+            }
+        }
+        let mut holds: Vec<_> = documents
+            .iter()
+            .map(|document| PackageHold::Document {
+                id: document.id(),
+                body: document.body(),
+            })
+            .collect();
+        holds.extend(
+            links
+                .iter()
+                .map(|(record, artifacts)| PackageHold::Link { record, artifacts }),
+        );
+        holds.extend(
+            roots
+                .iter()
+                .filter(|id| !code.prepared.contains(id))
+                .map(PackageHold::RetainLink),
+        );
+        holds.extend(publications.iter().map(PackageHold::Publication));
+        self.packages
+            .acquire_batch(claim, &holds)
+            .await
+            .map_err(store_error)
+    }
+
     /// A runtime-authored successor Link is structurally checked against cold immutable dependencies.
     pub(crate) async fn prepare_link(&self, link: Link) -> Result<(), EnginePortError> {
         let mut content = LinkedContent::default();
@@ -718,53 +818,38 @@ impl KernelDocuments {
         self.fulfil_checked(&document, request).await
     }
 
-    /// Fulfil freshly lowered, identified content without publishing a
-    /// document before the rest of its execution admission is ready.
-    pub async fn fulfil_identified(
-        &self,
-        document: &IdentifiedDocument,
-        request: &FulfilRequest,
-    ) -> Result<Fulfilled, EnginePortError> {
-        self.check_identified_document(document)?;
-        if document.id() != request.document {
-            return Err(EnginePortError::Corrupt {
-                artifact: document_artifact(&request.document),
-                message: "fulfilment document differs from its request".into(),
-            });
-        }
-        self.fulfil_checked(document, request).await
-    }
-
     async fn fulfil_checked(
         &self,
         document: &IdentifiedDocument,
         request: &FulfilRequest,
     ) -> Result<Fulfilled, EnginePortError> {
         let mut content = self.content_for(document, &request.snapshot).await?;
+        let fulfilled = self.fulfil_content(request, &mut content)?;
+        self.prepared
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .linked
+            .links
+            .insert(fulfilled.inspection.link, fulfilled.content.clone());
+        Ok(fulfilled)
+    }
+
+    fn fulfil_content(
+        &self,
+        request: &FulfilRequest,
+        content: &mut LinkedContent,
+    ) -> Result<Fulfilled, EnginePortError> {
         let (own, attachment) = match &request.purpose {
             LinkPurpose::Cell => (None, None),
             LinkPurpose::Workflow { attachment } => (None, Some(attachment)),
             LinkPurpose::PackageCode { path } => (Some(path), None),
         };
         let link = namespace(&request.snapshot)
-            .fulfil(
-                &content,
-                request.document,
-                &request.context,
-                own,
-                attachment,
-            )
+            .fulfil(content, request.document, &request.context, own, attachment)
             .map_err(map_link_refusal)?;
         let id = link.identity();
         content.links.insert(id, link.clone());
-        let inspection = inspection(self, &content, id, &request.selector)?;
-        {
-            let mut prepared = self
-                .prepared
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            prepared.linked.links.insert(id, link.clone());
-        }
+        let inspection = inspection(self, content, id, &request.selector)?;
         Ok(Fulfilled {
             content: link,
             inspection,
@@ -926,6 +1011,16 @@ impl KernelDocuments {
         })
         .await
     }
+    /// Inspect the validated code held by one cell's preparation.
+    pub fn inspect_cell(
+        &self,
+        content: &LinkedContent,
+        link: LinkId,
+        selector: &ReachSelector,
+    ) -> Result<LinkInspection, EnginePortError> {
+        inspection(self, content, link, selector)
+    }
+
     pub async fn inspect_link(
         &self,
         link: LinkId,
@@ -933,23 +1028,6 @@ impl KernelDocuments {
     ) -> Result<LinkInspection, EnginePortError> {
         inspection(self, &self.load_linked(link).await?, link, selector)
     }
-    /// Certifiable calls of the exact stored start. Merely held callable code
-    /// remains available for recorded calls but cannot plan unrecorded reads.
-    pub async fn invoked_operations(
-        &self,
-        start: &LinkedStart,
-    ) -> Result<BTreeSet<lash_kernel_value::OperationUse>, EnginePortError> {
-        let content = self.load_linked(start.link).await?;
-        let reach = content
-            .inspect_invocations(
-                start.link,
-                &ReachSelection::Start(start.selector.clone()),
-                self.helpers.as_ref(),
-            )
-            .map_err(map_link_refusal)?;
-        Ok(reach.operations.into_keys().collect())
-    }
-
     /// Retain existing content by its stored pointer. Only a fresh, unpublished preparation may write a Link.
     pub async fn hold(
         &self,
