@@ -594,7 +594,7 @@ impl Lowerer<'_> {
                 let place = self.operands(&[&subscript.value, &subscript.slice])?;
                 let container = self.pin(place[0].clone());
                 let index = self.pin(place[1].clone());
-                let current = self.getitem(kind, container.clone(), index.clone())?;
+                let current = self.getitem(kind, &[container.clone(), index.clone()])?;
                 let (aside, operand) = self.aside(|this| this.expr(&assign.value))?;
                 let current = if aside.is_empty() {
                     current
@@ -625,9 +625,9 @@ impl Lowerer<'_> {
             || (left.ty == Ty::Str && right.ty == Ty::Str);
         if assign.op == ast::Operator::Add && !typed {
             let numeric = match assign.target.as_ref() {
-                PyExpr::Name(name) => self
-                    .variable(name.id.as_str())
-                    .is_some_and(|found| self.local_fact(&found, name.id.as_str()).is_number()),
+                PyExpr::Name(name) => self.variable(name.id.as_str()).is_some_and(|found| {
+                    self.local_fact(found.scope, name.id.as_str()).is_number()
+                }),
                 _ => false,
             };
             if numeric {

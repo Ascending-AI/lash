@@ -12,28 +12,21 @@ impl Lowerer<'_> {
             PyExpr::Dict(_) | PyExpr::DictComp(_) => Ty::Dict,
             PyExpr::List(_) | PyExpr::ListComp(_) => Ty::List,
             PyExpr::Tuple(_) => Ty::Tuple,
-            PyExpr::Name(name) => self
-                .variable(name.id.as_str())
-                .map_or(Ty::Unknown, |found| {
-                    self.local_type(&found, name.id.as_str())
-                }),
+            PyExpr::Name(name) => {
+                self.local_type(self.variable_scope(name.id.as_str()), name.id.as_str())
+            }
             _ => Ty::Unknown,
         }
     }
 
-    pub(super) fn getitem(
-        &mut self,
-        kind: Ty,
-        target: Operand,
-        index: Operand,
-    ) -> Lowering<Operand> {
-        let helper = match (kind, &index.expr) {
+    pub(super) fn getitem(&mut self, kind: Ty, operands: &[Operand]) -> Lowering<Operand> {
+        let helper = match (kind, &operands[1].expr) {
             (Ty::Dict, Expr::Literal(Literal::Text(_))) => "py.dict_getitem",
             (Ty::List, Expr::Literal(Literal::Int(_))) => "py.list_getitem",
             (Ty::Tuple, Expr::Literal(Literal::Int(_))) => "py.tuple_getitem",
             _ => "py.getitem",
         };
-        self.invoke(helper, &[target, index], Ty::Unknown)
+        self.invoke(helper, operands, Ty::Unknown)
     }
 
     pub(super) fn setitem(

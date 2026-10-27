@@ -224,7 +224,7 @@ impl Lowerer<'_> {
                 index => {
                     let kind = self.subscript_kind(&subscript.value);
                     let operands = self.operands(&[&subscript.value, index])?;
-                    self.getitem(kind, operands[0].clone(), operands[1].clone())
+                    self.getitem(kind, &operands)
                 }
             },
             PyExpr::Slice(slice) => Err(diagnostics::with_repair(

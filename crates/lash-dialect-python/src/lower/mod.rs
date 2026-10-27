@@ -531,6 +531,24 @@ impl Lowerer<'_> {
                 scope: None,
             });
         }
+        let index = self.variable_scope(id)?;
+        Some(Found {
+            name: self
+                .module_environment
+                .as_ref()
+                .filter(|(scope, _)| *scope == index)
+                .and_then(|(_, bindings)| bindings.get(id))
+                .or_else(|| self.scopes[index].names.get(id))
+                .cloned()
+                .unwrap_or_else(|| Name::new(id)),
+            scope: Some(index),
+        })
+    }
+
+    fn variable_scope(&self, id: &str) -> Option<usize> {
+        if self.renames.iter().any(|(name, _)| name == id) {
+            return None;
+        }
         let mut index = self.scopes.len() - 1;
         while index > 0 {
             let bindings = &self.scopes[index].bindings;
@@ -560,17 +578,7 @@ impl Lowerer<'_> {
             .bindings
             .locals
             .contains(id)
-            .then(|| Found {
-                name: self
-                    .module_environment
-                    .as_ref()
-                    .filter(|(scope, _)| *scope == index)
-                    .and_then(|(_, bindings)| bindings.get(id))
-                    .or_else(|| self.scopes[index].names.get(id))
-                    .cloned()
-                    .unwrap_or_else(|| Name::new(id)),
-                scope: Some(index),
-            })
+            .then_some(index)
     }
 
     fn is_bound(&self, scope: usize, id: &str) -> bool {
@@ -621,19 +629,19 @@ impl Lowerer<'_> {
         if annotated != Ty::Unknown {
             return annotated;
         }
-        self.local_type(found, id)
+        self.local_type(found.scope, id)
     }
 
     /// Facts proved from definitions, independently of annotations.
-    fn local_type(&self, found: &Found, id: &str) -> Ty {
-        match self.local_fact(found, id) {
+    fn local_type(&self, scope: Option<usize>, id: &str) -> Ty {
+        match self.local_fact(scope, id) {
             Ty::Number => Ty::Unknown,
             ty => ty,
         }
     }
 
-    fn local_fact(&self, found: &Found, id: &str) -> Ty {
-        if let Some(scope) = found.scope
+    fn local_fact(&self, scope: Option<usize>, id: &str) -> Ty {
+        if let Some(scope) = scope
             && scope == self.scopes.len() - 1
             && self.is_bound(scope, id)
         {

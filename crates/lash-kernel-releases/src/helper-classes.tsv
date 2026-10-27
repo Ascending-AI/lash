@@ -28,6 +28,7 @@ py.delitem	total
 py.delslice	total
 py.dict	operation
 py.dict.extend	total
+py.dict_getitem	total
 py.dir	total
 py.divmod	total
 py.ellipsis	total
@@ -88,6 +89,8 @@ py.json_quote	total
 py.kw.extend	total
 py.kw.put	total
 py.length	total
+py.list_getitem	total
+py.list_setitem	total
 py.map	operation
 py.match_mapping	total
 py.match_rest	total
@@ -230,6 +233,7 @@ py.namespace	total
 py.neg	total
 py.next	operation
 py.no_attribute	total
+py.number.iadd	total
 py.number_text	total
 py.number_underscores	total
 py.oct	total
@@ -303,6 +307,7 @@ py.to_tuple	operation
 py.token	total
 py.truediv	total
 py.truth	total
+py.tuple_getitem	total
 py.type	total
 py.type.construct	operation
 py.type.name	total

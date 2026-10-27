@@ -461,7 +461,7 @@ fn bedrock_projection_strips_array_constraints_from_wire_schema_only() {
     );
 }
 
-/// ADMITTED-SCHEMA-IDENTITY: cloning an immutable contract shares its admitted body.
+/// ADMITTED-SCHEMA-IDENTITY: host contracts share their exact immutable preparation.
 #[test]
 fn admitted_schema_clones_share_the_canonical_body() {
     let body = json!({"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]});
@@ -478,4 +478,16 @@ fn admitted_schema_clones_share_the_canonical_body() {
     assert_eq!(schema.as_value(), &body);
     assert!(schema.validate(&json!({})).is_err());
     assert!(schema.validate(&json!({"count": 1})).is_ok());
+    let contract = SchemaContract::admit(body.clone()).unwrap();
+    let decoded: SchemaContract =
+        serde_json::from_value(serde_json::to_value(&contract).unwrap()).unwrap();
+    assert!(std::ptr::eq(
+        contract.canonical.as_value(),
+        decoded.canonical.as_value()
+    ));
+    let mut annotated = body;
+    annotated["title"] = json!("another contract");
+    let other = SchemaContract::admit(annotated.clone()).unwrap();
+    assert_eq!(other.canonical.as_value(), &annotated);
+    assert_ne!(contract, other);
 }

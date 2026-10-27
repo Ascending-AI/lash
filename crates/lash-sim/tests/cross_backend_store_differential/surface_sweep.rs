@@ -933,6 +933,25 @@ impl BackendRunner {
                     .publish(&claim, &publication)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let prepared = packages
+                    .prepare_publications(std::slice::from_ref(&publication))
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let mut unpublished = publication.clone();
+                unpublished.code_links.clear();
+                assert!(matches!(
+                    packages.prepare_publications(&[unpublished]).await,
+                    Err(lash_durable::DurableError::Package(
+                        lash_durable::packages::PackageRefusal::Identity(_)
+                    ))
+                ));
+                let next_referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+                let next_claim = ReferrerClaim::unguarded(next_referrer.clone())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .acquire_prepared_publications(&next_claim, &prepared)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
                 assert!(
                     packages
                         .unheld_publications(&claim, &[key.clone()].into())
@@ -980,7 +999,35 @@ impl BackendRunner {
                 );
                 packages
                     .end_package_referrer(&ResolvedArtifactCleanup {
-                        referrer,
+                        referrer: referrer.clone(),
+                        carries: Vec::new(),
+                    })
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                // A fresh owner retains the complete prepared closure after
+                // the publisher ends. Preparation itself retains no owner.
+                assert_eq!(
+                    packages
+                        .link(&link.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(link.clone())
+                );
+                let empty = packages
+                    .prepare_publications(&[])
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                for prepared in [&prepared, &empty] {
+                    assert!(matches!(
+                        packages.acquire_prepared_publications(&claim, prepared).await,
+                        Err(lash_durable::DurableError::Package(
+                            lash_durable::packages::PackageRefusal::ReferrerEnded(ended)
+                        )) if ended == referrer
+                    ));
+                }
+                packages
+                    .end_package_referrer(&ResolvedArtifactCleanup {
+                        referrer: next_referrer,
                         carries: Vec::new(),
                     })
                     .await
@@ -992,7 +1039,8 @@ impl BackendRunner {
                         .map_err(|error| StoreError::Backend(error.to_string()))?
                         .is_none()
                 );
-                "publication acquired and reclaimed with its closure".to_owned()
+                "prepared publication retained by a fresh owner and reclaimed; ended owner refused"
+                    .to_owned()
             }
             SurfaceMethod::ProcessAuthority => {
                 let record = self

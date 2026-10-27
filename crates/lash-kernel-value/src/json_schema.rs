@@ -134,7 +134,7 @@ pub(crate) mod admissions {
             {
                 return Ok(JsonSchema { admitted });
             }
-            let compiled = JsonSchema::admit_fresh(value)?;
+            let compiled = JsonSchema::admit(value)?;
             Ok(self.keep(compiled))
         }
 
@@ -169,11 +169,6 @@ pub(crate) mod admissions {
 
 impl JsonSchema {
     pub fn admit(value: Value) -> Result<Self, SchemaAdmissionError> {
-        static ADMISSIONS: OnceLock<admissions::Admissions> = OnceLock::new();
-        ADMISSIONS.get_or_init(Default::default).admit(value)
-    }
-
-    fn admit_fresh(value: Value) -> Result<Self, SchemaAdmissionError> {
         let kind = match &value {
             Value::Null => Some(InvalidSchemaKind::Null),
             Value::Number(_) => Some(InvalidSchemaKind::Number),
@@ -437,9 +432,10 @@ mod preparation_tests {
         let public = JsonSchema::admit(value.clone()).unwrap();
         let decoded: JsonSchema = serde_json::from_value(value.clone()).unwrap();
         assert!(
-            Arc::ptr_eq(&public.admitted, &decoded.admitted),
-            "FIG-7453: decoding an unchanged schema recompiled its validator and kernel projection"
+            !Arc::ptr_eq(&public.admitted, &decoded.admitted),
+            "schema admission outside a caller-owned cache must not share lookup state"
         );
+        assert_eq!(public, decoded);
         let public_weak = Arc::downgrade(&public.admitted);
         drop(public);
         drop(decoded);

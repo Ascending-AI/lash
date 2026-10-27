@@ -34,6 +34,7 @@ pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct SchemaContract {
+    #[serde(deserialize_with = "deserialize_admitted_schema")]
     pub canonical: JsonSchema,
     #[serde(default, skip_serializing_if = "SchemaProjectionPolicy::is_default")]
     pub projection: SchemaProjectionPolicy,
@@ -48,7 +49,7 @@ impl SchemaContract {
     }
 
     pub fn admit(canonical: Value) -> Result<Self, SchemaAdmissionError> {
-        JsonSchema::admit(canonical).map(Self::new)
+        admit_schema(canonical).map(Self::new)
     }
 
     pub fn with_override(mut self, dialect: SchemaDialect, schema: JsonSchema) -> Self {
@@ -169,7 +170,23 @@ impl ProjectionMode {
 )]
 pub struct SchemaProjectionOverride {
     pub dialect: SchemaDialect,
+    #[serde(deserialize_with = "deserialize_admitted_schema")]
     pub schema: JsonSchema,
+}
+
+// Host contracts share immutable preparation while a contract still owns it.
+// Kernel admission and guest-derived entry schemas never consult this cache.
+fn admit_schema(value: Value) -> Result<JsonSchema, SchemaAdmissionError> {
+    static ADMISSIONS: std::sync::OnceLock<lash_kernel_value::schema_admissions::Admissions> =
+        std::sync::OnceLock::new();
+    ADMISSIONS.get_or_init(Default::default).admit(value)
+}
+
+fn deserialize_admitted_schema<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<JsonSchema, D::Error> {
+    let value = <Value as serde::Deserialize>::deserialize(deserializer)?;
+    admit_schema(value).map_err(serde::de::Error::custom)
 }
 
 impl SchemaProjectionOverride {

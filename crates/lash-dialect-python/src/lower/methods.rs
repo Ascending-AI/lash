@@ -194,7 +194,7 @@ impl Lowerer<'_> {
         let name = method.name;
         let list_local = matches!(attribute.value.as_ref(), PyExpr::Name(local)
             if self.variable(local.id.as_str()).is_some_and(|found|
-                self.local_type(&found, local.id.as_str()) == Ty::List));
+                self.local_type(found.scope, local.id.as_str()) == Ty::List));
         if name == "append" && slots[0].ty == Ty::List && list_local {
             let value = slots.remove(1);
             let target = slots.remove(0).expr;
