@@ -559,8 +559,15 @@ fn code_call_root_leases_share_the_checkpoint_transactions() {
         "five code calls: {commits} raw SQLite write commits, {turn_commits} turn commits (exactly 19): {operations:?}"
     );
     assert_eq!(
-        operations.get("pages.lease"),
-        Some(&2),
+        operations
+            .iter()
+            .filter(|(operation, _)| {
+                operation.contains("::acquire_root_lease<")
+                    || operation.contains("::release_root_lease<")
+            })
+            .map(|(_, count)| count)
+            .sum::<u64>(),
+        2,
         "only the session reader acquires and releases a standalone root lease"
     );
     assert_eq!(
