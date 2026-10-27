@@ -336,6 +336,14 @@ Warm paired `instructions:u` against main 18d4942d66: branch1m TS 837.0 →
 291.0 M per body (QuickJS 374.5), sum1m TS 517.0 → 160.0, sum1m Python
 495.0 → 231.0, every other row within 1%, charges and digests equal.
 
+A repeated integer control prefix may be paired with a float tail. Each part
+uses the existing typed program and numeric kernels; their frame-slot sets
+must be disjoint, both entry guards must pass, and the two parts must together cover the
+whole iteration. The pair commits only complete iterations, restores both
+register files when either part misses, and concatenates their charge tape in
+source order. A failed entry guard preserves the ordinary homogeneous path;
+a partial homogeneous prefix cannot stand in for the whole mixed iteration.
+
 ### 2.5 The statement step (FIG-6964)
 
 An allocating plan admits, runs and commits its statements one by one

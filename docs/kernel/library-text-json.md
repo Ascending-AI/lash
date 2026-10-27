@@ -186,6 +186,25 @@ the baseline needs a new definition identity (`K-VER-002`).
   deep size alone counts a shared object once. The TypeScript console passes
   `(-5, 21, true, false)`; no language policy or callback lives in the writer.
 
+- **K-LJSON-009.** `json.encode(value, layout, style)` shares the strict writer
+  and takes the same four decimal layout fields as `json.render`, applied only
+  to floats. Integers retain every digit. Style is `(ascii, item_separator,
+  key_separator, exponent_digits, fractional, excluded_fields)`. ASCII mode
+  escapes every scalar outside U+0020..U+007E, using surrogate pairs as needed.
+  Exponents have at least `exponent_digits` digits, in 0..20; `fractional`
+  adds `.0` to integral fixed-notation floats. The three excluded field names
+  reject records with `not_data`; ordinary map keys are data. Unsupported
+  kinds, non-text keys, non-finite floats, cycles and excessive nesting raise
+  the strict writer's errors. Charge is one plus argument and result deep sizes;
+  the writer reserves its output and buffer before appending. The caller owns
+  fallbacks, callbacks and language error policy.
+
+- **K-LJSON-010.** `json.decode(text, numbers, policy, objects)` uses the
+  `json.parse` grammar, numeric conversion and depth bounds. `objects` selects
+  `record` or `map` for every object, preserving field order and exact integer
+  digits at every nesting level. Arrays stay lists. It constructs the requested
+  object kind directly, with no intermediate object tree or guest conversion.
+
 ## Neutral formatting
 
 - **K-LFMT-001.** `format.fixed(number, precision)` writes exactly precision

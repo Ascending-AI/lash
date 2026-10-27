@@ -139,7 +139,7 @@ const FUNCTIONS: &[Function] = &[
         name: "loads",
         params: &["s"],
         required: 1,
-        body: "let value = json.parse(s, \"number\", \"by_spelling\") return invoke py.reply(value)",
+        body: "return json.decode(s, \"number\", \"by_spelling\", \"map\")",
     },
     Function {
         module: "json",
@@ -163,7 +163,7 @@ const FUNCTIONS: &[Function] = &[
 
 pub(crate) fn source() -> String {
     let mut source = String::from(
-        "use py.bind\nuse kind\nuse same\nuse bool.not\nuse eq\nuse lt\nuse le\nuse add\nuse mul\nuse div\nuse abs\nuse rem_floor\nuse floor\nuse ceil\nuse trunc\nuse num.to_int\nuse num.to_float\nuse is_finite\nuse is_nan\nuse is_infinite\nuse is_integer\nuse py.fail\nuse py.reply\nuse py.json_dump\nuse json.parse\n",
+        "use py.bind\nuse kind\nuse same\nuse bool.not\nuse eq\nuse lt\nuse le\nuse add\nuse mul\nuse div\nuse abs\nuse rem_floor\nuse floor\nuse ceil\nuse trunc\nuse num.to_int\nuse num.to_float\nuse is_finite\nuse is_nan\nuse is_infinite\nuse is_integer\nuse py.fail\nuse py.json_dump\nuse json.decode\n",
     );
     for function in FUNCTIONS {
         if function.module == "math" {

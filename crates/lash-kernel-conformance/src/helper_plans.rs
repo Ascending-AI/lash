@@ -1010,6 +1010,18 @@ fn memory_off_15_helper_plans_keep_the_corpus_without_census_work() {
 fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
     let python = [
         (
+            "float recurrence and configured JSON encoding",
+            r#"import json
+async def run():
+    value = 0.5
+    for i in range(3):
+        value += value * 0.25
+    text = json.dumps({'z': [value, -0.0, 1e-5], 'a': 'é😀'}, separators=(',', ':'))
+    await host.observe(text)
+await run()
+"#,
+        ),
+        (
             "proven subscript bounds and aliased mutation",
             r#"def build():
     out = []

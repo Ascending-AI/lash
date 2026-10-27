@@ -56,6 +56,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_ISALNUM_PLAN,
     &PY_DELSLICE_PLAN,
     &PY_LIST_GETITEM_PLAN,
+    &PY_MODULE_JSON_PLAN,
     &PY_INDEX_PLAN,
     &PY_EXC_MATCHES_PLAN,
     &PY_SUB_PLAN,
@@ -92,6 +93,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_LOWERCASE_PLAN,
     &PY_METHOD_ADD_PLAN,
     &PY_EXTREME_PLAN,
+    &PY_JSON_QUOTE_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
     &PY_FLOAT_TEXT_PLAN,
     &PY_INVERT_PLAN,
@@ -124,6 +126,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_ARGS_EXTEND_PLAN,
     &PY_MATH_ISFINITE_PLAN,
     &PY_TO_LIST_PLAN,
+    &PY_NUMBER_IADD_PLAN,
     &PY_MATH_GAMMA_PLAN,
     &PY_METHOD_ISTITLE_PLAN,
     &PY_METHOD_BIT_COUNT_PLAN,
@@ -189,6 +192,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_IS_NUMBER_PLAN,
     &PY_NAME_PLAN,
     &PY_METHOD_COPY_PLAN,
+    &PY_JSON_DUMPS_PLAN,
     &PY_MATH_HYPOT_PLAN,
     &PY_TEXT_ALNUM_PLAN,
     &PY_DIR_PLAN,
@@ -196,7 +200,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_PARTITION_PLAN,
     &PY_FORMAT_PLAN,
     &PY_CONTAINS_PLAN,
-    &PY_JSON_DUMPS_PLAN,
     &PY_METHOD_SWAPCASE_PLAN,
     &PY_NEXT_PLAN,
     &PY_NEG_PLAN,
@@ -224,7 +227,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_FROMKEYS_PLAN,
     &PY_LIST_SETITEM_PLAN,
     &PY_POW_PLAN,
-    &PY_JSON_QUOTE_PLAN,
     &PY_STR_PLAN,
     &PY_TRUTH_PLAN,
     &PY_MATH_NEXTAFTER_PLAN,
@@ -243,6 +245,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_REMOVE_PLAN,
     &PY_BIN_PLAN,
     &PY_TO_DICT_PLAN,
+    &PY_JSON_DUMP_PLAN,
     &PY_NAME_CHECK_PLAN,
     &PY_TEXT_TITLE_PLAN,
     &PY_EXC_NAME_PLAN,
@@ -265,7 +268,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_ENUMERATE_PLAN,
     &PY_MATH_LOG1P_PLAN,
     &PY_BYTES_PLAN,
-    &PY_JSON_DUMP_PLAN,
     &PY_METHOD_KEYS_PLAN,
     &PY_METHOD_ZFILL_PLAN,
     &PY_METHOD_CENTER_PLAN,
@@ -292,7 +294,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TYPE_NAME_PLAN,
     &PY_UNPACK_PLAN,
     &PY_ZIP_PLAN,
-    &PY_MODULE_JSON_PLAN,
     &PY_TEXT_WHITESPACE_PLAN,
     &PY_MATH_ASINH_PLAN,
     &PY_CALL_PLAN,
@@ -319,6 +320,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_LOWER_PLAN,
     &PY_FOR_IN_ITEM_PLAN,
     &PY_RANGE_PLAN,
+    &PY_JSON_LOADS_PLAN,
     &PY_METHOD_CASEFOLD_PLAN,
     &PY_METHOD_REVERSE_PLAN,
     &PY_MATH_REMAINDER_PLAN,
@@ -329,7 +331,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SORTED_PLAN,
     &PY_SLICE_BOUNDS_PLAN,
     &PY_MATH_ACOS_PLAN,
-    &PY_JSON_LOADS_PLAN,
     &PY_MATH_LOG_PLAN,
     &PY_MATH_TRUNC_PLAN,
     &PY_MATCH_REST_PLAN,
@@ -6972,6 +6973,89 @@ fn py_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
                 Some(v0)
             })() { return Some(value); }
             heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_NUMBER_IADD_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.iadd",
+    function: p::function("4a4c23988d62018dd496bc945ac14644d07d07b1e3928dde04e5d6299e872ef6"),
+    callees: &[
+        p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
+        p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
+        p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"),
+        p::function("3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("float"),
+        p::PlanLiteral::Text("+="),
+        p::PlanLiteral::Int("0"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+        p::PlanLocal { name: "r", path: &[0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_iadd,
+    template: Some(p::HelperTemplate { entry: Some(py_number_iadd_template), metered: None, depth: 1, callees: &[p::function("c00cf80881ccac569a1263a3b0a9c6589c0a0f75e1902fe5453b77b86427afef"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: Some(0), texts: None } }),
+};
+
+/// `py.number.iadd`.
+fn py_number_iadd(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(2, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.literal(1, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    ctx.local(0, 1)?;
+    ctx.local(1, 2)?;
+    ctx.call(3, 0, 3)?;
+    ctx.begin()?;
+    ctx.literal(3, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_number_iadd_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
+                Some(v0)
+            })() { return Some(value); }
             None
         },
         _ => None,
@@ -57558,7 +57642,7 @@ fn py_gather_options(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_JSON_QUOTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json_quote",
-    function: p::function("9dcb92ec71917ea8678a29941b60c5bbcb82ee3c36e6daefda715e6454b4f06c"),
+    function: p::function("30d9f4091855409f9f7b764bacdaf9177fc3289745958cceb6e605bae9a91502"),
     callees: &[
         p::function("b93d1d34db3b20cd8781bd45de3d855c00df25a5cb1ff5aee6751eca59e91d51"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -57577,7 +57661,7 @@ const PY_JSON_QUOTE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("0723f439a90b73307ee94404072dce60f6b1d14719c064e2833e347f0e6e66e8"),
     ],
     literals: &[
-        p::PlanLiteral::Int("128"),
+        p::PlanLiteral::Int("127"),
         p::PlanLiteral::Int("65536"),
         p::PlanLiteral::Int("55296"),
         p::PlanLiteral::Int("1024"),
@@ -57749,7 +57833,7 @@ fn py_json_quote_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json_dump",
-    function: p::function("bd0e74bf6822c0b982a7a30d4f72619f6bb15737a0ea639b85b7f4a249f1eca3"),
+    function: p::function("ae0420faa9497eaaf7aba6d5f41470ea4b1865fbc68049131e18af3e1ca81e64"),
     callees: &[
         p::function("048c05b964b7f84bae81c9d46f9d95384ad6e2ac679258e9e01911a98c68b544"),
         p::function("f47eff31eb6ab5a5bb2a2495830ee82bc313363956107391b89c43d8135e7fb7"),
@@ -57757,6 +57841,7 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"),
         p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
         p::function("194d1707fa1658959f2cae55491447fd63022f24e49ebed9b50abe04f87b918d"),
+        p::function("f8aa04b055bedf45670ce1e95e6a0728e0bc87da7989c311a4dfdf19cf0f90c1"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -57782,10 +57867,20 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text(", "),
         p::PlanLiteral::Text(": "),
         p::PlanLiteral::Text(","),
+        p::PlanLiteral::Int("-3"),
+        p::PlanLiteral::Int("16"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Text("__py_ellipsis"),
+        p::PlanLiteral::Text("__py_module"),
+        p::PlanLiteral::Text("json_key"),
+        p::PlanLiteral::Text("json_number"),
+        p::PlanLiteral::Text("json_depth"),
+        p::PlanLiteral::Text("not_data"),
+        p::PlanLiteral::Text("cycle"),
     ],
-    fields: &[],
+    fields: &["kind", ],
     records: &[],
-    registers: 3,
+    registers: 10,
     slots: &[
         p::PlanLocal { name: "value", path: &[] },
         p::PlanLocal { name: "options", path: &[] },
@@ -57802,19 +57897,21 @@ const PY_JSON_DUMP_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "pretty", path: &[15] },
         p::PlanLocal { name: "item_separator", path: &[17] },
         p::PlanLocal { name: "key_separator", path: &[18] },
-        p::PlanLocal { name: "active", path: &[21] },
-        p::PlanLocal { name: "go", path: &[22] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "unsupported", path: &[21, 1, 0, 1, 1, 1, 0, 1] },
+        p::PlanLocal { name: "active", path: &[22] },
+        p::PlanLocal { name: "go", path: &[23] },
     ],
     closures: &[
-        &[23, 0],
+        &[24, 0],
     ],
     sites: &[
         p::PlanSite {
-            path: &[24, 0],
+            path: &[25, 0],
             call: p::SiteCall::Apply,
             dst: 0,
             roles: &[],
-            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            bound: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18],
             loops: &[],
         },
     ],
@@ -58064,22 +58161,162 @@ fn py_json_dump(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     }
     if r == 0 {
         ctx.begin()?;
+        ctx.local(12, 0)?;
+        ctx.call(1, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(10, 0)?;
+            ctx.call(1, 0, 1)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.literal(9, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                } else {
+                    ctx.begin()?;
+                    ctx.local(9, 0)?;
+                    ctx.literal(12, 1)?;
+                    ctx.call(0, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.literal(9, 0)?;
+                        ctx.assign(9, 0)?;
+                    }
+                }
+                ctx.begin()?;
+                ctx.local(9, 0)?;
+                ctx.literal(9, 1)?;
+                ctx.call(0, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    {
+                        let cursor_scope = ctx.scope();
+                        let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                            ctx.begin()?;
+                            ctx.local(0, 0)?;
+                            ctx.literal(23, 1)?;
+                            ctx.literal(24, 2)?;
+                            ctx.literal(11, 3)?;
+                            ctx.literal(11, 4)?;
+                            ctx.tuple(1, 4)?;
+                            ctx.local(3, 2)?;
+                            ctx.local(13, 3)?;
+                            ctx.local(14, 4)?;
+                            ctx.literal(2, 5)?;
+                            ctx.literal(11, 6)?;
+                            ctx.literal(25, 7)?;
+                            ctx.literal(26, 8)?;
+                            ctx.literal(27, 9)?;
+                            ctx.tuple(7, 3)?;
+                            ctx.tuple(2, 6)?;
+                            ctx.call(6, 0, 3)?;
+                            return Ok(Departure::Return(ctx.take(0)));
+                        })(ctx);
+                        outcome = match outcome {
+                            Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 15)?)),
+                            Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 15)?)),
+                            other => other,
+                        };
+                        ctx.unwind(cursor_scope);
+                        if matches!(outcome, Err(p::PlanExit::Raise(_))) {
+                            if let Err(p::PlanExit::Raise(value)) = outcome {
+                                ctx.retain(value, 16)?;
+                            }
+                            outcome = {
+                                let cursor_scope = ctx.scope();
+                                let mut outcome = (|ctx: &mut dyn p::PlanContext| -> Result<Departure, p::PlanExit> {
+                                    ctx.begin()?;
+                                    ctx.local(16, 0)?;
+                                    ctx.field(0, 0)?;
+                                    ctx.literal(28, 1)?;
+                                    ctx.call(0, 0, 2)?;
+                                    if ctx.test(0, p::Test::If)? {
+                                    } else {
+                                        ctx.begin()?;
+                                        ctx.local(16, 0)?;
+                                        ctx.field(0, 0)?;
+                                        ctx.literal(29, 1)?;
+                                        ctx.call(0, 0, 2)?;
+                                        if ctx.test(0, p::Test::If)? {
+                                        } else {
+                                            ctx.begin()?;
+                                            ctx.local(16, 0)?;
+                                            ctx.field(0, 0)?;
+                                            ctx.literal(30, 1)?;
+                                            ctx.call(0, 0, 2)?;
+                                            if ctx.test(0, p::Test::If)? {
+                                            } else {
+                                                ctx.begin()?;
+                                                ctx.local(16, 0)?;
+                                                ctx.field(0, 0)?;
+                                                ctx.literal(31, 1)?;
+                                                ctx.call(0, 0, 2)?;
+                                                if ctx.test(0, p::Test::If)? {
+                                                } else {
+                                                    ctx.begin()?;
+                                                    ctx.local(16, 0)?;
+                                                    ctx.field(0, 0)?;
+                                                    ctx.literal(32, 1)?;
+                                                    ctx.call(0, 0, 2)?;
+                                                    if ctx.test(0, p::Test::If)? {
+                                                    } else {
+                                                        ctx.begin()?;
+                                                        ctx.local(16, 0)?;
+                                                        return Err(p::PlanExit::Raise(ctx.take(0)));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ctx.unbind(16);
+                                    Ok(Departure::Next)
+                                })(ctx);
+                                outcome = match outcome {
+                                    Ok(Departure::Return(value)) => Ok(Departure::Return(ctx.retain(value, 15)?)),
+                                    Err(p::PlanExit::Raise(value)) => Err(p::PlanExit::Raise(ctx.retain(value, 15)?)),
+                                    other => other,
+                                };
+                                ctx.unbind(16);
+                                ctx.unwind(cursor_scope);
+                                outcome
+                            };
+                        }
+                        ctx.unbind(15);
+                        match outcome {
+                            Ok(Departure::Next) => {},
+                            Err(exit) => return Err(exit),
+                            Ok(Departure::Return(value)) => return Ok(value),
+                            Ok(Departure::Break) => {
+                                unreachable!("a loop departure needs a loop");
+                            },
+                            Ok(Departure::Continue) => {
+                                unreachable!("a loop departure needs a loop");
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
         ctx.list(0, 0)?;
-        ctx.bind(15, 0)?;
+        ctx.bind(17, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.literal(9, 0)?;
-        ctx.bind(16, 0)?;
+        ctx.bind(18, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
         ctx.closure(0, 0)?;
-        ctx.assign(16, 0)?;
+        ctx.assign(18, 0)?;
     }
     if r == 0 || matches!(r, 1) {
         if r == 0 { ctx.begin()?; }
-        if r == 0 { ctx.local(16, 0)?; }
+        if r == 0 { ctx.local(18, 0)?; }
         if r == 0 {
             ctx.local(0, 1)?;
         }
@@ -75476,63 +75713,38 @@ fn py_math_gcd(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const PY_JSON_LOADS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json.loads",
-    function: p::function("f551b1d49dbd7e308a088a965473d08f39d045f1b5687b6bbd53d680aca85d2d"),
+    function: p::function("ea7760afe0ebaed4b5c5edc9af7c39fa4a4bd2dc4d3d131576849f9f238aa47c"),
     callees: &[
-        p::function("9ac1f5b356808d583d7e67c5cd14e1c40461dbc8172f3e91180cecfafbe064ef"),
-        p::function("3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75"),
+        p::function("0346cd76509c764e5101b20c71700d5388b3eae34fb46610dbb41f78c1d49af6"),
     ],
     literals: &[
         p::PlanLiteral::Text("number"),
         p::PlanLiteral::Text("by_spelling"),
+        p::PlanLiteral::Text("map"),
     ],
     fields: &[],
     records: &[],
-    registers: 3,
+    registers: 4,
     slots: &[
         p::PlanLocal { name: "s", path: &[] },
-        p::PlanLocal { name: "value", path: &[0] },
     ],
     closures: &[
     ],
-    sites: &[
-        p::PlanSite {
-            path: &[1, 0],
-            call: p::SiteCall::Invoke(1),
-            dst: 0,
-            roles: &[],
-            bound: &[0, 1],
-            loops: &[],
-        },
-    ],
+    sites: &[],
     run: py_json_loads,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_json_loads_heap, depth: 2, writes: false, element: None, record_write: None, callees: &[p::function("9ac1f5b356808d583d7e67c5cd14e1c40461dbc8172f3e91180cecfafbe064ef"), p::function("3d3e30b7e98aedc3adb83230d71a374a4836333fbaf7b0f9511560f14bbd4e75"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_json_loads_heap, depth: 1, writes: false, element: None, record_write: None, callees: &[p::function("0346cd76509c764e5101b20c71700d5388b3eae34fb46610dbb41f78c1d49af6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.json.loads`.
-fn py_json_loads(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
-    let mut r = entry;
-    if r == 0 { ctx.adopt(0, 0)?; }
-    if r == 0 {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.literal(0, 1)?;
-        ctx.literal(1, 2)?;
-        ctx.call(0, 0, 3)?;
-        ctx.bind(1, 0)?;
-    }
-    if r == 0 || matches!(r, 1) {
-        if r == 0 { ctx.begin()?; }
-        if r == 0 {
-            ctx.local(1, 0)?;
-        }
-        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 1, 0, 1)?; }
-        if r == 0 { return Ok(ctx.take(0)); }
-    }
-    if r != 0 {
-        return Err(ctx.lost(r));
-    }
+fn py_json_loads(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
     ctx.begin()?;
-    Ok(Value::Null)
+    ctx.local(0, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.literal(1, 2)?;
+    ctx.literal(2, 3)?;
+    ctx.call(0, 0, 4)?;
+    Ok(ctx.take(0))
 }
 fn py_json_loads_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
@@ -75540,10 +75752,8 @@ fn py_json_loads_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             let charge_mark = heap.mark();
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("by_spelling") }?)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                Some(v1)
+                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("by_spelling") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)])?; let _ = v0;
+                Some(v0)
             })() { return Some(value); }
             heap.rewind(charge_mark);
             None
@@ -75554,9 +75764,9 @@ fn py_json_loads_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_JSON_DUMPS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.json.dumps",
-    function: p::function("873aaf03ce5d9670e1ebd3a4da1d461b094c07f2f413f4af25f32cf4f02c912d"),
+    function: p::function("8205ae46be5fad4c90535b41ce0d00f41eaa74cc89344323e70cd5c0d03aeb2b"),
     callees: &[
-        p::function("bd0e74bf6822c0b982a7a30d4f72619f6bb15737a0ea639b85b7f4a249f1eca3"),
+        p::function("ae0420faa9497eaaf7aba6d5f41470ea4b1865fbc68049131e18af3e1ca81e64"),
     ],
     literals: &[],
     fields: &[],
@@ -76191,7 +76401,7 @@ fn py_module_math(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
 
 const PY_MODULE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.json",
-    function: p::function("d3c83cca03e57b7d834344cbf80383535d100cc50f720c8b12768fc9dc4c3132"),
+    function: p::function("18223ccc6b0b03631fd8f15a3a3efa9473cba9776ad8f0324e10c563145f615a"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("json"),

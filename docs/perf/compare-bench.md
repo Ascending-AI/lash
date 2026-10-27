@@ -106,9 +106,10 @@ sort unit is one 1000-element descending-input setup/sort/validation batch.
 The agent units are a 128-record JSON tool result, a filter/map/reduce over
 10,000 records, and 100 rendered template lines. These different units must
 never be averaged together or compared across dialects. Python uses
-comprehensions and sum for filter/map/reduce; its JSON workload uses a source
-codec restricted to this fixture's unescaped ASCII flat records, because the
-dialect has no stdlib imports. CPython executes that identical codec.
+comprehensions and sum for filter/map/reduce; its JSON workload uses
+`json.loads` and `json.dumps` with compact separators,
+matching TypeScript's `JSON.parse` and `JSON.stringify` over the same records.
+CPython executes that identical Python source.
 
 There is one warmup pair by default and five measured pairs (`--warmups`,
 `--runs`). The receipt retains every duration and checksum. Separate fits of
@@ -156,22 +157,48 @@ cannot qualify as instruction baselines. Host/compiler/allocator/build/CPU,
 source, geometry, observation and metering identities must match. External
 reference rows remain descriptive. This is an opt-in developer gate.
 
-## Current comparison
+## Python numeric and JSON comparison
 
-The full optimized run on 2026-10-27 completed all **17/17 Python workloads**
+The FIG-7465 full optimized comparison on 2026-10-27 uses the supported
+Python JSON module against TS `JSON.parse`/`JSON.stringify`. Both bodies
+parse the same 128-record ASCII object, increment every value once, and sum
+compact serialized lengths. CPython and Node independently agree at 1, 10
+and 100 trips, returning 7701, 77010 and 770100. The array row retains
+FIG-7466's corrected ten per-read accumulator updates.
+
+| Workload | Python instructions/op | TS instructions/op | Python/TS |
+|---|---:|---:|---:|
+| float_arith | 619.372 | 608.829 | 1.017317x |
+| json_transform | 5,742,611.556 | 5,862,875.444 | 0.979487x |
+| array_read | 1,867.492 | 1,054.807 | 1.770458x |
+
+All 34 Lash rows passed the 1% no-regression bound against the full main
+baseline at `2d809c6b68`, with one warmup, three low/high pairs and factor 10.
+All 204 measured Lash PMU windows qualified at >=99% running time. Exact
+charge and memory metering were enabled; shared-host wall time is unclaimed.
+The source-matched charge census has 383 executable programs, 5 lower, 378
+equal and no higher charges. Full evidence is in
+`/workspace/notes/lash/tasks/lanes/r33/pyjson.evidence/report.md`.
+
+## Monty baseline before FIG-7465
+
+The archived full optimized run on 2026-10-27 completed all **17/17 Python workloads**
 on Monty 1.4.0. All **170/170 measured Monty outputs exactly equal CPython's**,
 including the floating-point row. There were **85 engine/workload rows and
 850 measured samples**, with no unsupported features, missing rows or checksum
-errors. Lash uses fewer instructions than Monty for integer arithmetic, and
-more for the other 16 rows. The largest ratios are JSON transformation at
-14.67× and keyed object sorting at 11.68×. No interpreter changes were made.
+errors. Lash used fewer instructions than Monty for integer arithmetic, and
+more for the other 16 rows. Keyed object sorting was 11.68×. The obsolete
+handwritten JSON row is omitted below; its before numbers are retained in
+`/workspace/notes/lash/tasks/lanes/r33/pyjson.evidence/monty-before-doc.md`.
+No interpreter changes were made in that baseline run.
 
 This is one full optimized compare invocation at implementation commit
 `565d2761a7c8f5b0e9adc52beac2a58641070a93`, based on main `46b88ac7dbccd3278db4fed77b06112fd62caa97`.
 Main at run start was `7064395d3a437e377b0c5c541af97463d570e40b`; its intervening prompt/read-race
 changes did not change the benchmark or interpreter sources. Every engine
 received the checked-in workload, including the restricted JSON codec then on
-main. The stdlib JSON workload from the concurrent lane was not yet on main.
+main. This baseline predates the supported JSON module workload and the numeric
+optimizations measured above.
 
 Five measured pairs, one fixed low-count warmup, factor 20, CPU 0, observation
 off, exact charge and memory metering on. The 340 scoped Lash windows and 510
@@ -183,7 +210,6 @@ work units, especially sorting, keep their own denominators.
 
 | Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Likely cause from source |
 |---|---:|---:|---:|---:|---|
-| json_transform | 102940835.89 | 7015212.26 | 14.67× | 2.14× | The restricted codec repeatedly splits/replaces text, calls guest functions and accesses dictionaries. |
 | object_sort | 90770.03 | 7769.08 | 11.68× | 8.87× | Key extraction calls a Python lambda and reads each record before the native key sort; the secant is nonlinear. |
 | map_set_string | 45581.25 | 5408.45 | 8.43× | 8.01× | Each batch builds 1,000 text keys twice, stores dictionary entries and checks membership. |
 | records | 174035856.11 | 20827344.47 | 8.36× | 8.51× | Two materialized comprehensions, dictionary reads and helper-based summation traverse 10,000 records. |

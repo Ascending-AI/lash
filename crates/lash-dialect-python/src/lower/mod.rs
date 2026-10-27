@@ -132,7 +132,7 @@ struct Scope {
     /// Locals whose every definition is integer-producing. Boundness is
     /// checked separately at each read; these facts are never serialized.
     integer_locals: BTreeSet<String>,
-    sequence_locals: BTreeMap<String, Ty>,
+    value_locals: BTreeMap<String, Ty>,
     /// Names that hold a value at this point, one frame per kernel block
     /// open in this scope. A read of a name in none of them is checked.
     bound: Vec<BTreeSet<String>>,
@@ -317,7 +317,7 @@ pub(crate) fn lower_with_calls(
         excluded.extend(bindings.locals.iter().cloned());
     }
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
-    let sequence_locals = scope::sequence_locals(&module.body, &bindings, &excluded, true);
+    let value_locals = scope::value_locals(&module.body, &bindings, &excluded, true);
     let mut imported = BTreeMap::new();
     for statement in &module.body {
         match statement {
@@ -376,7 +376,7 @@ pub(crate) fn lower_with_calls(
             kind: ScopeKind::Module,
             bindings,
             integer_locals,
-            sequence_locals,
+            value_locals,
             bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
             loops: 0,
@@ -626,6 +626,13 @@ impl Lowerer<'_> {
 
     /// Facts proved from definitions, independently of annotations.
     fn local_type(&self, found: &Found, id: &str) -> Ty {
+        match self.local_fact(found, id) {
+            Ty::Number => Ty::Unknown,
+            ty => ty,
+        }
+    }
+
+    fn local_fact(&self, found: &Found, id: &str) -> Ty {
         if let Some(scope) = found.scope
             && scope == self.scopes.len() - 1
             && self.is_bound(scope, id)
@@ -633,7 +640,7 @@ impl Lowerer<'_> {
             if self.scopes[scope].integer_locals.contains(id) {
                 return Ty::Int;
             }
-            if let Some(ty) = self.scopes[scope].sequence_locals.get(id) {
+            if let Some(ty) = self.scopes[scope].value_locals.get(id) {
                 return *ty;
             }
         }

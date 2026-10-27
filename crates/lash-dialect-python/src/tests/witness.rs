@@ -93,4 +93,6 @@ witness!(
     raise_cause,
     range_register_boundaries,
     proven_subscripts,
+    numeric_register_boundaries,
+    json_boundaries,
 );

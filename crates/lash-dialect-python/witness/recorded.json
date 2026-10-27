@@ -339,6 +339,44 @@
    "end": "ok"
   },
   {
+   "name": "json_boundaries",
+   "source": "import json\n\nvalue = json.loads('{\"z\": [\"\\\\u00e9\", \"\\\\ud83d\\\\ude00\", -0.0], \"a\": 123456789012345678901234567890}')\nprint(list(value), value['z'], value['a'])\nprint(json.dumps(value, separators=(',', ':')))\nprint(json.dumps(value, ensure_ascii=False, separators=(',', ':')))\nprint(json.dumps({'z': 1, 'a': 2}, sort_keys=True))\nsource = '[' * 40 + '1' + ']' * 40\nvalue = json.loads(source)\nfor i in range(40):\n    value = value[0]\nprint(value)\nprint(await host.echo(json.dumps({'b': [True, None, 1.0, -0.0], 'a': 'é'})))\n\nprint(json.dumps({'text': '\\x7f\\n\"\\\\', 'numbers': [1.0, 1e-5, 1e16, -0.0]}, sort_keys=True))\nprint(json.dumps({'é': 1.0}, separators=(' / ', ' = ')))\nprint(json.dumps({1: 'one', None: 'null', False: 'false'}))\nprint(json.dumps([float('inf'), float('-inf'), float('nan')]))\ntry:\n    print(json.dumps(float('inf'), allow_nan=False))\nexcept ValueError:\n    print('nonfinite')\nprint(json.dumps([1, 2], indent=2))\ndef convert(value):\n    return 'converted'\nprint(json.dumps({1, 2}, default=convert))\ncycle = []\ncycle.append(cycle)\ntry:\n    print(json.dumps(cycle))\nexcept ValueError:\n    print('circular')\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "host.echo:{\"b\": [true, null, 1.0, -0.0], \"a\": \"\\u00e9\"}"
+     ],
+     "logged": [
+      "['z', 'a'] ['é', '😀', -0.0] 123456789012345678901234567890",
+      "{\"z\":[\"\\u00e9\",\"\\ud83d\\ude00\",-0.0],\"a\":123456789012345678901234567890}",
+      "{\"z\":[\"é\",\"😀\",-0.0],\"a\":123456789012345678901234567890}",
+      "{\"a\": 2, \"z\": 1}",
+      "1"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:{\"b\": [true, null, 1.0, -0.0], \"a\": \"\\u00e9\"}"
+     ],
+     "asked": [],
+     "logged": [
+      "{\"b\": [true, null, 1.0, -0.0], \"a\": \"\\u00e9\"}",
+      "{\"numbers\": [1.0, 1e-05, 1e+16, -0.0], \"text\": \"\\u007f\\n\\\"\\\\\"}",
+      "{\"\\u00e9\" = 1.0}",
+      "{\"1\": \"one\", \"null\": \"null\", \"false\": \"false\"}",
+      "[Infinity, -Infinity, NaN]",
+      "nonfinite",
+      "[\n  1,\n  2\n]",
+      "\"converted\"",
+      "circular"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "list_pop",
    "source": "xs = [10, 20]\ntry:\n    xs.pop(1.0)\nexcept TypeError as error:\n    print(\"TypeError\", error)\nprint(xs)\ntry:\n    xs.pop(0, 99)\nexcept TypeError as error:\n    print(\"TypeError\", error)\nprint(xs)\nprint(xs.pop(-2), xs)\n",
    "deliveries": [],
@@ -452,6 +490,54 @@
       "ZeroDivisionError 0.0 cannot be raised to a negative power",
       "OverflowError (34, 'Numerical result out of range')",
       "12345678901234567890124 3.0 -42 1180591620717411303424 7"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "numeric_register_boundaries",
+   "source": "async def compute():\n    a = -0.0\n    b = 0.5\n    for i in range(3):\n        a += b * b\n        b += 1\n    print(a, b)\n    negative = -0.0\n    print(negative * 1.0, negative + -0.0, -negative)\n    infinite = 1e309\n    other = -1e309\n    print(infinite * 2.0, other + 1.0, infinite - infinite)\n    mixed = 0.5\n    mixed *= 2\n    print(mixed + 9007199254740993)\n    try:\n        print(a / 0.0)\n    except ZeroDivisionError:\n        print('zero division')\n    print(await host.echo(str(a)))\n    return a + b\nprint(await compute())\n\nvalue = 0.5\nfor i in range(2):\n    if i == 1:\n        value = 'a'\n    value += value\nprint(value)\n\ndef outer():\n    x = 0.5\n    def change():\n        nonlocal x\n        x = 'a'\n    change()\n    x += 'b'\n    print(x)\nouter()\n\ndef maybe(flag):\n    if flag:\n        x = 0.5\n    try:\n        x += 1.0\n        print(x)\n    except UnboundLocalError:\n        print('unbound')\nmaybe(False)\nmaybe(True)\n\nasync def accumulate():\n    values = [1, 2, 3]\n    alias = values\n    total = 0\n    for i in range(3):\n        total += values[i]\n        if i == 0:\n            alias[1] = 0.5\n        if i == 1:\n            alias[2] = await host.echo(4)\n    print(total)\n    alias[0] = 'bad'\n    try:\n        total += values[0]\n    except TypeError as error:\n        print(type(error).__name__, str(error))\n    return total\nprint(await accumulate())\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "host.echo:8.75"
+     ],
+     "logged": [
+      "8.75 3.5",
+      "-0.0 -0.0 0.0",
+      "inf -inf nan",
+      "9007199254740992.0",
+      "zero division"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:8.75"
+     ],
+     "asked": [
+      "host.echo:4"
+     ],
+     "logged": [
+      "8.75",
+      "12.25",
+      "aa",
+      "ab",
+      "unbound",
+      "1.5"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:4"
+     ],
+     "asked": [],
+     "logged": [
+      "5.5",
+      "TypeError unsupported operand type(s) for +=: 'float' and 'str'",
+      "5.5"
      ]
     }
    ],

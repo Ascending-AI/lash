@@ -20,6 +20,7 @@ pub(crate) enum Ty {
     Bool,
     Int,
     Float,
+    Number,
     Str,
     List,
     Tuple,
@@ -48,7 +49,7 @@ impl From<lash_ext_py_helpers::methods::ResultKind> for Ty {
 
 impl Ty {
     pub(crate) fn is_number(self) -> bool {
-        matches!(self, Ty::Int | Ty::Float)
+        matches!(self, Ty::Int | Ty::Float | Ty::Number)
     }
 
     /// The type an annotation names, as far as the front end uses it.
@@ -591,24 +592,31 @@ pub(crate) fn integer_locals(
     typed_locals(body, bindings, excluded, Ty::Int, range_builtin, false)
 }
 
-/// Closed list, text, dict and tuple definitions use the same scope-wide fixpoint as
-/// integers. A shadowed `str` establishes no text fact, even if its name
+/// Closed numeric, list, text, dict and tuple definitions use the same
+/// scope-wide fixpoint as integers. A shadowed `str` establishes no text fact, even if its name
 /// happens to match the builtin. Parameters, captures and restored cells
 /// are excluded by the caller, and reads still require definite boundness.
-pub(crate) fn sequence_locals(
+pub(crate) fn value_locals(
     body: &[Stmt],
     bindings: &Bindings,
     excluded: &BTreeSet<String>,
     str_builtin: bool,
 ) -> BTreeMap<String, Ty> {
-    [Ty::List, Ty::Str, Ty::Dict, Ty::Tuple]
-        .into_iter()
-        .flat_map(|ty| {
-            typed_locals(body, bindings, excluded, ty, false, str_builtin)
-                .into_iter()
-                .map(move |name| (name, ty))
-        })
-        .collect()
+    [
+        Ty::Number,
+        Ty::Float,
+        Ty::List,
+        Ty::Str,
+        Ty::Dict,
+        Ty::Tuple,
+    ]
+    .into_iter()
+    .flat_map(|ty| {
+        typed_locals(body, bindings, excluded, ty, false, str_builtin)
+            .into_iter()
+            .map(move |name| (name, ty))
+    })
+    .collect()
 }
 
 fn typed_locals(
@@ -670,6 +678,35 @@ impl LocalProof<'_> {
         }
         match self.ty {
             Ty::Int => self.integer(expr),
+            Ty::Number => match expr {
+                Expr::NumberLiteral(number) => {
+                    matches!(number.value, ast::Number::Int(_) | ast::Number::Float(_))
+                }
+                Expr::BinOp(op) => match op.op {
+                    ast::Operator::Add | ast::Operator::Sub => {
+                        self.produces(&op.left) || self.produces(&op.right)
+                    }
+                    ast::Operator::Mult => self.produces(&op.left) && self.produces(&op.right),
+                    _ => false,
+                },
+                Expr::UnaryOp(op) => {
+                    matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                        && self.produces(&op.operand)
+                }
+                _ => false,
+            },
+            Ty::Float => match expr {
+                Expr::NumberLiteral(number) => matches!(number.value, ast::Number::Float(_)),
+                Expr::BinOp(op) if self.closed(op.op) => {
+                    (self.produces(&op.left) && self.float_operand(&op.right))
+                        || (self.float_operand(&op.left) && self.produces(&op.right))
+                }
+                Expr::UnaryOp(op) => {
+                    matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                        && self.produces(&op.operand)
+                }
+                _ => false,
+            },
             Ty::List => {
                 matches!(expr, Expr::List(_) | Expr::ListComp(_) | Expr::Generator(_))
                     || matches!(expr, Expr::BinOp(op) if op.op == ast::Operator::Add
@@ -692,9 +729,25 @@ impl LocalProof<'_> {
     fn closed(&self, op: ast::Operator) -> bool {
         match self.ty {
             Ty::Int => integer_closed(op),
+            Ty::Number => matches!(
+                op,
+                ast::Operator::Add | ast::Operator::Sub | ast::Operator::Mult
+            ),
+            Ty::Float => matches!(
+                op,
+                ast::Operator::Add | ast::Operator::Sub | ast::Operator::Mult
+            ),
             Ty::List | Ty::Str => op == ast::Operator::Add,
             _ => false,
         }
+    }
+
+    fn float_operand(&self, expr: &Expr) -> bool {
+        self.produces(expr)
+            || matches!(expr, Expr::NumberLiteral(number) if matches!(number.value, ast::Number::Int(_)))
+            || matches!(expr, Expr::UnaryOp(op)
+                if matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                    && self.float_operand(&op.operand))
     }
 
     fn integer(&self, expr: &Expr) -> bool {
@@ -764,7 +817,17 @@ impl<'a> Visitor<'a> for LocalProof<'_> {
                 &assign.target,
                 self.closed(assign.op)
                     && self.produces(&assign.target)
-                    && self.produces(&assign.value),
+                    && if self.ty == Ty::Number
+                        && matches!(assign.op, ast::Operator::Add | ast::Operator::Sub)
+                    {
+                        // A numeric left operand can only produce a number
+                        // or raise, even if the right operand is unknown.
+                        true
+                    } else if self.ty == Ty::Float {
+                        self.float_operand(&assign.value)
+                    } else {
+                        self.produces(&assign.value)
+                    },
             ),
             Stmt::For(for_loop) => {
                 let integer = self.ty == Ty::Int

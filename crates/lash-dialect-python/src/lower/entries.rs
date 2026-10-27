@@ -70,7 +70,7 @@ impl Lowerer<'_> {
             kind: ScopeKind::Module,
             bindings,
             integer_locals: BTreeSet::new(),
-            sequence_locals: BTreeMap::new(),
+            value_locals: BTreeMap::new(),
             bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
             loops: 0,

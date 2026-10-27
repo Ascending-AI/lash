@@ -73,7 +73,14 @@ known when lowering, subscripts with negative indices and slices, the
 check that a dict or set did not change size under a `for` or a
 comprehension, `str`, `repr`
 and f-string formatting are helpers. Direct builtin `range` loops retain validated
-integer bounds and step once before entering the counter loop. Closed local
+integer bounds and step once before entering the counter loop. Closed float
+recurrences use the same numeric register operations as integer recurrences.
+A source-proven numeric accumulator with an unknown right operand uses a
+guarded numeric addition helper. It preserves int/float promotion and errors
+without selecting list extension; it makes no claim about mutable elements.
+JSON encoding supplies Python escaping, separators and float layout to the
+shared kernel writer; custom encoders, ordering, non-text keys and non-finite
+values retain the Python policy walk. Closed local
 dictionary, list and tuple definitions select typed access helpers for proven
 keys and indices. Their generated plans use kernel heap access and retain the
 generic access fee, negative-index normalization and Python errors. Captures, restored bindings and incompatible definitions

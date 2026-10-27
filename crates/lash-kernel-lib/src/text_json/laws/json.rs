@@ -805,3 +805,53 @@ fn classification_integer_policy_refuses_nested_bigints_in_the_counted_walk() {
         }
     }
 }
+
+/// K-LJSON-009, K-CHG-003: configured encoding keeps exact integers,
+/// floating-point layout, Unicode escaping and output reservations.
+#[test]
+fn k_ljson_009_configured_encoding_preserves_lexical_policy_and_room() {
+    let mut lab = Lab::new();
+    let value = lab.value(list(vec![
+        t("é😀\u{7f}\n\"\\"),
+        f(-0.0),
+        f(1.0),
+        f(1e-5),
+        big("123456789012345678901234567890"),
+    ]));
+    let layout = lab.value(Datum::Tuple(vec![i(-3), i(16), b(true), b(true)]));
+    let style = |ascii| {
+        Datum::Tuple(vec![
+            b(ascii),
+            t(", "),
+            t(": "),
+            i(2),
+            b(true),
+            Datum::Tuple(vec![t("reserved"), t("other"), t("private")]),
+        ])
+    };
+    let ascii = lab.value(style(true));
+    let args = [value, layout, ascii];
+    let text =
+        r#"["\u00e9\ud83d\ude00\u007f\n\"\\", -0.0, 1.0, 1e-05, 123456789012345678901234567890]"#;
+    lab.room(None);
+    let result = lab.call("json.encode", &args).unwrap();
+    assert_eq!(lab.datum(&result), t(text));
+    let reserved = lab.reserved;
+    lab.room(Some(reserved - 1));
+    assert!(crate::testsupport::exhausted(
+        &lab.call("json.encode", &args)
+    ));
+    lab.room(None);
+    let unicode = lab.value(style(false));
+    let result = lab.call("json.encode", &[value, layout, unicode]).unwrap();
+    assert_eq!(
+        lab.datum(&result),
+        t(&text.replace("\\u00e9\\ud83d\\ude00\\u007f", "é😀\u{7f}"))
+    );
+    let record = lab.value(Datum::Record(vec![("reserved".into(), i(1))]));
+    assert!(lab.call("json.encode", &[record, layout, ascii]).is_err());
+    // The same text key in an ordinary map is data, not a reserved field.
+    let map = lab.value(Datum::Map(vec![(t("reserved"), i(1))]));
+    let result = lab.call("json.encode", &[map, layout, ascii]).unwrap();
+    assert_eq!(lab.datum(&result), t(r#"{"reserved": 1}"#));
+}

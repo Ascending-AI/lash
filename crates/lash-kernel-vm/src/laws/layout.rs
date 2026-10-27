@@ -655,7 +655,7 @@ fn observe_scalar_bounded(
     if require_typed {
         assert!(
             crate::kernel_internals::register_work(&tape).blocks > 0,
-            "the scalar layout must execute typed blocks"
+            "the scalar layout must execute typed blocks: {source}"
         );
     }
     let events = tape
@@ -683,11 +683,15 @@ fn observe_scalar_bounded(
 #[test]
 fn scalar_layouts_agree() {
     for (case, body) in [
+        "let i = 0 let target = 0 let a = 0.1 let s = 0.0 while flat.lt(i, 5) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } do perform 0((i, target, s, a)) as Any return (i, target, s, a)",
+        "let i = 9223372036854775806 let target = 0 let s = -0.0 while flat.lt(i, 9223372036854775807) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(s, -0.0)) } return (i, target, s)",
+        "let i = 0 let target = 0 let s = -0.0 while flat.lt(i, 3) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.div(0.0, 0.0)) } return (i, target, s)",
         "let i = 0.0 while flat.lt(i, 5.0) { set i = flat.add(i, 1.0) } return i",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 5.0) { if flat.lt(i, 2.0) { set s = flat.add(s, 2.0) } else { set s = flat.add(s, 3.0) } set i = flat.add(i, 1.0) } return (i, s)",
         "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 5.0) { set s = flat.add(flat.mul(s, -0.0), flat.div(0.0, 0.0)) set i = flat.add(i, 1.0) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.rem(s, 2.0) set i = flat.add(i, 1.0) } print s return s",
+        "let i = 0 let target = 0 let a = 1 let s = 0 while flat.lt(i, 3) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } return (i, target, s, a)",
         "let n = 0 let f = fn() { let old = flat.identity(n) set n = flat.add(old, 1) do perform 0(n) as Any return n } let a = apply f() let b = apply f() return (a, b, n)",
         "let n = 2 let f = fn() { set n = 30 return 4 } let answer = flat.mul(flat.identity(n), apply f()) do perform 0(answer) as Any return (answer, n)",
         "let n = 0 let f = fn() { set n = flat.add(n, 1) return false } try { let answer = flat.identity(apply f()) return answer } catch err { return n }",
@@ -699,7 +703,7 @@ fn scalar_layouts_agree() {
         for record in [false, true] {
             let reference = observe_scalar(&source, Layout(0), record, false, false);
             for layout in [Layout(0), Layout(1), Layout(2), Layout(0x5eed)] {
-                assert_eq!(observe_scalar(&source, layout, record, false, record && case < 3 && layout.0 % 2 == 0), reference, "{body}, {layout:?}, tape={record}");
+                assert_eq!(observe_scalar(&source, layout, record, false, record && case < 6 && layout.0 % 2 == 0), reference, "{body}, {layout:?}, tape={record}");
                 assert_eq!(observe_scalar(&source, layout, record, true, false), reference, "cold {body}, {layout:?}, tape={record}");
             }
         }

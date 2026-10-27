@@ -312,6 +312,7 @@ struct Out<'a, 'call> {
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
+    encoding: Option<Encoding>,
 }
 
 impl Out<'_, '_> {
@@ -321,7 +322,56 @@ impl Out<'_, '_> {
         Ok(())
     }
 
+    fn separator(&mut self, item: bool) -> Result<(), NativeError> {
+        let piece = self
+            .encoding
+            .as_ref()
+            .map_or(if item { "," } else { ":" }, |policy| {
+                if item {
+                    policy.item_separator.as_str()
+                } else {
+                    policy.key_separator.as_str()
+                }
+            });
+        self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
+        self.text.push_str(piece);
+        Ok(())
+    }
+
     fn quote(&mut self, text: &str) -> Result<(), NativeError> {
+        if self.encoding.as_ref().is_some_and(|policy| policy.ascii) {
+            self.push("\"")?;
+            let mut start = 0;
+            for (index, character) in text.char_indices() {
+                let escape = match character {
+                    '"' => "\\\"",
+                    '\\' => "\\\\",
+                    '\n' => "\\n",
+                    '\r' => "\\r",
+                    '\t' => "\\t",
+                    '\u{8}' => "\\b",
+                    '\u{c}' => "\\f",
+                    ' '..='~' => continue,
+                    _ => "",
+                };
+                self.push(&text[start..index])?;
+                if escape.is_empty() {
+                    for unit in character.encode_utf16(&mut [0; 2]) {
+                        let mut escaped = *b"\\u0000";
+                        for digit in 0..4 {
+                            escaped[5 - digit] =
+                                b"0123456789abcdef"[usize::from((*unit >> (digit * 4)) & 15)];
+                        }
+                        self.push(std::str::from_utf8(&escaped).map_err(|_| syntax())?)?;
+                    }
+                } else {
+                    self.push(escape)?;
+                }
+                start = index + character.len_utf8();
+            }
+            self.push(&text[start..])?;
+            return self.push("\"");
+        }
         self.push("\"")?;
         let mut start = 0;
         for (index, byte) in text.bytes().enumerate() {
@@ -359,7 +409,10 @@ impl Out<'_, '_> {
     }
 
     fn number(&mut self, value: &Value, selected: bool) -> Result<(), NativeError> {
-        if let Some(layout) = self.layout.filter(|_| selected) {
+        if let Some(layout) = self
+            .layout
+            .filter(|_| selected && (self.encoding.is_none() || matches!(value, Value::Float(_))))
+        {
             match value {
                 Value::Float(number) => {
                     let value = number.get();
@@ -534,6 +587,14 @@ fn write(
                         if !matches!(pair[0], Value::Text(_) | Value::LongText(_)) {
                             return Err(raise("json_key", "JSON map keys must be text"));
                         }
+                        if matches!(value, Value::Record(_))
+                            && let Some(policy) = &out.encoding
+                        {
+                            let key = text_held(args, out.new, &pair[0])?;
+                            if policy.excluded.iter().any(|field| *key == **field) {
+                                return Err(raise("not_data", "record has an excluded field"));
+                            }
+                        }
                         fields.push((&pair[0], &pair[1]));
                     }
                 }
@@ -556,11 +617,11 @@ fn write(
                 out.push("{")?;
                 for (index, (name, value)) in fields.iter().enumerate() {
                     if index != 0 {
-                        out.push(",")?;
+                        out.separator(true)?;
                     }
                     let name = text_held(args, out.new, name)?;
                     out.quote(&name)?;
-                    out.push(":")?;
+                    out.separator(false)?;
                     write(value, active, depth + 1, raw_numbers, out)?;
                 }
                 out.push("}")?;
@@ -583,7 +644,7 @@ fn write_array(
     out.push("[")?;
     for (index, value) in items.iter().enumerate() {
         if index != 0 {
-            out.push(",")?;
+            out.separator(true)?;
         }
         write(value, active, depth + 1, raw_numbers, out)?;
     }
@@ -610,6 +671,7 @@ pub fn stringify_json<'call>(
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
+        encoding: None,
     };
     write(value, &mut Vec::new(), 0, false, &mut out)?;
     Ok(out.text)
@@ -643,11 +705,44 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
             &["json_number", "json_key", "json_depth"],
             stringify,
         ),
+        definition(
+            selection,
+            "json.decode",
+            &[
+                ("text", Type::Text),
+                (
+                    "numbers",
+                    Type::Enum(vec!["int".into(), "float".into(), "number".into()]),
+                ),
+                (
+                    "policy",
+                    Type::Enum(vec!["by_spelling".into(), "float".into()]),
+                ),
+                ("objects", Type::Enum(vec!["record".into(), "map".into()])),
+            ],
+            Type::Any,
+            &["json_syntax", "json_depth"],
+            decode,
+        ),
         render_definition(selection),
+        encode_definition(selection),
     ]
 }
 
 fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    parse_objects(call, false)
+}
+
+fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let maps = match materialized_text(&call.args, call.new, 3)?.as_ref() {
+        "map" => true,
+        "record" => false,
+        _ => return Err(raise("type_error", "expected record or map objects")),
+    };
+    parse_objects(call, maps)
+}
+
+fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeError> {
     let text = text_arg(&call.args, 0)?;
     let json = read(&text, call.args.limits().document_depth(), call.new)?;
     let numbers = match materialized_text(&call.args, call.new, 1)?.as_ref() {
@@ -661,13 +756,14 @@ fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
     };
-    decode_with_numbers(&json, &numbers, policy, call.new)
+    decode_with_numbers(&json, &numbers, policy, maps, call.new)
 }
 
 fn decode_with_numbers(
     json: &Json,
     numbers: &Type,
     policy: NumberPolicy,
+    maps: bool,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     match json {
@@ -675,7 +771,7 @@ fn decode_with_numbers(
         Json::Array(items) => {
             let values = items
                 .iter()
-                .map(|item| decode_with_numbers(item, numbers, policy, new))
+                .map(|item| decode_with_numbers(item, numbers, policy, maps, new))
                 .collect::<Result<_, _>>()?;
             Ok(new.allocate(NewObject::List(values)))
         }
@@ -684,10 +780,14 @@ fn decode_with_numbers(
                 .iter()
                 .map(|(key, item)| {
                     let key = new.text(key);
-                    Ok((key, decode_with_numbers(item, numbers, policy, new)?))
+                    Ok((key, decode_with_numbers(item, numbers, policy, maps, new)?))
                 })
                 .collect::<Result<_, NativeError>>()?;
-            Ok(new.allocate(NewObject::Record(values)))
+            Ok(new.allocate(if maps {
+                NewObject::Map(values)
+            } else {
+                NewObject::Record(values)
+            }))
         }
         Json::Null => Ok(Value::Null),
         Json::Bool(value) => Ok(Value::Bool(*value)),
@@ -736,6 +836,7 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         layout: Some(layout),
         verbatim_kinds,
         verbatim_field,
+        encoding: None,
     };
     write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
     let text = out.text;
@@ -852,6 +953,13 @@ impl DecimalLayout {
                     break;
                 }
             }
+            let width = out
+                .encoding
+                .as_ref()
+                .map_or(0, |policy| policy.exponent_digits);
+            for _ in scratch.len() - start..width {
+                out.push("0")?;
+            }
             out.push(std::str::from_utf8(&scratch[start..]).map_err(|_| syntax())?)
         } else if point <= 0 {
             out.push("0.")?;
@@ -865,6 +973,13 @@ impl DecimalLayout {
                 out.push(digits)?;
                 for _ in digits.len()..point {
                     out.push("0")?;
+                }
+                if out
+                    .encoding
+                    .as_ref()
+                    .is_some_and(|policy| policy.fractional)
+                {
+                    out.push(".0")?;
                 }
                 Ok(())
             } else {
@@ -896,4 +1011,112 @@ fn render_definition(selection: &Selection<'_>) -> Function {
         &["json_number", "json_key", "json_depth", "number_range"],
         render,
     )
+}
+
+/// Lexical JSON choices, supplied by the caller independently of its value model.
+struct Encoding {
+    ascii: bool,
+    item_separator: String,
+    key_separator: String,
+    exponent_digits: usize,
+    fractional: bool,
+    excluded: Vec<String>,
+}
+
+fn encode_definition(selection: &Selection<'_>) -> Function {
+    definition(
+        selection,
+        "json.encode",
+        &[
+            ("value", Type::Any),
+            (
+                "layout",
+                Type::Tuple(vec![Type::Int, Type::Int, Type::Bool, Type::Bool]),
+            ),
+            (
+                "style",
+                Type::Tuple(vec![
+                    Type::Bool,
+                    Type::Text,
+                    Type::Text,
+                    Type::Int,
+                    Type::Bool,
+                    Type::Tuple(vec![Type::Text, Type::Text, Type::Text]),
+                ]),
+            ),
+        ],
+        Type::Text,
+        &[
+            "json_number",
+            "json_key",
+            "json_depth",
+            "number_range",
+            "not_data",
+            "cycle",
+        ],
+        encode,
+    )
+}
+
+fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let args = call.args;
+    let layout = DecimalLayout::read(arg(args.values(), 1)?, &args)?;
+    let style = arg(args.values(), 2)?;
+    let (Value::Tuple(_), Some(style)) = (style, args.sequence(style)?) else {
+        return Err(raise("type_error", "expected JSON style tuple"));
+    };
+    if style.len() != 6 {
+        return Err(raise("type_error", "expected six JSON style fields"));
+    }
+    let values = (0..6)
+        .map(|index| style.get(index))
+        .collect::<Result<Vec<_>, _>>()?;
+    let [
+        Some(Value::Bool(ascii)),
+        Some(item),
+        Some(key),
+        Some(Value::Int(width)),
+        Some(Value::Bool(fractional)),
+        Some(excluded),
+    ] = values.as_slice()
+    else {
+        return Err(raise("type_error", "invalid JSON style fields"));
+    };
+    if !(0..=20).contains(width) {
+        return Err(raise("number_range", "exponent width must be in 0..20"));
+    }
+    let (Value::Tuple(_), Some(excluded)) = (excluded, args.sequence(excluded)?) else {
+        return Err(raise("type_error", "expected excluded record fields"));
+    };
+    if excluded.len() != 3 {
+        return Err(raise("type_error", "expected three excluded record fields"));
+    }
+    let excluded = (0..excluded.len())
+        .map(|index| {
+            let field = excluded
+                .get(index)?
+                .ok_or_else(|| raise("type_error", "missing excluded field"))?;
+            Ok(text_held(&args, call.new, field)?.into_owned())
+        })
+        .collect::<Result<Vec<_>, NativeError>>()?;
+    let encoding = Encoding {
+        ascii: *ascii,
+        item_separator: text_held(&args, call.new, item)?.into_owned(),
+        key_separator: text_held(&args, call.new, key)?.into_owned(),
+        exponent_digits: *width as usize,
+        fractional: *fractional,
+        excluded,
+    };
+    let mut out = Out {
+        text: String::new(),
+        args: &args,
+        new: call.new,
+        layout: Some(layout),
+        verbatim_kinds: 0,
+        verbatim_field: None,
+        encoding: Some(encoding),
+    };
+    write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
+    let text = out.text;
+    Ok(call.new.text(&text))
 }

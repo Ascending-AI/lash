@@ -40,22 +40,33 @@ impl Meter {
         }
     }
 
-    pub(crate) fn charges(&mut self, charges: crate::compile::MeteredCharges, exact: bool) {
-        let events = charges
-            .events
-            .into_iter()
-            .map(|(units, _)| Weight::Atomic(units))
-            .collect::<Vec<_>>();
+    /// Keep a helper's final fee after its body events without building a
+    /// temporary event vector when no charge tape is being recorded.
+    pub(crate) fn charges(
+        &mut self,
+        charges: crate::compile::MeteredCharges,
+        exact: bool,
+        final_fee: Option<u64>,
+    ) {
         let units = if exact {
-            events
+            charges
+                .events
                 .iter()
-                .map(|weight| weight.units())
+                .map(|(units, _)| *units)
+                .chain(final_fee)
                 .fold(0_u64, u64::saturating_add)
         } else {
             charges.pace
         };
         self.units = self.units.saturating_add(units);
         if self.record {
+            let events = charges
+                .events
+                .into_iter()
+                .map(|(units, _)| units)
+                .chain(final_fee)
+                .map(Weight::Atomic)
+                .collect();
             self.taken.push(Taken::Charges(events));
         }
     }

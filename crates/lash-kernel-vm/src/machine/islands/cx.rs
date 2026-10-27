@@ -322,7 +322,7 @@ impl Cx<'_> {
             let units = self.units(function, fast, values, Fresh::default(), &answer)?;
             charges.events.push((units, None));
         }
-        self.meter.charges(charges, self.charging);
+        self.meter.charges(charges, self.charging, None);
         Some(value)
     }
 
@@ -505,15 +505,14 @@ impl Cx<'_> {
         else {
             return self.windowed(values, |cx, args| cx.general(function, args));
         };
-        let (value, mut charges) = self.heap_paths(heap, callees, natives, values)?;
+        let (value, charges) = self.heap_paths(heap, callees, natives, values)?;
         self.body_paths = true;
-        if self.charging {
-            charges.events.push((
-                self.units(function, fast, values, fresh, &value.into())?,
-                None,
-            ));
-        }
-        self.meter.charges(charges, self.charging);
+        let final_fee = if self.charging {
+            Some(self.units(function, fast, values, fresh, &value.into())?)
+        } else {
+            None
+        };
+        self.meter.charges(charges, self.charging, final_fee);
         Some(value)
     }
 

@@ -20,6 +20,7 @@ use text.repeat
 use text.to_code_points
 use text.from_code_points
 use json.stringify
+use json.encode
 use list.len
 use list.slice
 use list.contains
@@ -27,6 +28,7 @@ use record.keys
 use record.contains
 use map.keys
 use py.fail
+use py.call
 use py.sealed
 use py.str
 use py.float_text
@@ -41,7 +43,7 @@ body {
   if bool.not(ascii) { return shown }
   let parts = []
   for point in text.to_code_points(shown) {
-    if lt(point, 128) { set parts[list.len(parts)] = text.from_code_points([point]) } else {
+    if lt(point, 127) { set parts[list.len(parts)] = text.from_code_points([point]) } else {
       let points = [point]
       if le(65536, point) {
         set point = sub(point, 65536)
@@ -92,6 +94,25 @@ body {
   if bool.not(same(separators, absent)) {
     if bool.not(same(separators, null)) { set item_separator = separators[0] set key_separator = separators[1] }
   }
+  if bool.not(pretty) {
+    if bool.not(sort_keys) {
+      if same(default, absent) {} else { if same(default, null) { set default = absent } }
+      if same(default, absent) {
+        try {
+          return json.encode(value, (-3, 16, true, true), (ascii, item_separator, key_separator, 2, true, ("__lash_brand", "__py_ellipsis", "__py_module")))
+        } catch unsupported {
+          # Non-text keys, non-finite floats, callbacks and deeper values keep
+          # the Python walk below, including its errors and circular check.
+          if same(unsupported.kind, "json_key") {} else {
+          if same(unsupported.kind, "json_number") {} else {
+          if same(unsupported.kind, "json_depth") {} else {
+          if same(unsupported.kind, "not_data") {} else {
+          if same(unsupported.kind, "cycle") {} else { throw unsupported }
+          } } } }
+        }
+      }
+    }
+  }
   let active = []
   let go = absent
   set go = fn(item, depth) {
@@ -116,7 +137,7 @@ body {
     if bool.not(sequence) {
       if bool.not(mapping) {
         if bool.not(same(default, absent)) {
-          if bool.not(same(default, null)) { let converted = apply default(item) return apply go(converted, depth) }
+          if bool.not(same(default, null)) { let converted = invoke py.call(default, [item], map{}) return apply go(converted, depth) }
         }
         do invoke py.fail("TypeError", "Object is not JSON serializable")
       }

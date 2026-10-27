@@ -624,6 +624,18 @@ impl Lowerer<'_> {
         let typed = (left.ty.is_number() && right.ty.is_number())
             || (left.ty == Ty::Str && right.ty == Ty::Str);
         if assign.op == ast::Operator::Add && !typed {
+            let numeric = match assign.target.as_ref() {
+                PyExpr::Name(name) => self
+                    .variable(name.id.as_str())
+                    .is_some_and(|found| self.local_fact(&found, name.id.as_str()).is_number()),
+                _ => false,
+            };
+            if numeric {
+                // Source proof excludes list extension while preserving
+                // Python addition errors for an unknown right operand.
+                let value = self.native("py.number.iadd", vec![left.expr, right.expr])?;
+                return Ok(Operand::inline(value, Ty::Unknown));
+            }
             return self.invoke("py.iadd", &[left, right], Ty::Unknown);
         }
         self.binary(
@@ -1364,8 +1376,8 @@ impl Lowerer<'_> {
         excluded.extend(params.iter().cloned());
         let range_builtin = self.variable("range").is_none();
         let integer_locals = scope::integer_locals(suite, &bindings, &excluded, range_builtin);
-        let sequence_locals =
-            scope::sequence_locals(suite, &bindings, &excluded, self.variable("str").is_none());
+        let value_locals =
+            scope::value_locals(suite, &bindings, &excluded, self.variable("str").is_none());
         // A global read must bypass every intervening local with its spelling.
         let names = bindings
             .locals
@@ -1396,7 +1408,7 @@ impl Lowerer<'_> {
             kind: ScopeKind::Function { is_async },
             bindings,
             integer_locals,
-            sequence_locals,
+            value_locals,
             bound: vec![params.iter().cloned().collect::<BTreeSet<String>>()],
             handlers: active.iter().cloned().map(Active::Passed).collect(),
             loops: 0,

@@ -134,6 +134,17 @@ await host.observe(JSON.stringify([xs, alias === xs, 4 in xs, 5 in xs]));"#,
 /// standing in a `try` of their own.
 const PYTHON: &[(&str, &str)] = &[
     (
+        "float and JSON",
+        r#"import json
+value = 0.5
+for i in range(2):
+    value += value * 0.25
+text = json.dumps({'z': [value, -0.0], 'a': 'é'}, separators=(',', ':'))
+print(json.dumps({1, 2}, default=lambda item: text))
+await host.observe(text)
+"#,
+    ),
+    (
         "range through a bignum park",
         r#"async def walk(start, stop, step):
     out = []

@@ -24,6 +24,7 @@ py.is_number	80bb3b97b5e28c4eddcebcc93e6f187dbc0e6bd5c65eb59a085f3530e37c3bf9	cl
 py.operand_error	3a5f1e38b4e266fd76f0ad760037db05fbc177a29a86a75cc794c53c17ce5f4e	closed	-	true	0	false	8	generated
 py.truth	a0f64338677d64fd2978fef6ee34baa7a424fd7192de002df69589ccb0770923	closed	-	false	0	false	4	generated
 py.add	a1e85ee5f8c68e4f87f1e232b3c8a7a470c4a305663456062368381ae13d262c	closed	-	true	0	false	sum(4, size(left), size(right))	generated
+py.number.iadd	4a4c23988d62018dd496bc945ac14644d07d07b1e3928dde04e5d6299e872ef6	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.sub	19d8e6282e23420fdff196e3e209c197f0020ac2514da08ed17f5a7a2cb5e8c0	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.mul	06e9c9d9718f1a9af48142850480534f40c3991d9ce5d7dea12bcbe25c6b614e	closed	-	true	0	true	sum(4, size(left), size(right), size(result))	generated
 py.truediv	9393c940c6b1dcf2fb51c2b98804cae959a108ae33f39536541551f78462a000	closed	-	true	0	false	sum(4, size(left), size(right))	generated
@@ -267,8 +268,8 @@ py.task.bridge	3db271e8f32d242d404e96618322d2bb77bebec3a4a2bb833dc18067c46b09b8	
 py.gather	756b0c2f8a0ac9b4655bb74b745fcbae6735cdd424b87a06bbc5bf688486ab25	task	join; cancel; join; join; spawn; invoke py.task.bridge	true	0	true	sum(6, size(tasks), size(result))	reaches task
 py.sleep	b08a06e1d5333d786c3c9ce3c0cb8f4257ae0b15bf2e87fea966de37ae739bd2	task	yield; perform import 2	true	0	false	512	nests an action that is not a library call
 py.gather.options	ddd9effd962bb8dee2bc0a158f8decdbf10963d6c47542de8ba6bb3b269e86a5	closed	-	false	0	true	sum(4, size(kwargs))	generated
-py.json_quote	9dcb92ec71917ea8678a29941b60c5bbcb82ee3c36e6daefda715e6454b4f06c	closed	-	true	0	false	sum(8, size(value), size(result))	generated
-py.json_dump	bd0e74bf6822c0b982a7a30d4f72619f6bb15737a0ea639b85b7f4a249f1eca3	callback	apply go	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
+py.json_quote	30d9f4091855409f9f7b764bacdaf9177fc3289745958cceb6e605bae9a91502	closed	-	true	0	false	sum(8, size(value), size(result))	generated
+py.json_dump	ae0420faa9497eaaf7aba6d5f41470ea4b1865fbc68049131e18af3e1ca81e64	callback	apply go	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
 py.value_attribute	91365bf2087ccbff55fa6a09e2061ee8dce00bda5182619a0143ca1a2cd6046b	closed	-	false	0	false	32	generated
 py.format.attribute	c5b9036c2cb248e01fd5edc64a8dbbe9673ba8f4feaa556f64ef4ec83ac3106f	closed	-	true	0	false	sum(8, size(name))	generated
 py.method.format	d9518f7ae17f7c2f47d2c134ad40d48796f2995c78b39d2827b83687aba7ef04	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
@@ -320,7 +321,7 @@ py.math.degrees	b28a60cfd05180ad6ec9a4030d76b62141ad859409b427d6aa013398b605e6ee
 py.math.radians	59ce5614aa8171038c1ddb19af92da5f091a2394af81f248e01156dfa7e4a123	closed	-	false	0	false	32	generated
 py.math.factorial	eb2ff2dd4f0a31f673d19b509a8fedf17d80611e6e0254a61c20076cb800ba17	closed	-	false	0	true	32	generated
 py.math.gcd	02e669220548d2cfb8159b6a4827e0b6a281c1f7ee73bd67d33033f7036c152f	closed	-	false	0	true	32	generated
-py.json.loads	f551b1d49dbd7e308a088a965473d08f39d045f1b5687b6bbd53d680aca85d2d	callback	invoke py.reply	false	0	false	32	segment of 1 sites
-py.json.dumps	873aaf03ce5d9670e1ebd3a4da1d461b094c07f2f413f4af25f32cf4f02c912d	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
+py.json.loads	ea7760afe0ebaed4b5c5edc9af7c39fa4a4bd2dc4d3d131576849f9f238aa47c	closed	-	false	0	false	32	generated
+py.json.dumps	8205ae46be5fad4c90535b41ce0d00f41eaa74cc89344323e70cd5c0d03aeb2b	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
 py.module.math	4e5c5e83e616a8931c1cc1e5c485010ed6310ce1038c5fa234d763a97b96a6e5	closed	-	false	42	false	64	generated
-py.module.json	d3c83cca03e57b7d834344cbf80383535d100cc50f720c8b12768fc9dc4c3132	closed	-	false	2	false	64	generated
+py.module.json	18223ccc6b0b03631fd8f15a3a3efa9473cba9776ad8f0324e10c563145f615a	closed	-	false	2	false	64	generated

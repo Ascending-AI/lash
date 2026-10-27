@@ -1,7 +1,8 @@
 //! Typed blocks (`docs/design/kernel-regions.md` §2.4, FIG-6946): a
 //! straight-line run of a scalar plan's statements whose operands are all
 //! floats or all word integers at the run's entry, compiled to one run over
-//! unboxed registers.
+//! unboxed registers. An integer control prefix and a float tail may repeat
+//! together when their frame slots are disjoint; both guard before entry.
 //!
 //! A run is a block's statements from one of them on: writes and
 //! declarations of frame variables whose values are operators with typed
@@ -55,6 +56,7 @@ pub(crate) trait Slots {
 pub(crate) struct Typed {
     floats: Option<Program<f64>>,
     ints: Option<Program<i64>>,
+    mixed: Option<Mixed>,
     /// It is a `while`'s test and its whole body:
     /// it runs whole iterations ([`Typed::repeat`]).
     pub(crate) whole: bool,
@@ -103,6 +105,18 @@ impl Typed {
         pending: &mut Vec<Weight>,
         headroom: Headroom,
     ) -> (u64, u64, Ran) {
+        if let Some(mixed) = &self.mixed
+            && let Some(repeated) = mixed.repeat::<RECORD, COUNT>(
+                exe,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+                frame,
+                pending,
+                headroom,
+            )
+        {
+            return repeated;
+        }
         let mut repeated = None;
         if let Some(floats) = &self.floats {
             repeated = floats.repeat::<RECORD, COUNT>(
@@ -472,6 +486,19 @@ impl<T: Domain> Program<T> {
         }
     }
 
+    fn repeatable(&self) -> bool {
+        !self
+            .loads
+            .iter()
+            .any(|(_, reg)| self.locals & (1 << reg) != 0)
+            && !self.held.iter().any(|at| {
+                self.slots
+                    .iter()
+                    .enumerate()
+                    .any(|(reg, slot)| slot == at && self.locals & (1 << reg) != 0)
+            })
+    }
+
     /// [`Typed::repeat`] in this domain: `None` where a guard misses at
     /// its entry; else the iterations, their charge and how the next
     /// iteration ended.
@@ -484,18 +511,7 @@ impl<T: Domain> Program<T> {
         pending: &mut Vec<Weight>,
         headroom: Headroom,
     ) -> Option<(u64, u64, Ran)> {
-        if !self.tested
-            || self
-                .loads
-                .iter()
-                .any(|(_, reg)| self.locals & (1 << reg) != 0)
-            || self.held.iter().any(|at| {
-                self.slots
-                    .iter()
-                    .enumerate()
-                    .any(|(reg, slot)| slot == at && self.locals & (1 << reg) != 0)
-            })
-        {
+        if !self.tested || !self.repeatable() {
             return None;
         }
         let mut scratch = Scratch::new();
@@ -543,6 +559,134 @@ impl<T: Domain> Program<T> {
             *pending = std::mem::take(&mut state.pending);
         }
         self.leave(frame, &state, written & !self.locals);
+        Some((iterations, units, ended))
+    }
+}
+
+/// An integer control prefix and an independent float tail retain their
+/// own unboxed registers across complete iterations. Disjoint frame slots
+/// prove that neither part can observe a delayed write-back from the other.
+struct Mixed {
+    head: Program<i64>,
+    tail: Program<f64>,
+}
+
+impl Mixed {
+    fn compile(
+        exe: &Executable,
+        charged: bool,
+        test: &Summary,
+        body: &Body,
+        from: usize,
+    ) -> Option<Self> {
+        let (_, covered) = Builder::<i64>::new(exe, charged).program(Some(test), body, from)?;
+        // Limit speculative suffix formation to the typed register budget.
+        for split in (from + 1..=from + covered).rev().take(REGISTERS) {
+            let Some((tail, rest)) = Builder::<f64>::new(exe, charged).program(None, body, split)
+            else {
+                continue;
+            };
+            if split + rest != body.steps.len() {
+                continue;
+            }
+            let (head, prefix) =
+                Builder::<i64>::new(exe, charged).program_until(Some(test), body, from, split)?;
+            if prefix != split - from
+                || head.slots.iter().any(|slot| tail.slots.contains(slot))
+                || !head.repeatable()
+                || !tail.repeatable()
+            {
+                continue;
+            }
+            return Some(Self { head, tail });
+        }
+        None
+    }
+
+    #[inline]
+    fn repeat<const RECORD: bool, const COUNT: bool>(
+        &self,
+        exe: &Executable,
+        #[cfg(any(test, feature = "perf-witness"))] census: &execution::Recorder,
+        frame: &mut impl Slots,
+        pending: &mut Vec<Weight>,
+        headroom: Headroom,
+    ) -> Option<(u64, u64, Ran)> {
+        let mut integer_scratch = Scratch::new();
+        let mut float_scratch = Scratch::new();
+        let mut head = self
+            .head
+            .state::<RECORD>(integer_scratch.temps(self.head.temps));
+        let mut tail = self
+            .tail
+            .state::<RECORD>(float_scratch.temps(self.tail.temps));
+        self.tail
+            .enter::<RECORD>(&mut tail, frame, &mut Vec::new())?;
+        self.head.enter::<RECORD>(&mut head, frame, pending)?;
+        let mut iterations = 0_u64;
+        let mut units = 0_u64;
+        let mut head_written = 0_u32;
+        let mut tail_written = 0_u32;
+        let ended = loop {
+            match headroom
+                .charged
+                .checked_add(units)
+                .and_then(|charged| charged.checked_add(headroom.iteration_max))
+            {
+                Some(end) if end <= headroom.bound && end < headroom.slice_end => {}
+                _ => break Ran::Done(0),
+            }
+            let integers = head.regs;
+            let floats = tail.regs;
+            let recorded = head.pending.len();
+            head.units = 0;
+            tail.units = 0;
+            head.written = 0;
+            tail.written = 0;
+            let mut statements = 0_u64;
+            let mut ran = self.head.execute_program(exe, &mut head, || {
+                if COUNT {
+                    statements += 1;
+                }
+            });
+            if matches!(ran, Ran::Done(_)) {
+                ran = self.tail.execute_program(exe, &mut tail, || {
+                    if COUNT {
+                        statements += 1;
+                    }
+                });
+            }
+            if !matches!(ran, Ran::Done(_)) {
+                head.regs = integers;
+                tail.regs = floats;
+                if RECORD {
+                    head.pending.truncate(recorded);
+                    tail.pending.clear();
+                }
+                break ran;
+            }
+            iterations += 1;
+            units += head.units + tail.units + headroom.loop_test;
+            head_written |= head.written;
+            tail_written |= tail.written;
+            if RECORD {
+                head.pending.append(&mut tail.pending);
+                if headroom.loop_test != 0 {
+                    head.pending.push(Weight::Atomic(headroom.loop_test));
+                }
+            }
+            #[cfg(any(test, feature = "perf-witness"))]
+            if COUNT {
+                execution::statements_here(census, statements.saturating_sub(1), true);
+            }
+        };
+        if RECORD {
+            *pending = std::mem::take(&mut head.pending);
+        }
+        self.head
+            .leave(frame, &head, head_written & !self.head.locals);
+        self.tail
+            .leave(frame, &tail, tail_written & !self.tail.locals);
         Some((iterations, units, ended))
     }
 }
@@ -708,6 +852,7 @@ pub(super) fn compile(
     body: &Body,
     from: usize,
 ) -> Option<Typed> {
+    let mixed = test.and_then(|test| Mixed::compile(exe, charged, test, body, from));
     let floats = Builder::<f64>::new(exe, charged).program(test, body, from);
     let ints = Builder::<i64>::new(exe, charged).program(test, body, from);
     let covers = match (&floats, &ints) {
@@ -715,11 +860,16 @@ pub(super) fn compile(
         (Some((_, covers)), None) | (None, Some((_, covers))) => *covers,
         (None, None) => return None,
     };
-    // Both domains run the same statements, or the wider one alone.
+    // A mixed run can fall back only to a homogeneous run of the whole
+    // body. A shorter prefix must return to the ordinary register program.
+    let homogeneous = mixed.is_none() || covers == body.steps.len() - from;
     Some(Typed {
-        floats: floats.and_then(|(program, covered)| (covered == covers).then_some(program)),
-        ints: ints.and_then(|(program, covered)| (covered == covers).then_some(program)),
-        whole: test.is_some() && covers == body.steps.len(),
+        floats: floats
+            .and_then(|(program, covered)| (homogeneous && covered == covers).then_some(program)),
+        ints: ints
+            .and_then(|(program, covered)| (homogeneous && covered == covers).then_some(program)),
+        whole: mixed.is_some() || test.is_some() && covers == body.steps.len(),
+        mixed,
     })
 }
 
@@ -777,10 +927,20 @@ impl<'e, T: Domain> Builder<'e, T> {
     /// The program of `body`'s run from `from`, and how many statements it
     /// runs.
     fn program(
+        self,
+        test: Option<&Summary>,
+        body: &Body,
+        from: usize,
+    ) -> Option<(Program<T>, usize)> {
+        self.program_until(test, body, from, body.steps.len())
+    }
+
+    fn program_until(
         mut self,
         test: Option<&Summary>,
         body: &Body,
         from: usize,
+        until: usize,
     ) -> Option<(Program<T>, usize)> {
         let tested = test.is_some();
         let test_branch = if let Some(test) = test {
@@ -791,7 +951,7 @@ impl<'e, T: Domain> Builder<'e, T> {
         };
         let mut covers = 0;
         let mut units = 0_u64;
-        for step in body.steps.get(from..)? {
+        for step in body.steps.get(from..until)? {
             // Failed compilation leaves neither registers nor instructions.
             let saved = self.state.clone();
             let code = self.code.len();

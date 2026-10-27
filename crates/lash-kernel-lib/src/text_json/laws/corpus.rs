@@ -316,6 +316,43 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             ],
             Ok(t(r#"["x",2,[2.5,null]]"#)),
         ),
+        (
+            "K-LJSON-009",
+            "json.encode".to_owned(),
+            vec![
+                Datum::List(vec![t("é😀\u{7f}"), f(-0.0), f(1e-5), i(123)]),
+                Datum::Tuple(vec![i(-3), i(16), Datum::Bool(true), Datum::Bool(true)]),
+                Datum::Tuple(vec![
+                    Datum::Bool(true),
+                    t(", "),
+                    t(": "),
+                    i(2),
+                    Datum::Bool(true),
+                    Datum::Tuple(vec![t("reserved"), t("other"), t("private")]),
+                ]),
+            ],
+            Ok(t(r#"["\u00e9\ud83d\ude00\u007f", -0.0, 1e-05, 123]"#)),
+        ),
+        (
+            "K-LJSON-010",
+            "json.decode".to_owned(),
+            vec![
+                t(r#"{"z":[{"a":123456789012345678901234567890}],"b":-0.0}"#),
+                t("number"),
+                t("by_spelling"),
+                t("map"),
+            ],
+            Ok(Datum::Map(vec![
+                (
+                    t("z"),
+                    Datum::List(vec![Datum::Map(vec![(
+                        t("a"),
+                        Datum::Int(Integer::parse("123456789012345678901234567890").unwrap()),
+                    )])]),
+                ),
+                (t("b"), f(-0.0)),
+            ])),
+        ),
         // One record node, four two-unit comparisons, one list node and
         // two scalar nodes: work = 12, encoded admission = 2 * 12 + 1.
         (

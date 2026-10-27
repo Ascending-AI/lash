@@ -1104,19 +1104,25 @@ outer()
 /// integer fact, including a string/float at a later iteration's backedge.
 #[test]
 fn integer_facts_exclude_string_and_float_reassignments() {
-    for (source, expected) in [
+    for (source, expected, helper) in [
         (
             "x = 1\nfor i in range(2):\n    x = 'a'\n    x += 'b'\nprint(x)",
             "ab",
+            "py.iadd",
         ),
         (
             "x = 1\nfor i in range(2):\n    x += 1\n    x = 1.5\nprint(x)",
             "1.5",
+            "py.number.iadd",
         ),
-        ("x = 1\nif True:\n    x = 1.5\nx += 1\nprint(x)", "2.5"),
+        (
+            "x = 1\nif True:\n    x = 1.5\nx += 1\nprint(x)",
+            "2.5",
+            "py.number.iadd",
+        ),
     ] {
         assert_eq!(output(source), (vec![expected.into()], "ok".into()));
-        assert!(calls_helper(source, "py.iadd"));
+        assert!(calls_helper(source, helper));
     }
 }
 
@@ -1810,17 +1816,25 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     use lash_kernel_vm::testing::{ExecutionStrategy, library};
     let source = r#"
+import json
 async def build():
     parts = []
     text = ''
+    floating = 0.5
+    numbers = [1, 2, 3]
+    total = 0
     for n in range(3):
+        total += numbers[n]
+        floating += 0.25 * floating
         part = 'λ' + str(n)
         text += part
         parts.append(part)
     parts.append(await host.echo(text))
     d = {'a': 1}
     d['a'] += 2
-    print(d['a'], parts[0])
+    print(d['a'], parts[0], floating, total)
+    encoded = json.dumps({'z': [floating, -0.0], 'a': 'é'}, separators=(',', ':'))
+    print(await host.echo(encoded))
     parts[0] = text
     print(parts)
 await build()
@@ -1879,5 +1893,17 @@ fn standard_depth_admits_five_thousand_guest_calls() {
             "def descend(n):\n    if n == 0:\n        return 0\n    return 1 + descend(n - 1)\nprint(descend(5000))\n"
         ),
         (vec!["5000".into()], "ok".into())
+    );
+}
+
+/// A closed numeric recurrence may add unknown items without selecting
+/// list extension. Item kinds remain runtime Python semantics.
+#[test]
+fn numeric_accumulators_do_not_dispatch_list_extension() {
+    let source = "def accumulate():\n    values = [1, 0.5]\n    total = 0\n    for i in range(2):\n        total += values[i]\n    return total\nprint(accumulate())\n";
+    assert_eq!(output(source), (vec!["1.5".into()], "ok".into()));
+    assert!(
+        !calls_helper(source, "py.iadd"),
+        "a closed numeric accumulator cannot extend a list"
     );
 }
