@@ -402,10 +402,70 @@ fn process_refusal(counted: usize, requested: usize) -> String {
 
 /// Runs the process of `groups` in a turn of session `name` under [`LIMIT`];
 /// what every request of the turn showed the model, joined.
-async fn run_groups(world: &World, name: &str, groups: &[&[&str]]) -> String {
-    let _ = world
+async fn run_groups(world: &World, witness: &Witness, name: &str, groups: &[&[&str]]) -> String {
+    let output = world
         .run(name, served::spec(LIMIT), vec![groups_cell(groups)])
         .await;
+    let counts = groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .iter()
+                .map(|label| (*label, usize::from(group.len() <= LIMIT), witness.of(label)))
+        })
+        .collect::<Vec<_>>();
+    if counts
+        .iter()
+        .any(|(_, expected, executions)| executions.len() != *expected)
+    {
+        let processes = lash_core::testing::process_roster_records_for_fixture(
+            world.backend.process_registry().as_ref(),
+            &lash_execution_contracts::process::ProcessListFilter {
+                status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await;
+        eprintln!(
+            "{name}: executions: {counts:#?}\nturn outcome: {output:#?}\nmodel requests: {:#?}\nprocesses: {processes:#?}",
+            world.requests(name)
+        );
+        let cells = async {
+            let session = world
+                .core
+                .session(lash_kernel_value::identity::SessionId::try_from(name.to_owned()).unwrap())
+                .durable()
+                .await?;
+            session
+                .read()
+                .await
+                .map(|view| view.map(|view| view.transcript()))
+        }
+        .await;
+        eprintln!("cell outcomes: {cells:#?}");
+        if let Ok(processes) = processes {
+            for process in processes {
+                let steps = lash_core::facade_support::read_process_steps(
+                    &world.core.effect_host(),
+                    &process.id,
+                )
+                .await;
+                eprintln!("process {} staged steps: {steps:#?}", process.id);
+                if let Ok(steps) = steps {
+                    let probe = probe_definition(PROBE).id().to_string();
+                    for step in steps.into_iter().filter(|step| step.tool == probe) {
+                        let call = world
+                            .core
+                            .processes()
+                            .tool_call(&process.id, &step.call)
+                            .await;
+                        eprintln!("step {} tool call: {call:#?}", step.call);
+                    }
+                }
+            }
+        }
+        panic!("{name}: process tool bodies differed at turn completion: {counts:#?}");
+    }
     world.requests(name).join("\n")
 }
 
@@ -419,7 +479,7 @@ async fn process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
         return;
     };
     let at: &[&str] = &["at-0", "at-1"];
-    let shown = run_groups(&world, "process-limit-at", &[at]).await;
+    let shown = run_groups(&world, &witness, "process-limit-at", &[at]).await;
     for label in at {
         witness.only(label);
     }
@@ -429,7 +489,7 @@ async fn process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(
     );
 
     let past: &[&str] = &["past-0", "past-1", "past-2"];
-    let shown = run_groups(&world, "process-limit-past", &[past]).await;
+    let shown = run_groups(&world, &witness, "process-limit-past", &[past]).await;
     for label in past {
         assert!(
             witness.of(label).is_empty(),
@@ -454,7 +514,7 @@ async fn process_tool_call_limit_staged_calls(tier: Tier) {
     };
     let first: &[&str] = &["twice-0", "twice-1"];
     let second: &[&str] = &["twice-2", "twice-3"];
-    let shown = run_groups(&world, "process-limit-twice", &[first, second]).await;
+    let shown = run_groups(&world, &witness, "process-limit-twice", &[first, second]).await;
     for label in first.iter().chain(second) {
         witness.only(label);
     }
@@ -465,7 +525,7 @@ async fn process_tool_call_limit_staged_calls(tier: Tier) {
 
     let first: &[&str] = &["staged-0", "staged-1"];
     let past: &[&str] = &["staged-2", "staged-3", "staged-4"];
-    let shown = run_groups(&world, "process-limit-staged", &[first, past]).await;
+    let shown = run_groups(&world, &witness, "process-limit-staged", &[first, past]).await;
     for label in first {
         witness.only(label);
     }
