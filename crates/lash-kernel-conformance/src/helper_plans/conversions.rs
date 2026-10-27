@@ -104,7 +104,12 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             .find(|(_, registered)| registered.name() == name)
             .unwrap()
     };
-    for name in ["ts.number.format_value", "ts.to_boolean"] {
+    for name in [
+        "ts.number.format_value",
+        "ts.to_boolean",
+        "ts.primitive_to_string",
+        "ts.to_int32",
+    ] {
         let (_, registered) = function(name);
         assert!(
             registered
@@ -138,6 +143,26 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             "ts.to_boolean",
             vec![-0.0, 0.0, f64::NAN, f64::INFINITY, -1.0, f64::from_bits(1)],
         ),
+        (
+            "ts.to_int32",
+            vec![
+                -0.0,
+                0.0,
+                f64::NAN,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                2147483648.0,
+                4294967296.0,
+                -4294967297.0,
+                3.9,
+                -3.9,
+                1e100,
+            ],
+        ),
+        (
+            "ts.primitive_to_string",
+            vec![-0.0, 0.0, f64::NAN, f64::INFINITY, 1.5, 1000.0, 1e21],
+        ),
     ] {
         let (_, registered) = function(name);
         let prepared = registered.native().unwrap().prepare().unwrap();
@@ -168,6 +193,10 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
     let (boolean, _) = function("ts.to_boolean");
     let named = |name| *function(name).0;
     let sources = [
+        format!(
+            r#"main {{ for value in [nan, inf, -inf, -0.0, 2147483648.0, 4294967295.0, 4294967296.0, -4294967297.0, 3.9, -3.9, 1e100] {{ let converted = invoke @{int32}(value) print converted }} return null }}"#,
+            int32 = named("ts.to_int32")
+        ),
         format!(
             r#"
 main {{

@@ -53,11 +53,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         Some((value, units?))
     }
-    pub(super) fn pure_call_values(
+    pub(super) fn pure_call_values<const N: usize>(
         &self,
         frame: &Frame<'e>,
-        args: [&super::super::compiled::Operand; 3],
-    ) -> Option<[Value; 3]> {
+        args: [&super::super::compiled::Operand; N],
+    ) -> Option<[Value; N]> {
         use super::super::compiled::Operand;
         let read = |arg: &Operand| match arg {
             Operand::Literal { value, .. } => Some(*value),
@@ -71,16 +71,82 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 _ => None,
             },
         };
-        Some([read(args[0])?, read(args[1])?, read(args[2])?])
+        let mut values = [Value::Absent; N];
+        for (value, arg) in values.iter_mut().zip(args) {
+            *value = read(arg)?;
+        }
+        Some(values)
     }
 
-    pub(super) fn property_write(
+    pub(super) fn element_value(
+        &mut self,
+        site: &super::super::compiled::HeapSite,
+        values: &[Value; 2],
+        units: u64,
+    ) -> Option<Answer> {
+        if OBSERVING
+            || !self.swift
+            || self.deferred_end.is_some()
+            || self.arena.any_cold()
+            || !self.depth_fits(site.depth)
+            || !self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES)
+        {
+            return None;
+        }
+        let (Value::List(list), Value::Float(key)) = (values[0], values[1]) else {
+            return None;
+        };
+        let key = key.get();
+        if !(0.0..lash_kernel_doc::plan::ELEMENT_POSITIONS as f64).contains(&key) {
+            return None;
+        }
+        let at = key as u64;
+        if at as f64 != key {
+            return None;
+        }
+        let value = self.arena.item(list, at).ok()??;
+        if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
+            return None;
+        }
+        let value = match value {
+            Value::Tuple(tuple) if self.arena.len(tuple).ok()? == 0 => Value::Absent,
+            value => value,
+        };
+        let (before, root) = self.root_prefix(site.root).ok()?;
+        let counted = site.counted.or(root);
+        if counted.is_some_and(|at| !self.counters.can_advance(&[at])) {
+            return None;
+        }
+        let end = self
+            .charged
+            .checked_add(before)?
+            .checked_add(units)?
+            .checked_add(site.close.map_or(0, |close| u64::from(close.total)))?;
+        if end > self.bound || end >= self.slice_end {
+            return None;
+        }
+        if let Some(at) = counted
+            && let Err(stop) = self.count(at)
+        {
+            return Some(Err(stop));
+        }
+        self.charged = end;
+        self.covered = false;
+        Some(Ok(value))
+    }
+
+    pub(super) fn member_write(
         &mut self,
         statement: Option<StmtId>,
-        site: &super::super::compiled::PropertyWrite,
+        site: &super::super::compiled::MemberWrite,
         close: Option<Close>,
         values: &[Value; 3],
     ) -> Option<Result<(), Stop>> {
+        if let Some(units) = site.element
+            && matches!(values[0], Value::List(_))
+        {
+            return self.element_store(site, close, values, units);
+        }
         if OBSERVING
             || !self.swift
             || self.deferred_end.is_some()
@@ -99,8 +165,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         };
         let units = match &site.charge {
-            super::super::compiled::PropertyCharge::Known(units) => *units,
-            super::super::compiled::PropertyCharge::Text(charge) => {
+            super::super::compiled::MemberCharge::Known(units) => *units,
+            super::super::compiled::MemberCharge::Text(charge) => {
                 charge.units(key.as_bytes().len() as u64)
             }
         };
@@ -154,6 +220,55 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     .ok()?;
             }
         }
+        if let Some(at) = site.occurrence
+            && let Err(stop) = self.count(at)
+        {
+            return Some(Err(stop));
+        }
+        self.charged = end;
+        self.covered = false;
+        Some(Ok(()))
+    }
+
+    fn element_store(
+        &mut self,
+        site: &super::super::compiled::MemberWrite,
+        close: Option<Close>,
+        values: &[Value; 3],
+        units: u64,
+    ) -> Option<Result<(), Stop>> {
+        if OBSERVING
+            || !self.swift
+            || self.deferred_end.is_some()
+            || self.arena.any_cold()
+            || self.base + u64::from(self.depth) + u64::from(site.depth) > self.call_depth
+            || !self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES)
+            || site
+                .occurrence
+                .is_some_and(|at| !self.counters.can_advance(&[at]))
+        {
+            return None;
+        }
+        let (Value::List(list), Value::Float(key)) = (values[0], values[1]) else {
+            return None;
+        };
+        let key = key.get();
+        if !(0.0..lash_kernel_doc::plan::ELEMENT_POSITIONS as f64).contains(&key) {
+            return None;
+        }
+        let at = key as u64;
+        if at as f64 != key || at > self.arena.len(list).ok()? {
+            return None;
+        }
+        let end = self
+            .charged
+            .checked_add(site.before)?
+            .checked_add(units)?
+            .checked_add(close.map_or(0, |close| u64::from(close.total)))?;
+        if end > self.bound || end >= self.slice_end {
+            return None;
+        }
+        self.arena.list_set(list, at, values[2]).ok()?;
         if let Some(at) = site.occurrence
             && let Err(stop) = self.count(at)
         {

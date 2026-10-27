@@ -1159,6 +1159,18 @@ result = build()
         ),
     ];
     let typescript = [
+        (
+            "bitwise boundaries and indexed writes",
+            r#"const values = [NaN, Infinity, -Infinity, -0, 2147483647, 2147483648, 4294967295, 4294967296, 4294967297, -2147483649, -4294967297, 3.9, -3.9, 1e100, {valueOf() { return 4294967297; }}];
+const counts = [-1, 0, 1, 31, 32, 33, 63, NaN, Infinity, 4294967297, -33, 2, -2, 32, 33];
+function bits(x, n) { return [x >> n, x >>> n, x << n, x & n, x | n, x ^ n, ~x]; }
+const rows = [];
+for (let i = 0; i < values.length; i++) { rows[i] = bits(values[i], counts[i]); }
+const xs = [, 9]; const alias = xs;
+for (let i = 0; i < 4; i++) { xs[i] = i ^ 3; if (i === 2) { await host.observe(JSON.stringify(alias)); } }
+xs[6] = 42; xs[1] = {v: 7}; xs[2] = alias;
+await host.observe(JSON.stringify([rows, xs.length, xs[0], xs[1].v, xs[2] === xs, 4 in xs, 5 in xs, xs[4] === undefined, xs[-1] === undefined, xs[0.5] === undefined, xs[NaN] === undefined, xs[6]]));"#,
+        ),
         // K-CHG-001 / K-MACH-008: cached writes retain aliases and revoke
         // their positions after structural edits, including a missing key.
         (

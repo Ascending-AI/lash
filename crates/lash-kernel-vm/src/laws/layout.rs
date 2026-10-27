@@ -847,7 +847,7 @@ pub(super) fn allocation_probes(
                 heap: Some(HeapTemplate {
                     depth: 1,
                     writes,
-                    element_write: false,
+                    element: None,
                     record_write: None,
                     callees: &[],
                     entry: if writes {

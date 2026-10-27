@@ -171,11 +171,16 @@ pub(in crate::machine::islands) enum Op {
         site: HeapSite,
         args: Box<[u32]>,
     },
-    PropertyStore {
+    ElementRead {
+        site: HeapSite,
+        args: Box<[u32]>,
+        units: u64,
+    },
+    MemberStore {
         site: HeapSite,
         args: Box<[u32]>,
         reads: Option<Box<[Read; 3]>>,
-        property: Box<super::PropertyWrite>,
+        property: Box<super::MemberWrite>,
         finish: Option<u32>,
     },
     Reserve {

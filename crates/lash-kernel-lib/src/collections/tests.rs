@@ -636,12 +636,13 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                     _ => 0,
                 })
                 .collect();
-            for tuples in [false, true] {
+            for representation in 0..3 {
                 let keys: Vec<String> = ranks
                     .iter()
-                    .map(|rank| match tuples {
-                        true => format!("({}, {rank})", rank % 3),
-                        false => rank.to_string(),
+                    .map(|rank| match representation {
+                        1 => format!("({}, {rank})", rank % 3),
+                        2 => format!("[{}, {rank}]", rank % 3),
+                        _ => rank.to_string(),
                     })
                     .collect();
                 let items = (0..n).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
@@ -672,7 +673,10 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                     let Datum::Tuple(expected) = expected else {
                         panic!("the comparator sort's result")
                     };
-                    assert_eq!(sorted, expected[0], "{shape} n={n} {tuples} {descending}");
+                    assert_eq!(
+                        sorted, expected[0],
+                        "{shape} n={n} {representation} {descending}"
+                    );
                     let Datum::Int(calls) = &expected[1] else {
                         panic!("comparison count")
                     };

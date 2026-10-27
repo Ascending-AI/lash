@@ -1479,13 +1479,18 @@ fn record_write(steps: &[Step], value: &Symbol) -> Option<(String, u8, bool)> {
 }
 
 /// The helpers whose body, on a list, a float that is a whole number at
-/// least zero and below both the list's length and 2³² − 1, and any
+/// least zero and at most the list's length and below 2³² − 1, and any
 /// value, makes the element write `set target[key] = value` and answers
-/// `value`, as [`lash_kernel_doc::plan::HeapTemplate::element_write`]
+/// `value`, as [`lash_kernel_doc::plan::HeapTemplate::element`]
 /// declares: the TypeScript member write, whose list branch converts such
 /// a key to itself (`ts.number_index`) and writes there. The regions law
 /// that a region's element writes agree with the reference's pins each.
 const ELEMENT_WRITES: &[&str] = &["ts.set"];
+
+/// These generated helpers' numeric-list branch reads the integral key
+/// directly, returns Absent for an empty tuple, and has no closure charge.
+/// `ts.get` keeps its separately charged dynamic closure and is excluded.
+const ELEMENT_READS: &[&str] = &["ts.get_computed", "ts.get_numeric"];
 
 /// A generated template descriptor and its prepared code, if a typed path
 /// of this body can run using certified native entries, or the arena.
@@ -1571,14 +1576,20 @@ pub(crate) fn emit(
     match heap {
         None => descriptor.push_str("None"),
         Some(heap) => {
-            let element_write = heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str());
+            let element = if heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str()) {
+                "Some(p::Element::Write)"
+            } else if ELEMENT_READS.contains(&definition.name.as_str()) {
+                "Some(p::Element::Read)"
+            } else {
+                "None"
+            };
             let record_write = heap.record_writes.iter().max_by_key(|(_, kinds)| kinds.count_ones())
                 .map_or_else(|| "None".to_owned(), |((key, test, holds), kinds)| {
                     format!("Some(p::RecordWrite {{ key: {key:?}, test: {test}, holds: {holds}, values: {kinds} }})")
                 });
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element_write: {element_write}, record_write: {record_write}, callees: &[",
+                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element: {element}, record_write: {record_write}, callees: &[",
                 heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {

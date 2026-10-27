@@ -329,7 +329,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         | Op::Binary { .. }
                         | Op::Accumulation { .. }
                         | Op::Heap { .. }
-                        | Op::PropertyStore { .. }
+                        | Op::ElementRead { .. }
+                        | Op::MemberStore { .. }
                 )
             {
                 let mut loops = Vec::new();
@@ -1028,7 +1029,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         island.native(site, &values, reads.len())
                     })?;
                 }
-                Op::PropertyStore {
+                Op::MemberStore {
                     site,
                     args,
                     reads,
@@ -1040,7 +1041,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
                     };
                     let answer = self
-                        .property_write(frame.statement, property, site.close, &values)
+                        .member_write(frame.statement, property, site.close, &values)
                         .map(|answer| answer.map(|()| values[2]))
                         .unwrap_or_else(|| {
                             self.retaining(&mut frame.transient, |island| {
@@ -1057,6 +1058,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     if let Some(leaves) = finish {
                         return self.finish_statement(frame, *leaves, None);
                     }
+                }
+                Op::ElementRead { site, args, units } => {
+                    let values = [regs[args[0] as usize], regs[args[1] as usize]];
+                    let answer = self
+                        .element_value(site, &values, *units)
+                        .unwrap_or_else(|| {
+                            self.retaining(&mut frame.transient, |island| {
+                                island.heap_call(site, &values)
+                            })
+                        });
+                    regs[site.reg as usize] = answer?;
                 }
                 Op::Heap { site, args } => {
                     let mut values = [Value::Absent; MAX_ARGS];

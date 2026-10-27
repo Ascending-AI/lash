@@ -153,7 +153,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
             return None;
         }
-        let next = place.advance.call(&[index, Value::Int(1)])?;
+        let next = place.advance.call(&[index, place.increment])?;
         self.arena.list_set(target, at, item).ok()?;
         frame.slots[place.index] = SlotState::Value(next);
         frame.control.push(Position::Block(place.body, 4));

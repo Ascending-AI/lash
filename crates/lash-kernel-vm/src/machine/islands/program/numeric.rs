@@ -22,7 +22,7 @@ impl Build<'_> {
             targets.extend(block.starts.iter().copied());
             targets.extend([block.end, block.after]);
         }
-        let mut removed = self.property_inputs(&targets);
+        let mut removed = self.member_inputs(&targets);
         removed.extend(self.call_inputs(&targets));
         let mut relocation = vec![0; self.ops.len() + 1];
         let source = std::mem::take(&mut self.ops);
@@ -35,7 +35,7 @@ impl Build<'_> {
             }
             if !protected.contains(&at) {
                 instruction.op = fixed(instruction.op);
-                if let Op::PropertyStore { finish, .. } = &mut instruction.op
+                if let Op::MemberStore { finish, .. } = &mut instruction.op
                     && let Some((next, following)) = old.peek()
                     && !targets.contains(next)
                     && following.begin.is_none()
@@ -169,7 +169,7 @@ impl Build<'_> {
                 None
             };
             let property = if callee.is_none() && held.is_none() {
-                self.property_write(site, &reads)
+                self.member_write(site, &reads)
             } else {
                 None
             };
@@ -181,9 +181,8 @@ impl Build<'_> {
             site.inputs = Some(Box::new(CallInputs {
                 prefix: match (held, property) {
                     (Some(held), None) => CallPrefix::Held(held),
-                    (None, Some(property)) => CallPrefix::Property(property),
+                    (_, Some(member)) => CallPrefix::Member(member),
                     (None, None) => CallPrefix::None,
-                    (Some(_), Some(_)) => unreachable!("a property call has no held input"),
                 },
                 callee: callee.map(Operand::from),
                 args: reads.into_iter().map(Operand::from).collect(),
@@ -381,7 +380,7 @@ pub(in crate::machine::islands) struct CallInputs {
 enum CallPrefix {
     None,
     Held(Operand),
-    Property(Box<super::super::PropertyWrite>),
+    Member(Box<super::super::MemberWrite>),
 }
 
 impl CallInputs {
@@ -392,9 +391,9 @@ impl CallInputs {
         }
     }
 
-    pub(in crate::machine::islands) fn property(&self) -> Option<&super::super::PropertyWrite> {
+    pub(in crate::machine::islands) fn member(&self) -> Option<&super::super::MemberWrite> {
         match &self.prefix {
-            CallPrefix::Property(property) => Some(property),
+            CallPrefix::Member(member) => Some(member),
             _ => None,
         }
     }

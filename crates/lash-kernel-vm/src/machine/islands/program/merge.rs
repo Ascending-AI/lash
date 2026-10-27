@@ -34,6 +34,7 @@ pub(in crate::machine::islands) struct Placement {
     pub(in crate::machine::islands) list: usize,
     pub(in crate::machine::islands) body: usize,
     pub(in crate::machine::islands) advance: Entry,
+    pub(in crate::machine::islands) increment: Value,
 }
 
 pub(in crate::machine::islands) struct Merge {
@@ -308,8 +309,12 @@ impl Build<'_> {
         (read(*to)? == target && read(*at)? == index && read(*from)? == value).then_some(())?;
         let (to, addition) = assigned(advance, false)?;
         let [from, one] = self.merge_args(addition, "num.add")?;
-        (to == index && local(from)? == index && matches!(one.kind, Kind::Const(Value::Int(1))))
-            .then_some(())?;
+        let Kind::Const(increment) = one.kind else {
+            return None;
+        };
+        let one = matches!(increment, Value::Int(1))
+            || matches!(increment, Value::Float(value) if value.get() == 1.0);
+        (to == index && local(from)? == index && one).then_some(())?;
         let Kind::Operator { lib, .. } = &unpin(addition).kind else {
             return None;
         };
@@ -326,6 +331,7 @@ impl Build<'_> {
             list: list as usize,
             body: self.blocks.iter().position(|block| block.id == body.id)?,
             advance,
+            increment,
         })
     }
 

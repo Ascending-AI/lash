@@ -224,7 +224,7 @@ pub(in crate::laws) fn helper_probes(
                     callees: &[],
                     depth: 1,
                     writes: false,
-                    element_write: false,
+                    element: None,
                     record_write: None,
                 }),
                 forwards: Default::default(),

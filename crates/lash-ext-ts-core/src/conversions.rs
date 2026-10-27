@@ -167,3 +167,37 @@ impl NativeFunction for NumberToString {
         })
     }
 }
+
+/// Pure primitive spellings, with allocating Number and BigInt cases left
+/// to the body. The default sort takes this entry once per primitive key.
+pub(super) struct PrimitiveToString;
+
+fn primitive_to_string(args: &[Value]) -> Option<Value> {
+    let [value] = args else { return None };
+    match value {
+        Value::Text(_) | Value::LongText(_) => Some(*value),
+        Value::Float(_) => number_to_string(args),
+        Value::Null => Some(Value::Text(lash_kernel_doc::arena::ShortText::new("null")?)),
+        Value::Absent => Some(Value::Text(lash_kernel_doc::arena::ShortText::new(
+            "undefined",
+        )?)),
+        Value::Bool(value) => Some(Value::Text(lash_kernel_doc::arena::ShortText::new(
+            if *value { "true" } else { "false" },
+        )?)),
+        _ => None,
+    }
+}
+
+impl NativeFunction for PrimitiveToString {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        primitive_to_string(call.args.values()).ok_or(NativeError::Decline)
+    }
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            pair: None,
+            entry: primitive_to_string,
+            charged_entry: None,
+            operation: "ts.primitive_to_string(value: Any) -> Text",
+        })
+    }
+}

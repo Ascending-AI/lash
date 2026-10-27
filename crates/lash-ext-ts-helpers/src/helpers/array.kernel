@@ -1571,7 +1571,7 @@ body {
       if same(value, absent) { set undefined_count = num.add(undefined_count, 1) }
       else { set values[list.len(values)] = value }
     }
-    set index = num.add(index, 1)
+    set index = num.add(index, 1.0)
   }
   if same(callback, absent) {
     # SortCompare takes both strings at each comparison. A primitive's
@@ -1664,16 +1664,16 @@ body {
     if actual_list { set in_place = num.lt(index, list.len(this)) }
     if in_place { set this[index] = value }
     else { do invoke ts.array.set(this, index, value) }
-    set index = num.add(index, 1)
+    set index = num.add(index, 1.0)
   }
   while num.lt(0, undefined_count) metered 2 {
     do invoke ts.array.set(this, index, absent)
-    set index = num.add(index, 1)
+    set index = num.add(index, 1.0)
     set undefined_count = num.sub(undefined_count, 1)
   }
   while num.lt(index, length) metered 2 {
     do invoke ts.array.remove(this, index)
-    set index = num.add(index, 1)
+    set index = num.add(index, 1.0)
   }
   return this
 }

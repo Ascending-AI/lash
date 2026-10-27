@@ -39,6 +39,13 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
+    pub(crate) fn element(&self) -> Option<lash_kernel_doc::plan::Element> {
+        match self {
+            Self::Template { template, .. } => template.heap.as_ref()?.element,
+            Self::Native(_) => None,
+        }
+    }
+
     /// Resolve the certificate's predicate against the actual registered native.
     pub(crate) fn record_write(&self) -> Option<(&'static str, [bool; 2], u32)> {
         let Self::Template {

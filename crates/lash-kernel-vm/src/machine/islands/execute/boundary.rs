@@ -223,7 +223,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     Op::Native { .. }
                     | Op::DirectNative { .. }
                     | Op::Heap { .. }
-                    | Op::PropertyStore { .. } => Reason::Native,
+                    | Op::MemberStore { .. }
+                    | Op::ElementRead { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
                         Reason::Binding
@@ -247,7 +248,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 | Op::DirectOperator { site, .. }
                 | Op::Unary { site, .. }
                 | Op::Binary { site, .. } => Some(site.lib),
-                Op::Heap { site, .. } | Op::PropertyStore { site, .. } => Some(site.lib),
+                Op::Heap { site, .. }
+                | Op::MemberStore { site, .. }
+                | Op::ElementRead { site, .. } => Some(site.lib),
                 Op::Call { site, .. } => site.library,
                 _ => None,
             };

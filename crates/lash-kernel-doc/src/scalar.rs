@@ -168,3 +168,56 @@ fn int_answer<T>(
         ScalarOp::Ge => truth(a >= b),
     }
 }
+
+/// Truncate a binary64 value and reduce it modulo 2^32. Non-finite values
+/// and either zero give zero. No wide integer or floating remainder is needed.
+#[inline(always)]
+pub fn uint32(value: f64) -> u32 {
+    if (i32::MIN as f64..=i32::MAX as f64).contains(&value) {
+        return value as i32 as u32;
+    }
+    let bits = value.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32 - 1023;
+    if !(0..84).contains(&exponent) {
+        return 0;
+    }
+    let significand = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
+    let word = if exponent < 52 {
+        (significand >> (52 - exponent)) as u32
+    } else {
+        (significand as u32) << (exponent - 52)
+    };
+    if bits >> 63 == 0 {
+        word
+    } else {
+        word.wrapping_neg()
+    }
+}
+
+/// A binary operation on truncated 32-bit Number operands. Keeping these
+/// separate leaves the ordinary arithmetic kernel's dispatch unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordOp {
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Ushr,
+}
+
+/// Apply a 32-bit word operation, returning a binary64 Number. Signed
+/// operations return an i32; unsigned right shift returns a u32.
+#[inline(never)]
+pub fn words(op: WordOp, a: Float, b: Float) -> Value {
+    let (a, b) = (uint32(a.get()), uint32(b.get()));
+    let value = match op {
+        WordOp::And => (a & b) as i32 as f64,
+        WordOp::Or => (a | b) as i32 as f64,
+        WordOp::Xor => (a ^ b) as i32 as f64,
+        WordOp::Shl => a.wrapping_shl(b & 31) as i32 as f64,
+        WordOp::Shr => ((a as i32) >> (b & 31)) as f64,
+        WordOp::Ushr => (a >> (b & 31)) as f64,
+    };
+    Value::Float(Float::new(value))
+}

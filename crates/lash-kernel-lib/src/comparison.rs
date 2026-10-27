@@ -2,6 +2,7 @@
 use crate::numeric::{Numeric, number_cmp, scalar_cmp};
 use crate::raised;
 use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::arena::native::SequenceView;
 use lash_kernel_doc::{Args, NativeError, Nursery, Value};
 
 use std::cmp::Ordering;
@@ -134,9 +135,12 @@ pub fn compare(
     args: &Args<'_>,
     new: &mut Nursery<'_>,
 ) -> Result<Option<Ordering>, NativeError> {
-    enum Step {
+    if let Some(answer) = scalar_compare(a, b) {
+        return answer;
+    }
+    enum Step<'a> {
         Values(Value, Value, bool),
-        Members(Value, Value, u64, u64, u64),
+        Members(SequenceView<'a>, SequenceView<'a>, u64),
         Leave,
     }
     let mut pending = vec![Step::Values(*a, *b, false)];
@@ -148,25 +152,32 @@ pub fn compare(
                 active.pop();
                 continue;
             }
-            Step::Members(a, b, index, a_len, b_len) => {
-                if index == a_len.min(b_len) {
-                    let order = a_len.cmp(&b_len);
+            Step::Members(a, b, mut index) => {
+                while index < a.len().min(b.len()) {
+                    let left = a
+                        .get(index)?
+                        .ok_or(NativeError::Malformed("an ordered member is absent"))?;
+                    let right = b
+                        .get(index)?
+                        .ok_or(NativeError::Malformed("an ordered member is absent"))?;
+                    if let (Value::Int(left), Value::Int(right)) = (left, right) {
+                        let order = left.cmp(right);
+                        if order != Ordering::Equal {
+                            return Ok(Some(order));
+                        }
+                        index += 1;
+                        continue;
+                    }
+                    pending.push(Step::Members(a, b, index + 1));
+                    pending.push(Step::Values(*left, *right, true));
+                    break;
+                }
+                if index == a.len().min(b.len()) {
+                    let order = a.len().cmp(&b.len());
                     if order != Ordering::Equal {
                         return Ok(Some(order));
                     }
-                    continue;
                 }
-                let member = |value: &Value| -> Result<Value, NativeError> {
-                    args.sequence(value)?
-                        .and_then(|sequence| sequence.get(index).transpose())
-                        .transpose()?
-                        .copied()
-                        .ok_or(NativeError::Malformed("an ordered member is absent"))
-                };
-                let left = member(&a)?;
-                let right = member(&b)?;
-                pending.push(Step::Members(a, b, index + 1, a_len, b_len));
-                pending.push(Step::Values(left, right, true));
                 continue;
             }
             Step::Values(a, b, member) => (a, b, member),
@@ -209,7 +220,7 @@ pub fn compare(
                 let (Some(left), Some(right)) = (args.sequence(&a)?, args.sequence(&b)?) else {
                     return Err(NativeError::Malformed("a tuple names no sequence"));
                 };
-                pending.push(Step::Members(a, b, 0, left.len(), right.len()));
+                pending.push(Step::Members(left, right, 0));
                 continue;
             }
             (Value::List(a_id), Value::List(b_id)) => {
@@ -222,7 +233,7 @@ pub fn compare(
                 };
                 active.push(pair);
                 pending.push(Step::Leave);
-                pending.push(Step::Members(a, b, 0, left.len(), right.len()));
+                pending.push(Step::Members(left, right, 0));
                 continue;
             }
             _ => return Err(raised("type_error", "values have no shared ordering")),

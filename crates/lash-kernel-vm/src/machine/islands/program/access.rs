@@ -67,11 +67,11 @@ pub(in crate::machine::islands) enum AccessShape {
 }
 
 impl Build<'_> {
-    pub(super) fn property_write(
+    pub(super) fn member_write(
         &self,
         site: &CallSite,
         reads: &[Read],
-    ) -> Option<Box<super::super::PropertyWrite>> {
+    ) -> Option<Box<super::super::MemberWrite>> {
         self.property(
             site.library?,
             site.root,
@@ -88,7 +88,7 @@ impl Build<'_> {
         counted: Option<usize>,
         depth: u32,
         reads: Option<&[Read]>,
-    ) -> Option<Box<super::super::PropertyWrite>> {
+    ) -> Option<Box<super::super::MemberWrite>> {
         let key = reads
             .and_then(|reads| reads.get(1))
             .and_then(|read| match read {
@@ -110,14 +110,27 @@ impl Build<'_> {
             return None;
         }
         let (entry, _) = function.prepared.as_ref()?;
+        let element = ((entry.element() == Some(lash_kernel_doc::plan::Element::Write))
+            && key.is_none())
+        .then(|| {
+            function.charge.known_charge(
+                &[
+                    None,
+                    Some(Value::Float(lash_kernel_doc::Float::new(0.0))),
+                    None,
+                ],
+                None,
+            )
+        })
+        .flatten();
         let (guard, accepts, values) = entry.record_write()?;
         let charge = match key {
-            Some(key) => super::super::PropertyCharge::Known(
+            Some(key) => super::super::MemberCharge::Known(
                 function
                     .charge
                     .known_charge(&[None, Some(Value::Text(key)), None], None)?,
             ),
-            None => super::super::PropertyCharge::Text(function.charge.short_text_charge(1)?),
+            None => super::super::MemberCharge::Text(function.charge.short_text_charge(1)?),
         };
         let (before, root) = match root {
             Some(id) => {
@@ -131,7 +144,8 @@ impl Build<'_> {
             }
             None => (0, None),
         };
-        Some(Box::new(super::super::PropertyWrite {
+        Some(Box::new(super::super::MemberWrite {
+            element,
             guard: lash_kernel_state::arena::Key::of_text(guard),
             accepts,
             values,
@@ -143,7 +157,7 @@ impl Build<'_> {
         }))
     }
 
-    pub(super) fn property_inputs(
+    pub(super) fn member_inputs(
         &mut self,
         targets: &std::collections::BTreeSet<usize>,
     ) -> std::collections::BTreeSet<usize> {
@@ -152,6 +166,22 @@ impl Build<'_> {
             let Op::Heap { site, args } = &self.ops[at].op else {
                 continue;
             };
+            if args.len() == 2 {
+                let function = self.exe.lib(site.lib);
+                if function.prepared.as_ref().is_some_and(|(entry, _)| {
+                    entry.element() == Some(lash_kernel_doc::plan::Element::Read)
+                }) && let Some(units) = function.charge.known_charge(
+                    &[None, Some(Value::Float(lash_kernel_doc::Float::new(0.0)))],
+                    None,
+                ) {
+                    let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
+                    let Op::Heap { site, args } = original else {
+                        unreachable!()
+                    };
+                    self.ops[at].op = Op::ElementRead { site, args, units };
+                }
+                continue;
+            }
             if args.len() != 3 {
                 continue;
             }
@@ -204,7 +234,7 @@ impl Build<'_> {
             let Op::Heap { site, args } = original else {
                 unreachable!()
             };
-            self.ops[at].op = Op::PropertyStore {
+            self.ops[at].op = Op::MemberStore {
                 site,
                 args,
                 reads,

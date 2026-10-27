@@ -37,7 +37,7 @@ fn probes(
                 entry: |heap, args, _| heap.call(0, args),
                 depth: 1,
                 writes: false,
-                element_write: false,
+                element: None,
                 record_write: None,
                 callees: Box::leak(Box::new([concat])),
             }),

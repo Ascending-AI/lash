@@ -23,6 +23,7 @@
 //! an embedder installs each plan and adds each native beside the helper
 //! its build registered ([`implement`]).
 
+mod bitwise;
 mod conversions;
 mod number_index;
 
@@ -130,6 +131,17 @@ natives!(name, kernel;
         "ts.sub" => Arc::new(Subtract {
             native: kernel("num.sub")?,
         }),
+        "ts.primitive_to_string" => Arc::new(conversions::PrimitiveToString),
+        "ts.to_int32" => Arc::new(bitwise::ToInt32),
+        "ts.bit_not" => Arc::new(bitwise::Not),
+        "ts.bit_and" | "ts.bit_or" | "ts.bit_xor" | "ts.shl" | "ts.shr" | "ts.ushr" => Arc::new(bitwise::Binary(match name {
+            "ts.bit_and" => lash_kernel_doc::scalar::WordOp::And,
+            "ts.bit_or" => lash_kernel_doc::scalar::WordOp::Or,
+            "ts.bit_xor" => lash_kernel_doc::scalar::WordOp::Xor,
+            "ts.shl" => lash_kernel_doc::scalar::WordOp::Shl,
+            "ts.shr" => lash_kernel_doc::scalar::WordOp::Shr,
+            _ => lash_kernel_doc::scalar::WordOp::Ushr,
+        })),
         "ts.to_number" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
         "ts.number.format_value" => Arc::new(conversions::NumberToString),
@@ -207,6 +219,47 @@ impl NativeFunction for Relate {
             _ => Err(NativeError::Decline),
         }
     }
+    fn prepare(&self) -> Option<PreparedNative> {
+        use lash_kernel_doc::scalar::{Pair, ScalarOp};
+        type Entry = fn(&[Value]) -> Option<Value>;
+        let (entry, op): (Entry, _) = match self.relation {
+            Relation::Lt => (|args| relate(Relation::Lt, args), ScalarOp::Lt),
+            Relation::Le => (|args| relate(Relation::Le, args), ScalarOp::Le),
+            Relation::Gt => (|args| relate(Relation::Gt, args), ScalarOp::Gt),
+            Relation::Ge => (|args| relate(Relation::Ge, args), ScalarOp::Ge),
+        };
+        Some(PreparedNative {
+            pair: Some(Pair {
+                floats: Some(op),
+                ints: None,
+            }),
+            entry,
+            charged_entry: None,
+            operation: "Number or inline text relation",
+        })
+    }
+}
+
+fn relate(relation: Relation, args: &[Value]) -> Option<Value> {
+    let truth = match args {
+        [Value::Float(a), Value::Float(b)] => relation.floats(a.get(), b.get()),
+        [Value::Text(a), Value::Text(b)] => {
+            let (a, b) = (a.as_str(), b.as_str());
+            let order = if a.is_ascii() && b.is_ascii() {
+                a.cmp(b)
+            } else {
+                a.encode_utf16().cmp(b.encode_utf16())
+            };
+            match relation {
+                Relation::Lt => order.is_lt(),
+                Relation::Le => !order.is_gt(),
+                Relation::Gt => order.is_gt(),
+                Relation::Ge => !order.is_lt(),
+            }
+        }
+        _ => return None,
+    };
+    Some(Value::Bool(truth))
 }
 
 /// Float operands already are ECMA Numbers. Every conversion case, including

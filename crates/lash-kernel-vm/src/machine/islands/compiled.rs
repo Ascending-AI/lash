@@ -242,19 +242,20 @@ pub(super) struct CallSite {
     pub(super) after: u64,
 }
 
-/// A helper's record branch compiled for a literal short property key.
-pub(super) struct PropertyWrite {
+/// A helper's certified member write with its source admission and formula.
+pub(super) struct MemberWrite {
+    pub(super) element: Option<u64>,
     pub(super) guard: lash_kernel_state::arena::Key,
     pub(super) accepts: [bool; 2],
     pub(super) values: u32,
     pub(super) lookup: Option<lash_kernel_state::arena::Key>,
-    pub(super) charge: PropertyCharge,
+    pub(super) charge: MemberCharge,
     pub(super) before: u64,
     pub(super) occurrence: Option<usize>,
     pub(super) depth: u32,
 }
 
-pub(super) enum PropertyCharge {
+pub(super) enum MemberCharge {
     Known(u64),
     Text(crate::compile::LengthCharge),
 }

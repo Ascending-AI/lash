@@ -361,6 +361,7 @@ body {
 function ts.bigint.bitwise(left: Int, right: Int, operation: Text) -> Int
 kernel 1
 charge sum(8, product(sum(size(left), size(right)), sum(size(left), size(right))))
+native
 body {
   let a = left
   let b = right

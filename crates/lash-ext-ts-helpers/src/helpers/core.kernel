@@ -731,6 +731,7 @@ function ts.to_int32(value: Any) -> Int
 kernel 1
 errors "type_error"
 charge sum(12, deep(value))
+native
 body {
   let number = invoke ts.to_number(value)
   if num.is_finite(number) {} else {
@@ -747,6 +748,7 @@ body {
 function ts.wrap_int32(value: Int) -> Int
 kernel 1
 charge 3
+native
 body {
   let wrapped = int.rem_floor(value, 4294967296)
   if num.le(2147483648, wrapped) {
@@ -760,6 +762,7 @@ function ts.shift_count(value: Any) -> Int
 kernel 1
 errors "type_error"
 charge sum(14, deep(value))
+native
 body {
   let count = invoke ts.to_int32(value)
   return int.rem_floor(count, 32)
@@ -770,6 +773,7 @@ body {
 function ts.bitwise32(left: Int, right: Int, operation: Text) -> Int
 kernel 1
 charge 1024
+native
 body {
   # Below 2^32 a float is exact, and float arithmetic is cheaper than
   # integer arithmetic.
@@ -803,6 +807,7 @@ function ts.bit_and(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]
@@ -818,6 +823,7 @@ function ts.bit_or(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]
@@ -833,6 +839,7 @@ function ts.bit_xor(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(28, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]
@@ -848,6 +855,7 @@ function ts.bit_not(value: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(14, deep(value))
+native
 body {
   let value = invoke ts.to_numeric(value)
   if same(kind(value), "integer") { return num.sub(num.neg(value), 1) }
@@ -859,6 +867,7 @@ function ts.shl(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(32, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]
@@ -883,6 +892,7 @@ function ts.shr(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(30, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]
@@ -905,6 +915,7 @@ function ts.ushr(left: Any, right: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(30, deep(left), deep(right))
+native
 body {
   let pair = invoke ts.numeric_pair(left, right)
   let left = pair[0]

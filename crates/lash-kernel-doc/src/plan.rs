@@ -158,16 +158,23 @@ pub struct HeapTemplate {
     /// the write is the path's last fallible step, but what runs after
     /// the call in its caller's statement may still fail.
     pub writes: bool,
-    /// Whether the paths on a list, a float that is a whole number at
-    /// least zero and below both the list's length and
-    /// [`ELEMENT_POSITIONS`], and any value are the element write
-    /// `set target[key] = value` answering `value`, which a caller may
-    /// make itself ([`TemplateHeap::set_index`]) in place of the paths.
-    pub element_write: bool,
+    /// A certified numeric array access, over unchanged arguments.
+    pub element: Option<Element>,
     /// A source-certified record membership guard followed by the write
     /// `target[key] = value`, returning `value`, over three unchanged
     /// arguments. Other operand kinds retain the ordinary template.
     pub record_write: Option<RecordWrite>,
+}
+
+/// A helper's operation on a list and an integral nonnegative Float key
+/// below [`ELEMENT_POSITIONS`]. Other operand paths keep their source body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Element {
+    /// Return the indexed value, converting an empty tuple hole to Absent.
+    /// The key must be strictly below the list's length.
+    Read,
+    /// Write the third argument and return it. The key may equal length.
+    Write,
 }
 
 /// The symbolic record-write path retained by a helper template.
@@ -184,7 +191,7 @@ pub struct RecordWrite {
 }
 
 /// The positions an element-writing template writes at lie below
-/// ([`HeapTemplate::element_write`]): 2³² − 1.
+/// ([`HeapTemplate::element`]): 2³² − 1.
 pub const ELEMENT_POSITIONS: u64 = (1 << 32) - 1;
 
 /// What a heap path reads, builds and writes with: the forms a helper body

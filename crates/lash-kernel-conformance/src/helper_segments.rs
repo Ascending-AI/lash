@@ -120,6 +120,14 @@ try {
 }
 await host.observe([caught, log]);"#,
     ),
+    (
+        "indexed append with bitwise operands",
+        r#"const xs = [, 9];
+const alias = xs;
+for (let i = 0; i < 4; i++) { xs[i] = i ^ 3; if (i === 2) { await host.observe(alias); } }
+xs[6] = 42;
+await host.observe(JSON.stringify([xs, alias === xs, 4 in xs, 5 in xs]));"#,
+    ),
 ];
 
 /// Key functions and conversions through Python segment helpers, some
