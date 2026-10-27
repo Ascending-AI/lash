@@ -96,7 +96,7 @@ pub use session_model::{
     TurnFinish, TurnOutcome, TurnStop, messages_are_prompt_resume_safe, same_history_record,
     shared_parts,
 };
-pub use standard_batch::BatchResultRow;
+pub use standard_batch::{BatchResultRow, ModelBatchResultRow};
 pub use tool_call_id::{
     InvalidToolCallId, TOOL_CALL_ID_PREFIX, ToolCallAdmission, ToolCallId, ToolCallPosition,
     ToolCallRoot, ToolCallRootError,

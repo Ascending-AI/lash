@@ -103,7 +103,7 @@ fn standard_execution_section(
     };
     match batch {
         BatchSugar::Enabled { max_members } => format!(
-            "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most {max_members} per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. {ending}"
+            "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most {max_members} per batch); make dependent calls after their inputs return. Check each batch result’s outcome before using its body. {ending}"
         ),
         BatchSugar::Disabled => format!(
             "Call tools directly with their declared JSON arguments. Make independent calls together; make dependent calls after their inputs return. {ending}"

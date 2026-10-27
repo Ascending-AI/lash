@@ -2872,6 +2872,7 @@ dependencies = [
  "lash-kernel-value",
  "lash-runtime",
  "mutants",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",

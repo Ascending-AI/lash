@@ -398,11 +398,15 @@ impl ToolCallStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum ToolCallOutcome {
-    Success(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolValue),
+    Success(
+        #[serde(serialize_with = "crate::durable_serde::serialize")]
+        #[schemars(with = "Value")]
+        ToolValue,
+    ),
     Failure(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolFailure),
     Cancelled(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolCancellation),
 }
@@ -723,7 +727,7 @@ fn decode_object(mut map: Map<String, Value>) -> serde_json::Result<ToolValue> {
 mod failure_cause;
 pub use failure_cause::ToolFailureCause;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 pub struct ToolFailure {
     pub class: ToolFailureClass,
@@ -736,6 +740,7 @@ pub struct ToolFailure {
     pub cause: Option<Box<ToolFailureCause>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "crate::durable_serde::serialize")]
+    #[schemars(with = "Option<Value>")]
     pub raw: Option<ToolValue>,
 }
 
@@ -893,7 +898,7 @@ impl CancelRequest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 pub struct ToolCancellation {
     pub message: String,
@@ -902,6 +907,7 @@ pub struct ToolCancellation {
     pub origin: Option<CancelOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "crate::durable_serde::serialize")]
+    #[schemars(with = "Option<Value>")]
     pub raw: Option<ToolValue>,
     /// Whether lash forced the end: a cancelled process whose engine did not
     /// end it within its cancel grace (ADR 0132 §10).
@@ -1072,7 +1078,7 @@ impl AttachmentMaterializationNotice {
 
 /// The execution fact on a tool return, independent of its presented body.
 /// Only failure and cancellation variants can carry their typed causes.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum ModelToolOutcome {
     Completed,

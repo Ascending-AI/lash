@@ -11,6 +11,10 @@ use std::num::NonZeroUsize;
 use lash_core::facade_support::{ModelToolReturn, ModelToolReturnPart};
 use lash_core::sansio::{CompletedToolCall, ExpandedRow, ExpandedWrapper, ToolExpansionPlan};
 use lash_core::{ToolCallOutput, ToolControl};
+use lash_protocol_types::{
+    ModelBatchResultRow, ModelToolOutcome, ToolCallOutcome, ToolFailure, ToolFailureClass,
+    ToolValue,
+};
 use lash_tool_support::object_schema;
 use lash_vocabulary::tool_contract::ToolDefinition;
 use serde_json::Value;
@@ -35,7 +39,7 @@ pub(crate) fn batch_tool_definition(
         "tool:batch",
         BATCH_OPERATION,
         format!(
-            "Run 1-{max_members} independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls."
+            "Run 1-{max_members} independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a tagged outcome and presented text body. Do not nest batch calls."
         ),
         object_schema(
             serde_json::json!({
@@ -61,29 +65,14 @@ pub(crate) fn batch_tool_definition(
     ).expect("valid declared tool schemas")
 }
 
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BatchResult {
+    results: Vec<BatchResultRow>,
+}
+
 fn batch_output_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "results": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "index": { "type": "integer", "minimum": 0 },
-                        "tool": { "type": "string" },
-                        "success": { "type": "boolean" },
-                        "result": {},
-                        "error": {}
-                    },
-                    "required": ["index", "tool", "success"],
-                    "additionalProperties": false
-                }
-            }
-        },
-        "required": ["results"],
-        "additionalProperties": false
-    })
+    schemars::schema_for!(BatchResult).to_value()
 }
 
 pub(crate) struct Member {
@@ -203,9 +192,13 @@ fn fold_wrapper(
                 tool,
                 error,
             } => {
-                let row = BatchResultRow::failure(*member_index as usize, tool, error.clone());
-                model_rows.push(row.clone());
-                rows.push(row);
+                push_refusal(
+                    &mut rows,
+                    &mut model_rows,
+                    *member_index as usize,
+                    tool,
+                    error.clone(),
+                );
             }
             ExpandedRow::Slot {
                 member_index,
@@ -214,12 +207,17 @@ fn fold_wrapper(
             } => {
                 let index = *member_index as usize;
                 let Some(member) = slots.get_mut(*slot as usize).and_then(Option::take) else {
-                    let missing = Value::String(format!(
-                        "the host returned no result for batch member {index}"
-                    ));
-                    let row = BatchResultRow::failure(index, tool, missing);
-                    model_rows.push(row.clone());
-                    rows.push(row);
+                    push_refusal(
+                        &mut rows,
+                        &mut model_rows,
+                        index,
+                        tool,
+                        ToolFailure::runtime(
+                            ToolFailureClass::Internal,
+                            "batch_member_missing",
+                            format!("the host returned no result for batch member {index}"),
+                        ),
+                    );
                     continue;
                 };
                 let success = member.output.is_success();
@@ -231,18 +229,29 @@ fn fold_wrapper(
                         tool_name: tool_name.to_owned(),
                     };
                 }
-                let value = member.output.value_for_projection();
                 let (presented, member_attachments) =
                     presented_member(member.model_return.parts, &member.output);
                 attachments.extend(member_attachments);
                 intent_outcomes.extend(member.intent_outcomes);
-                if success {
-                    rows.push(BatchResultRow::success(index, tool, value));
-                    model_rows.push(BatchResultRow::success(index, tool, presented));
-                } else {
-                    rows.push(BatchResultRow::failure(index, tool, value));
-                    model_rows.push(BatchResultRow::failure(index, tool, presented));
-                }
+                model_rows.push(ModelBatchResultRow {
+                    index,
+                    tool: tool.clone(),
+                    outcome: ModelToolOutcome::from(&member.output.outcome),
+                    body: presented,
+                });
+                let outcome = match member.output {
+                    ToolCallOutput {
+                        outcome: ToolCallOutcome::Success(_),
+                        projection_value: Some(value),
+                        ..
+                    } => ToolCallOutcome::Success(ToolValue::untrusted_json(value)),
+                    output => output.outcome,
+                };
+                rows.push(BatchResultRow {
+                    index,
+                    tool: tool.clone(),
+                    outcome,
+                });
             }
         }
     }
@@ -257,7 +266,7 @@ fn fold_wrapper(
         args: wrapper.args.clone(),
         output: ToolCallOutput {
             control,
-            ..ToolCallOutput::success(serde_json::json!({ "results": rows }))
+            ..ToolCallOutput::success(serde_json::json!(BatchResult { results: rows }))
         },
         model_return: ModelToolReturn {
             outcome: lash_protocol_types::ModelToolOutcome::Completed,
@@ -269,15 +278,37 @@ fn fold_wrapper(
     }
 }
 
+fn push_refusal(
+    rows: &mut Vec<BatchResultRow>,
+    model_rows: &mut Vec<ModelBatchResultRow>,
+    index: usize,
+    tool: &str,
+    failure: ToolFailure,
+) {
+    let body = failure.model_text().to_owned();
+    let outcome = ToolCallOutcome::Failure(failure);
+    model_rows.push(ModelBatchResultRow {
+        index,
+        tool: tool.to_owned(),
+        outcome: ModelToolOutcome::from(&outcome),
+        body,
+    });
+    rows.push(BatchResultRow {
+        index,
+        tool: tool.to_owned(),
+        outcome,
+    });
+}
+
 /// A member's presentation as the model saw it on its own: its text blocks
-/// joined (as JSON when the text is JSON), and its attachments and retained
+/// joined as text, and its attachments and retained
 /// outputs, which the wrapper's result carries after its rows. A retained
 /// output's row names its attachment; its witness is shown once, in its
 /// block.
 fn presented_member(
     parts: Vec<ModelToolReturnPart>,
     output: &ToolCallOutput,
-) -> (Value, Vec<ModelToolReturnPart>) {
+) -> (String, Vec<ModelToolReturnPart>) {
     let mut text = String::new();
     let mut attachments = Vec::new();
     for part in parts {
@@ -302,8 +333,7 @@ fn presented_member(
     {
         text.push_str(cause);
     }
-    let value = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
-    (value, attachments)
+    (text, attachments)
 }
 
 #[cfg(test)]

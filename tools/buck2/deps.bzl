@@ -989,6 +989,7 @@ PACKAGE_DEPS = {
             "lash_tool_presenter_standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
+            "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0320"
         }

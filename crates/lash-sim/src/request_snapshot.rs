@@ -228,7 +228,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             "tool_choice": "auto",
             "tools": [{
                 "function": {
-                    "description": "Run 1-64 independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
+                    "description": "Run 1-64 independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a tagged outcome and presented text body. Do not nest batch calls.",
                     "name": "batch",
                     "parameters": {
                         "additionalProperties": false,
@@ -262,9 +262,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["raw_len"], 1162);
+    assert_eq!(requests[1]["event"]["raw_len"], 1168);
     assert_eq!(
         requests[1]["event"]["raw_sha256"],
-        "563f5dbe2fe6ddd4cdceb55052daf6e259aa8d502098f05d4249a43b589fcc1c"
+        "2491253b8a9b56ebc27daf44eb8ebac4a5e2c8b576d479e536761b9ba8af16ce"
     );
 }

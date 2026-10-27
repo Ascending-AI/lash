@@ -26,7 +26,7 @@ fn standard_execution_section_uses_only_surviving_tool_examples() {
         &[],
     );
     assert!(enabled.contains("declared JSON arguments"));
-    assert!(enabled.contains("Check each batch result’s success flag"));
+    assert!(enabled.contains("Check each batch result’s outcome"));
     assert!(enabled.contains("at most 64 per batch"));
     let disabled = standard_execution_section(
         BatchSugar::Disabled,

@@ -33,6 +33,7 @@ lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 
 [features]
 default = []

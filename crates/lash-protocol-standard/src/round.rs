@@ -118,7 +118,7 @@ enum Member {
     Refused {
         index: u32,
         tool: String,
-        error: Value,
+        error: ToolFailure,
     },
 }
 
@@ -217,7 +217,7 @@ pub(crate) fn plan_round(calls: Vec<ResponseCall>, rules: &RoundRules<'_>) -> Ro
                             ..
                         } if control && blocked => rows.push(ExpandedRow::Refused {
                             member_index: index,
-                            error: failure_value(ToolFailure::control_sibling_failed(&tool)),
+                            error: ToolFailure::control_sibling_failed(&tool),
                             tool,
                         }),
                         Member::Run {
@@ -290,14 +290,17 @@ fn members(
                 return Member::Refused {
                     index,
                     tool: member.tool,
-                    error: Value::String("`batch` cannot run inside `batch`".to_string()),
+                    error: ToolFailure::invalid_request(
+                        "nested_batch",
+                        "`batch` cannot run inside `batch`",
+                    ),
                 };
             }
             let control = (rules.ends_the_turn)(&tool);
             if control && *spent {
                 return Member::Refused {
                     index,
-                    error: failure_value(attempt_spent_failure(&tool)),
+                    error: attempt_spent_failure(&tool),
                     tool,
                 };
             }
@@ -337,12 +340,6 @@ fn unlisted(tool_name: &str, batch: BatchSugar) -> ToolCallOutput {
             ),
         },
     ))
-}
-
-/// A refused member's row error: the typed failure, as the model reads a
-/// refused call's.
-fn failure_value(failure: ToolFailure) -> Value {
-    failure.to_json_value()
 }
 
 /// Slot and member counts are bounded by admission, far below `u32::MAX`.

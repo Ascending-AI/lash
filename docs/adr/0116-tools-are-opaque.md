@@ -131,11 +131,23 @@ the wrapper.
 
 #### 2.4 The folded presentation
 
-Folding returns `{ "results": [{ "index": 0, "tool": "read", "success": true,
-"result": ... }] }`, with `error` on failed rows. Rows preserve written order,
-nested refusals, presentation, attachments, notices and intent outcomes. A valid
-wrapper succeeds even if members fail. A step with only refused wrapper rows
-executes no body, but still folds those rows.
+Folding returns typed rows `{ "results": [{ "index": 0, "tool": "read",
+"outcome": { "status": "success", "payload": ... } }] }`. Each outcome is
+`ToolCallOutcome`: success carries its typed value, failure its `ToolFailure`,
+and cancellation its `ToolCancellation`. The success value retains its trust
+envelope; a successful display projection replaces only that success payload.
+Interruption remains a failure with its committed typed cause.
+
+Model-facing rows use `ModelBatchResultRow` with `index`, `tool`, `outcome`
+and a text `body`. Its `ModelToolOutcome` derives from the committed member:
+`completed`, `failure` or `cancelled`. Failure and cancellation retain their
+typed payloads; presented text stays in `body`, including JSON text. When no
+presenter ran, the committed cause supplies that body. Attachments and retained
+output witnesses follow the rows as model return parts.
+
+Rows preserve written order, nested refusals, presentation, attachments,
+notices and intent outcomes. A valid wrapper succeeds even if members fail.
+A step with only refused wrapper rows executes no body, but still folds them.
 
 #### 2.5 Limits and nested refusal
 

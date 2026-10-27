@@ -1,41 +1,22 @@
-#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+use crate::{ModelToolOutcome, ToolCallOutcome};
+
+/// A batch member's typed result, independent of its model presentation.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BatchResultRow {
     pub index: usize,
     pub tool: String,
-    pub success: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<serde_json::Value>,
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
+    pub outcome: ToolCallOutcome,
 }
 
-impl BatchResultRow {
-    pub fn success(index: usize, tool: impl Into<String>, result: serde_json::Value) -> Self {
-        Self {
-            index,
-            tool: tool.into(),
-            success: true,
-            result: Some(result),
-            error: None,
-        }
-    }
-
-    pub fn failure(index: usize, tool: impl Into<String>, error: serde_json::Value) -> Self {
-        Self {
-            index,
-            tool: tool.into(),
-            success: false,
-            result: None,
-            error: Some(error),
-        }
-    }
-
-    pub fn value(&self) -> &serde_json::Value {
-        if self.success {
-            self.result.as_ref().unwrap_or(&serde_json::Value::Null)
-        } else {
-            self.error.as_ref().unwrap_or(&serde_json::Value::Null)
-        }
-    }
+/// The committed member outcome with its presented text. Attachments follow
+/// the wrapper's rows as separate model return parts.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ModelBatchResultRow {
+    pub index: usize,
+    pub tool: String,
+    pub outcome: ModelToolOutcome,
+    pub body: String,
 }

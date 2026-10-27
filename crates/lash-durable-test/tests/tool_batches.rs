@@ -695,7 +695,17 @@ fn replies(
         leaves_in(&value, &mut replies);
     } else {
         for answered in served::results(view) {
-            leaves_in(&answered.value(), &mut replies);
+            let value = answered.value();
+            if answered.tool == "batch" {
+                let rows: Vec<lash_protocol_types::ModelBatchResultRow> =
+                    serde_json::from_value(value["results"].clone()).expect("batch member rows");
+                for row in rows {
+                    let body = serde_json::from_str(&row.body).expect("leaf response JSON");
+                    leaves_in(&body, &mut replies);
+                }
+            } else {
+                leaves_in(&value, &mut replies);
+            }
         }
     }
     replies
@@ -1077,17 +1087,19 @@ async fn assert_step_limit_refusal(world: &World, name: &str, output: &lash::Tur
                 tool_name,
                 ..
             } if tool_name.as_deref() == Some("batch") => {
-                // The wrapper completes; each member keeps its own success flag.
+                // The wrapper completes; each member keeps its committed outcome.
                 assert_eq!(*status, lash_protocol_types::ToolCallStatus::Success);
                 let text = content
                     .iter()
                     .filter_map(|part| part.visible_text())
                     .collect::<String>();
                 let value: serde_json::Value = serde_json::from_str(&text).expect("batch result");
-                let rows: Vec<lash_protocol_types::BatchResultRow> =
+                let rows: Vec<lash_protocol_types::ModelBatchResultRow> =
                     serde_json::from_value(value["results"].clone())
                         .expect("typed member outcomes");
-                rows.iter().filter(|row| !row.success).count()
+                rows.iter()
+                    .filter(|row| row.outcome.status().is_error())
+                    .count()
             }
             lash_core::llm::types::LlmContentBlock::ToolResult {
                 status: lash_protocol_types::ToolCallStatus::Failure,
@@ -1483,7 +1495,12 @@ fn rows(answered: &served::Answered) -> Vec<(u64, String, bool)> {
                     (
                         row["index"].as_u64().unwrap_or(u64::MAX),
                         row["tool"].as_str().unwrap_or_default().to_owned(),
-                        row["success"].as_bool().unwrap_or(false),
+                        serde_json::from_value::<lash_protocol_types::ModelToolOutcome>(
+                            row["outcome"].clone(),
+                        )
+                        .expect("member outcome")
+                        .status()
+                            == lash_protocol_types::ToolCallStatus::Success,
                     )
                 })
                 .collect()
@@ -1897,7 +1914,10 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
         .map(|rows| {
             rows.iter()
                 .map(|row| {
-                    row["result"]["value"]
+                    serde_json::from_str::<serde_json::Value>(
+                        row["body"].as_str().expect("member body"),
+                    )
+                    .expect("echo JSON")["value"]
                         .as_str()
                         .unwrap_or_default()
                         .to_owned()

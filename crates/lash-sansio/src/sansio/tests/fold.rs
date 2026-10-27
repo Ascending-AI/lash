@@ -45,7 +45,10 @@ fn plan() -> ToolExpansionPlan {
                 ExpandedRow::Refused {
                     member_index: 1,
                     tool: "batch".to_string(),
-                    error: serde_json::json!("nested"),
+                    error: lash_protocol_types::ToolFailure::invalid_request(
+                        "nested_batch",
+                        "nested",
+                    ),
                 },
                 ExpandedRow::Slot {
                     member_index: 2,

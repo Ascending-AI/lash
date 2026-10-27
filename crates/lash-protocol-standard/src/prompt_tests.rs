@@ -101,7 +101,7 @@ async fn the_standard_sections_compose_the_protocol_prompt() {
     insta::assert_snapshot!(instructions(&composed), @r"
     ## Execution
 
-    Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most 64 per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.
+    Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most 64 per batch); make dependent calls after their inputs return. Check each batch result’s outcome before using its body. Answer in prose only when no tool is needed.
 
     ");
 }

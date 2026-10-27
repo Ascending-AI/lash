@@ -127,7 +127,8 @@ pub enum ExpandedRow {
     Refused {
         member_index: u32,
         tool: String,
-        error: Value,
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
+        error: lash_protocol_types::ToolFailure,
     },
 }
 

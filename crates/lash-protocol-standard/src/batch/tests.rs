@@ -172,26 +172,96 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
             .expect("rows decode");
     assert_eq!(
         rows.iter()
-            .map(|row| (row.index, row.tool.as_str(), row.success))
+            .map(|row| (
+                row.index,
+                row.tool.as_str(),
+                matches!(row.outcome, ToolCallOutcome::Success(_))
+            ))
             .collect::<Vec<_>>(),
         vec![(0, "read", true), (1, "batch", false), (2, "search", false)]
     );
-    assert_eq!(rows[0].value(), &serde_json::json!({ "from": "w/batch/0" }));
+    let ToolCallOutcome::Success(value) = &rows[0].outcome else {
+        panic!("successful read");
+    };
+    assert_eq!(
+        value.to_json_value(),
+        serde_json::json!({ "from": "w/batch/0" })
+    );
+    let schema = lash_kernel_value::JsonSchema::admit(batch_output_schema()).expect("batch schema");
+    schema
+        .validate(&wrapper.output.value_for_projection())
+        .expect("typed outcomes match their schema");
 
     let [ModelToolReturnPart::Text { text }] = wrapper.model_return.parts.as_slice() else {
         panic!("one text block: {:?}", wrapper.model_return.parts);
     };
     let presented: Value = serde_json::from_str(text).expect("the presentation is JSON");
     assert_eq!(
-        presented["results"][0]["result"],
-        serde_json::json!({ "from": "w/batch/0" }),
-        "a member's JSON presentation is embedded as JSON"
+        presented["results"][0]["body"],
+        serde_json::json!({ "from": "w/batch/0" }).to_string(),
+        "a member's presentation remains text"
     );
     assert_eq!(
-        presented["results"][2]["error"], "bad arguments",
+        presented["results"][2]["body"], "bad arguments",
         "an unpresented failure retains its committed explanation"
     );
     assert_eq!(wrapper.provider_call_id.as_deref(), Some("w"));
+}
+
+/// Cancellation must remain distinct from failure, and an interrupted member
+/// must retain its committed cause even when no presenter ran (FIG-7488).
+#[test]
+fn the_fold_preserves_committed_stops_without_presenters() {
+    let expansion = expand_plain(vec![wrapper("w", &["read", "read"])], max(64));
+    let outputs = [
+        ToolCallOutput::cancelled(lash_protocol_types::ToolCancellation::runtime("run closed")),
+        ToolCallOutput::failure(
+            ToolFailure::runtime(
+                ToolFailureClass::Execution,
+                "tool_interrupted",
+                "interrupted",
+            )
+            .with_cause(lash_protocol_types::ToolFailureCause::Interrupted),
+        ),
+    ];
+    let completed = expansion
+        .calls
+        .iter()
+        .zip(outputs)
+        .map(|(slot, output)| {
+            let mut completed = answered(slot, output);
+            completed.model_return.parts.clear();
+            completed
+        })
+        .collect();
+    let folded = fold(&expansion.plan, completed);
+    let stored = folded[0].output.value_for_projection();
+    lash_kernel_value::JsonSchema::admit(batch_output_schema())
+        .expect("batch output schema")
+        .validate(&stored)
+        .expect("committed stop outcomes match their schema");
+    assert_eq!(stored["results"][0]["outcome"]["status"], "cancelled");
+    assert_eq!(
+        stored["results"][1]["outcome"]["payload"]["cause"]["kind"],
+        "interrupted"
+    );
+    let [ModelToolReturnPart::Text { text }] = folded[0].model_return.parts.as_slice() else {
+        panic!("one text block");
+    };
+    let presented: Value = serde_json::from_str(text).expect("batch presentation");
+    lash_kernel_value::JsonSchema::admit(
+        schemars::schema_for!(Vec<ModelBatchResultRow>).to_value(),
+    )
+    .expect("model row schema")
+    .validate(&presented["results"])
+    .expect("presented rows match their own schema");
+    assert_eq!(presented["results"][0]["outcome"]["status"], "cancelled");
+    assert_eq!(presented["results"][0]["body"], "run closed");
+    assert_eq!(
+        presented["results"][1]["outcome"]["payload"]["cause"]["kind"],
+        "interrupted"
+    );
+    assert_eq!(presented["results"][1]["body"], "interrupted");
 }
 
 #[test]
