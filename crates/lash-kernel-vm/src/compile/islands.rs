@@ -459,6 +459,7 @@ impl Former<'_> {
             lib.and_then(|lib| self.library.get_lib(lib))
                 .is_some_and(|function| {
                     !matches!(function.run, LibRun::Native { .. })
+                        && !function.collection_method()
                         && function.prepared.as_ref().is_some_and(|(entry, _)| {
                             entry.writes(&|id| self.library.lib(id), &|id| self.library.lib_of(id))
                         })
@@ -651,7 +652,9 @@ impl Former<'_> {
                     let function = self.library.get_lib(*lib)?;
                     let body = match function.run {
                         LibRun::Body(code)
-                            if matches!(callee, super::Callee::Library(_))
+                            if (matches!(callee, super::Callee::Library(_))
+                                || (matches!(callee, super::Callee::CheckedHelper(_))
+                                    && function.collection_method()))
                                 && args.len() == function.arity =>
                         {
                             Some(code)
@@ -981,14 +984,37 @@ impl Former<'_> {
             };
             let written: Vec<Reg> = span.iter().filter_map(Op::writes).collect();
             let mut fresh: Vec<Reg> = Vec::new();
-            span.iter().all(|op| {
+            let safe = span.iter().all(|op| {
                 let reads = op
                     .reads()
                     .into_iter()
                     .all(|reg| fresh.contains(&reg) || !written.contains(&reg));
                 fresh.extend(op.writes());
                 reads
-            })
+            });
+            safe || self
+                .tables
+                .stream
+                .ops
+                .get(commit as usize)
+                .and_then(|op| {
+                    let Op::Nested { act, .. } = op else {
+                        return None;
+                    };
+                    let lib = self
+                        .tables
+                        .stream
+                        .nested
+                        .get(act.ix())?
+                        .kind
+                        .operator_lib()?;
+                    self.library
+                        .get_lib(lib)?
+                        .collection_method()
+                        .then_some(())?;
+                    collection_restart(&self.tables.stream, head, commit)
+                })
+                .is_some()
         })
     }
 
@@ -1091,8 +1117,8 @@ impl Former<'_> {
             args,
             closes,
         } = &mut expr.kind
-            && !invoke.checked
             && let Some(function) = self.library.get_lib(*lib)
+            && (!invoke.checked || function.collection_method())
             && self.body_call(*lib, args.len())
             && function.arity == args.len()
             && let LibRun::Body(code) = function.run
@@ -1268,6 +1294,10 @@ impl Former<'_> {
     /// whose resident path stages a mutation without a call frame.
     fn body_call(&self, lib: LibId, given: usize) -> bool {
         !self.charged
+            || self
+                .library
+                .get_lib(lib)
+                .is_some_and(Lib::collection_method)
             || self.operator(lib, given, true).is_none()
             || self
                 .library
@@ -1531,4 +1561,44 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
         _ => {}
     }
     Ok(())
+}
+
+/// One argument-list construction may overwrite an input of the fixed
+/// region it closes. Its other forms are pure register reads and literals.
+/// Keeping that input before construction makes a refused close restartable.
+pub(crate) fn collection_restart(
+    stream: &super::Stream,
+    head: u32,
+    commit: u32,
+) -> Option<(u32, u32)> {
+    let span = stream.ops.get(head as usize..commit as usize)?;
+    let mut made = None;
+    let mut written = Vec::new();
+    let mut inputs = Vec::new();
+    for (at, op) in span.iter().enumerate() {
+        match op {
+            Op::Region { .. } | Op::Const { .. } | Op::Local { .. } => {}
+            Op::MakeList { items } if made.is_none() && at + 1 == span.len() => {
+                made = Some((head + at as u32, items.start.0));
+            }
+            _ => return None,
+        }
+        for reg in op.reads() {
+            if !written.contains(&reg) && !inputs.contains(&reg) {
+                inputs.push(reg);
+            }
+        }
+        written.extend(op.writes());
+    }
+    let (pc, reg) = made?;
+    let lost: Vec<_> = inputs
+        .into_iter()
+        .filter(|input| written.contains(input))
+        .collect();
+    (lost.len() == 1
+        && lost[0].0 == reg
+        && !span[..span.len() - 1]
+            .iter()
+            .any(|op| op.writes().is_some_and(|at| at.0 == reg)))
+    .then_some((pc, reg))
 }

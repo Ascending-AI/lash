@@ -33,12 +33,21 @@ pub(crate) struct Compiled {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
+    pub(super) restarts: Vec<Restart>,
     headers: Box<[(u32, usize)]>,
     actions: Box<[(u32, usize)]>,
     pub(super) cell_parameters: usize,
     pub(super) cleanups: bool,
     room: u32,
     observes: bool,
+}
+
+/// Private copies used only when a source region's charge close refuses.
+pub(super) struct Restart {
+    pub(super) statement: StmtId,
+    pub(super) head: u32,
+    pub(super) reg: u32,
+    pub(super) saved: u32,
 }
 
 pub(super) struct Block {
@@ -212,6 +221,7 @@ pub(super) struct UnitSite {
 
 /// A compiled island call.
 pub(super) struct CallSite {
+    pub(super) checked: bool,
     pub(super) inputs: Option<Box<CallInputs>>,
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
@@ -264,9 +274,15 @@ pub(super) struct RepeatSite {
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
         let stream = plan.stream(exe);
-        let mut measure = Build::new(exe, &plan.shared, stream, None);
+        let mut measure = Build::new(exe, &plan.shared, stream, None, 0);
         measure.block(&plan.body)?;
-        let mut cx = Build::new(exe, &plan.shared, stream, Some(measure.segments));
+        let mut cx = Build::new(
+            exe,
+            &plan.shared,
+            stream,
+            Some(measure.segments),
+            measure.registers as u32,
+        );
         cx.block(&plan.body)?;
         cx.numeric();
         if !plan.charged && stream.layout.0.is_multiple_of(2) {
@@ -320,6 +336,7 @@ impl Compiled {
             }),
             ops: cx.ops,
             registers: cx.registers,
+            restarts: cx.restarts,
             headers: headers.into(),
             actions: actions.into(),
             cell_parameters: plan

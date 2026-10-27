@@ -937,6 +937,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 return self.returning(frame, *value);
             }
+            Op::Keep { src, saved } => {
+                regs[*saved as usize] = regs[*src as usize];
+                regs[*saved as usize + 1] = Value::Bool(true);
+            }
             Op::Constant { dst, value } => regs[*dst as usize] = *value,
             Op::Local {
                 dst,

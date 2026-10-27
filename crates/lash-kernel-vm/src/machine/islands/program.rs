@@ -113,6 +113,10 @@ pub(in crate::machine::islands) enum Op {
         covered: bool,
         reg: u32,
     },
+    Keep {
+        src: u32,
+        saved: u32,
+    },
     Constant {
         dst: u32,
         value: Value,
@@ -369,6 +373,9 @@ pub(super) struct Build<'e> {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
+    pub(super) restarts: Vec<super::Restart>,
+    captures: Vec<(u32, u32, u32, bool)>,
+    source_registers: u32,
     live: Vec<u32>,
     statement: Option<StmtId>,
     /// The accumulator slots of each loop being built, innermost last.
@@ -381,6 +388,7 @@ impl<'e> Build<'e> {
         shared: &'e [bool],
         stream: &'e Stream,
         measured: Option<Vec<u64>>,
+        source_registers: u32,
     ) -> Self {
         Self {
             exe,
@@ -396,6 +404,9 @@ impl<'e> Build<'e> {
             blocks: Vec::new(),
             ops: Vec::new(),
             registers: 0,
+            restarts: Vec::new(),
+            captures: Vec::new(),
+            source_registers,
             live: Vec::new(),
             statement: None,
             texts: Vec::new(),
@@ -499,6 +510,7 @@ impl<'e> Build<'e> {
                 self.segments.len(),
                 self.blocks.len(),
                 self.texts.len(),
+                self.restarts.len(),
             );
             if self.statement(statement, index).is_none() {
                 // A straight-line statement the register cannot build runs
@@ -513,6 +525,7 @@ impl<'e> Build<'e> {
                 self.segments.truncate(mark.1);
                 self.blocks.truncate(mark.2);
                 self.texts.truncate(mark.3);
+                self.restarts.truncate(mark.4);
                 (self.root, self.begin, self.open) = (None, None, None);
                 let cold = Statement {
                     id: statement.id,
@@ -541,6 +554,7 @@ impl<'e> Build<'e> {
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
+        self.captures.clear();
         self.live.clear();
         let ahead = self.start();
         self.cover(1);
@@ -935,7 +949,7 @@ impl<'e> Build<'e> {
         }
         self.open = None;
         self.live.clear();
-        Some(())
+        self.captures.iter().all(|capture| capture.3).then_some(())
     }
 
     /// The branch instruction enters a nonempty arm's source block itself.
@@ -990,6 +1004,35 @@ impl<'e> Build<'e> {
 
     fn expr(&mut self, expr: &Expr) -> Option<()> {
         let (pc, reg) = (expr.pc, expr.reg);
+        let collection = match &expr.kind {
+            Kind::Operator { lib, .. } => self.exe.lib(*lib).collection_method(),
+            Kind::Call { invoke, .. } => invoke
+                .act
+                .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
+                .is_some_and(|lib| self.exe.lib(lib).collection_method()),
+            _ => false,
+        };
+        if collection {
+            for close in expr.closes() {
+                if let Some((made, input)) =
+                    crate::compile::islands::collection_restart(self.stream, close.head, pc)
+                {
+                    let saved = self.source_registers + 2 * self.restarts.len() as u32;
+                    self.registers = self.registers.max(saved as usize + 2);
+                    self.restarts.push(super::Restart {
+                        statement: self.statement?,
+                        head: close.head,
+                        reg: input,
+                        saved,
+                    });
+                    self.captures.push((made, input, saved, false));
+                    self.emit(Op::Constant {
+                        dst: saved + 1,
+                        value: Value::Bool(false),
+                    });
+                }
+            }
+        }
         match &expr.kind {
             Kind::Local { local, miss, .. } => {
                 self.emit(Op::Local {
@@ -1232,6 +1275,7 @@ impl<'e> Build<'e> {
                     });
                 self.emit(Op::Call {
                     site: CallSite {
+                        checked: invoke.checked || self.root_checked(),
                         inputs: None,
                         root: self.root,
                         library,
@@ -1317,6 +1361,18 @@ impl<'e> Build<'e> {
                     self.expr(item)?;
                 }
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
+                let keeps: Vec<_> = self
+                    .captures
+                    .iter_mut()
+                    .filter(|capture| capture.0 == pc)
+                    .map(|capture| {
+                        capture.3 = true;
+                        (capture.1, capture.2)
+                    })
+                    .collect();
+                for (src, saved) in keeps {
+                    self.emit(Op::Keep { src, saved });
+                }
                 self.emit(Op::Make {
                     ahead: *ahead,
                     make: *make,

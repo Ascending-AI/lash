@@ -588,7 +588,7 @@ fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
 /// total charge, key identities and results as uninterrupted execution.
 #[test]
 fn map_admission_preserves_exact_charge_across_slices_and_argument_parks() {
-    let source = "const key = {}; const f = () => 1; const m = new Map(); m.set(-0, 1); m.set(NaN, 2); m.set(key, 3); m.set(f, await host.echo(7)); m.set(); key.x = 9; const checks = [m.size === 5, m.get(0) === 1, m.get(NaN) === 2, m.get(key) === 3, m.get(f) === 7, m.has(), m.get() === undefined, m.delete(f), !m.has(f)]; let valid = true; for (const check of checks) { valid = valid && check; } await control.finish(valid);";
+    let source = "const key = {}; const f = () => 1; const m = new Map(); m.set(-0, 1); m.set(NaN, 2); m.set(key, 3); m.set(f, await host.echo(7)); m.set(); const textMap = new Map(); const s = new Set(); for (const text of ['x', 'a long text key past the inline limit']) { textMap.set(text, await host.echo(text)); s.add(text); } textMap.set('x', 'replacement'); for (let i = 0; i < 3; i++) { textMap.set(String(i), i); } key.x = 9; const checks = [m.size === 5, textMap.size === 5, textMap.has(String(1)), textMap.get(String(1)) === 1, textMap.get('x') === 'replacement', textMap.get('a long text key past the inline limit') === 'a long text key past the inline limit', s.has('x'), s.has('a long text key past the inline limit'), s.size === 2, m.get(0) === 1, m.get(NaN) === 2, m.get(key) === 3, m.get(f) === 7, m.has(), m.get() === undefined, m.delete(f), !m.has(f)]; let valid = true; for (const check of checks) { valid = valid && check; } await control.finish(valid);";
     let plain = plain_record_resume(source, u64::MAX, false);
     assert_eq!(plain.0, Datum::Bool(true));
     for slice in [1, 7, u64::MAX] {

@@ -68,113 +68,140 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             None
         };
-        let answer = (|| {
-            let regs = &mut frame.regs;
-            let callee = inputs
-                .as_ref()
-                .map_or_else(|| read.then(|| regs[site.reg as usize]), |values| values.0);
-            if let Some(close) = &site.close
-                && !self.close(close)
-            {
-                return Err(self.at(close.head));
-            }
-            let (before, root_occurrence) = self.root_prefix(site.root)?;
-            if !self.root_fits(before, 0, site.root.is_some() && self.accounting) {
-                return Err(self.at(site.pc));
-            }
-            if !OBSERVING
-                && site.library.is_some()
-                && self.retaining(&mut frame.transient, |island| {
-                    island.call_answer(
-                        site,
-                        (args, inputs.as_ref().map(|input| input.1)),
-                        regs,
-                        before,
-                        root_occurrence,
-                    )
-                })?
-            {
-                return Ok(Next::Continue);
-            }
-            let target = match (site.callee, callee) {
-                (Some(code), _) => self.declared(code),
-                (None, Some(callee)) => self.resolve(site.site, callee),
-                _ => None,
-            };
-            let mut room = true;
-            let target = target.filter(|target| {
-                args.len() <= target.compiled.layout.arity
-                    && !(site.library.is_some()
-                        && self.accounting
-                        && (OBSERVING || target.compiled.cleanups))
-                    && self.depth < self.frames
-                    && *slots + target.plan.slots <= self.slot_room
-                    && {
-                        room = self.register_room(target.compiled);
-                        room
-                    }
-            });
-            let Some(target) = target else {
-                #[cfg(any(test, feature = "perf-witness"))]
-                {
-                    self.scratch.exit.reason = Some(if self.depth >= self.frames {
-                        Reason::Depth
-                    } else if !room {
-                        Reason::Capacity
-                    } else {
-                        Reason::Call
-                    });
-                }
-                return Err(self.at(site.pc));
-            };
-            if OBSERVING
-                && self
-                    .watching
+        let answer =
+            (|| {
+                let regs = &mut frame.regs;
+                let callee = inputs
                     .as_ref()
-                    .is_some_and(|watching| !watching.can_call())
-            {
-                return Err(self.at(site.pc));
-            }
-            if let Some(at) = site.occurrence.or(root_occurrence) {
-                self.count(at)?;
-            } else if let Some(watching) = &self.projection() {
-                if let Some(act) = site.act {
-                    watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
-                } else if let Some(stmt) = frame.statement {
-                    watching.root_call(self.exe, stmt, args.len());
+                    .map_or_else(|| read.then(|| regs[site.reg as usize]), |values| values.0);
+                if let Some(close) = &site.close
+                    && !self.close(close)
+                {
+                    return Err(self.at(close.head));
                 }
-            }
-            self.root_arguments(before);
-            // The call owns its frame transition. No resolved callee
-            // crosses the instruction result or is decoded by the loop.
-            if let Some(value) = self.returned_literal(target) {
-                regs[site.reg as usize] = value;
-                if site.after != 0 {
-                    self.admit(site.after);
+                let (before, root_occurrence) = self.root_prefix(site.root)?;
+                if !self.root_fits(before, 0, site.root.is_some() && self.accounting) {
+                    return Err(self.at(site.pc));
                 }
-                return Ok(Next::Continue);
-            }
-            frame.waiting = Some(frame.pc - 1);
-            (frame.admitted, frame.swift, frame.covered) =
-                (self.admitted, self.swift, self.covered);
-            self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));
-            let inner = if let Some((callee, values)) = &inputs {
-                if let Some(callee) = callee {
-                    regs[site.reg as usize] = *callee;
+                if let Some(lib) = site.library {
+                    if site.checked {
+                        let function = self.exe.lib(lib);
+                        let fits = function.header.signature.params.iter().enumerate().all(
+                            |(at, param)| {
+                                let value = inputs
+                                    .as_ref()
+                                    .map_or_else(|| regs[args[at] as usize], |input| input.1[at]);
+                                (param.optional && matches!(value, Value::Absent))
+                                    || match (&param.ty, value) {
+                                        (
+                                            lash_kernel_value::Type::List(item),
+                                            Value::List(list),
+                                        ) if **item == lash_kernel_value::Type::Any => {
+                                            self.arena.len(list).ok().is_some_and(|len| {
+                                                len == 0 || self.limits.value_depth() > 1
+                                            })
+                                        }
+                                        _ => crate::compile::import_result_fits(&param.ty, value),
+                                    }
+                            },
+                        );
+                        if !fits || self.arena.any_cold() {
+                            return Err(self.at(site.pc));
+                        }
+                    }
+                    if !OBSERVING
+                        && self.retaining(&mut frame.transient, |island| {
+                            island.call_answer(
+                                site,
+                                (args, inputs.as_ref().map(|input| input.1)),
+                                regs,
+                                before,
+                                root_occurrence,
+                            )
+                        })?
+                    {
+                        return Ok(Next::Continue);
+                    }
                 }
-                for (reg, value) in args.iter().zip(values.iter()) {
-                    regs[*reg as usize] = *value;
+                let target = match (site.callee, callee) {
+                    (Some(code), _) => self.declared(code),
+                    (None, Some(callee)) => self.resolve(site.site, callee),
+                    _ => None,
+                };
+                let mut room = true;
+                let target = target.filter(|target| {
+                    args.len() <= target.compiled.layout.arity
+                        && !(site.library.is_some()
+                            && self.accounting
+                            && (OBSERVING || target.compiled.cleanups))
+                        && self.depth < self.frames
+                        && *slots + target.plan.slots <= self.slot_room
+                        && {
+                            room = self.register_room(target.compiled);
+                            room
+                        }
+                });
+                let Some(target) = target else {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    {
+                        self.scratch.exit.reason = Some(if self.depth >= self.frames {
+                            Reason::Depth
+                        } else if !room {
+                            Reason::Capacity
+                        } else {
+                            Reason::Call
+                        });
+                    }
+                    return Err(self.at(site.pc));
+                };
+                if OBSERVING
+                    && self
+                        .watching
+                        .as_ref()
+                        .is_some_and(|watching| !watching.can_call())
+                {
+                    return Err(self.at(site.pc));
                 }
-                self.frame_from(target, values[..args.len()].iter().copied())
-            } else {
-                self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]))
-            };
-            *slots += inner.slots.len();
-            callers.push(std::mem::replace(frame, inner));
-            self.depth += 1;
-            self.activate(frame);
-            Ok(Next::Continue)
-        })();
+                if let Some(at) = site.occurrence.or(root_occurrence) {
+                    self.count(at)?;
+                } else if let Some(watching) = &self.projection() {
+                    if let Some(act) = site.act {
+                        watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
+                    } else if let Some(stmt) = frame.statement {
+                        watching.root_call(self.exe, stmt, args.len());
+                    }
+                }
+                self.root_arguments(before);
+                // The call owns its frame transition. No resolved callee
+                // crosses the instruction result or is decoded by the loop.
+                if let Some(value) = self.returned_literal(target) {
+                    regs[site.reg as usize] = value;
+                    if site.after != 0 {
+                        self.admit(site.after);
+                    }
+                    return Ok(Next::Continue);
+                }
+                frame.waiting = Some(frame.pc - 1);
+                (frame.admitted, frame.swift, frame.covered) =
+                    (self.admitted, self.swift, self.covered);
+                self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));
+                let inner = if let Some((callee, values)) = &inputs {
+                    if let Some(callee) = callee {
+                        regs[site.reg as usize] = *callee;
+                    }
+                    for (reg, value) in args.iter().zip(values.iter()) {
+                        regs[*reg as usize] = *value;
+                    }
+                    self.frame_from(target, values[..args.len()].iter().copied())
+                } else {
+                    self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]))
+                };
+                *slots += inner.slots.len();
+                callers.push(std::mem::replace(frame, inner));
+                self.depth += 1;
+                self.activate(frame);
+                Ok(Next::Continue)
+            })();
         if answer.is_err()
             && let (Some(inputs), Some((callee, values))) = (&site.inputs, inputs)
         {

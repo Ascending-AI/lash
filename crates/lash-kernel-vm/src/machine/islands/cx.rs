@@ -27,6 +27,7 @@ use crate::compile::{
     Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, ReadSite, Source,
     inner_entry as inner,
 };
+mod collections;
 mod meter;
 mod texts;
 pub(super) use texts::append_text;
@@ -240,16 +241,17 @@ impl Cx<'_> {
 
     /// What `plan` charges a call of `args` that gave `result`, measured
     /// as the reference measures it. With a write held, a formula that
-    /// measures an object other than a long text, which the write may
-    /// change or reach, is the reference's to measure after the write.
+    /// measures a graph the write may change uses its projected flat
+    /// map size, or leaves completion to the reference after the write.
     fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> Option<u64> {
-        if self.held.is_some() && measures_object(plan, args, result) {
-            return None;
-        }
         if let Some(observer) = self.native_observer {
             observer.formula_enter();
         }
-        let answer = measured_formula(self.arena, plan, args, result);
+        let answer = if self.held.is_some() && measures_object(plan, args, result) {
+            self.map_completion(plan, args, result)
+        } else {
+            measured_formula(self.arena, plan, args, result)
+        };
         if let Some(observer) = self.native_observer {
             observer.formula_leave();
         }

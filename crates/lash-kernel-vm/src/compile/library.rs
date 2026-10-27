@@ -30,6 +30,16 @@ impl Lib {
         self.operation
     }
 
+    /// Collection methods retain a call continuation after their mutation.
+    pub(crate) fn collection_method(&self) -> bool {
+        matches!(self.run, LibRun::Body(_))
+            && self.header.signature.result == lash_kernel_value::Type::Any
+            && matches!(
+                self.header.name.as_str(),
+                "ts.map.set" | "ts.map.get" | "ts.map.has" | "ts.set.add" | "ts.set.has"
+            )
+    }
+
     /// A text addition forwards both operands to the kernel concat native.
     /// The compiler derives the helper fact over every text representation.
     pub(crate) fn text_append(&self, exe: &Executable) -> Option<LibId> {

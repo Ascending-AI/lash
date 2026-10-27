@@ -1155,6 +1155,20 @@ await host.observe(JSON.stringify([xs, ys, zs, zs[2], 2 in zs, 3 in zs]));"#,
             "function build(values) {\n  const parts = [];\n  for (let i = 0; i < values.length; i++) {\n    parts.push(String(values[i]));\n  }\n  return parts;\n}\nconst result = build([1, 2.5, true, null, \"x\", 1e21, -0, NaN, 123456789012345]);\nconst call = build;\ncall([1]);\n",
         ),
         (
+            "Map argument construction at charge cuts",
+            "function probe() { const m = new Map(); m.set(String(1), 7); const present = m.has(String(1)); return [m.get(String(1)), present]; } await host.observe(probe());\n",
+        ),
+        // K-KEY-002/003 and K-CHG-007: normalized text keys, replacement
+        // with different-sized values, and graph values that require fallback.
+        (
+            "Map and Set text keys",
+            "function build(n) { const m = new Map(); const s = new Set(); const out = []; for (let i = 0; i < n; i++) { const key = String(i % 3); m.set(key, i); s.add(key); out.push([m.has(key), m.get(key), s.has(key)]); } m.set('0', 'longer replacement'); m.set('a long text key past the inline limit', 7); m.set('nested', [m]); out.push([m.get('0'), m.get('missing'), m.has('missing'), m.get('a long text key past the inline limit'), m.get('nested')[0] === m, m.size, s.size]); return out; } const result = build(7); const call = build; call(2); await host.observe(result);\n",
+        ),
+        (
+            "Map and Set key identities",
+            "function build() { const m = new Map(); const s = new Set(); const object = {}; const keys = ['x', 'a long text key past the inline limit', null, true, -0, NaN, 1n, 1, undefined, object]; for (const key of keys) { m.set(key, key); s.add(key); } object.changed = true; const out = []; for (const key of keys) { out.push([m.has(key), m.get(key) === key || Number.isNaN(key), s.has(key)]); } m.set(); s.add(); out.push([m.size, s.size, m.has(), m.get() === undefined]); return out; } const result = build(); const call = build; call(); await host.observe(result);\n",
+        ),
+        (
             "branded record",
             "function build(n) {\n  const row = new Map();\n  for (let i = 0; i < n; i++) {\n    row[\"total\"] = (row[\"total\"] || 0) + i;\n  }\n  return row[\"total\"];\n}\nconst call = build;\ncall(0);\nconst result = build(5);\n",
         ),
@@ -1249,6 +1263,19 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
                         .into()
                 )]
             );
+        }
+        if case
+            .id
+            .ends_with("Map argument construction at charge cuts")
+        {
+            for charge in 0..=reference.charged {
+                assert_eq!(
+                    run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
+                    run_bounded::<3>(&case, &bodies, &mut Projector::default(), charge),
+                    "{} at charge {charge}",
+                    case.id,
+                );
+            }
         }
         if case.id.ends_with("default sort UTF16 and holes") {
             let Request::Effect(effect) = &planned.requests[0];
