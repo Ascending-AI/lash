@@ -108,7 +108,9 @@ pub trait Profiling {
     /// the run does not count.
     fn work(&self) -> Option<WorkReport>;
     /// Publishes the running task's frames and the machine's phase to
-    /// `context` from here on, for a sampler the embedder runs.
+    /// `context` from here on, for a sampler the embedder runs. Publication
+    /// preserves quiet execution. Register frames publish at frame transitions;
+    /// their statement is the last published site, not a per-instruction cursor.
     fn publish_context(&mut self, context: std::sync::Arc<GuestContext>);
     /// What the tokens of this run's counts and context name.
     fn guest_symbols(&self) -> GuestSymbols;

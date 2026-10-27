@@ -366,6 +366,104 @@ pub(super) fn profile(
 mod tests {
     use super::*;
 
+    // FIG-7445: publishing a sampler's context must preserve the quiet executor,
+    // including prepared property/index reads and resident stores.
+    #[test]
+    fn profiling_context_preserves_quiet_execution() {
+        let kernel = Kernel::new().unwrap();
+        for source in [
+            r#"var global_res = 0;
+function prop_read(n)
+{
+    var obj, sum, j;
+    obj = {a: 1, b: 2, c:3, d:4 };
+    sum = 0;
+    for(j = 0; j < n; j++) {
+        sum += obj.a;
+        sum += obj.b;
+        sum += obj.c;
+        sum += obj.d;
+    }
+    global_res = sum;
+    return n * 4;
+}
+function benchmark(n) { prop_read(n); return global_res; }
+console.log(JSON.stringify(benchmark(1000)));"#,
+            r#"var global_res = 0;
+function prop_write(n)
+{
+    var obj, j;
+    obj = {a: 1, b: 2, c:3, d:4 };
+    for(j = 0; j < n; j++) {
+        obj.a = j;
+        obj.b = j;
+        obj.c = j;
+        obj.d = j;
+    }
+    global_res = obj.a;
+    return n * 4;
+}
+function benchmark(n) { prop_write(n); return global_res; }
+console.log(JSON.stringify(benchmark(1000)));"#,
+            r#"var global_res = 0;
+function array_read(n)
+{
+    var tab, len, sum, i, j;
+    tab = [];
+    len = 10;
+    for(i = 0; i < len; i++)
+        tab[i] = i;
+    sum = 0;
+    for(j = 0; j < n; j++) {
+        sum += tab[0];
+        sum += tab[1];
+        sum += tab[2];
+        sum += tab[3];
+        sum += tab[4];
+        sum += tab[5];
+        sum += tab[6];
+        sum += tab[7];
+        sum += tab[8];
+        sum += tab[9];
+    }
+    global_res = sum;
+    return len * n;
+}
+function benchmark(n) { array_read(n); return global_res; }
+console.log(JSON.stringify(benchmark(1000)));"#,
+        ] {
+            let (program, _) = kernel.prepare(source, false).unwrap();
+            let run = |publish| {
+                let mut machine = start(&program).unwrap();
+                if publish {
+                    machine.publish_context(lash_kernel_vm::perf_witness::GuestContext::new());
+                }
+                machine.checkpoint().unwrap();
+                machine.count_execution();
+                let mut console = Console::default();
+                loop {
+                    match machine.run(&mut console, u64::MAX).unwrap() {
+                        Step::Slice => {}
+                        Step::Ended(End::Finished(_)) => break,
+                        other => panic!("cell did not finish: {other:?}"),
+                    }
+                }
+                (
+                    console.0,
+                    machine.meters().charged,
+                    machine.take_execution_census(),
+                )
+            };
+            let quiet = run(false);
+            let profiled = run(true);
+            println!(
+                "quiet and profiled census: {}",
+                serde_json::to_string(&quiet.2).unwrap()
+            );
+            assert_eq!(profiled, quiet, "{source}");
+        }
+    }
+
     // FIG-7431: creation-site metadata must name the executable library bodies,
     // in both dialects. Looking up a body site directly loses both names.
     #[test]

@@ -301,6 +301,7 @@ struct Island<'a, const OBSERVING: bool> {
     /// An observer is attached: helper calls answer as observed runs do.
     observed: bool,
     watching: Option<&'a dyn Projection>,
+    sampling: Option<&'a dyn observing::FramePublication>,
     /// The run's data limits, which natives answer under.
     limits: KernelDataLimits,
     /// Memory is accounted: heap operations stay within the entry nursery.
@@ -1134,10 +1135,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// charge it otherwise.
     #[inline(always)]
     fn kind_test(&mut self, site: &compiled::KindTest, x: Value) -> Answer {
-        if self
-            .projection()
-            .is_some_and(|observer| !observer.context_only())
-        {
+        if self.projection().is_some() {
             let kind = self.operate(&site.kind, &[x])?;
             return self.operate(&site.same, &[kind, site.literal]);
         }

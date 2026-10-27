@@ -224,7 +224,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some(value) = self.returned_literal(callee) {
             return Ok(value);
         }
-        self.record_entry(callee);
+        self.record_entry(callee, None);
         let mut active = self.new_frame(callee, args);
         self.execute(&mut active)
     }
@@ -363,6 +363,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         && let Some(watching) = &self.projection()
                     {
                         watching.pop(self.charged, self.arena.allocations());
+                    }
+                    if !active.resident
+                        && let Some(sampling) = self.sampling
+                    {
+                        sampling.pop();
                     }
                     slots -= active.slots.len();
                     self.recycle(active);
@@ -507,6 +512,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     fn activate(&mut self, frame: &mut Frame<'e>) {
         self.activate_mode(frame);
+        if let Some(sampling) = self.sampling {
+            sampling.statement(frame.callee.plan.code, frame.statement);
+        }
         self.admitted = frame.callee.compiled.admits(
             self.base + u64::from(self.depth),
             self.call_depth,
@@ -532,7 +540,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     /// Only a fresh virtual call replaces a reference frame push. Resuming
     /// an existing semantic frame after a slice is no new island entry.
-    fn record_entry(&self, callee: Callee<'_>) {
+    fn record_entry(&self, callee: Callee<'_>, caller: Option<(CodeId, Option<StmtId>)>) {
+        if let Some(sampling) = self.sampling {
+            if let Some((code, statement)) = caller {
+                sampling.statement(code, statement);
+            }
+            sampling.push(callee.plan.code);
+        }
         if OBSERVING && let Some(watching) = &self.projection() {
             watching.push(callee.plan.code, self.charged, self.arena.allocations());
         }

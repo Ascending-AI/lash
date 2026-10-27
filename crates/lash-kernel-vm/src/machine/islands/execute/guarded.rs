@@ -29,9 +29,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.admitted
             && self.charging
             && self.tape.is_none()
-            && self
-                .projection()
-                .is_none_or(|observer| observer.context_only())
+            && self.projection().is_none()
             && self.deferred_end.is_none()
             && !self.arena.boundary_due()
             && let Some(value) = self.guarded_path(frame, site)

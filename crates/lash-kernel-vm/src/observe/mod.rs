@@ -268,10 +268,25 @@ impl Observer {
         }
     }
 
-    /// Whether a charge tape is all that observes: the one observer a
-    /// region records for (`docs/design/kernel-regions.md` §1).
-    pub(crate) fn only_charges(&self) -> bool {
-        self.path.is_none() && self.work.is_none() && self.context.is_none()
+    /// Statement projections need the observing executor. A sampler's context
+    /// follows frame transitions independently and never selects that executor.
+    pub(crate) fn projects_execution(&self) -> bool {
+        self.path.is_some() || self.work.is_some()
+    }
+
+    /// Semantic observers retain helper bodies; context publication alone does
+    /// not change admission or replace prepared answers with those bodies.
+    pub(crate) fn observes_bodies(&self) -> bool {
+        self.projects_execution() || self.charges.is_some() || {
+            #[cfg(any(test, feature = "perf-witness"))]
+            {
+                self.work_witness
+            }
+            #[cfg(not(any(test, feature = "perf-witness")))]
+            {
+                false
+            }
+        }
     }
 
     #[inline(never)]

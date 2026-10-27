@@ -216,6 +216,7 @@ impl KernelMachine {
         };
         let entry = Entry {
             watching: None,
+            sampling: None,
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -395,7 +396,7 @@ impl KernelMachine {
             || self
                 .observer
                 .as_deref()
-                .is_some_and(|observer| !observer.only_charges())
+                .is_some_and(|observer| observer.projects_execution())
     }
 
     pub(super) fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
@@ -426,7 +427,10 @@ impl KernelMachine {
             open,
             charging,
             slice_end,
-            observed: self.observer.is_some(),
+            observed: self
+                .observer
+                .as_deref()
+                .is_some_and(|o| o.observes_bodies()),
             projecting: self.projects(sites),
             sites,
             limits: self.limits,
@@ -479,18 +483,27 @@ impl KernelMachine {
             .as_deref()
             .and_then(|observer| observer.charges.as_ref())
             .cloned();
-        let watching = if OBSERVING {
+        let (watching, sampling) = if OBSERVING {
             let coordinates = self.observation_coordinates(task, gate.sites, false)?;
-            Watching::new(
-                self.observer.as_deref_mut(),
-                &mut self.ran,
-                task,
-                coordinates,
-                host,
-                gate.sites,
+            (
+                Watching::new(
+                    self.observer.as_deref_mut(),
+                    &mut self.ran,
+                    task,
+                    coordinates,
+                    host,
+                    gate.sites,
+                ),
+                None,
             )
         } else {
-            None
+            (
+                None,
+                self.observer
+                    .as_deref_mut()
+                    .and_then(|observer| observer.context.as_mut())
+                    .map(|publisher| super::observing::Sampling::new(publisher, task)),
+            )
         };
         let mut arena = self.arena.borrow_mut();
         let running = self
@@ -515,6 +528,9 @@ impl KernelMachine {
             watching: watching
                 .as_deref()
                 .map(|watching| watching as &dyn super::Projection),
+            sampling: sampling
+                .as_ref()
+                .map(|s| s as &dyn super::observing::FramePublication),
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -815,18 +831,27 @@ impl KernelMachine {
             .as_deref()
             .and_then(|observer| observer.charges.as_ref())
             .cloned();
-        let watching = if OBSERVING {
+        let (watching, sampling) = if OBSERVING {
             let coordinates = self.observation_coordinates(task, gate.sites, true)?;
-            Watching::new(
-                self.observer.as_deref_mut(),
-                &mut self.ran,
-                task,
-                coordinates,
-                Some(host),
-                gate.sites,
+            (
+                Watching::new(
+                    self.observer.as_deref_mut(),
+                    &mut self.ran,
+                    task,
+                    coordinates,
+                    Some(host),
+                    gate.sites,
+                ),
+                None,
             )
         } else {
-            None
+            (
+                None,
+                self.observer
+                    .as_deref_mut()
+                    .and_then(|observer| observer.context.as_mut())
+                    .map(|publisher| super::observing::Sampling::new(publisher, task)),
+            )
         };
         let mut arena = self.arena.borrow_mut();
         let task_state = self
@@ -856,6 +881,9 @@ impl KernelMachine {
             watching: watching
                 .as_deref()
                 .map(|watching| watching as &dyn super::Projection),
+            sampling: sampling
+                .as_ref()
+                .map(|s| s as &dyn super::observing::FramePublication),
             ground: &ground,
             arena: &mut arena,
             sites: &mut self.sites,
@@ -979,6 +1007,7 @@ pub(in crate::machine) struct Ground<'a> {
 /// The borrows and current bound of one entry under a held ground.
 struct Entry<'a> {
     watching: Option<&'a dyn super::Projection>,
+    sampling: Option<&'a dyn super::observing::FramePublication>,
     ground: &'a Ground<'a>,
     arena: &'a mut Arena,
     sites: &'a mut SiteCaches,
@@ -1102,6 +1131,7 @@ fn open<'a, const OBSERVING: bool>(
         counters,
         observed: ground.observed,
         watching: entry.watching,
+        sampling: entry.sampling,
         limits: ground.limits,
         memory: ground.memory,
         ceiling,

@@ -192,6 +192,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         stop: Stop,
     ) -> Answer {
         self.give_back();
+        if let Some(sampling) = self.sampling {
+            sampling.statement(active.callee.plan.code, active.statement);
+        }
         #[cfg(any(test, feature = "perf-witness"))]
         if !self.scratch.exit.scheduling {
             let reason = if let Some(reason) = self.scratch.exit.reason.take() {

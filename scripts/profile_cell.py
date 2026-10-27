@@ -182,6 +182,9 @@ def report(raw: dict, out: Path, top: int = 10) -> dict:
                                              else (-selves[k], -inclusive[k], k))]
     totals = {key: raw[key] for key in ("instructions", "running_fraction", "allocations", "charge", "wall_seconds",
                                        "sample_hz", "refused", "overflow", "overruns", "pid", "window")}
+    for key in ("sampler_instructions", "sampler_counter_failures", "guest_accuracy"):
+        if key in raw:
+            totals[key] = raw[key]
     totals["samples"] = len(raw["samples"])
     totals["truncated_guest"] = sum(s["truncated_guest"] for s in raw["samples"])
     totals["truncated_native"] = sum(s["truncated_native"] for s in raw["samples"])
@@ -199,6 +202,11 @@ def report(raw: dict, out: Path, top: int = 10) -> dict:
              f"| Truncated guest / native samples | {totals['truncated_guest']} / {totals['truncated_native']} |",
              f"| Native addresses without source lines | {totals['unresolved_native_addresses']} |",
              f"| Source resolution seconds | {totals['symbolize_seconds']:.3f} |"]
+    if "sampler_instructions" in totals:
+        lines.append(f"Sampler handler instructions:u: {totals['sampler_instructions']}; "
+                     f"counter failures: {totals['sampler_counter_failures']}.")
+    if "guest_accuracy" in totals:
+        lines.append(f"Guest accuracy: {totals['guest_accuracy']}.")
     lines.append("Rust text self samples include inlined std/dependency work at the innermost Lash source frame; folded stacks retain every frame.")
     for label, rows in tables.items():
         lines += [f"\n{label}: self / inclusive CPU samples", "| Self | Inclusive | Function (file:line) |",

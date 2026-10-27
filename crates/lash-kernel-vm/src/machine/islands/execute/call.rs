@@ -157,7 +157,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             frame.waiting = Some(frame.pc - 1);
             (frame.admitted, frame.swift, frame.covered) =
                 (self.admitted, self.swift, self.covered);
-            self.record_entry(target);
+            self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));
             let inner = if let Some((callee, values)) = &inputs {
                 if let Some(callee) = callee {
                     regs[site.reg as usize] = *callee;

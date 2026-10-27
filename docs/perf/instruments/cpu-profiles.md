@@ -29,8 +29,21 @@ named function's source-map range and carry a `[body]` label. Helper functions
 retain their library names. Each native stack and its
 guest context come from one interrupt of the executing thread, not separate
 runs. Function tables group by the function's mapped body location; the joined
-view uses each frame's current statement line so build and sort sites within
-one function remain distinct. A thread CPU timer requests 100 samples per CPU second; this is CPU
+view uses the last published statement line, falling back to the function's
+mapped body line when no statement is published. Context publication preserves
+the quiet executor's admission, prepared helpers and typed access paths; it does
+not select the observing executor. In the quiet register program, frames update
+on entry, call, return and exit to the source evaluator. Statements inside an
+uninterrupted frame are not tracked, so a long build/sort loop in one frame has
+function-level accuracy. Caller lines are refreshed when a real callee frame is
+pushed. Source continuations retain statement-level accuracy and native phases.
+Helpers that run as frames retain their library names. Native and prepared/inlined
+answers inside the quiet register program stay attributed to their enclosing
+frame; the Rust stack identifies their implementation. Quiet publication adds
+no per-operation native-phase or per-statement taps. Work counters or path tracing
+requested separately still select their statement projections and are not enabled
+by `profile-cell`.
+A thread CPU timer requests 100 samples per CPU second; this is CPU
 residency rather than the older wall-residency sampler. Native frame-pointer
 walks retain inline frames after batch symbolization. The Rust text tables
 attribute inlined standard-library/dependency work to the innermost Lash
@@ -52,7 +65,13 @@ Totals include unscaled `instructions:u`, enabled/running times and running
 fraction, allocation and reallocation calls, exact charge and wall time over
 run-to-terminal. Instructions are refused below 99% PMU running time. These
 are observed-run totals, including instrumentation overhead, not an
-uninstrumented performance claim. Prepare/start/drop are outside the window.
+uninstrumented performance claim. `sampler_instructions` separately counts user
+instructions inside the signal handler, including refused reads, using an
+allocation-free PMU read at each end. A failed handler counter read or less than
+99% PMU running time refuses the capture. Subtracting that count leaves context
+publication, allocation counting, signal entry/return and counter-read edges in
+the total; it is not a claim of zero observer cost. Prepare/start/drop are outside
+the window.
 The command bounds the workload to 90 seconds and 8 GiB of address space.
 Symbolization uses one batch of unique addresses per ELF object and disables
 external debug downloads. A cache keyed by the complete raw-capture digest

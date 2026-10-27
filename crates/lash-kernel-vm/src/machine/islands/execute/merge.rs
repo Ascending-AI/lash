@@ -25,9 +25,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         .saturating_sub(self.register_bytes)
                         .saturating_sub(self.arena.held())
                         .saturating_sub(self.transient))
-            || self
-                .projection()
-                .is_some_and(|observer| !observer.context_only())
+            || self.projection().is_some()
         {
             return None;
         }

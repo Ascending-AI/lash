@@ -54,7 +54,7 @@ impl<'a> Watching<'a> {
         host: Option<&'a mut dyn crate::Host>,
         sites: bool,
     ) -> Option<Box<Self>> {
-        if ran.is_empty() && !sites && observer.as_ref().is_none_or(|o| o.only_charges()) {
+        if ran.is_empty() && !sites && observer.as_ref().is_none_or(|o| !o.projects_execution()) {
             return None;
         }
         let (identity, loops) =
@@ -272,6 +272,44 @@ impl<'a> Watching<'a> {
     }
 }
 
+/// A quiet entry publishes only where its physical frame stack changes. It
+/// borrows no counters and has no influence on execution policy.
+pub(super) struct Sampling<'a> {
+    publisher: RefCell<&'a mut crate::observe::Publisher>,
+    task: TaskId,
+}
+
+impl<'a> Sampling<'a> {
+    pub(super) fn new(publisher: &'a mut crate::observe::Publisher, task: TaskId) -> Self {
+        Self {
+            publisher: RefCell::new(publisher),
+            task,
+        }
+    }
+}
+
+pub(super) trait FramePublication {
+    fn push(&self, code: CodeId);
+    fn pop(&self);
+    fn statement(&self, code: CodeId, statement: Option<StmtId>);
+}
+
+impl FramePublication for Sampling<'_> {
+    fn push(&self, code: CodeId) {
+        self.publisher.borrow_mut().push(self.task.0, code.0);
+    }
+    fn pop(&self) {
+        self.publisher.borrow_mut().pop(self.task.0);
+    }
+    fn statement(&self, code: CodeId, statement: Option<StmtId>) {
+        self.publisher.borrow_mut().statement(
+            self.task.0,
+            code.0,
+            statement.map_or(crate::observe::NO_STATEMENT, |s| s.0),
+        );
+    }
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     #[inline(always)]
     pub(super) fn observed_native(
@@ -325,7 +363,6 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn root_call(&self, exe: &Executable, id: StmtId, arguments: usize);
     fn condition(&self, exe: &Executable, id: StmtId);
     fn sites(&self) -> bool;
-    fn context_only(&self) -> bool;
     fn loops(&self, loops: Vec<LoopIteration>);
     fn action(&self, exe: &Executable, index: usize, occurrence: u64) -> Result<(), Halt>;
     fn native_begin(&self, lib: LibId);
@@ -334,14 +371,6 @@ pub(super) trait Projection: crate::observe::NativeObservation {
     fn pop(&self, charged: u64, allocated: u64);
 }
 impl Projection for Watching<'_> {
-    fn context_only(&self) -> bool {
-        !self.sites
-            && self.ran.borrow().is_empty()
-            && self.observer.as_ref().is_none_or(|observer| {
-                let observer = observer.borrow();
-                observer.work.is_none() && observer.path.is_none()
-            })
-    }
     fn reset_facts(&self) {
         Watching::reset_facts(self);
     }

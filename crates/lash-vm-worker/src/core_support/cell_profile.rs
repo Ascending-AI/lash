@@ -79,6 +79,9 @@ struct State {
     overflow: u64,
     overruns: u64,
     timer: libc::timer_t,
+    counter: InstructionCounter,
+    handler_instructions: u64,
+    counter_failures: u64,
 }
 
 struct Errno(i32);
@@ -99,6 +102,26 @@ extern "C" fn interrupt(_: i32, info: *mut libc::siginfo_t, registers: *mut libc
     unsafe {
         let _errno = Errno(*libc::__errno_location());
         let state = &mut *((*info).si_value().sival_ptr.cast::<State>());
+        let before = state.counter.try_snapshot();
+        capture_interrupt(state, registers);
+        match (before, state.counter.try_snapshot()) {
+            (Some(before), Some(after))
+                if after.time_enabled > before.time_enabled
+                    && (after.time_running - before.time_running) as f64
+                        / (after.time_enabled - before.time_enabled) as f64
+                        >= 0.99 =>
+            {
+                state.handler_instructions += after.instructions - before.instructions;
+            }
+            _ => state.counter_failures += 1,
+        }
+    }
+}
+
+fn capture_interrupt(state: &mut State, registers: *mut libc::c_void) {
+    // SAFETY: called only by interrupt with its live signal context and exclusive
+    // preallocated state. All pointers below follow the handler's bounds checks.
+    unsafe {
         state.overruns += libc::timer_getoverrun(state.timer).max(0) as u64;
         if state.samples.len() == state.samples.capacity() {
             state.overflow += 1;
@@ -233,6 +256,9 @@ impl Sampler {
                 overflow: 0,
                 overruns: 0,
                 timer: std::ptr::null_mut(),
+                counter: InstructionCounter::open_inherited()?,
+                handler_instructions: 0,
+                counter_failures: 0,
             }));
             let mut set: libc::sigset_t = std::mem::zeroed();
             libc::sigemptyset(&raw mut set);
@@ -438,8 +464,15 @@ pub(super) fn capture(
         "instructions":instructions,"running_fraction":instructions.running_fraction(),
         "allocations":allocations,"charge":machine.meters().charged,"wall_seconds":wall,
         "codes":codes,"statements":statements,"libs":libs,"samples":samples,
-        "refused":state.refused,"overflow":state.overflow,"overruns":state.overruns});
+        "refused":state.refused,"overflow":state.overflow,"overruns":state.overruns,
+        "sampler_instructions":state.handler_instructions,"sampler_counter_failures":state.counter_failures,
+        "guest_accuracy":"frame transitions in quiet register execution; statements in source continuations"});
     std::fs::write(out.join("raw.json"), serde_json::to_vec(&raw)?)?;
+    if state.counter_failures > 0 {
+        return Err(
+            "sampler instruction counter read or PMU residency failed; inspect raw.json".into(),
+        );
+    }
     if state.overflow > 0 || state.overruns > 0 {
         return Err("CPU sample capacity/schedule lost samples; inspect raw.json".into());
     }

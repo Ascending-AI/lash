@@ -100,15 +100,21 @@ impl InstructionCounter {
 
     /// Read count and scheduling times together.
     pub fn snapshot(&self) -> Result<InstructionReading> {
+        self.try_snapshot().ok_or_else(|| {
+            io::Error::other(format!(
+                "read instructions counter and scheduling times: {}",
+                io::Error::last_os_error()
+            ))
+        })
+    }
+
+    /// A signal handler must not format or allocate an error on a failed read.
+    pub(super) fn try_snapshot(&self) -> Option<InstructionReading> {
         let mut reading = InstructionReading::default();
         let size = std::mem::size_of::<InstructionReading>();
         // SAFETY: the kernel writes the three u64 fields selected by read_format.
         let read = unsafe { libc::read(self.0, (&raw mut reading).cast(), size) };
-        require(
-            read == size as isize,
-            "read instructions counter and scheduling times",
-        )?;
-        Ok(reading)
+        (read == size as isize).then_some(reading)
     }
 }
 

@@ -231,7 +231,11 @@ impl KernelMachine {
         // Observed deferred plans validate before offering their prepared
         // entry, just as general invoke dispatch does.
         let answer = if !entry.operator
-            || (self.observer.is_some() && matches!(function.run, crate::compile::LibRun::Body(_)))
+            || (self
+                .observer
+                .as_deref()
+                .is_some_and(|o| o.observes_bodies())
+                && matches!(function.run, crate::compile::LibRun::Body(_)))
         {
             self.answer(running.task, running.exe, lib, args, count, args)
         } else {
