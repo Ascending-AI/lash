@@ -1033,13 +1033,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     args,
                     reads,
                     property,
+                    finish,
                 } => {
                     let values = match reads {
-                        Some(reads) => self.inputs::<3>(&frame.slots, reads)?,
+                        Some(reads) => self.inputs::<3>(&frame.slots, reads.as_slice())?,
                         None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
                     };
                     let answer = self
-                        .property_value(frame.statement, property, site.close, &values)
+                        .property_write(frame.statement, property, site.close, &values)
+                        .map(|answer| answer.map(|()| values[2]))
                         .unwrap_or_else(|| {
                             self.retaining(&mut frame.transient, |island| {
                                 island.heap_call(site, &values)
@@ -1052,6 +1054,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             }
                         }
                     })?;
+                    if let Some(leaves) = finish {
+                        return self.finish_statement(frame, *leaves, None);
+                    }
                 }
                 Op::Heap { site, args } => {
                     let mut values = [Value::Absent; MAX_ARGS];
@@ -1154,8 +1159,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         })?
                 }
                 Op::Access(site) => return self.access(frame, site),
-                Op::AccessInit { head, original } => {
-                    return self.access_init(frame, *head, original);
+                Op::AccessInit {
+                    head,
+                    original,
+                    held,
+                } => {
+                    return self.access_init(frame, *head, original, held.as_deref());
                 }
                 Op::DirectKind { site, reads } => {
                     let [value] = self.inputs::<1>(&frame.slots, reads)?;

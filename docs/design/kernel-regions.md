@@ -95,6 +95,14 @@ of region are built from one unit.
   is cold, as a conditional arm of other ops is: reaching it exits at its
   first op once its unit is charged, so a guard's fallback (`ts.read` of a
   record the island cannot read in place) leaves the body an island.
+  Compact member reads can consume an adjacent scalar update and its
+  preceding pure local copy. They substitute that saved operand while
+  checking the complete source charge interval, then commit the original
+  bindings together. Charge cuts, tight memory and detailed observers keep
+  the source instructions and their evaluated prefixes. The source frame
+  reservation does not shrink. Property stores consume an untargeted
+  statement-completion edge. Compact access execution stays out of line
+  from the common register dispatcher.
 - **Merge pass.** The register compiler recognizes a complete stable
   bottom-up merge pass from its source data flow. Integer bookkeeping and
   element placement run natively on that frame's variables. The comparator
@@ -275,6 +283,10 @@ over variables and constants, and `if`s whose test is such a comparison
 and whose arms are such statements whole; a `while`'s test heads its
 body's first run. Operators, assignments, statement commits and forward
 branches are flat typed instructions with explicit operands and results.
+The executor decodes an adjacent comparison, commit and branch together,
+and likewise an arithmetic result, assignment and commit. The verifier
+still checks each source instruction and event program; taped and counted
+execution retain each statement's own commit.
 Statement-local numeric temporaries are separate from the sixteen variable
 registers, so flattening imposes no additional eligibility limit. The unit is
 the run of statements, not the expression: a
@@ -391,6 +403,9 @@ Keyed writes (FIG-6979) take what an earlier read of the region proved:
   still the version the proof names and the entry there is keyed by it.
   An edit that adds, removes or moves an entry revokes the version, and a
   write by another key fails the key check: either finds its key again.
+  A float replacing a float has the same flat member size and no arena
+  holding edges, so it leaves those ledgers unchanged. Its dirty card and
+  occurrence count are still updated immediately, as for every write.
 - **Element writes.** A template that declares its paths on a list, a
   whole float position at least zero below the list's length and
   2³² − 1, and a value to be the element write

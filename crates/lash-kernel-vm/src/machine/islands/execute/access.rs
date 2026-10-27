@@ -74,13 +74,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some([read(args[0])?, read(args[1])?, read(args[2])?])
     }
 
-    pub(super) fn property_value(
+    pub(super) fn property_write(
         &mut self,
         statement: Option<StmtId>,
         site: &super::super::compiled::PropertyWrite,
         close: Option<Close>,
         values: &[Value; 3],
-    ) -> Option<Answer> {
+    ) -> Option<Result<(), Stop>> {
         if OBSERVING
             || !self.swift
             || self.deferred_end.is_some()
@@ -161,9 +161,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         self.charged = end;
         self.covered = false;
-        Some(Ok(values[2]))
+        Some(Ok(()))
     }
 
+    #[inline(never)]
     pub(super) fn access(
         &mut self,
         frame: &mut Frame<'e>,
@@ -175,7 +176,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             && self.projection().is_none()
             && self.deferred_end.is_none()
             && !self.arena.boundary_due()
-            && let Some(answer) = self.access_value(frame, site, 0, false)
+            && let Some(answer) = self.access_value(frame, site, 0, false, None)
         {
             return self.commit_access(frame, site, answer);
         }
@@ -192,22 +193,38 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Frame<'e>,
         head: usize,
         init: &WriteSite,
+        held: Option<&WriteSite>,
     ) -> Result<Next, Stop> {
-        if let Some(begin) = &init.begin {
+        let original = held.unwrap_or(init);
+        if let Some(begin) = &original.begin {
             self.begin(frame, begin.id, begin.index, begin.ahead)?;
         }
         let Op::Access(site) = &frame.callee.compiled.ops[head].op else {
             unreachable!()
         };
-        let extra = 1 + init.close.map_or(0, |close| u64::from(close.total));
+        let extra = 1
+            + init.close.map_or(0, |close| u64::from(close.total))
+            + held.map_or(0, |held| {
+                1 + held.close.map_or(0, |close| u64::from(close.total))
+            });
+        let saved = held.and_then(|held| {
+            let [read] = held.reads.as_deref()? else {
+                return None;
+            };
+            Some((held.at, self.pure(&frame.slots, read)?))
+        });
         if self.admitted
             && self.charging
             && self.tape.is_none()
             && self.projection().is_none()
             && self.deferred_end.is_none()
             && !self.arena.boundary_due()
-            && let Some(answer) = self.access_value(frame, site, extra, true)
+            && (held.is_none() || saved.is_some())
+            && let Some(answer) = self.access_value(frame, site, extra, true, saved)
         {
+            if let Some((at, value)) = saved {
+                frame.slots[at] = SlotState::Value(value);
+            }
             let Some(Position::Block(_, index)) = frame.control.last_mut() else {
                 unreachable!()
             };
@@ -219,18 +236,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             execution::statements(
                 &self.scratch.census,
                 Owner::RegisterProgram,
-                1,
+                1 + u64::from(held.is_some()),
                 self.scratch.counting,
             );
             return self.commit_access(frame, site, answer);
         }
-        let Some(reads) = &init.reads else {
+        let Some(reads) = &original.reads else {
             unreachable!("a combined initializer retains its literal operand")
         };
         let value = self.inputs::<1>(&frame.slots, reads)?[0];
-        self.write_value(frame, init, value)
+        self.write_value(frame, original, value)
     }
 
+    #[inline(always)]
     fn commit_access(
         &mut self,
         frame: &mut Frame<'e>,
@@ -271,12 +289,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.finish_statement(frame, leaves, None)
     }
 
+    #[inline(always)]
     fn access_value(
         &mut self,
         frame: &Frame<'e>,
         site: &AccessSite,
         extra: u64,
         initializing: bool,
+        saved: Option<(usize, Value)>,
     ) -> Option<ReadAnswer> {
         if !initializing && matches!(frame.slots[site.at], SlotState::Empty) {
             return None;
@@ -403,7 +423,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 value
             }
         };
-        if let Some(answer) = self.access_tail(frame, site, value, units) {
+        if let Some(answer) = self.access_tail(frame, site, value, units, saved) {
             return Some(answer);
         }
         let end = self.charged.checked_add(units)?;
@@ -415,12 +435,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         })
     }
 
+    #[inline(always)]
     fn access_tail(
         &self,
         frame: &Frame<'e>,
         site: &AccessSite,
         value: Value,
         mut units: u64,
+        saved: Option<(usize, Value)>,
     ) -> Option<ReadAnswer> {
         if let Some(short) = &site.short {
             units = units.checked_add(site.fixed - short.fixed)?;
@@ -435,12 +457,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             {
                 return None;
             }
-            let (_, fast) = self.exe.lib(hole.lib).prepared.as_ref()?;
-            units = units.checked_add(fast.immediate(
-                &[value, Value::Absent],
-                Fresh::of(0b10),
-                &Value::Bool(false),
-            )?)?;
+            let charged = match (value, hole.floats) {
+                (Value::Float(_), Some(units)) => units,
+                _ => {
+                    let (_, fast) = self.exe.lib(hole.lib).prepared.as_ref()?;
+                    fast.immediate(
+                        &[value, Value::Absent],
+                        Fresh::of(0b10),
+                        &Value::Bool(false),
+                    )?
+                }
+            };
+            units = units.checked_add(charged)?;
         }
         let consumed = if let Some(consumer) = &site.consumer {
             if matches!(frame.slots[consumer.at], SlotState::Empty)
@@ -451,18 +479,34 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let read = |arg: &Read| {
                 if matches!(arg, Read::Local { at, shared: false, .. } if *at == site.at) {
                     Some(value)
+                } else if let (
+                    Read::Local {
+                        at, shared: false, ..
+                    },
+                    Some((held, value)),
+                ) = (arg, saved)
+                    && *at == held
+                {
+                    Some(value)
                 } else {
                     self.pure(&frame.slots, arg)
                 }
             };
             let values = [read(&consumer.reads[0])?, read(&consumer.reads[1])?];
-            let (Op::Accumulation { site: operator, .. }
-            | Op::DirectOperator { site: operator, .. }) =
-                &frame.callee.compiled.ops[consumer.operator].op
-            else {
-                unreachable!()
+            let (answer, charged) = match (values, consumer.floats) {
+                ([Value::Float(a), Value::Float(b)], Some((op, units))) => {
+                    (lash_kernel_doc::scalar::floats(op, a, b)?, units)
+                }
+                _ => {
+                    let (Op::Accumulation { site: operator, .. }
+                    | Op::DirectOperator { site: operator, .. }) =
+                        &frame.callee.compiled.ops[consumer.operator].op
+                    else {
+                        unreachable!()
+                    };
+                    self.scalar_operator(operator, &values)?
+                }
             };
-            let (answer, charged) = self.scalar_operator(operator, &values)?;
             units = units.checked_add(charged)?;
             Some(answer)
         } else {

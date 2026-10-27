@@ -683,6 +683,8 @@ fn observe_scalar_bounded(
 #[test]
 fn scalar_layouts_agree() {
     for (case, body) in [
+        "let i = 0.0 while flat.lt(i, 5.0) { set i = flat.add(i, 1.0) } return i",
+        "let i = 0.0 let s = 0.0 while flat.lt(i, 5.0) { if flat.lt(i, 2.0) { set s = flat.add(s, 2.0) } else { set s = flat.add(s, 3.0) } set i = flat.add(i, 1.0) } return (i, s)",
         "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 5.0) { set s = flat.add(flat.mul(s, -0.0), flat.div(0.0, 0.0)) set i = flat.add(i, 1.0) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.rem(s, 2.0) set i = flat.add(i, 1.0) } print s return s",

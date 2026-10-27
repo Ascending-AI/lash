@@ -314,6 +314,14 @@ impl<T: Domain> State<'_, T> {
             }
         }
     }
+
+    #[inline(always)]
+    fn commit(&mut self, units: u64, formulas: usize, program: &[Event]) {
+        self.units += units;
+        if self.record {
+            self.recorded(program, formulas);
+        }
+    }
 }
 
 /// A scalar operand: a frame register, a constant, or a statement-local
@@ -577,7 +585,7 @@ impl<T: Domain> Program<T> {
     // The silent callback is zero-sized: an uncounted iteration carries no
     // collector argument. Keep the checked loop and its refusal mapping at
     // this one boundary rather than decoding Option<Ran> in every caller.
-    #[inline(never)]
+    #[inline(always)]
     fn execute_program(
         &self,
         _exe: &Executable,
@@ -610,12 +618,50 @@ impl<T: Domain> Program<T> {
                     let value = T::number(*op, a, b)?;
                     state.charge(table, a, b, value.sized());
                     state.temps[*dst] = value;
+                    if let [
+                        Instruction::Set {
+                            value: Arg::Temp(source),
+                            dst: slot,
+                        },
+                        Instruction::Commit {
+                            units,
+                            formulas,
+                            program,
+                            ..
+                        },
+                        ..,
+                    ] = &self.code[pc + 1..]
+                        && source == dst
+                    {
+                        state.regs[usize::from(*slot)] = value;
+                        state.written |= 1 << slot;
+                        committed();
+                        state.commit(*units, *formulas, program);
+                        pc += 3;
+                        continue;
+                    }
                 }
                 Instruction::Compare { kernel, a, b } => {
                     let Kernel { op, table } = &self.kernels[*kernel];
                     let (a, b) = (a.get(state), b.get(state));
                     state.holds = T::truth(*op, a, b)?;
                     state.charge(table, a, b, 0);
+                    if let [
+                        Instruction::Commit {
+                            units,
+                            formulas,
+                            program,
+                            ..
+                        },
+                        Instruction::Branch { otherwise },
+                        ..,
+                    ] = &self.code[pc + 1..]
+                    {
+                        committed();
+                        state.commit(*units, *formulas, program);
+                        pc = if state.holds { pc + 3 } else { *otherwise };
+                        continue;
+                    }
                 }
                 Instruction::Set { value, dst } => {
                     state.regs[usize::from(*dst)] = value.get(state);
@@ -628,10 +674,7 @@ impl<T: Domain> Program<T> {
                     ..
                 } => {
                     committed();
-                    state.units += units;
-                    if state.record {
-                        state.recorded(program, *formulas);
-                    }
+                    state.commit(*units, *formulas, program);
                 }
                 Instruction::Branch { otherwise } if !state.holds => {
                     pc = *otherwise;

@@ -12,8 +12,8 @@ use super::*;
 /// separates the calls. Earlier fused scalar writes and distinct field names
 /// catch relocating a field-name index as though it were an instruction PC.
 const GUARDED: &str = r#"
-definition "function read(obj: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let certified = flat.identity(1) let names = {left: certified, right: 2} do names.left do names.right let sum = 0 let i = 0 while flat.lt(i, rounds) { let t = absent if same(kind(obj), \"record\") { if bool.not(record.contains(obj, \"__lash_brand\")) { set t = obj.a } else { set t = 100 } } else { set t = 200 } set sum = flat.add(sum, t) set i = flat.add(i, 1) } return sum }"
-definition "function item(xs: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let sum = 0 let i = 0 while flat.lt(i, rounds) { let t = absent if same(kind(xs), \"list\") { if flat.lt(1, list.len(xs)) { set t = xs[1] if same(t, ()) { set t = 0 } } else { set t = 100 } } else { set t = 200 } set sum = flat.add(sum, t) set i = flat.add(i, 1) } return sum }"
+definition "function read(obj: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let certified = flat.identity(1) let names = {left: certified, right: 2} do names.left do names.right let sum = 0 let i = 0 while flat.lt(i, rounds) { let held = sum let t = absent if same(kind(obj), \"record\") { if bool.not(record.contains(obj, \"__lash_brand\")) { set t = obj.a } else { set t = 100 } } else { set t = 200 } set sum = flat.add(held, t) set i = flat.add(i, 1) } return sum }"
+definition "function item(xs: Any, rounds: Any) -> Any\nkernel 1\nmetering statements\nbody { let sum = 0 let i = 0 while flat.lt(i, rounds) { let held = sum let t = absent if same(kind(xs), \"list\") { if flat.lt(1, list.len(xs)) { set t = xs[1] if same(t, ()) { set t = 0 } } else { set t = 100 } } else { set t = 200 } set sum = flat.add(held, t) set i = flat.add(i, 1) } return sum }"
 main {
   let plain = {a: 1, b: 2}
   let branded = {__lash_brand: "x", a: 5}
@@ -248,6 +248,27 @@ main {
     assert!(reference.0.starts_with("finished"), "{}", reference.0);
     let natural = guarded_run(WRITES, false, u64::MAX, super::super::embedder::ROOMY);
     assert_eq!(natural, reference);
+    // K-MACH-008: same-sized scalar overwrites still dirty based cards;
+    // replacing an arena edge by a scalar still releases that edge.
+    let floats = WRITES.replace(
+        "set obj.a = i",
+        "set obj.a = 0.0 set obj.a = -0.0 set obj.a = 2.5 set obj.a = xs set obj.a = 3.5",
+    );
+    assert_eq!(
+        guarded_run(&floats, false, u64::MAX, super::super::embedder::ROOMY),
+        guarded_run(&floats, true, u64::MAX, super::super::embedder::ROOMY),
+    );
+    for memory in [4096, 24 << 10, 64 << 10] {
+        let bounds = Bounds {
+            memory,
+            ..super::super::embedder::ROOMY
+        };
+        assert_eq!(
+            guarded_run(&floats, false, 23, bounds),
+            guarded_run(&floats, true, 23, bounds),
+            "scalar overwrite at memory {memory}",
+        );
+    }
     for slice in [1, 2, 3, 5, 7, 11, 13, 17, 23, 31] {
         assert_eq!(
             guarded_run(WRITES, false, slice, super::super::embedder::ROOMY),

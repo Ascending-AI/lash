@@ -26,9 +26,9 @@ use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Objects, ShortText, Table};
 use lash_kernel_doc::{NativeError, Retry, Value};
 
-use super::Facts;
 use super::keys::{Key, key_of};
 use super::layouts::{Layout, Layouts, Step};
+use super::{CARD, Facts};
 
 /// A table's key index and its entries' insertion sequences: a shared
 /// layout's, or its own.
@@ -642,6 +642,16 @@ impl super::Arena {
     /// The body and index of the resident table `handle`, and its facts.
     #[inline]
     fn table_facts(&self, handle: ArenaHandle) -> Result<(&Table, &Index, &Facts), NativeError> {
+        let (body, facts) = self.table_body(handle)?;
+        let index = facts
+            .index
+            .as_ref()
+            .ok_or(NativeError::Malformed("a resident table has no index"))?;
+        Ok((table_of(body)?, index, facts))
+    }
+
+    #[inline]
+    fn table_body(&self, handle: ArenaHandle) -> Result<(&Body, &Facts), NativeError> {
         let (Some(body), Some(facts)) = (
             self.objects.get(handle),
             self.facts.get(handle.index() as usize),
@@ -655,11 +665,7 @@ impl super::Arena {
             }
             .into());
         }
-        let index = facts
-            .index
-            .as_ref()
-            .ok_or(NativeError::Malformed("a resident table has no index"))?;
-        Ok((table_of(body)?, index, facts))
+        Ok((body, facts))
     }
 
     #[inline]
@@ -730,52 +736,60 @@ impl super::Arena {
 
     /// Writes `value` over the entry at `place` where the short text `key`
     /// keys it in the table's `version` ([`Self::table_version`]), as
-    /// [`Self::table_overwrite`] writes over that entry, without finding
-    /// it. Gives the entry's sequence, or `None`, having written nothing,
-    /// where the table is cold or no longer that version, or no resident
-    /// entry at `place` is keyed `key`.
-    pub(super) fn table_overwrite_at(
+    /// [`Self::table_write`] writes over that entry, without finding
+    /// it. Gives `false`, having written nothing, where the table is cold
+    /// or no longer that version, or no resident entry at `place` is keyed
+    /// `key`.
+    #[inline(always)]
+    pub fn table_write_at(
         &mut self,
         handle: ArenaHandle,
         version: (u64, u64),
         place: Place,
         key: &ShortText,
         value: Value,
-    ) -> Result<Option<u64>, NativeError> {
+    ) -> Result<bool, NativeError> {
         let (Some(body), Some(facts)) = (
             self.objects.get_mut(handle),
-            self.facts.get(handle.index() as usize),
+            self.facts.get_mut(handle.index() as usize),
         ) else {
             return Err(NativeError::Malformed("a stale handle reached the machine"));
         };
         if facts.cold || !Self::proves(facts, version) {
-            return Ok(None);
+            return Ok(false);
         }
         let Some(seq) = facts
             .index
             .as_ref()
             .and_then(|index| index.sequences(place.chunk).get(place.at))
         else {
-            return Ok(None);
+            return Ok(false);
         };
         let set = matches!(body, Body::Set(_));
         let Some(Chunk::Resident(values)) = table_mut(body)?.chunks.get_mut(place.chunk) else {
-            return Ok(None);
+            return Ok(false);
         };
         let Some([Value::Text(held_key), held]) = values.get_mut(place.at * 2..place.at * 2 + 2)
         else {
-            return Ok(None);
+            return Ok(false);
         };
         if held_key != key {
-            return Ok(None);
+            return Ok(false);
         }
         let old = std::mem::replace(held, value);
+        // Floats have identical leaf sizes and no arena holding edges.
+        // Dirty-card marking still happens immediately on this path.
+        if matches!((old, value), (Value::Float(_), Value::Float(_))) {
+            Self::mark_resident(facts, &mut self.dirty, handle, Some(seq / CARD));
+            return Ok(true);
+        }
         if !set {
             self.update_flat(handle, Some(&old), Some(&value));
         }
         self.hold(&value);
         self.unhold(&old);
-        Ok(Some(seq))
+        self.mark(handle, Some(seq / CARD))?;
+        Ok(true)
     }
 
     /// Writes `value` under `key`, whose resident key is `resident` and
@@ -956,18 +970,31 @@ impl super::Arena {
         slot: Option<PropertySlot>,
         key: &Key,
     ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
-        let (table, index, facts) = self.table_facts(handle)?;
+        let (body, facts) = self.table_body(handle)?;
         let version = (facts.revision != u64::MAX).then_some((facts.token, facts.revision));
         let short = match key {
             Key::Text(low, high) => Some(u128::from(*high) << 64 | u128::from(*low)),
             _ => None,
         };
+        // The proof's object generation and structural revision still
+        // agree. A proved absence needs neither the table nor its index.
+        if let (Some(slot), Some(word)) = (slot, short)
+            && slot.place.is_none()
+            && slot.key == word
+            && version == Some(slot.version)
+        {
+            return Ok((None, Some(slot)));
+        }
+        let index = facts
+            .index
+            .as_ref()
+            .ok_or(NativeError::Malformed("a resident table has no index"))?;
+        let table = table_of(body)?;
         if let (Some(slot), Some(word)) = (slot, short)
             && slot.key == word
         {
             let current = version == Some(slot.version);
             match slot.place {
-                None if current => return Ok((None, Some(slot))),
                 None => {}
                 Some(place) => {
                     if let Some(pair) = table

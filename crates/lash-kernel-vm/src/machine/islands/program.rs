@@ -174,8 +174,9 @@ pub(in crate::machine::islands) enum Op {
     PropertyStore {
         site: HeapSite,
         args: Box<[u32]>,
-        reads: Option<Box<[Read]>>,
+        reads: Option<Box<[Read; 3]>>,
         property: Box<super::PropertyWrite>,
+        finish: Option<u32>,
     },
     Reserve {
         kind: lash_kernel_doc::ValueKind,
@@ -293,6 +294,7 @@ pub(in crate::machine::islands) enum Op {
     AccessInit {
         head: usize,
         original: Box<WriteSite>,
+        held: Option<Box<WriteSite>>,
     },
     /// A local's binary update and its write share one instruction.
     Accumulation {
@@ -307,12 +309,14 @@ pub(in crate::machine::islands) enum Op {
 /// The most arms a guarded read enters.
 pub(in crate::machine::islands) const GUARDED_ARMS: usize = 4;
 
+#[derive(Clone)]
 pub(in crate::machine::islands) struct StatementEntry {
     pub(in crate::machine::islands) id: StmtId,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) ahead: u64,
 }
 
+#[derive(Clone)]
 pub(in crate::machine::islands) struct WriteSite {
     pub(in crate::machine::islands) begin: Option<StatementEntry>,
     pub(in crate::machine::islands) reads: Option<Box<[Read]>>,

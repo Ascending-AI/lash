@@ -35,6 +35,21 @@ impl Build<'_> {
             }
             if !protected.contains(&at) {
                 instruction.op = fixed(instruction.op);
+                if let Op::PropertyStore { finish, .. } = &mut instruction.op
+                    && let Some((next, following)) = old.peek()
+                    && !targets.contains(next)
+                    && following.begin.is_none()
+                    && matches!(following.op, Op::Done { empty: None, .. })
+                {
+                    let Some((next, following)) = old.next() else {
+                        unreachable!()
+                    };
+                    relocation[next] = self.ops.len();
+                    let Op::Done { leaves, .. } = following.op else {
+                        unreachable!()
+                    };
+                    *finish = Some(leaves);
+                }
                 let candidate = match &instruction.op {
                     Op::Unary {
                         site,

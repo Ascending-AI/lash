@@ -56,9 +56,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         && let [target, key, value] = args
                         && let Some(values) = self.pure_call_values(frame, [target, key, value])
                         && let Some(answer) =
-                            self.property_value(frame.statement, property, site.close, &values)
+                            self.property_write(frame.statement, property, site.close, &values)
                     {
-                        frame.regs[site.reg as usize] = answer?;
+                        answer?;
+                        frame.regs[site.reg as usize] = values[2];
                         if site.after != 0 {
                             self.admit(site.after);
                         }

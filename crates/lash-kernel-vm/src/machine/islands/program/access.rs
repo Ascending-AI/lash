@@ -30,6 +30,7 @@ pub(in crate::machine::islands) struct AccessEnd {
 
 pub(in crate::machine::islands) struct AccessHole {
     pub(in crate::machine::islands) lib: LibId,
+    pub(in crate::machine::islands) floats: Option<u64>,
 }
 
 pub(in crate::machine::islands) struct AccessConsumer {
@@ -38,6 +39,7 @@ pub(in crate::machine::islands) struct AccessConsumer {
     pub(in crate::machine::islands) at: usize,
     pub(in crate::machine::islands) next: usize,
     pub(in crate::machine::islands) accumulates: bool,
+    pub(in crate::machine::islands) floats: Option<(lash_kernel_doc::scalar::ScalarOp, u64)>,
 }
 
 pub(in crate::machine::islands) enum AccessShape {
@@ -178,7 +180,9 @@ impl Build<'_> {
                         }),
                         _ => None,
                     })
-                    .collect::<Option<Box<[_]>>>()
+                    .collect::<Option<Vec<_>>>()
+                    .and_then(|reads| reads.try_into().ok())
+                    .map(Box::new)
             } else {
                 None
             };
@@ -186,9 +190,13 @@ impl Build<'_> {
                 Depth::None => 0,
                 Depth::Operation(n) | Depth::Template(n) => n,
             };
-            let Some(property) =
-                self.property(site.lib, site.root, site.counted, depth, reads.as_deref())
-            else {
+            let Some(property) = self.property(
+                site.lib,
+                site.root,
+                site.counted,
+                depth,
+                reads.as_deref().map(|reads: &[Read; 3]| reads.as_slice()),
+            ) else {
                 continue;
             };
             let fold = reads.is_some();
@@ -201,6 +209,7 @@ impl Build<'_> {
                 args,
                 reads,
                 property,
+                finish: None,
             };
             if fold {
                 self.ops[at].begin = self.ops[start].begin.take();
@@ -283,7 +292,36 @@ impl Build<'_> {
                 else {
                     unreachable!()
                 };
-                self.ops[head - 1].op = Op::AccessInit { head, original };
+                self.ops[head - 1].op = Op::AccessInit {
+                    head,
+                    original,
+                    held: None,
+                };
+                if head >= 2
+                    && let Op::Write { site: held } = &self.ops[head - 2].op
+                    && let Op::Access(site) = &self.ops[head].op
+                    && held.bind
+                    && !held.shared
+                    && !held.accumulates
+                    && held.leaves == 0
+                    && held.begin.is_some()
+                    && self.ops[head - 2].begin.is_none()
+                    && held.reads.as_deref().is_some_and(|reads| reads.len() == 1)
+                    && held.at != site.at
+                    && !matches!(site.target, Read::Local { at, .. } if at == held.at)
+                    && !matches!(&site.shape, AccessShape::Index { index: Read::Local { at, .. }, .. } if *at == held.at)
+                    && site.consumer.as_ref().is_some_and(|consumer| consumer.reads.iter().any(|read| matches!(read, Read::Local { at, shared: false, .. } if *at == held.at)))
+                {
+                    let held = held.clone();
+                    let Op::AccessInit { original, .. } = &self.ops[head - 1].op else {
+                        unreachable!()
+                    };
+                    self.ops[head - 2].op = Op::AccessInit {
+                        head,
+                        original: original.clone(),
+                        held: Some(held),
+                    };
+                }
             }
         }
     }
@@ -375,7 +413,18 @@ impl Build<'_> {
             return;
         };
         site.fixed = total;
-        site.hole = Some(AccessHole { lib: unit.lib });
+        site.hole = Some(AccessHole {
+            lib: unit.lib,
+            // An empty construction and a float both have size 1 and
+            // nested size 0. ScalarTable refuses magnitude formulas.
+            floats: self
+                .exe
+                .lib(unit.lib)
+                .prepared
+                .as_ref()
+                .and_then(|(_, fast)| fast.scalar())
+                .and_then(|table| table.units(0)),
+        });
         site.after = self.edge(self.blocks[site.arms[0]].after);
         site.arms = Box::default();
         site.statements += 1;
@@ -453,6 +502,10 @@ impl Build<'_> {
             at: write.at,
             next: begin.index + 1,
             accumulates: write.accumulates,
+            floats: operator
+                .pair
+                .and_then(|pair| pair.floats)
+                .zip(operator.floats),
         });
         site.after = after;
         site.leaves = write.leaves;

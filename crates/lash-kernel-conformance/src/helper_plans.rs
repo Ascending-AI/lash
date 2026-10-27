@@ -1111,7 +1111,10 @@ function build() {
   }
   const xs = [0, 1, 2];
   for (let i = 0; i < 6; i++) { sum += xs[1]; if (i === 2) { xs[1] = 7; xs.push(9); } }
-  return [sum, row.a, row.b, alias.extra, xs.length, row["k8"]];
+  let saved = 0;
+  for (let i = 0; i < 3; i++) { saved += row.a; saved += xs[1]; }
+  row.a = -0; row.a = 2.5; row.a = xs; row.a = 8;
+  return [sum, row.a, row.b, alias.extra, xs.length, row["k8"], saved];
 }
 await host.observe(JSON.stringify(build()));"#,
         ),
@@ -1294,7 +1297,7 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
         reference.tape = recorded;
         if case.id.ends_with("compact access invalidation") {
             let Request::Effect(effect) = &planned.requests[0];
-            assert_eq!(effect.args, vec![Datum::Text("[105,8,9,99,4,8]".into())]);
+            assert_eq!(effect.args, vec![Datum::Text("[105,8,9,99,4,8,45]".into())]);
         }
         if case
             .id

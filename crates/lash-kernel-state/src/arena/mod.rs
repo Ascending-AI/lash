@@ -648,26 +648,33 @@ impl Arena {
         handle: ArenaHandle,
         card: Option<u64>,
     ) -> Result<(), NativeError> {
-        let facts = self.facts_mut(handle)?;
+        self.facts_mut(handle)?;
+        Self::mark_resident(
+            &mut self.facts[handle.index() as usize],
+            &mut self.dirty,
+            handle,
+            card,
+        );
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn mark_resident(
+        facts: &mut Facts,
+        dirty: &mut Vec<ArenaHandle>,
+        handle: ArenaHandle,
+        card: Option<u64>,
+    ) {
         if facts.based
             && let Some(card) = card
             && let Err(at) = facts.cards.binary_search(&card)
         {
             facts.cards.insert(at, card);
         }
-        self.changed(handle);
-        Ok(())
-    }
-
-    /// Marks the resident object `handle` changed since it was last
-    /// projected.
-    #[inline]
-    fn changed(&mut self, handle: ArenaHandle) {
-        let facts = &mut self.facts[handle.index() as usize];
         facts.dirty = true;
         if facts.entity.is_some() && !facts.listed {
             facts.listed = true;
-            self.dirty.push(handle);
+            dirty.push(handle);
         }
     }
 
