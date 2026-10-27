@@ -62,8 +62,8 @@ max-minus-min absolute noise. Exact metrics get zero slack. Every measured
 maximum, noise and resulting ceiling is in
 `crates/lash-perf/workloads/replay/baseline.json`. `just perf-replay-bless`
 collects all five receipts in independent processes and refuses to raise an existing ceiling. The
-committed depth-slope and independent hard ceilings still bind. The first
-five-run calibration measured 91 chat-short writes/turn and 101 compacting-chat
+committed depth-slope and independent hard ceilings still bind. The final
+five-run calibration after FIG-7446 measured 87 chat-short writes/turn and 97 compacting-chat
 writes/turn, both with zero noise. Full maxima, noise and ceilings are retained
 in the baseline for all 96 medians, including entries per actual tool body.
 The fixture stores use fixed-length private canonical paths during measurement:
@@ -73,8 +73,10 @@ to the requested artifact directory after measurement. These are
 finite same-commit observations, not a population-wide noise bound. SQL reads
 include asynchronous background work: existing observer origin tags do not
 provide a complete foreground/maintenance classification across all runtime
-tasks, so a one-read regression is not certified. Probe (e) is unproven and stale: its patch targets `SurfaceTools::execute`, which ordinary facade replay dispatch no longer runs. Their measured aggregate
+tasks, so a one-read regression is not certified. Their measured aggregate
 ceilings remain enforced.
+
+Probe (e) is unproven and stale: its patch targets `SurfaceTools::execute`, which ordinary facade replay dispatch no longer runs.
 
 The retained-byte window includes host caches, the store and the result ledger
 created while those actual facade handles are held. It measures the final

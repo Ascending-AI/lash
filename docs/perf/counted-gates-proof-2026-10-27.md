@@ -27,9 +27,12 @@ The landing count baseline uses five complete captures from the actual hermetic
 executor with eight runtime workers and periodic node maintenance outside the
 foreground window. Each ceiling is maximum plus max-minus-min range. All 60
 original main median ceilings tighten; original hard caps and depth-slope
-references still bind. Foreground write maxima are 91, 101, 144 and 144, each
-with zero observed range. The raw population and source checkpoint are in
-`foreground-executor-raw/` and `foreground-calibration-source.json`.
+references still bind. After rebasing main through FIG-7446, foreground write maxima are 87, 97, 132
+and 132, each with zero observed range. All 96 median ceilings use the five
+complete receipts in `turnsql-main-raw/`. Source checkpoint `c871a0019457` and
+the actual binary hash are retained in `ship-counts-source.json`. Original
+hermetic identities remain unchanged, including their unavailable Git commit.
+`ship-baseline.diff` contains the final baseline diff.
 
 The earlier local calibration failed the hermetic replay target, exposing
 resource-geometry differences and maintenance writes proportional to executor
@@ -49,7 +52,8 @@ Evidence directory:
 - `paired-count-probe-{a,b,f}/proof.json` and sibling raw receipts/controls.
 - `final-probe-c/capture/decision.json`, `final-probe-c-reverted/capture/decision.json`.
 - `paired-startup-probe-d/capture/decision.json` and reverted sibling.
-- `landing-counts.0.json` through `.4.json`, `landing-counts-baseline.json`.
+- `turnsql-main-raw/replay-receipt.0.json` through `.4.json`, `ship-counts-baseline.json`.
+- `ship-replay-tests.json`: final rebased full target, 9/9 passed.
 - Earlier failed controls, partial captures and superseded calibrations remain
   retained and are not passing proof pairs.
 
