@@ -86,11 +86,56 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
     }
 }
 
-/// A stored kernel document states the kernel version it is written in, in
-/// its manifest: the module store holds nothing else. A text that is not a
-/// document is undecidable, since it is not evidence of another build.
+/// Read only encoding evidence, never an older document or function body.
+/// Seven-field functions and unstamped documents belong to encoding 1.
+/// Eight-field functions are encoding 2; stamped documents carry their
+/// witness first. Other artifact kinds do not carry a document encoding.
 fn kernel_document(payload: Payload<'_>) -> Vec<Extraction> {
     let format = DurableFormat::KernelDocument;
+    if let Payload::Graph(bytes) = payload {
+        let node = GraphNode {
+            id: NodeId::of_envelope(bytes),
+            bytes: std::sync::Arc::from(bytes),
+        };
+        let evidence = (|| -> Result<Option<u32>, String> {
+            let envelope = node.envelope().map_err(|error| error.to_string())?;
+            if !matches!(
+                envelope.kind,
+                NodeKind::DOCUMENT | NodeKind::HELPER_DEFINITION
+            ) {
+                return Ok(None);
+            }
+            let mut input = envelope.reader();
+            if input.sum().map_err(|error| error.to_string())? != (0, 1) {
+                return Err("streamed kernel artifact: the encoding witness is in its body; the bounded probe cannot fetch its children".to_string());
+            }
+            let fields = input.seq().map_err(|error| error.to_string())?;
+            if (envelope.kind == NodeKind::DOCUMENT && fields == 8)
+                || (envelope.kind == NodeKind::HELPER_DEFINITION && fields == 7)
+            {
+                return Ok(Some(1));
+            }
+            if envelope.kind == NodeKind::HELPER_DEFINITION && fields == 8 {
+                return Ok(Some(2));
+            }
+            if fields != 9 {
+                return Err(format!(
+                    "kernel artifact has no recognised encoding witness ({fields} fields)"
+                ));
+            }
+            input
+                .unsigned_u32()
+                .map(Some)
+                .map_err(|error| error.to_string())
+        })();
+        return match evidence {
+            Ok(Some(version)) => vec![Extraction::Found { format, version }],
+            Ok(None) => Vec::new(),
+            Err(reason) => vec![Extraction::Undecodable { format, reason }],
+        };
+    }
+    // Legacy JSON documents state kernel 1 in their manifest. New persisted
+    // artifacts use token bodies; this only reports the old witness.
     let document = match payload.json(format) {
         Ok(document) => document,
         Err(extraction) => return vec![extraction],
@@ -100,7 +145,7 @@ fn kernel_document(payload: Payload<'_>) -> Vec<Extraction> {
         .and_then(serde_json::Value::as_u64)
         .and_then(|version| u32::try_from(version).ok())
     {
-        Some(version) => vec![Extraction::Found { format, version }],
+        Some(_) => vec![Extraction::Found { format, version: 1 }],
         None => vec![Extraction::Undecodable {
             format,
             reason: "document manifest carries no readable `kernel` version".to_string(),
@@ -292,10 +337,10 @@ mod tests {
         assert!(reasons[0].contains("sha256:abc"), "{reasons:?}");
     }
 
-    /// A stored document is judged by the kernel version its manifest
-    /// states; a text with none is undecidable, never another build's.
+    /// A legacy JSON manifest identifies an unstamped encoding, independently
+    /// of its semantic kernel number. A text with none stays undecidable.
     #[tokio::test]
-    async fn a_stored_document_reports_the_kernel_version_it_is_written_in() {
+    async fn a_legacy_json_document_reports_its_unstamped_encoding() {
         let stored = |text: &str| {
             item(
                 DurableSurface::ModuleArtifact,
@@ -305,7 +350,7 @@ mod tests {
         let extractions = extract(&stored(r#"{"manifest":{"kernel":7,"numbers":"exact"}}"#)).await;
         assert_eq!(
             versions(&extractions, DurableFormat::KernelDocument),
-            vec![7]
+            vec![1]
         );
         let extractions = extract(&stored("{}")).await;
         let reasons = undecodable(&extractions, DurableFormat::KernelDocument);

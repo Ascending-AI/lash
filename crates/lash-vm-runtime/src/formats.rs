@@ -3,12 +3,11 @@
 //! kernel versions a build interprets, and these constants are what a fleet
 //! compares.
 //!
-//! Each is the newest kernel version this build interprets, and each moves
-//! by migration (ADR 0106): a breaking kernel version ships the migration
-//! from the version before it (`lash-kernel-migrate`), and a node of the
-//! new build carries a document forward when it takes over a process the
-//! previous build parked, including its paged continuation. The `synthetic-next` build
-//! interprets the successor only it knows.
+//! The semantic kernel version and the document token encoding are separate
+//! compatibility witnesses. Before 1.0, a token-encoding change requires a
+//! reset, without a migration or old-body reader. Kernel semantic succession
+//! governs parked runs and saved-function admission; its `synthetic-next`
+//! build interprets the successor only it knows.
 
 use lash_kernel_doc::KernelVersion;
 
@@ -30,24 +29,19 @@ pub const LASH_KERNEL_VERSION: u32 = 2;
 
 const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 
-/// The JSON encoding of a kernel document, as a store holds it.
+/// The stored token encoding of documents and library function definitions.
+/// This witness is independent of the kernel's semantic version. Before 1.0,
+/// an encoding change requires a reset, with no migration or old-body reader.
 ///
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document, Manifest)),
+///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
 /// )
-#[cfg(not(feature = "synthetic-next"))]
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
-/// version_unguarded = "kernel document: a kernel migration rewrites it when a node claims the process that runs it (lash-kernel-migrate), never a record upcaster"
-pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 1;
-/// The synthetic successor's document encoding.
-#[cfg(feature = "synthetic-next")]
-/// format_manifest = "KernelDocument"
-/// version_surface = "migrate"
-/// version_unguarded = "kernel document: a kernel migration rewrites it when a node claims the process that runs it (lash-kernel-migrate), never a record upcaster"
+/// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
 pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 2;
 
-const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == KernelVersion::NEWEST.number());
+const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION);
 
 /// A parked run: the machine's state as a checkpoint root page
 /// (`paged::root::CheckpointRoot`, kind 1000) over the run's persistent heap
@@ -96,14 +90,16 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 /// under it.
 ///
 /// version_guard(
-///     items(path = "crates/lash-kernel-dialect/src/saved.rs", SavedFunction, Token, HeldAt, NotSaved, CaptureRefusal),
+///     items(path = "crates/lash-kernel-doc/src/snapshot/collect.rs", CaptureRefusal, VALUE_KINDS),
+///     items(path = "crates/lash-kernel-dialect/src/saved.rs", SavedFunction, Token, HeldAt, NotSaved),
 ///     items(
 ///         path = "crates/lash-kernel-dialect/src/saved/graph.rs",
-///         DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, BundleBody, MemberBody, VALUE_KINDS, encode,
+///         DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, BundleBody, MemberBody, encode,
 ///         decode,
 ///     ),
 /// )
 /// format_manifest = "KernelSavedFunction"
+/// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 1;
 

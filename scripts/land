@@ -152,6 +152,7 @@ def main():
         run("git", "fetch", "origin", "main")
         main_sha = git("rev-parse", "origin/main")
         rebase()
+        run("python3", "scripts/check_version_bumps.py", "--base", main_sha, "--head", "HEAD")
         run("python3", "scripts/perf-gates.py", "check-sources")
         run("kiln", "clippy")
         if args.dry_run:

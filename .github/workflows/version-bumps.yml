@@ -34,10 +34,8 @@ permissions:
 jobs:
   version-bumps:
     name: Strict version-bump gate
-    # Advisory until the 1.0 cut (FIG-4097/Z07 flips this to required): the
-    # version freeze makes in-place stored-shape changes expected, so the
-    # strict gate reports them and the failure must not redden the board.
-    continue-on-error: true
+    # Durable shape changes must update their encoding witness, including
+    # pre-1.0 changes that require a reset instead of a migration (FIG-7507).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

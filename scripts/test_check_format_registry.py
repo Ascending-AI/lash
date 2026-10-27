@@ -258,18 +258,22 @@ class FormatRegistryTests(unittest.TestCase):
     def test_a_consistent_registry_passes(self) -> None:
         self.assertEqual(self.problems(), [])
 
-    def test_a_prompt_section_exclusion_names_a_swept_constant(self) -> None:
-        self.write(
-            "crates/demo/src/prompt_sections.rs",
-            'pub const FINAL_ANSWER_FORMAT: &str = "final_answer_format";\n',
-        )
-        self.registry_text += '''
+    def test_an_exclusion_names_a_constant_even_without_a_version_suffix(self) -> None:
+        source = "crates/demo/src/prompt_sections.rs"
+        declarations = ('pub const FINAL_ANSWER_FORMAT: &str = "final_answer_format";\n'
+                        'pub const MODEL_RETURN_RENDERER: &str = "renderer/v1";\n')
+        self.write(source, declarations)
+        for name in ("FINAL_ANSWER_FORMAT", "MODEL_RETURN_RENDERER"):
+            self.registry_text += f"""
 [[unregistered]]
-constant = "FINAL_ANSWER_FORMAT"
-constant_path = "crates/demo/src/prompt_sections.rs"
-reason = "key of a prompt section, not a stored-format version"
-'''
+constant = "{name}"
+constant_path = "{source}"
+reason = "a projection identity, not a stored-format version"
+"""
         self.assertEqual(self.problems(), [])
+        self.write(source, declarations.replace("MODEL_RETURN_RENDERER", "RENAMED"))
+        self.assertTrue(any("MODEL_RETURN_RENDERER names no swept constant" in error
+                            for error in self.problems()))
 
     def test_an_unknown_version_constant_is_named(self) -> None:
         self.write(

@@ -311,6 +311,126 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
 }
 
 #[tokio::test]
+async fn a_22d_function_store_requires_reset_before_decode() {
+    use lash_core::durable_port::domain::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
+    };
+    use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+
+    let newest = crate::formats::KERNEL_DOCUMENT_SCHEMA_VERSION;
+
+    // 22d7212cc8's FunctionDefinition writer, verbatim field list. This is
+    // deliberately independent of the current writer and its field count.
+    let definition = lash_kernel_doc::parse_definition(
+        "function fixture(x: Any) -> Any\nkernel 1\ncharge 1\nnative\n",
+    )
+    .expect("valid fixture definition");
+    let mut old = TokenWriter::new();
+    old.seq(7);
+    old.unsigned(u64::from(definition.kernel));
+    definition.name.encode(&mut old);
+    definition.signature.encode(&mut old);
+    definition.errors.encode(&mut old);
+    definition.guard.encode(&mut old);
+    definition.implementation.encode(&mut old);
+    old.unsigned(u64::from(definition.native_version));
+    let document =
+        lash_kernel_doc::parse_document("kernel 1\nnumbers by_spelling\nmain { return null }\n")
+            .expect("valid current document");
+    let current_function = lash_kernel_value::tokens::encode_body(&definition);
+    let current_document = lash_kernel_value::tokens::encode_body(&document);
+    for (kind, body, readable) in [
+        (NodeKind::HELPER_DEFINITION, old.as_bytes(), false),
+        (
+            NodeKind::HELPER_DEFINITION,
+            current_function.as_slice(),
+            true,
+        ),
+        (NodeKind::DOCUMENT, current_document.as_slice(), true),
+    ] {
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1_048_576)));
+        let root = staging
+            .encode(kind, TypedBody::logical(body))
+            .expect("fixture stages");
+        let store = FakeStore::default().with_items(
+            DurableSurface::ModuleArtifact,
+            vec![DurableItem {
+                surface: DurableSurface::ModuleArtifact,
+                cursor: root.to_hex(),
+                process_id: None,
+                session_id: None,
+                status: None,
+                owner_record: None,
+                payload: DurablePayload::GraphNode(
+                    staging.get(&root).expect("staged root").bytes.to_vec(),
+                ),
+            }],
+        );
+        let report = probe_store(&store, PreflightOptions::summary())
+            .await
+            .expect("probe reads fixture");
+        let row = component(&report, DurableFormat::KernelDocument);
+        assert_eq!(row.expected, newest.to_string());
+        assert_eq!(
+            row.found,
+            vec![FoundVersion {
+                version: if readable { newest } else { 1 },
+                count: 1
+            }]
+        );
+        assert_eq!(
+            row.verdict,
+            if readable {
+                ComponentVerdict::AllReadable
+            } else {
+                ComponentVerdict::Refused
+            }
+        );
+        assert_eq!(
+            report.outcome,
+            if readable {
+                PreflightOutcome::Ready
+            } else {
+                PreflightOutcome::Refused
+            }
+        );
+        assert!(
+            newest > 1,
+            "the upgrade survey must see a change from encoding 1"
+        );
+        assert_eq!(report.drain.len(), usize::from(!readable));
+        assert_eq!(report.refusal_message().is_some(), !readable);
+    }
+    assert!(
+        lash_kernel_value::tokens::decode_body::<lash_kernel_doc::FunctionDefinition>(
+            old.as_bytes()
+        )
+        .is_err()
+    );
+    assert_eq!(
+        lash_kernel_value::tokens::decode_body::<lash_kernel_doc::FunctionDefinition>(
+            &current_function
+        )
+        .expect("current function reads"),
+        definition
+    );
+    assert_eq!(
+        lash_kernel_value::tokens::decode_body::<lash_kernel_doc::Document>(&current_document)
+            .expect("current document reads"),
+        document
+    );
+    let mut unsupported = current_document.clone();
+    let mut header = TokenReader::new(&current_document);
+    header.seq().expect("a stamped document is a sequence");
+    // Flip a value bit in the grammar varint without changing its width.
+    unsupported[header.position() + 1] ^= 1;
+    assert!(matches!(
+        lash_kernel_value::tokens::decode_body::<lash_kernel_doc::Document>(&unsupported),
+        Err(TokenError::Invalid(_))
+    ));
+}
+
+#[tokio::test]
 async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
     // The whole point of the walk: the refusal is named, counted and
     // attributed to what an operator can drain, before anything is wired.

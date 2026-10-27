@@ -884,12 +884,24 @@ impl TokenCodec for Stmt {
     }
 }
 
+fn decode_grammar(input: &mut TokenReader<'_>) -> Result<(), TokenError> {
+    let found = input.unsigned_u32()?;
+    if found != crate::DOCUMENT_GRAMMAR_VERSION {
+        return Err(super::invalid(format!(
+            "document token grammar {found} is unsupported; this build accepts {}",
+            crate::DOCUMENT_GRAMMAR_VERSION,
+        )));
+    }
+    Ok(())
+}
+
 // Documents.
 
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
         crate::document_work::note(|work| work.token_encodes += 1);
-        out.seq(8);
+        out.seq(9);
+        out.unsigned(u64::from(crate::DOCUMENT_GRAMMAR_VERSION));
         self.library.0.encode(out);
         self.imports.encode(out);
         self.exports.encode(out);
@@ -901,7 +913,8 @@ impl TokenCodec for Document {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         crate::document_work::note(|work| work.token_decodes += 1);
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
+        decode_grammar(input)?;
         Ok(Self {
             source_evidence: BTreeMap::new(),
             library: crate::LibraryDependencies(BTreeSet::decode(input)?),

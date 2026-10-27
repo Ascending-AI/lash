@@ -606,7 +606,8 @@ def _inspect_file(path, text, excluded):
     version_constants = frozenset(
         f'{path}:{match["name"]}' for match in declarations
         if not _is_test_source(path)
-        and re.fullmatch(r'[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH|_FORMAT)', match["name"])
+        and (re.fullmatch(r'[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH|_FORMAT)', match["name"])
+             or f'{path}:{match["name"]}' in excluded)
     )
     attributes = rust_outer_attribute_ranges(text)
 

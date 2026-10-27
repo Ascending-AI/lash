@@ -51,7 +51,8 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         ROLE_FLAT, ROLE_CHUNK, PendingRecord, RolesRecord, PhaseRecord, RoleRecord, RoleChunk,
 ///         decode_cell, encode_roles, encode, decode,
 ///     ),
-///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, Key, load_shared, seal, encode, decode),
+///     items(path = "crates/lash-kernel-state/src/paged/tree/key.rs", Key),
+///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, load_shared, seal, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),
 ///     items(
@@ -63,7 +64,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         RelativeValue, RelativeEntry, FrozenHeader, encode, decode,
 ///     ),
 ///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode),
-///     file(path = "crates/lash-core-store/src/checkpoint_graph/registry.rs", cover("SEMANTIC_REGISTRY")),
+///     file(path = "crates/lash-checkpoint-encoder/src/registry.rs", cover("SEMANTIC_REGISTRY")),
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "the page grammar beneath the parked-state and code mode snapshot surfaces, which the manifest reports; a semantic admission records it beside the kernel version"

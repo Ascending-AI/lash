@@ -148,8 +148,77 @@ pub(crate) fn handed_back_rlm_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_core::FleetFormat;
+    use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
+
+    const OWNER: &str = "lash-protocol-rlm";
+
+    fn write_driver(fleet: FleetFormat) -> Vec<u8> {
+        let version = fleet.writer_version(lash_core::surface_format!(RLM_DRIVER_STATE_VERSION));
+        serde_json::to_vec(&rlm_driver_state(RlmDriverState::default(), version).payload)
+            .expect("driver JSON")
+    }
+
+    fn read_driver(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
+        let payload = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let state =
+            lash_core::ProtocolDriverState::new(crate::plugin::RLM_PROTOCOL_PLUGIN_ID, payload);
+        let version = fleet.writer_version(lash_core::surface_format!(RLM_DRIVER_STATE_VERSION));
+        let decoded = decode_rlm_driver_state(state, version)?;
+        serde_json::to_string(&decoded).map_err(|error| error.to_string())
+    }
+
+    fn write_event(fleet: FleetFormat) -> Vec<u8> {
+        let event = lash_rlm_types::RlmProtocolEvent::RlmSeed(lash_rlm_types::RlmSeedPluginBody {
+            globals: serde_json::Map::from_iter([("answer".into(), serde_json::json!(42))]),
+        });
+        let version = fleet.writer_version(lash_core::surface_format!(
+            crate::RLM_PROTOCOL_EVENT_VERSION
+        ));
+        serde_json::to_vec(&crate::projection::rlm_protocol_event(event, version).payload)
+            .expect("event JSON")
+    }
+
+    fn read_event(bytes: &[u8], _fleet: FleetFormat) -> Result<String, String> {
+        let payload = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let event = lash_core::ProtocolEvent::new(crate::plugin::RLM_PROTOCOL_PLUGIN_ID, payload);
+        let decoded = crate::projection::decode_rlm_protocol_event(&event)
+            .map_err(|error| error.to_string())?
+            .ok_or("RLM event missing")?;
+        serde_json::to_string(&decoded).map_err(|error| error.to_string())
+    }
+
+    fn restamp(bytes: &[u8], field: &str, version: u32) -> Vec<u8> {
+        let mut value: serde_json::Value = serde_json::from_slice(bytes).expect("stored JSON");
+        value[field] = serde_json::json!(version);
+        serde_json::to_vec(&value).expect("restamped JSON")
+    }
+
+    fn probes() -> [SurfaceProbe; 2] {
+        [
+            SurfaceProbe {
+                constant: "RLM_DRIVER_STATE_VERSION",
+                newest: RLM_DRIVER_STATE_VERSION,
+                write: write_driver,
+                read: read_driver,
+                restamp: |bytes, version| restamp(bytes, "schema_version", version),
+            },
+            SurfaceProbe {
+                constant: "RLM_PROTOCOL_EVENT_VERSION",
+                newest: crate::RLM_PROTOCOL_EVENT_VERSION,
+                write: write_event,
+                read: read_event,
+                restamp: |bytes, version| restamp(bytes, "format", version),
+            },
+        ]
+    }
+
     #[test]
     fn the_driver_refuses_unstamped_and_foreign_driver_state() {
+        let probes = probes();
+        laws::every_guarded_surface_decodes_its_supported_range(OWNER, &probes);
+        laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes);
+        laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes);
         for parts in [
             Vec::new(),
             vec![lash_core::Part::text(

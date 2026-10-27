@@ -76,11 +76,6 @@ constant_path = "crates/lash-kernel-doc/src/function.rs"
 reason = "the revision a native implementation states when it states none: the implementation's own number, which a release manifest pins by fingerprint, not a lash format"
 
 [[unregistered]]
-constant = "FINISH_ARGS"
-constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
-reason = "names the projection a frozen request's finish arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
-
-[[unregistered]]
 constant = "CALL_ARGS"
 constant_path = "crates/lash-protocol-rlm/src/executor/host.rs"
 reason = "names the projection a frozen request's call arguments were made under; the FrozenRequest node it is written in is the format, frozen with the 1.0 checkpoint graph"
@@ -94,6 +89,26 @@ reason = "names the projection a frozen request's call arguments were made under
 constant = "MODEL_RETURN_RENDERER"
 constant_path = "crates/lash-protocol-types/src/tool_output/graph.rs"
 reason = "the spec whose digest identifies the one renderer a presentation recipe is reconstructed with; a recipe under another renderer is refused, never re-rendered, so it versions no stored shape"
+
+[[unregistered]]
+constant = "BUDGETS_FORMAT"
+constant_path = "crates/lash-perf/src/replay/gate.rs"
+reason = "benchmark gate policy JSON, not a runtime durable format"
+
+[[unregistered]]
+constant = "BASELINE_FORMAT"
+constant_path = "crates/lash-perf/src/replay/gate.rs"
+reason = "benchmark baseline evidence JSON, not a runtime durable format"
+
+[[unregistered]]
+constant = "RECEIPT_FORMAT"
+constant_path = "crates/lash-perf/src/replay/receipt.rs"
+reason = "benchmark measurement receipt JSON, not a runtime durable format"
+
+[[unregistered]]
+constant = "ERROR_VERSION"
+constant_path = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs"
+reason = "error schema of a benchmark-only plugin operation, not a production durable format"
 
 # BLAKE3 hash domains that are permanently reserved but no longer used: a
 # retired name must never identify another format. The domains in use are the

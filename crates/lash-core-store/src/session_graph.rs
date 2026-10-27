@@ -379,12 +379,14 @@ pub struct SessionNodeRecord {
 ///             SamplingCapability, StreamTermination, CacheControlDialect,
 ///         ),
 ///     ),
+///     shapes(path = "crates/lash-protocol-types/src/attachment.rs", cover(AttachmentRef)),
+///     shapes(path = "crates/lash-protocol-types/src/llm/attachment_delivery.rs", cover(ProviderFileScope)),
 ///     shapes(
 ///         path = "crates/lash-protocol-types/src/llm/types.rs",
 ///         path = "crates/lash-protocol-types/src/llm/types/non_negative_finite_f64.rs",
 ///         cover(
-///             AttachmentRef, ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
-///             ProviderRouteIdentity, ProviderFileScope, GenerationOptions, NonNegativeFiniteF64,
+///             ProviderReplayMeta, ProviderReasoningReplay, ResponseTextMeta,
+///             ProviderRouteIdentity, GenerationOptions, NonNegativeFiniteF64,
 ///         ),
 ///     ),
 /// )

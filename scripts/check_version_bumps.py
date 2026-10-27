@@ -38,6 +38,9 @@ block and the ``const``.
   must be among them;
 - ``impls`` guards hand-written ``Serialize for T`` / ``Deserialize for T``
   impls. The impls of a reachable type are guarded without being named;
+- Every guard also follows the `TokenCodec` and `CodecVariant` impls of the
+  types it reaches, plus primitive/container codecs. Helpers and macro calls
+  are included. A moved codec needs no new marker;
 - ``file`` guards whole files, and ``cover(..)`` names text they must contain;
 - ``catalog`` guards nothing: it names the migration catalog a DDL stamp's bump
   must extend (below), and ``rows = ".."`` keeps only the rows that contain that
@@ -66,8 +69,8 @@ dropping a shape from a marker does not excuse changing it, a constant that
 disappears does not excuse the shapes it guarded, and dropping a ``catalog``
 does not excuse the step.
 
-Before the 1.0 cut (FIG-3846), an unchanged version with a changed shape is
-reported with the head shape hash and does not fail. FIG-4494 flips
+Stored formats require a changed witness even before 1.0. Only coexist
+wire formats without token codecs retain the pre-1.0 in-place policy. FIG-4494 flips
 ``STRICT_VERSION_BUMPS`` at the cut; ``--strict`` exercises that policy now.
 Strict mode requires the bump. In both modes, a bump without its evidence,
 a backwards version, and a guard that cannot be evaluated exit nonzero.
@@ -103,7 +106,7 @@ from discover_version_surfaces import (
     REGISTRY, RUST_SOURCE_PATTERNS, SourceError as CheckError, WorktreeSources,
     Token, _is_test_source, _rust_group_end, _rust_top_level_items, _test_only_cfg,
     _rust_trivia_end, discover, rust_item_end,
-    rust_item_start_with_attributes, rust_outer_attribute_ranges, rust_tokens,
+    rust_item_start_with_attributes, rust_outer_attribute_ranges, rust_tokens, rust_lexemes,
     strip_rust_trivia, test_only_module_ranges,
 )
 
@@ -452,7 +455,8 @@ def serde_shapes(text: str) -> dict[str, str]:
         name = match.group(1)
         start = rust_item_start_with_attributes(text, match.start(), attribute_ranges)
         attributes = text[start : match.start()]
-        if "Serialize" not in attributes and "Deserialize" not in attributes:
+        if ("Serialize" not in attributes and "Deserialize" not in attributes
+                and production_codec_source(text) is None):
             continue
         end = rust_item_end(text, match.start())
         value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
@@ -1067,7 +1071,7 @@ class ParsedShape:
 
 
 @lru_cache(maxsize=None)
-def parse_shape(text: str, offset: int) -> ParsedShape:
+def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> ParsedShape:
     """The types one struct, enum, union or alias serializes."""
     start = rust_item_start_with_attributes(text, offset, rust_outer_attribute_ranges(text))
     end = rust_item_end(text, offset)
@@ -1101,13 +1105,15 @@ def parse_shape(text: str, offset: int) -> ParsedShape:
         field_attributes = inner.attributes()
         inner.visibility()
         if named:
+            if inner.peek() == ("ident", "r") and inner.tokens[inner.index + 1:inner.index + 2] == (("punct", "#"),):
+                inner.index += 2
             inner.index += 2
         tokens = inner.until_comma()
         arguments = serde_arguments(field_attributes)
         keys = {key for key, _ in arguments}
         if _outside_default_build(field_attributes):
             return
-        if "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys:
+        if not token_encoded and ("skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys):
             return
         refs.extend(type_refs(tokens, scope))
         adapters.extend(
@@ -1146,7 +1152,7 @@ def parse_shape(text: str, offset: int) -> ParsedShape:
             keys = {key for key, _ in serde_arguments(variant_attributes)}
             if _outside_default_build(variant_attributes):
                 continue
-            if "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys:
+            if not token_encoded and ("skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys):
                 continue
             members(body, named=named)
     else:
@@ -1235,6 +1241,25 @@ def _gated_on_test(text: str, start: int) -> bool:
     return False
 
 
+def module_use_offsets(text: str) -> set[int]:
+    """Imports at module scope, independent of indentation and formatting."""
+    modules = {match.end() - 1 for match in RUST_MODULE_OPENING.finditer(text)}
+    tokens = iter(rust_lexemes(text))
+    token = next(tokens, None)
+    stack = []
+    offsets = set()
+    for match in RUST_USE.finditer(text):
+        while token is not None and token.start < match.start():
+            if token.kind == "punct" and token.value == "{":
+                stack.append(token.start in modules)
+            elif token.kind == "punct" and token.value == "}" and stack:
+                stack.pop()
+            token = next(tokens, None)
+        if all(stack):
+            offsets.add(match.start())
+    return offsets
+
+
 @lru_cache(maxsize=None)
 def index_file(text: str) -> FileIndex:
     ranges: list[tuple[str, int, int]] = []
@@ -1258,10 +1283,12 @@ def index_file(text: str) -> FileIndex:
         # An item indented past its module is inside a function, impl or trait.
         if production(match.start()) and len(match.group(1)) == 4 * len(chain):
             types.append((match.group(3), match.group(2), match.start(), chain))
+    use_offsets = module_use_offsets(text)
     uses = [
         (name, segments, match.group(1) is not None)
         for match in RUST_USE.finditer(text)
         if production(match.start())
+        and match.start() in use_offsets
         for name, segments in _expand_use(match.group(2))
     ]
     return FileIndex(
@@ -1771,6 +1798,19 @@ class Reachability:
             indexed = self._index(crate)
             macros = {macro for index in indexed.values() for macro, _ in index.macro_definitions}
             texts = []
+            # Imported macro_rules declarations can produce a type in this
+            # crate. Retain both the imported definition and its local calls.
+            for index in indexed.values():
+                for alias, segments, _ in index.uses:
+                    target = self._crate_names.get(segments[0]) if segments else None
+                    if target is None or target == crate or len(segments) < 2:
+                        continue
+                    for path, foreign in self._index(target).items():
+                        for macro, offset in foreign.macro_definitions:
+                            if macro == segments[-1]:
+                                macros.add(alias)
+                                body = _item_text(self.view.projected(path) or "", offset)
+                                texts.append((path, alias, offset, True, body))
             for path, index in indexed.items():
                 content = self.view.projected(path) or ""
                 for defines, entries in (
@@ -1970,6 +2010,8 @@ class Reachability:
             )
             extra.extend((path, name, value) for name, value in impls.items())
             hand_written = hand_written or bool(impls)
+        codecs = token_codec_signature(self.view, shape)
+        extra.extend(codecs)
         if shape.kind.startswith("macro "):
             macro = shape.kind.partition(" ")[2]
             extra.extend(
@@ -1984,12 +2026,12 @@ class Reachability:
             self._edges[key] = result
             return result
 
-        parsed = parse_shape(content, shape.offset)
-        if hand_written and not parsed.derives_serde:
+        parsed = parse_shape(content, shape.offset, token_encoded=bool(codecs))
+        if hand_written and not parsed.derives_serde and not codecs:
             opaque.append(
                 (shape.label, "its Serde impls are hand-written; the impls are guarded")
             )
-        elif not parsed.derives_serde and shape.kind != "type":
+        elif not parsed.derives_serde and not codecs and shape.kind != "type":
             opaque.append((shape.label, "not a Serde type; its fields are not followed"))
         else:
             for ref in parsed.refs:
@@ -2124,7 +2166,7 @@ def roots_closure(view: TreeView, guard: Guard) -> tuple[Closure, list[str]]:
     return reach.closure(shapes), sorted(set(guard.symbols) - found)
 
 
-def guard_signature(
+def _guard_signature(
     view: TreeView,
     guard: Guard,
     *,
@@ -2190,6 +2232,213 @@ def guard_signature(
             if missing:
                 raise CheckError(f"{where} does not cover " + ", ".join(missing))
     return tuple(sorted(set(signature)))
+
+
+@lru_cache(maxsize=None)
+def production_codec_source(text: str) -> str | None:
+    """Codec implementation, helpers and macro calls, excluding test-only code.
+
+    Hash the production file conservatively: a codec can call a local helper
+    or expand a macro, so hashing just its impl body misses encoding changes.
+    """
+    if "TokenCodec" not in text and "CodecVariant" not in text:
+        return None
+    attributes = rust_outer_attribute_ranges(text)
+    ranges = [
+        (rust_item_start_with_attributes(text, start, attributes), rust_item_end(text, start))
+        for start, end in attributes if _test_only_cfg(text[start:end])
+    ]
+    merged = []
+    for start, end in sorted(ranges):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    for start, end in reversed(merged):
+        text = text[:start] + text[end:]
+    tokens = rust_tokens(text)
+    # Includes generic/qualified impls and macro-generated codecs ($ty).
+    if not (any(kind == "ident" and name == "impl" for kind, name in tokens)
+            and any(kind == "ident" and name in {"TokenCodec", "CodecVariant"}
+                    for kind, name in tokens)) and "traitTokenCodec" not in strip_rust_trivia(text):
+        return None
+    return strip_rust_trivia(normalize_rust_derive_lists(strip_markers(text)))
+
+
+RUST_TOKEN_IMPL = re.compile(
+    r"\bimpl(?:\s*<[^{}]*?>)?\s+(?P<trait>[\w:]+)"
+    r"(?:\s*<[^{}]*?>)?\s+for\s+(?P<target>[\w:]+)"
+)
+
+
+def codec_entry(view: TreeView, path: str, label: str, raw: str) -> Entry:
+    entry = (path, label, strip_rust_trivia(normalize_rust_derive_lists(strip_markers(raw))))
+    if not hasattr(view, "_codec_raw"):
+        view._codec_raw = {}
+    view._codec_raw[entry] = raw
+    return entry
+
+
+def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple[Entry, ...]:
+    """The free functions and constants codecs call, including helper chains."""
+    reach = reachability(view)
+    cache = getattr(view, "_codec_helper_cache", {})
+    view._codec_helper_cache = cache
+    if crate not in cache:
+        catalog = {}
+        for path, index in reach._index(crate).items():
+            text = view.projected(path) or ""
+            for match in RUST_DECLARATION.finditer(text):
+                header = match.group(0)
+                if not re.search(r"\b(?:fn|const|static)\s+" + re.escape(match[1]) + r"$", header):
+                    continue
+                indent = len(header) - len(header.lstrip(" \t"))
+                modules = [name for name, start, end, _ in index.modules
+                           if start < match.start() < end]
+                if indent != 4 * len(modules) or _gated_on_test(text, match.start()):
+                    continue
+                raw = text[match.start():rust_item_end(text, match.start())]
+                catalog.setdefault(match[1], []).append(
+                    codec_entry(view, path, f"token codec helper: {match[1]}", raw))
+        cache[crate] = catalog
+    catalog = cache[crate]
+    queue = list(entries)
+    seen = set(queue)
+    helpers = set()
+    for entry in queue:
+        raw = getattr(view, "_codec_raw", {}).get(entry)
+        if raw is None:
+            continue
+        tokens = rust_tokens(raw)
+        wanted = {value for kind, value in tokens if kind == "ident" and value.isupper()}
+        for i, (kind, value) in enumerate(tokens[:-1]):
+            if kind != "ident" or tokens[i + 1] != ("punct", "("):
+                continue
+            if i and tokens[i - 1] in {("punct", "."), ("ident", "fn")}:
+                continue
+            start = i
+            while start >= 2 and tokens[start - 1] == ("punct", "::"):
+                start -= 2
+            if tokens[start][1][:1].isupper():
+                continue
+            wanted.add(value)
+        aliases = {name: segments[-1] for name, segments, _ in reach._file(entry[0]).uses
+                   if segments}
+        wanted.update(aliases[name] for name in tuple(wanted) if name in aliases)
+        for name in wanted:
+            for helper in catalog.get(name, ()):
+                helpers.add(helper)
+                if helper not in seen:
+                    seen.add(helper)
+                    queue.append(helper)
+    return tuple(sorted(helpers))
+
+
+def token_codec_signature(view: TreeView, shape: Shape) -> tuple[Entry, ...]:
+    """Find a type's codecs wherever its crate implements them.
+
+    Retain each impl and the helpers it calls, without binding unrelated
+    codecs that share a file. Macro definitions and invocations bind too.
+    """
+    reach = reachability(view)
+    crate = reach.crate_of(shape.path)
+    cache = getattr(view, "_token_codec_cache", {})
+    view._token_codec_cache = cache
+    if crate not in cache:
+        codecs: dict[str, list[Entry]] = {}
+        for path in view.matching_paths((f"{crate}/src/*.rs",)):
+            if _is_test_source(path):
+                continue
+            text = view.content(path) or ""
+            source = production_codec_source(text)
+            if source is None:
+                continue
+            traits = {"TokenCodec", "CodecVariant"} | {
+                alias for alias, segments, _ in index_file(text).uses
+                if segments and segments[-1] in {"TokenCodec", "CodecVariant"}
+            }
+            for match in RUST_TOKEN_IMPL.finditer(text):
+                if match["trait"].split("::")[-1] not in traits:
+                    continue
+                start = rust_item_start_with_attributes(text, match.start(), rust_outer_attribute_ranges(text))
+                raw = text[start:rust_item_end(text, match.start())]
+                label = f"token codecs: {match['trait']} for {match['target']}"
+                codecs.setdefault(match["target"].split("::")[-1], []).append(
+                    codec_entry(view, path, label, raw))
+        macros = reach._macro_texts(crate)
+        codec_macros = {name for _, name, _, defines, body in macros
+                        if defines and production_codec_source(body) is not None}
+        definitions = {name: codec_entry(view, path, f"token codec macro: {name}!", body)
+                       for path, name, _, defines, body in macros
+                       if defines and name in codec_macros}
+        for path, name, _, defines, body in macros:
+            if defines or name not in codec_macros:
+                continue
+            for kind, target in rust_tokens(body):
+                if kind == "ident":
+                    codecs.setdefault(target, []).extend([
+                        definitions[name], codec_entry(view, path, f"token codec call: {name}!", body),
+                    ])
+        cache[crate] = codecs
+    entries = cache[crate].get(shape.name, [])
+    if entries:
+        entries = [*entries, *codec_helpers(view, crate, entries)]
+        if "primitives" not in cache:
+            primitives = []
+            primitive_crates = set()
+            for path in view.matching_paths(("crates/*/src/*.rs",)):
+                if _is_test_source(path):
+                    continue
+                text = view.content(path) or ""
+                if re.search(r"\btrait\s+TokenCodec\b", text):
+                    primitive_crates.add(reach.crate_of(path))
+                    source = production_codec_source(text)
+                    if source is not None:
+                        primitives.append((path, f"token codecs: {path}", source))
+            containers = RUST_PRELUDE_TYPES | {"BTreeMap", "BTreeSet", "HashMap", "HashSet", "Arc"}
+            for owner in primitive_crates:
+                for path in view.matching_paths((f"{owner}/src/*.rs",)):
+                    if _is_test_source(path):
+                        continue
+                    text = view.content(path) or ""
+                    if any(match["trait"].split("::")[-1] == "TokenCodec"
+                           and match["target"].split("::")[-1] in containers
+                           for match in RUST_TOKEN_IMPL.finditer(text)):
+                        source = production_codec_source(text)
+                        if source is not None:
+                            primitives.append((path, f"token codecs: {path}", source))
+            cache["primitives"] = primitives
+        entries = [*entries, *cache["primitives"]]
+    return tuple(sorted(set(entries)))
+
+
+def guard_signature(
+    view: TreeView, guard: Guard, *, enforce_presence: bool,
+    base_signature: tuple[Entry, ...] | None = None,
+) -> tuple[Entry, ...]:
+    signature = _guard_signature(view, guard, enforce_presence=enforce_presence,
+                                 base_signature=base_signature)
+    if guard.kind in {"roots", "shapes", "records"}:
+        return signature
+    # Item/file guards can name token types without Serde roots. Their codec
+    # ownership is still mechanical; a per-impl marker is never required.
+    reach = reachability(view)
+    roots = []
+    for path, name, _ in signature:
+        if not path.endswith(".rs"):
+            continue
+        index = reach._file(path)
+        for declared, kind, offset, modules in index.types:
+            if name and declared != name.partition("#")[0]:
+                continue
+            shape = Shape(path, declared, offset, kind, modules)
+            if token_codec_signature(view, shape):
+                roots.append(shape)
+    closure = reach.closure(roots)
+    if enforce_presence and closure.problems:
+        raise CheckError(f"{view.label}: {guard.label} reaches token types it cannot resolve: "
+                         + "; ".join(closure.problems[:MAX_REPORTED_PROBLEMS]))
+    return tuple(sorted(set(signature) | set(closure.entries)))
 
 
 def closure_of(view: TreeView, guard: Guard) -> tuple[Closure, list[str]]:
@@ -2621,7 +2870,10 @@ def check_views(
                         )
                     )
                 elif changed and head_version == base_version:
-                    (failures if strict else in_place).append(
+                    witness_required = (strict or surface.upgrade != "coexist"
+                                        or any(name.startswith("token codecs:")
+                                               for _, name, _ in head_entries))
+                    (failures if witness_required else in_place).append(
                         Finding(
                             surface,
                             f"{surface.constant} is {head_version} on both sides but "
@@ -2629,7 +2881,7 @@ def check_views(
                             f"{surface_fingerprint(head_entries)})."
                             + (
                                 f" Bump {surface.constant} strictly past {base_version}."
-                                if strict
+                                if witness_required
                                 else " Pre-1.0 version freeze: changed in place."
                             ),
                         )
@@ -2804,6 +3056,12 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
         if declaration is not None:
             for guard in declaration.guards:
                 patterns.update(guard.paths)
+                entries = guard_signature(view, guard, enforce_presence=True)
+                patterns.update(path for path, _, _ in entries)
+                # A new codec file in an already guarded crate must select CI.
+                for path, name, _ in entries:
+                    if name.startswith("token codecs:"):
+                        patterns.add(f"{reachability(view).crate_of(path)}/src/*.rs")
                 if guard.kind in {"roots", "shapes", "records"}:
                     patterns.update(closure_of(view, guard)[0].paths)
             patterns.update(catalog.path for catalog in declaration.catalogs)

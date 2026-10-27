@@ -311,19 +311,21 @@ class Fixture(unittest.TestCase):
 
 
 class FreezeVerdicts(Fixture):
-    def test_an_in_place_change_is_reported_before_the_cut(self) -> None:
+    def test_a_stored_shape_requires_its_witness_before_the_cut(self) -> None:
         self.write("crates/demo/src/lib.rs", WIDER_RECORD)
-        head = self.commit("in-place shape change")
+        result = self.run_command(self.base, self.commit("stored shape change"), strict=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Bump WIRE_VERSION strictly past 3", result.stderr)
+
+    def test_a_coexist_wire_can_still_change_in_place_before_the_cut(self) -> None:
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("String", "u64"))
+        head = self.commit("wire shape change")
         result = self.run_command(self.base, head, strict=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("in-place shape change:", result.stdout)
-        self.assertIn("crates/demo/src/lib.rs:WIRE_VERSION", result.stdout)
         self.assertRegex(result.stdout, r"head sha256:[0-9a-f]{64}")
-        self.assertIn("2 of 2 surfaces evaluated", result.stdout)
-        self.assertNotIn("Bump WIRE_VERSION", result.stdout)
         strict = self.run_command(self.base, head)
         self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
-        self.assertIn("Bump WIRE_VERSION strictly past 3", strict.stderr)
         shape_hash = re.search(r"head sha256:[0-9a-f]{64}", result.stdout).group()
         self.assertIn(shape_hash, strict.stderr)
 
@@ -357,16 +359,98 @@ class FreezeVerdicts(Fixture):
         self.assertIn("2 of 2 surfaces evaluated", result.stdout)
 
 
-class HistoricalHookDecision(unittest.TestCase):
-    def test_0059_retains_the_historical_rule_and_links_0128(self):
-        root = Path(__file__).resolve().parents[1]
-        path = root / "docs/adr/0059-before-tool-call-directives-compose-monotonically.md"
-        self.assertTrue(path.exists(), "the old rule must remain available to interpret history")
-        text = path.read_text()
-        self.assertIn("Superseded", text)
-        self.assertIn("0128-tool-hooks-compose-as-transforms-then-checks.md", text)
-        self.assertIn("reinspect", text.lower())
-        self.assertIn("0059-before-tool-call-directives-compose-monotonically.md", (root / "docs/adr/README.md").read_text())
+class TokenCodecWitness(Fixture):
+    def test_codec_changes_require_a_witness_even_before_one(self) -> None:
+        codec = """
+impl TokenCodec for Record {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(7);
+        self.id.encode(out);
+        self.other.encode(out);
+    }
+}
+impl CodecVariant for Record {
+    fn codec_variant(&self) -> u32 { 0 }
+}
+macro_rules! record {
+    ($ty:ty) => { impl TokenCodec for $ty {} };
+}
+record!(Other);
+"""
+        self.write("crates/demo/src/codec.rs", codec)
+        self.base = self.commit("seven-field codec")
+        key = "crates/demo/src/lib.rs:WIRE_VERSION"
+        for old, new in [("seq(7)", "seq(8)"),
+                         ("self.id.encode(out);\n        self.other.encode(out);",
+                          "self.other.encode(out);\n        self.id.encode(out);"),
+                         ("{ 0 }", "{ 1 }")]:
+            with self.subTest(change=new):
+                self.write("crates/demo/src/codec.rs", codec.replace(old, new))
+                result = gate.check_views(gate.RevisionView(self.repo, self.base),
+                                          gate.WorktreeView(self.repo),
+                                          only=frozenset({key}), strict=False)
+                self.assertTrue(result.failures, result)
+                self.assertFalse(result.errors, result)
+        for addition in ["\n// A comment.\n", "\n#[cfg(test)]\nmod tests { impl TokenCodec for OnlyTests {} }\n"]:
+            self.write("crates/demo/src/codec.rs", codec + addition)
+            result = gate.check_views(gate.RevisionView(self.repo, self.base),
+                                      gate.WorktreeView(self.repo),
+                                      only=frozenset({key}), strict=False)
+            self.assertFalse(result.failures or result.errors, result)
+        self.write("crates/demo/src/codec.rs", codec.replace("record!(Other)", "record!(Another)"))
+        result = gate.check_views(gate.RevisionView(self.repo, self.base),
+                                  gate.WorktreeView(self.repo), only=frozenset({key}), strict=False)
+        self.assertFalse(result.failures or result.errors, result)
+        self.write("crates/demo/src/codec.rs", codec)
+        self.write("crates/demo/src/new_codec.rs", "impl TokenCodec for Record { fn encode(&self, out: &mut TokenWriter) { out.seq(8); } }")
+        result = gate.check_views(gate.RevisionView(self.repo, self.base),
+                                  gate.WorktreeView(self.repo),
+                                  only=frozenset({key}), strict=False)
+        self.assertTrue(result.failures, result)
+        self.assertFalse(result.errors, result)
+        (self.repo / "crates/demo/src/new_codec.rs").unlink()
+        self.write("crates/demo/src/codec.rs", codec.replace("seq(7)", "seq(8)"))
+        self.write("crates/demo/src/lib.rs", LIB.replace("= 3;", "= 4;"))
+        self.write(gate.UPCASTER_REGISTRY, LIFT_FROM_3)
+        result = gate.check_views(gate.RevisionView(self.repo, self.base),
+                                  gate.WorktreeView(self.repo),
+                                  only=frozenset({key}), strict=False)
+        self.assertFalse(result.failures or result.errors, result)
+        alias = ('use tokens::TokenCodec as Codec;\n' +
+                 codec.replace("impl TokenCodec for Record", "impl Codec for Record"))
+        self.write("crates/demo/src/codec.rs", alias)
+        self.write("crates/demo/src/lib.rs", LIB)
+        alias_base = self.commit("an imported codec trait alias")
+        self.write("crates/demo/src/codec.rs", alias.replace("seq(7)", "seq(8)"))
+        result = gate.check_views(gate.RevisionView(self.repo, alias_base),
+                                  gate.WorktreeView(self.repo),
+                                  only=frozenset({key}), strict=False)
+        self.assertTrue(result.failures, result)
+        self.assertFalse(result.errors, result)
+
+        for implementation in [
+            """impl TokenCodec for Record {
+    fn encode(&self, out: &mut TokenWriter) { fields(out); }
+}
+fn fields(out: &mut TokenWriter) { out.seq(7); }
+""",
+            """macro_rules! record_codec {
+    ($ty:ty, $fields:literal) => {
+        impl TokenCodec for $ty {
+            fn encode(&self, out: &mut TokenWriter) { out.seq($fields); }
+        }
+    };
+}
+record_codec!(Record, 7);
+""",
+        ]:
+            self.write("crates/demo/src/codec.rs", implementation)
+            baseline = self.commit("codec helper or macro field count")
+            self.write("crates/demo/src/codec.rs", implementation.replace("7", "8"))
+            result = gate.check_views(gate.RevisionView(self.repo, baseline),
+                                      gate.WorktreeView(self.repo), only=frozenset({key}), strict=False)
+            self.assertTrue(result.failures, result)
+            self.assertFalse(result.errors, result)
 
 
 class CutVerdicts(Fixture):
@@ -1134,13 +1218,13 @@ class ProcessEventVocabularyScope(unittest.TestCase):
         view = gate.WorktreeView(gate.ROOT)
         surface = gate.Surface(
             "PROCESS_EVENT_VOCABULARY_VERSION",
-            "crates/lash-core-execution/src/runtime/process/effect_summary.rs",
+            "crates/lash-execution-contracts/src/process/effect_summary.rs",
             "migrate",
             True,
         )
         declaration = gate.declaration_in(view.content(surface.constant_path), surface)
         self.assertIsNotNone(declaration)
-        path = "crates/lash-trace/src/limits.rs"
+        path = "crates/lash-core-store/src/execution_limits.rs"
         guards = [guard for guard in declaration.guards if path in guard.paths]
         self.assertTrue(guards, "the wire ceiling must remain guarded")
 
@@ -1154,7 +1238,8 @@ class ProcessEventVocabularyScope(unittest.TestCase):
         original = signature(view)
         source = view.content(path)
         for before, after, changes_vocabulary in [
-            ("pub held_observations: usize,", "pub held_observations: u64,", False),
+            ("MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;",
+             "MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;\nconst UNRELATED_LIMIT: usize = 2;", False),
             ("MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;",
              "MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4095;", True),
         ]:

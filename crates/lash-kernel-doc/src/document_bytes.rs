@@ -14,7 +14,7 @@ use lash_kernel_value::tokens::TokenError;
 /// decoder is provided for opaque host blobs.
 /// version_surface = "coexist"
 /// version_guard(items(DOCUMENT_GRAMMAR_VERSION, decode))
-pub const DOCUMENT_GRAMMAR_VERSION: u32 = 1;
+pub const DOCUMENT_GRAMMAR_VERSION: u32 = 2;
 
 /// An opaque document, its lash-issued identity and its grammar tag.
 ///

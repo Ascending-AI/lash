@@ -14,6 +14,7 @@ use thiserror::Error;
 ///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
+/// version_unguarded = "the session descriptor is an unversioned semantic graph page; kernel admission and the page grammar govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
 pub const CODEMODE_SNAPSHOT_VERSION: u32 = 1;
@@ -22,6 +23,7 @@ pub const CODEMODE_SNAPSHOT_VERSION: u32 = 1;
 /// with version 26's shape; its `Lift::Decoder` row admits N's
 /// roots, which the canonical decoder reads natively.
 #[cfg(feature = "synthetic-next")]
+/// version_unguarded = "the session descriptor is an unversioned semantic graph page; kernel admission and the page grammar govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
 pub const CODEMODE_SNAPSHOT_VERSION: u32 = 2;

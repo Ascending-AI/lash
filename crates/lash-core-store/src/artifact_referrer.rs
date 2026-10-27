@@ -42,8 +42,12 @@ use lash_vocabulary::identity::ProcessId;
 ///     ),
 ///     items(path = "crates/lash-core-store/src/process_identity.rs", parse_rendered),
 ///     file(
-///         path = "crates/lash-protocol-types/src/identity.rs",
-///         cover("string_identity!", SessionId, ProcessId),
+///         path = "crates/lash-kernel-value/src/identity.rs",
+///         cover("string_identity!", SessionId),
+///     ),
+///     file(
+///         path = "crates/lash-vocabulary/src/identity.rs",
+///         cover("string_identity!", ProcessId),
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
