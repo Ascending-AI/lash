@@ -1153,34 +1153,22 @@ impl ActorContext {
             match opened {
                 Ok(tx) => break tx,
                 Err(error) => {
-                    // A concurrent control read can sample our old revision before
-                    // an outcome commit, then reach storage after its acknowledgement.
-                    // Reopen only when this claim adopted the revision that displaced
-                    // the sample. A foreign writer's conflict still ends the attempt;
-                    // no previously prepared transaction is ever re-fenced.
-                    let displaced_here = match &error {
-                        DurableError::RevisionConflict {
-                            actor,
-                            epoch,
-                            expected,
-                            actual,
-                        } if actor == self.actor()
-                            && *epoch == self.epoch()
-                            && revision == Some(*expected) =>
-                        {
+                    let displaced_here = lash_durable::fenced_read::retained_displaced(
+                        self.actor(),
+                        self.epoch(),
+                        revision,
+                        &error,
+                        async {
                             self.inner
                                 .session_projection
                                 .lock()
                                 .await?
                                 .as_ref()
                                 .map(super::owner_state::OwnerState::revision)
-                                .transpose()?
-                                .is_some_and(|acknowledged| {
-                                    acknowledged > *expected && acknowledged >= *actual
-                                })
-                        }
-                        _ => false,
-                    };
+                                .transpose()
+                        },
+                    )
+                    .await?;
                     if !displaced_here {
                         return Err(error);
                     }

@@ -43,6 +43,7 @@ pub mod domain;
 mod dues;
 mod durable_config;
 mod error;
+pub mod fenced_read;
 mod formats;
 mod ids;
 mod labels;

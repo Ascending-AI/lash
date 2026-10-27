@@ -587,7 +587,7 @@ pub(super) async fn leased_pages(
     store: Arc<dyn PageStore>,
     request: RootLeaseRequest,
 ) -> Result<Pages, CarryFault> {
-    let lease = super::pages::acquire_parked_lease(store.as_ref(), request)
+    let lease = lash_durable::fenced_read::acquire_lease(store.as_ref(), request)
         .await
         .map_err(|error| HeapFault::Transport(error.to_string()))?;
     let runtime = tokio::runtime::Handle::current();

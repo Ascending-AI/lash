@@ -94940,7 +94940,8 @@
         "serde",
         "serde_json",
         "thiserror",
-        "tokio"
+        "tokio",
+        "tracing"
       ],
       "doc": "//crates/lash-durable:lash-durable__doc",
       "manifest": "crates/lash-durable/Cargo.toml",
