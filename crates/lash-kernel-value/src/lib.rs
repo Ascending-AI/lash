@@ -43,3 +43,9 @@ pub use types::*;
 /// Kernel-only access to the records opaque embedding identities retain.
 #[doc(hidden)]
 pub mod kernel_internals;
+
+mod document_refusal;
+pub use document_refusal::{Invalid, InvalidReason, StatementForm};
+
+mod document_check;
+pub use document_check::{CheckFailure, CheckReason, CheckRefusal};

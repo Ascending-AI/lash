@@ -36,7 +36,7 @@ pub(super) async fn carry(
         return Ok(());
     }
     let refusal = |reason: String| {
-        Error::Migration(lash_vm_runtime::KernelMigrationRefusal::NotAdmitted {
+        Error::Migration(lash_vm_runtime::KernelMigrationRefusal::Succession {
             document: envelope.document.id(),
             reason,
         })
@@ -90,7 +90,12 @@ pub(super) async fn carry(
             successor,
             &lash_kernel_package::ReachSelection::Start(lash_kernel_value::StartSelector::Main),
         )
-        .map_err(|e| refusal(e.to_string()))?;
+        .map_err(|error| {
+            Error::Migration(lash_vm_runtime::KernelMigrationRefusal::from_link(
+                envelope.document.id(),
+                error,
+            ))
+        })?;
     let execution = super::link::execution_id(snapshots.exec());
     let stores = ctx.actor_context().backend().stores();
     let resolutions = stores.execution_resolutions();
@@ -115,7 +120,12 @@ pub(super) async fn carry(
         &outcomes,
         &BTreeMap::new(),
     )
-    .map_err(|e| refusal(e.to_string()))?;
+    .map_err(|error| match error {
+        lash_vm_runtime::HelperAdoptionRefusal::Link(error) => Error::Migration(
+            lash_vm_runtime::KernelMigrationRefusal::from_link(envelope.document.id(), error),
+        ),
+        error => refusal(error.to_string()),
+    })?;
     let uses = UseCorrespondence { uses: adopted.uses };
     let mut environment = envelope.environment.clone();
     // Keep old uses for exact creation-code callables; successor uses inherit
@@ -158,7 +168,12 @@ pub(super) async fn carry(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
             )
-            .map_err(|error| refusal(error.to_string()))?;
+            .map_err(|error| {
+                Error::Migration(lash_vm_runtime::KernelMigrationRefusal::from_link(
+                    envelope.document.id(),
+                    error,
+                ))
+            })?;
         for (link, functions) in reach.functions {
             retained_code.entry(link).or_default().extend(functions);
         }
@@ -460,7 +475,12 @@ mod tests {
     fn a_linked_migration_refusal_keeps_its_typed_cause_at_the_plugin_boundary() {
         let refusal = lash_vm_runtime::KernelMigrationRefusal::NotAdmitted {
             document: lash_kernel_value::DocumentId::from_bytes([1; 32]),
-            reason: "linked carry has no successor Link correspondence".into(),
+            refusal: lash_kernel_doc::Invalid {
+                site: None,
+                reason: Box::new(lash_kernel_doc::InvalidReason::FunctionNotResolved {
+                    function: lash_kernel_value::FunctionId::from_bytes([2; 32]),
+                }),
+            },
         };
         let error = super::Error::Migration(refusal.clone()).into_runtime();
         let Some(lash_core::RuntimeErrorCause::PluginOperation { failure }) = error.cause else {

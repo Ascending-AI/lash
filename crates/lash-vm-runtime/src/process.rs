@@ -635,9 +635,7 @@ impl KernelProcessEngine {
                     internal_signature,
                 )
                 .map_err(|e| {
-                    documents::refused(lash_kernel_package::LinkRefusal::InvalidDocument {
-                        message: e.to_string(),
-                    })
+                    documents::refused(lash_kernel_package::LinkRefusal::DocumentValidation(e))
                 })?;
                 let exported = function
                     .entry_export(

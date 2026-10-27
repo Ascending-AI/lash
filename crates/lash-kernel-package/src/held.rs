@@ -47,11 +47,8 @@ impl LinkedContent {
         document: Document,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
     ) -> Result<DocumentId, LinkRefusal> {
-        lash_kernel_doc::validate_document(&document, catalog).map_err(|e| {
-            LinkRefusal::InvalidDocument {
-                message: e.to_string(),
-            }
-        })?;
+        lash_kernel_doc::validate_document(&document, catalog)
+            .map_err(LinkRefusal::DocumentValidation)?;
         let id = document.identity();
         self.documents.insert(id, std::sync::Arc::new(document));
         Ok(id)
@@ -185,9 +182,7 @@ impl LinkedContent {
                     .documents
                     .get(id)
                     .ok_or(LinkRefusal::MissingDocument { document: *id })?;
-                check(document).map_err(|error| LinkRefusal::InvalidDocument {
-                    message: error.to_string(),
-                })?;
+                check(document).map_err(LinkRefusal::DocumentValidation)?;
             }
         }
         self.inspect_with(
@@ -208,11 +203,8 @@ impl LinkedContent {
         for artifact in self.retain_reach(root)? {
             if let RetainedContent::Document(id) = artifact {
                 let document = self.document(id)?;
-                lash_kernel_doc::validate_document_structure(document).map_err(|error| {
-                    LinkRefusal::InvalidDocument {
-                        message: error.to_string(),
-                    }
-                })?;
+                lash_kernel_doc::validate_document_structure(document)
+                    .map_err(LinkRefusal::DocumentValidation)?;
             }
         }
         self.inspect_with(
@@ -324,11 +316,9 @@ impl LinkedContent {
                             message: format!("unproved helper {function}"),
                         });
                     }
-                    let registered = catalog.registered(&function).ok_or_else(|| {
-                        LinkRefusal::InvalidDocument {
-                            message: format!("missing pinned helper {function}"),
-                        }
-                    })?;
+                    let registered = catalog
+                        .registered(&function)
+                        .ok_or(LinkRefusal::MissingHelper { function })?;
                     pending.extend(registered.callees());
                     required
                         .functions

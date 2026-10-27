@@ -7,7 +7,10 @@ pub(super) fn helper(helpers: &BuildHelpers, name: &str) -> Result<FunctionId, M
         .functions()
         .named(name)
         .find(|id| helpers.contains(id))
-        .ok_or_else(|| MaterializeRefusal::MissingHelper { name: name.into() })
+        .ok_or_else(|| MaterializeRefusal::ConstructionHelperMissing {
+            name: FunctionName::new(name)
+                .unwrap_or_else(|_| unreachable!("qualified construction helper")),
+        })
 }
 
 pub(super) fn member(name: &Name, index: u32, ts: bool) -> Expr {
@@ -483,9 +486,7 @@ fn python_factory(
     helpers: &BuildHelpers,
     fresh: &mut impl FnMut(String) -> Name,
 ) -> Result<(Block, Name), MaterializeRefusal> {
-    let invalid = || MaterializeRefusal::Document {
-        message: "Python factory has no packed body".into(),
-    };
+    let invalid = || MaterializeRefusal::PythonFactoryBodyMissing;
     let Expr::Let { value, .. } = token else {
         return Err(invalid());
     };

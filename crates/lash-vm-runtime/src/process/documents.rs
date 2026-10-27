@@ -260,6 +260,8 @@ pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
                 artifact: link_artifact(link),
             };
         }
+        LinkRefusal::MissingHelper { function } => AdmissionRefusal::MissingHelper { function },
+        LinkRefusal::DocumentValidation(refusal) => AdmissionRefusal::DocumentValidation(refusal),
         LinkRefusal::InvalidDocument { message } => AdmissionRefusal::InvalidDocument { message },
     };
     EnginePortError::Refused(cause)
@@ -403,11 +405,7 @@ impl KernelDocuments {
                     self.inspections.documents(),
                 )
                 .map(|_| ())
-                .map_err(|e| {
-                    EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                        message: e.to_string(),
-                    })
-                })
+                .map_err(|refusal| EnginePortError::Refused(refusal.into()))
             })
             .clone()
             .inspect_err(|_| {
@@ -1159,10 +1157,18 @@ impl KernelDocuments {
             .map_err(map_link_refusal)?
             .clone();
         lash_kernel_check::WorkflowDocument::entered(document, start.clone(), self.helpers.as_ref())
-            .map_err(|e| {
-                EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
-                    message: e.to_string(),
-                })
+            .map_err(|error| match error {
+                lash_kernel_check::WorkflowDocumentError::Refused(refusal) => {
+                    EnginePortError::Refused(refusal.into())
+                }
+                lash_kernel_check::WorkflowDocumentError::Start(refusal) => {
+                    map_link_refusal(refusal.into())
+                }
+                lash_kernel_check::WorkflowDocumentError::Callable(refusal) => {
+                    EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                        message: refusal.to_string(),
+                    })
+                }
             })
     }
     pub async fn load(&self, reference: &ContentRef) -> Result<LoadedContent, EnginePortError> {

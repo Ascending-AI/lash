@@ -48,7 +48,10 @@ impl<'a> Values<'a> {
             .functions()
             .named(name)
             .find(|id| self.helpers.contains(id))
-            .ok_or_else(|| MaterializeRefusal::MissingHelper { name: name.into() })?;
+            .ok_or_else(|| MaterializeRefusal::ConstructionHelperMissing {
+                name: FunctionName::new(name)
+                    .unwrap_or_else(|_| unreachable!("qualified construction helper")),
+            })?;
         self.library.insert(id);
         Ok(Expr::Call { function: id, args })
     }

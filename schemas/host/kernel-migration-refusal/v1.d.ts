@@ -19,8 +19,17 @@ export type KernelMigrationRefusal = ({
   [key: string]: unknown;
 } | {
   "document": DocumentId;
-  "reason": string;
+  "refusal": Invalid;
   "refused": "not_admitted";
+  [key: string]: unknown;
+} | {
+  "document": DocumentId;
+  "refused": "explicit_successor_required";
+  [key: string]: unknown;
+} | {
+  "document": DocumentId;
+  "reason": string;
+  "refused": "succession";
   [key: string]: unknown;
 } | {
   "document": DocumentId;
@@ -84,6 +93,135 @@ export type FunctionName = string;
  */
 export type ImportSlot = number;
 
+/**
+ * Why a document or a definition is refused, and the node at fault.
+ */
+export type Invalid = {
+  "reason": InvalidReason;
+  /**
+   * The node at fault. `None` when the fault is in no node: the
+   * manifest, an entry, a signature.
+   */
+  "site"?: (Site | null);
+};
+
+export type InvalidReason = (("empty_name" | "limit_measures_result" | "empty_formula" | "guard_without_native" | "empty_guard_unit") | {
+  "document": {
+    "message": string;
+  };
+} | {
+  "import": {
+    "slot": ImportSlot;
+  };
+} | {
+  "kernel_version": {
+    "found": number;
+    "supported": number;
+  };
+} | {
+  "too_deep": {
+    "limit": number;
+  };
+} | {
+  "duplicate_param": {
+    "name": Name;
+  };
+} | {
+  "duplicate_field": {
+    "field": string;
+  };
+} | {
+  "loop_control_outside_loop": {
+    "keyword": string;
+  };
+} | {
+  "call_not_native": {
+    "function": FunctionId;
+    "name": FunctionName;
+  };
+} | {
+  "function_of_another_version": {
+    "function": FunctionId;
+    "name": FunctionName;
+    "required": number;
+    "written_for": number;
+  };
+} | {
+  "function_not_listed": {
+    "function": FunctionId;
+  };
+} | {
+  "function_not_resolved": {
+    "function": FunctionId;
+  };
+} | {
+  "call_arity": {
+    "accepted": number;
+    "given": number;
+    "name": string;
+    "required": number;
+  };
+} | {
+  "effect_not_listed": {
+    "slot": ImportSlot;
+  };
+} | {
+  "function_not_declared": {
+    "name": Name;
+  };
+} | {
+  "declared_function_in_library": {
+    "name": Name;
+  };
+} | {
+  "effect_not_declared": {
+    "slot": ImportSlot;
+  };
+} | {
+  "entry_not_declared": {
+    "entry": Name;
+  };
+} | {
+  "entry_arity": {
+    "declared": number;
+    "entry": Name;
+    "signature": number;
+  };
+} | {
+  "invalid_type": {
+    "problem": string;
+  };
+} | {
+  "required_after_optional": {
+    "name": Name;
+  };
+} | {
+  "formula_unknown_param": {
+    "name": Name;
+  };
+} | {
+  "native_version_without_native": {
+    "version": number;
+  };
+} | "native_version_zero" | {
+  "native_takes_function": {
+    "name": Name;
+  };
+} | {
+  "native_body_may_wait": {
+    "form": StatementForm;
+  };
+} | {
+  "place_first_assignment": {
+    "problem": string;
+  };
+} | "action_as_expression" | {
+  "start_arity": {
+    "declared": number;
+    "signature": number;
+  };
+} | "start_token");
+
 export type LinkId = string;
 
 /**
@@ -142,6 +280,12 @@ export type Site = {
   "path"?: Array<number>;
   "unit": Unit;
 };
+
+/**
+ * An action form, as a refusal names one the body of a function with a
+ * native implementation may not run (`K-LIB-004`).
+ */
+export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "await");
 
 /**
  * The code a node belongs to.

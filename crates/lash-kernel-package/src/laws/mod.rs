@@ -513,7 +513,7 @@ fn fresh_inspection_refuses_missing_declared_helpers() {
             &ReachSelection::AllExports,
             lash_kernel_doc::BuildHelpers::empty().as_ref()
         ),
-        Err(LinkRefusal::InvalidDocument { .. })
+        Err(LinkRefusal::DocumentValidation(_))
     ));
     content
         .inspect_ordinary(root, &ReachSelection::AllExports)
@@ -656,7 +656,7 @@ fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
     content.documents.insert(link.document, Arc::new(changed));
     assert!(matches!(
         inspections.inspect(&content, root, &ReachSelection::Callable(ids[0]), &helpers),
-        Err(LinkRefusal::InvalidDocument { .. })
+        Err(LinkRefusal::DocumentValidation(_))
     ));
     content.links.remove(&root);
     assert!(matches!(

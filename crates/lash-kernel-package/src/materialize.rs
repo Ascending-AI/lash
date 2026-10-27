@@ -31,8 +31,14 @@ pub enum MaterializeRefusal {
         limit: u64,
         actual: u64,
     },
+    #[error("missing build helper {function}")]
+    MissingHelper { function: FunctionId },
     #[error("missing construction helper {name}")]
-    MissingHelper { name: String },
+    ConstructionHelperMissing { name: FunctionName },
+    #[error(transparent)]
+    LibraryRequirements(#[from] LibraryRequirementRefusal),
+    #[error(transparent)]
+    DocumentValidation(#[from] Invalid),
     #[error(transparent)]
     Package(#[from] LinkRefusal),
     #[error(transparent)]
@@ -43,8 +49,18 @@ pub enum MaterializeRefusal {
     Check(#[from] lash_kernel_check::Refusal),
     #[error(transparent)]
     Captions(#[from] CaptionsRefusal),
-    #[error("invalid materialized document: {message}")]
-    Document { message: String },
+    #[error("callable reference needs its frozen value")]
+    FrozenValueRequired,
+    #[error("inconsistent import {slot:?} within defining Link {link}")]
+    InconsistentImport { link: LinkId, slot: ImportSlot },
+    #[error("missing convention import {slot:?} in Link {link}")]
+    ConventionImportMissing { link: LinkId, slot: ImportSlot },
+    #[error("Python factory has no packed body")]
+    PythonFactoryBodyMissing,
+    #[error(transparent)]
+    FunctionName(#[from] InvalidQualifiedName),
+    #[error("cannot reidentify materialized definitions: {message}")]
+    Reidentification { message: String },
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,9 +98,7 @@ pub fn materialize_workflow(
             dropped: vec![],
         });
     }
-    let function = function.ok_or_else(|| MaterializeRefusal::Document {
-        message: "callable reference needs its frozen value".into(),
-    })?;
+    let function = function.ok_or(MaterializeRefusal::FrozenValueRequired)?;
     if *reference != WorkflowReference::Callable(function.callable) {
         return Err(MaterializeRefusal::Callable(FunctionValueRefusal::Identity));
     }
@@ -203,10 +217,8 @@ pub fn materialize_workflow(
         let mut ids = BTreeMap::new();
         for id in &needed {
             if let Some(definition) = copied.functions.get_mut(id) {
-                definition.name = FunctionName::new(format!("materialized.node{n}.f{}", ids.len()))
-                    .map_err(|e| MaterializeRefusal::Document {
-                        message: e.to_string(),
-                    })?;
+                definition.name =
+                    FunctionName::new(format!("materialized.node{n}.f{}", ids.len()))?;
                 ids.insert(*id, definition.identity());
             } else {
                 document.library.insert(*id);
@@ -219,9 +231,9 @@ pub fn materialize_workflow(
                     let key = (node.callable.link, *slot);
                     if let Some(new) = slots.get(&key) {
                         if document.imports[new] != *import {
-                            return Err(MaterializeRefusal::Document {
-                                message: "inconsistent import signatures within a defining Link"
-                                    .into(),
+                            return Err(MaterializeRefusal::InconsistentImport {
+                                link: node.callable.link,
+                                slot: *slot,
                             });
                         }
                     } else {
@@ -236,13 +248,12 @@ pub fn materialize_workflow(
             if let FunctionTarget::Import(slot) = target {
                 let key = (node.callable.link, *slot);
                 if let std::collections::btree_map::Entry::Vacant(entry) = slots.entry(key) {
-                    let import =
-                        source
-                            .imports
-                            .get(slot)
-                            .ok_or_else(|| MaterializeRefusal::Document {
-                                message: "missing convention import".into(),
-                            })?;
+                    let import = source.imports.get(slot).ok_or(
+                        MaterializeRefusal::ConventionImportMissing {
+                            link: node.callable.link,
+                            slot: *slot,
+                        },
+                    )?;
                     let new = ImportSlot(document.imports.len() as u32);
                     entry.insert(new);
                     document.imports.insert(new, import.clone());
@@ -483,13 +494,9 @@ pub fn materialize_workflow(
     lash_kernel_doc::library_requirements(&mut document, helpers).map_err(
         |refusal| match refusal {
             lash_kernel_doc::LibraryRequirementRefusal::MissingHelper { function } => {
-                MaterializeRefusal::MissingHelper {
-                    name: function.to_string(),
-                }
+                MaterializeRefusal::MissingHelper { function }
             }
-            refusal => MaterializeRefusal::Document {
-                message: refusal.to_string(),
-            },
+            refusal => MaterializeRefusal::LibraryRequirements(refusal),
         },
     )?;
     let mut relocated = BTreeMap::new();
@@ -524,15 +531,13 @@ pub fn materialize_workflow(
     }
     let reidentified = document
         .reidentify_functions()
-        .map_err(|message| MaterializeRefusal::Document { message })?;
+        .map_err(|message| MaterializeRefusal::Reidentification { message })?;
     Budget {
         bytes: 0,
         limit: 4 * 1024 * 1024,
     }
     .add(&document)?;
-    validate_document(&document, helpers).map_err(|e| MaterializeRefusal::Document {
-        message: e.to_string(),
-    })?;
+    validate_document(&document, helpers).map_err(MaterializeRefusal::DocumentValidation)?;
     let mut entries = vec![];
     let mut dropped = vec![];
     for (n, node) in nodes.iter().enumerate() {

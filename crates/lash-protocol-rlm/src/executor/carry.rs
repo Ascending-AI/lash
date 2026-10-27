@@ -103,18 +103,13 @@ impl KernelCarry {
         &self,
         document: &lash_kernel_doc::Document,
     ) -> Result<lash_vm_runtime::PlannedMigration, KernelMigrationRefusal> {
-        let refused = |reason: &str| KernelMigrationRefusal::NotAdmitted {
+        let refused = || KernelMigrationRefusal::ExplicitSuccessorRequired {
             document: document.identity(),
-            reason: reason.into(),
         };
-        let capability = self
-            .succession
-            .as_ref()
-            .ok_or_else(|| refused("session kernel succession is unavailable"))?;
-        let plan = capability(document, self.library()?.as_ref())?
-            .ok_or_else(|| refused("session kernel succession has no correspondence"))?;
+        let capability = self.succession.as_ref().ok_or_else(refused)?;
+        let plan = capability(document, self.library()?.as_ref())?.ok_or_else(refused)?;
         let proved = lash_vm_runtime::plan_migration(document, self.library()?.as_ref())?
-            .ok_or_else(|| refused("no kernel format correspondence"))?;
+            .ok_or_else(refused)?;
         if plan != proved {
             return Err(KernelMigrationRefusal::Document {
                 document: document.identity(),

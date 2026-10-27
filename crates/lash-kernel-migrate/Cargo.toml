@@ -27,6 +27,7 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-kernel-package = { workspace = true }
 lash-kernel-value = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 lash-kernel-check = { workspace = true }

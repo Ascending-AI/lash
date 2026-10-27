@@ -30,9 +30,7 @@ pub(super) fn definition(
     Ok(FunctionDefinition {
         projection: Default::default(),
         kernel: KERNEL_VERSION,
-        name: FunctionName::new(name).map_err(|e| MaterializeRefusal::Document {
-            message: e.to_string(),
-        })?,
+        name: FunctionName::new(name)?,
         signature: Signature { params, result },
         errors: BTreeSet::new(),
         guard: None,

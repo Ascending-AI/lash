@@ -5,6 +5,10 @@ use {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LinkRefusal {
     #[error(transparent)]
+    DocumentValidation(#[from] lash_kernel_doc::Invalid),
+    #[error("missing build helper {function}")]
+    MissingHelper { function: FunctionId },
+    #[error(transparent)]
     SignatureRequired(Box<lash_kernel_doc::SignatureRequired>),
     #[error("Import {slot:?} ({name:?}) has no member")]
     MissingImport {

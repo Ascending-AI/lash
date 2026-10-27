@@ -273,8 +273,8 @@ mod work_laws {
                 .admit_document(&claim, &refused.clone().into())
                 .await,
             Err(EnginePortError::Refused(
-                AdmissionRefusal::InvalidDocument { .. }
-            ))
+                AdmissionRefusal::DocumentValidation(ref invalid)
+            )) if matches!(*invalid.reason, lash_kernel_doc::InvalidReason::FunctionNotResolved { function } if function == shipped)
         ));
         // Retain structurally valid bytes independently to test the cold
         // inspection boundary, which must use the same custom image too.
@@ -287,8 +287,8 @@ mod work_laws {
         assert!(matches!(
             documents.fulfil(&request(identified.id())).await,
             Err(EnginePortError::Refused(
-                AdmissionRefusal::InvalidDocument { .. }
-            ))
+                AdmissionRefusal::DocumentValidation(ref invalid)
+            )) if matches!(*invalid.reason, lash_kernel_doc::InvalidReason::FunctionNotResolved { function } if function == shipped)
         ));
     }
 

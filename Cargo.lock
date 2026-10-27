@@ -3496,6 +3496,7 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-value",
  "schemars",

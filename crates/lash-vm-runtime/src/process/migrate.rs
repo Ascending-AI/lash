@@ -53,7 +53,7 @@ pub fn plan_migration(
     validate_document(&rewritten.document, functions).map_err(|error| {
         KernelMigrationRefusal::NotAdmitted {
             document: from,
-            reason: error.to_string(),
+            refusal: error,
         }
     })?;
     Ok(Some(PlannedMigration {
@@ -111,10 +111,8 @@ pub async fn migration_refusal(
         }));
     };
     let content = documents.load_linked(link).await?;
-    Ok(Some(KernelMigrationRefusal::NotAdmitted {
+    Ok(Some(KernelMigrationRefusal::ExplicitSuccessorRequired {
         document: content.links[&link].document,
-        reason: "a kernel-format upgrade requires an explicit successor and UseCorrespondence"
-            .into(),
     }))
 }
 

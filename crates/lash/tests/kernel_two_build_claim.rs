@@ -613,7 +613,7 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn session_succession_refuses_typed_before_rewriting_without_a_complete_correspondence() {
     for (build, expected) in [
-        (Build::WithoutSuccession, "not_admitted"),
+        (Build::WithoutSuccession, "explicit_successor_required"),
         (Build::Unmapped, "document"),
     ] {
         let stores: Arc<dyn StoreSet> =
@@ -665,11 +665,6 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
         assert_eq!(failure["payload"]["refused"], expected, "{refusal}");
         if build == Build::Unmapped {
             assert_eq!(failure["payload"]["refusal"]["reason"], "correspondence");
-        } else {
-            assert_eq!(
-                failure["payload"]["reason"],
-                "session kernel succession is unavailable"
-            );
         }
         assert_eq!(parked.formats, formats);
         let after = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
@@ -1425,7 +1420,7 @@ async fn a_run_whose_provider_no_live_node_registers_stays_parked_and_stranded()
             && stranded.lacks.codecs.is_empty()
             && stranded.lacks.providers.len() == 1
             && stranded.lacks.providers.iter().all(|provider| {
-                provider.owner == "kernel-claim-hold" && provider.key == "body"
+                provider.owner() == "kernel-claim-hold" && provider.key() == "body"
             }),
         "the run lacks only its provider: {stranded:?}"
     );

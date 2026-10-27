@@ -121,6 +121,11 @@ pub struct LoadedContent {
 )]
 /// Typed deterministic admission refusal retained across the plugin/host boundary.
 pub enum AdmissionRefusal {
+    DocumentValidation(lash_kernel_value::Invalid),
+    DocumentCheck(lash_kernel_value::CheckRefusal),
+    MissingHelper {
+        function: lash_kernel_value::FunctionId,
+    },
     CallableIdentity {
         callable: lash_kernel_value::CallableId,
     },
@@ -192,6 +197,23 @@ pub enum AdmissionRefusal {
         message: String,
     },
 }
+impl From<lash_kernel_value::CheckRefusal> for AdmissionRefusal {
+    fn from(refusal: lash_kernel_value::CheckRefusal) -> Self {
+        match refusal.errors.as_slice() {
+            [
+                lash_kernel_value::CheckFailure {
+                    site,
+                    reason: lash_kernel_value::CheckReason::Invalid(reason),
+                },
+            ] => Self::DocumentValidation(lash_kernel_value::Invalid {
+                site: site.clone(),
+                reason: Box::new(reason.clone()),
+            }),
+            _ => Self::DocumentCheck(refusal),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",

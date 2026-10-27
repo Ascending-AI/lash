@@ -44,7 +44,7 @@ impl CodeModeExecutionState {
                 .successor(&function.document)
                 .map_err(SessionOpenError::Succession)?;
             let refuse = |reason: String| {
-                SessionOpenError::Succession(KernelMigrationRefusal::NotAdmitted {
+                SessionOpenError::Succession(KernelMigrationRefusal::Succession {
                     document: function.document.id(),
                     reason,
                 })
@@ -90,14 +90,27 @@ impl CodeModeExecutionState {
                 &BTreeMap::new(),
                 &BTreeMap::new(),
             )
-            .map_err(|error| refuse(error.to_string()))?;
+            .map_err(|error| match error {
+                lash_vm_runtime::HelperAdoptionRefusal::Link(error) => {
+                    SessionOpenError::Succession(KernelMigrationRefusal::from_link(
+                        function.document.id(),
+                        error,
+                    ))
+                }
+                error => refuse(error.to_string()),
+            })?;
             let reach = documents
                 .inspect(
                     &content,
                     link,
                     &lash_kernel_package::ReachSelection::AllExports,
                 )
-                .map_err(|error| refuse(error.to_string()))?;
+                .map_err(|error| {
+                    SessionOpenError::Succession(KernelMigrationRefusal::from_link(
+                        function.document.id(),
+                        error,
+                    ))
+                })?;
             let loaded = lash_vm_broker::kernel::loader::declare_reach(
                 &document,
                 &content

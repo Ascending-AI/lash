@@ -149,6 +149,682 @@
       "minimum": 0,
       "type": "integer"
     },
+    "Invalid": {
+      "additionalProperties": false,
+      "description": "Why a document or a definition is refused, and the node at fault.",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/InvalidReason"
+        },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The node at fault. `None` when the fault is in no node: the\nmanifest, an entry, a signature."
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "InvalidReason": {
+      "oneOf": [
+        {
+          "enum": [
+            "empty_name",
+            "limit_measures_result",
+            "empty_formula",
+            "guard_without_native",
+            "empty_guard_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "import": {
+              "additionalProperties": false,
+              "properties": {
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
+                }
+              },
+              "required": [
+                "slot"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "import"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_version": {
+              "additionalProperties": false,
+              "properties": {
+                "found": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "supported": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "found",
+                "supported"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kernel_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "too_deep": {
+              "additionalProperties": false,
+              "properties": {
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "too_deep"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_param": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_param"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_field": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "loop_control_outside_loop": {
+              "additionalProperties": false,
+              "properties": {
+                "keyword": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "keyword"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "loop_control_outside_loop"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A library call written as an expression's own call names a\nfunction with no native implementation: a call of it is an\naction, `invoke`.",
+          "properties": {
+            "call_not_native": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/FunctionName"
+                }
+              },
+              "required": [
+                "function",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call_not_native"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_of_another_version": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/FunctionName"
+                },
+                "required": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "written_for": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "function",
+                "name",
+                "written_for",
+                "required"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_of_another_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_resolved": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_resolved"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "accepted": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "given": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "given",
+                "required",
+                "accepted"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "effect_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
+                }
+              },
+              "required": [
+                "slot"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_declared": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declared_function_in_library": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "declared_function_in_library"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-004`: a library body performs only the operations its\n`effects` lists.",
+          "properties": {
+            "effect_not_declared": {
+              "additionalProperties": false,
+              "properties": {
+                "slot": {
+                  "$ref": "#/$defs/ImportSlot"
+                }
+              },
+              "required": [
+                "slot"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_not_declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entry_not_declared": {
+              "additionalProperties": false,
+              "properties": {
+                "entry": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "entry"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "entry_not_declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entry_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "declared": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "entry": {
+                  "$ref": "#/$defs/Name"
+                },
+                "signature": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "entry",
+                "signature",
+                "declared"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "entry_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_type": {
+              "additionalProperties": false,
+              "properties": {
+                "problem": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "problem"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invalid_type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "required_after_optional": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "required_after_optional"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "formula_unknown_param": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "formula_unknown_param"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-011`: a native version versions a native implementation.",
+          "properties": {
+            "native_version_without_native": {
+              "additionalProperties": false,
+              "properties": {
+                "version": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_version_without_native"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "native_version_zero",
+          "description": "`K-LIB-011`: native versions count from 1.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-003`: a function with a native implementation takes no\nfunction.",
+          "properties": {
+            "native_takes_function": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_takes_function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-004`: a body that stands beside a native implementation\ncannot wait.",
+          "properties": {
+            "native_body_may_wait": {
+              "additionalProperties": false,
+              "properties": {
+                "form": {
+                  "$ref": "#/$defs/StatementForm"
+                }
+              },
+              "required": [
+                "form"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_body_may_wait"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-EVAL-003`: an assignment evaluates its place before its\nright-hand side only when it writes a member, and that right-hand\nside is an expression, any action in it nested.",
+          "properties": {
+            "place_first_assignment": {
+              "additionalProperties": false,
+              "properties": {
+                "problem": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "problem"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "place_first_assignment"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "action_as_expression",
+          "description": "A right-hand side that is one action with variable and literal\narguments is the statement's action, not an expression: the one\nspelling kernel text reads back.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-CLO-004`: a direct start passes the signature's arguments as the\nfunction's parameters, one for one.",
+          "properties": {
+            "start_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "declared": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "signature": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "signature",
+                "declared"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "start_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "start_token",
+          "description": "`K-CLO-004`: a token holds its tag first and its callable after it.",
+          "type": "string"
+        }
+      ]
+    },
     "LinkId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -316,6 +992,19 @@
       ],
       "type": "object"
     },
+    "StatementForm": {
+      "description": "An action form, as a refusal names one the body of a function with a\nnative implementation may not run (`K-LIB-004`).",
+      "enum": [
+        "call",
+        "perform",
+        "join",
+        "yield",
+        "spawn",
+        "cancel",
+        "await"
+      ],
+      "type": "string"
+    },
     "Unit": {
       "description": "The code a node belongs to.",
       "oneOf": [
@@ -410,7 +1099,43 @@
       "type": "object"
     },
     {
-      "description": "The rewritten document is not one this build runs: a function it\nlists, redeclared for the next version, is not in this build's\nlibrary.",
+      "description": "The rewritten document fails validation in this build.",
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "refusal": {
+          "$ref": "#/$defs/Invalid"
+        },
+        "refused": {
+          "const": "not_admitted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document",
+        "refusal"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "refused": {
+          "const": "explicit_successor_required",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document"
+      ],
+      "type": "object"
+    },
+    {
       "properties": {
         "document": {
           "$ref": "#/$defs/DocumentId"
@@ -419,7 +1144,7 @@
           "type": "string"
         },
         "refused": {
-          "const": "not_admitted",
+          "const": "succession",
           "type": "string"
         }
       },

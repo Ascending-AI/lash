@@ -128,11 +128,16 @@ pub enum KernelMigrationRefusal {
         document: DocumentId,
         refusal: DocumentRefusal,
     },
-    /// The rewritten document is not one this build runs: a function it
-    /// lists, redeclared for the next version, is not in this build's
-    /// library.
-    #[error("document {document}, rewritten, is not admitted: {reason}")]
+    /// The rewritten document fails validation in this build.
+    #[error("document {document}, rewritten, is not admitted: {refusal}")]
     NotAdmitted {
+        document: DocumentId,
+        refusal: lash_kernel_doc::Invalid,
+    },
+    #[error("document {document} requires an explicit successor and UseCorrespondence")]
+    ExplicitSuccessorRequired { document: DocumentId },
+    #[error("document {document} cannot succeed: {reason}")]
+    Succession {
         document: DocumentId,
         reason: String,
     },
@@ -143,6 +148,30 @@ pub enum KernelMigrationRefusal {
     },
     #[error("the process's stored state does not decode: {message}")]
     State { message: String },
+}
+
+impl KernelMigrationRefusal {
+    /// Preserve validation and missing-helper failures while carrying linked code.
+    pub fn from_link(document: DocumentId, refusal: lash_kernel_package::LinkRefusal) -> Self {
+        match refusal {
+            lash_kernel_package::LinkRefusal::DocumentValidation(refusal) => {
+                Self::NotAdmitted { document, refusal }
+            }
+            lash_kernel_package::LinkRefusal::MissingHelper { function } => Self::NotAdmitted {
+                document,
+                refusal: lash_kernel_doc::Invalid {
+                    site: None,
+                    reason: Box::new(lash_kernel_doc::InvalidReason::FunctionNotResolved {
+                        function,
+                    }),
+                },
+            },
+            refusal => Self::Succession {
+                document,
+                reason: refusal.to_string(),
+            },
+        }
+    }
 }
 
 /// The migration this build ships from `version` to the version that
