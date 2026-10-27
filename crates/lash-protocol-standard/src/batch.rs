@@ -232,7 +232,8 @@ fn fold_wrapper(
                     };
                 }
                 let value = member.output.value_for_projection();
-                let (presented, member_attachments) = presented_member(member.model_return.parts);
+                let (presented, member_attachments) =
+                    presented_member(member.model_return.parts, &member.output);
                 attachments.extend(member_attachments);
                 intent_outcomes.extend(member.intent_outcomes);
                 if success {
@@ -273,7 +274,10 @@ fn fold_wrapper(
 /// outputs, which the wrapper's result carries after its rows. A retained
 /// output's row names its attachment; its witness is shown once, in its
 /// block.
-fn presented_member(parts: Vec<ModelToolReturnPart>) -> (Value, Vec<ModelToolReturnPart>) {
+fn presented_member(
+    parts: Vec<ModelToolReturnPart>,
+    output: &ToolCallOutput,
+) -> (Value, Vec<ModelToolReturnPart>) {
     let mut text = String::new();
     let mut attachments = Vec::new();
     for part in parts {
@@ -288,6 +292,15 @@ fn presented_member(parts: Vec<ModelToolReturnPart>) -> (Value, Vec<ModelToolRet
             }
             attachment @ ModelToolReturnPart::Attachment(_) => attachments.push(attachment),
         }
+    }
+    // Runtime-settled stops have a committed cause but never ran a presenter.
+    // Use that cause as their model error instead of an empty text projection.
+    if text.is_empty()
+        && let Some(cause) = crate::render::tool_failure_body(
+            &lash_protocol_types::ModelToolOutcome::from(&output.outcome),
+        )
+    {
+        text.push_str(cause);
     }
     let value = serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text));
     (value, attachments)

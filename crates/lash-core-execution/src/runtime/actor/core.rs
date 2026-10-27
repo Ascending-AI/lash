@@ -1117,38 +1117,76 @@ impl ActorContext {
         if self.actor().kind() == lash_durable::ActorKind::Process {
             return self.open_process_projection().await.map(|(tx, _)| tx);
         }
-        let revision = self
-            .inner
-            .session_projection
-            .lock()
-            .await?
-            .as_ref()
-            .map(super::owner_state::OwnerState::revision)
-            .transpose()?;
-        let mut tx = match revision {
-            Some(expected) => {
-                self.probe().owner_read(
-                    self.actor(),
-                    self.epoch(),
-                    lash_durable::OwnerRead::ExternalFrontierReads,
-                    1,
-                );
-                self.durable()?
-                    .begin_retained(
+        let mut tx = loop {
+            let revision = self
+                .inner
+                .session_projection
+                .lock()
+                .await?
+                .as_ref()
+                .map(super::owner_state::OwnerState::revision)
+                .transpose()?;
+            let opened = match revision {
+                Some(expected) => {
+                    self.probe().owner_read(
                         self.actor(),
                         self.epoch(),
-                        expected,
-                        self.backend()
-                            .config()
-                            .settings()
-                            .graph_reads
-                            .owner()
-                            .total_bytes,
-                    )
-                    .await
+                        lash_durable::OwnerRead::ExternalFrontierReads,
+                        1,
+                    );
+                    self.durable()?
+                        .begin_retained(
+                            self.actor(),
+                            self.epoch(),
+                            expected,
+                            self.backend()
+                                .config()
+                                .settings()
+                                .graph_reads
+                                .owner()
+                                .total_bytes,
+                        )
+                        .await
+                }
+                None => self.durable()?.begin(self.actor(), self.epoch()).await,
+            };
+            match opened {
+                Ok(tx) => break tx,
+                Err(error) => {
+                    // A concurrent control read can sample our old revision before
+                    // an outcome commit, then reach storage after its acknowledgement.
+                    // Reopen only when this claim adopted the revision that displaced
+                    // the sample. A foreign writer's conflict still ends the attempt;
+                    // no previously prepared transaction is ever re-fenced.
+                    let displaced_here = match &error {
+                        DurableError::RevisionConflict {
+                            actor,
+                            epoch,
+                            expected,
+                            actual,
+                        } if actor == self.actor()
+                            && *epoch == self.epoch()
+                            && revision == Some(*expected) =>
+                        {
+                            self.inner
+                                .session_projection
+                                .lock()
+                                .await?
+                                .as_ref()
+                                .map(super::owner_state::OwnerState::revision)
+                                .transpose()?
+                                .is_some_and(|acknowledged| {
+                                    acknowledged > *expected && acknowledged >= *actual
+                                })
+                        }
+                        _ => false,
+                    };
+                    if !displaced_here {
+                        return Err(error);
+                    }
+                }
             }
-            None => self.durable()?.begin(self.actor(), self.epoch()).await,
-        }?;
+        };
         if let Some(boundary) = &self.first_commit {
             boundary.stage(&mut tx)?;
         }

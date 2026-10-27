@@ -113,6 +113,8 @@ struct Scenario {
     waits: BTreeMap<usize, Vec<usize>>,
     events: Mutex<Vec<Event>>,
     changed: tokio::sync::watch::Sender<usize>,
+    answer_gate: Option<tokio::sync::watch::Receiver<bool>>,
+    read_gate: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl Scenario {
@@ -123,6 +125,8 @@ impl Scenario {
             waits,
             events: Mutex::default(),
             changed: tokio::sync::watch::channel(0).0,
+            answer_gate: None,
+            read_gate: None,
         }
     }
 
@@ -330,6 +334,11 @@ impl lash_core::ToolProvider for Leaves {
         let scenario = self.rendezvous.scenario(&name);
         scenario.record(Event::Started(position));
         let required = scenario.required(position);
+        if let Some(mut gate) = scenario.read_gate.clone() {
+            gate.wait_for(|open| *open)
+                .await
+                .expect("the watcher samples its revision");
+        }
         if call.name() == format!("tools.{DEFERRED_LEAF}") {
             // It joins the rendezvous like any leaf: its start is recorded,
             // and the task that resolves it holds its slot until the width
@@ -353,6 +362,13 @@ impl lash_core::ToolProvider for Leaves {
             return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
         }
         scenario.wait_for(&required).await;
+        if position != 0
+            && let Some(mut gate) = scenario.answer_gate.clone()
+        {
+            gate.wait_for(|open| *open)
+                .await
+                .expect("the law opens its gate");
+        }
         scenario.record(Event::Answered(position));
         ToolOutcome::ok(leaf_answer(position)).into()
     }
@@ -411,9 +427,19 @@ struct Producers {
 
 impl Producers {
     async fn new(tier: Tier, code: bool) -> Option<Self> {
+        Self::layered(tier, code, std::convert::identity).await
+    }
+
+    async fn layered(
+        tier: Tier,
+        code: bool,
+        layer: impl FnOnce(
+            Arc<dyn lash_execution_contracts::backend::StoreSet>,
+        ) -> Arc<dyn lash_execution_contracts::backend::StoreSet>,
+    ) -> Option<Self> {
         let rendezvous = Arc::new(Rendezvous::default());
         let leaves = Arc::clone(&rendezvous);
-        let world = World::new(tier, move |backend| {
+        let world = World::layered(tier, layer, move |backend| {
             let builder = if code {
                 lash::LashCore::rlm_builder(
                     backend.clone(),
@@ -838,6 +864,114 @@ async fn tool_group_members_start_before_any_finishes(tier: Tier) {
         }
         producers.world.shutdown().await;
     }
+}
+
+/// FIG-7467: a control read sampled before a member commits must not abort
+/// the other live members when that commit advances the retained revision.
+async fn member_commit_control_read_race(tier: Tier, producer: Producer) {
+    use lash_core::testing::DurableCommitHook;
+    use lash_durable::CommitLabel;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let hook = Arc::new(std::sync::OnceLock::<Arc<DurableCommitHook>>::new());
+    let Some(producers) = Producers::layered(tier, producer.code(), {
+        let hook = Arc::clone(&hook);
+        move |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_durable_store(move |inner| {
+                    let hooked = Arc::new(DurableCommitHook::over(inner));
+                    hook.set(Arc::clone(&hooked)).ok().unwrap();
+                    hooked
+                })
+                .into_store_set()
+        }
+    })
+    .await
+    else {
+        return;
+    };
+    let hook = Arc::clone(hook.get().unwrap());
+    let name = format!("{}-control-read", producer.label());
+    let width = if producer.code() { 64 } else { 4 };
+    let (read_started, read_gate) = tokio::sync::watch::channel(false);
+    let (answers, answer_gate) = tokio::sync::watch::channel(false);
+    let mut scenario = Scenario::new(width, true, BTreeMap::new());
+    scenario.answer_gate = Some(answer_gate);
+    scenario.read_gate = Some(read_gate);
+    let scenario = producers.rendezvous.open(&name, scenario);
+    let held = Arc::new(AtomicBool::new(false));
+    let crossed = Arc::new(AtomicBool::new(false));
+    let committed = Arc::new(tokio::sync::Notify::new());
+    hook.arm_retained_begin({
+        let scenario = Arc::clone(&scenario);
+        let held = Arc::clone(&held);
+        let crossed = Arc::clone(&crossed);
+        let read_started = read_started.clone();
+        let committed = Arc::clone(&committed);
+        move |_| {
+            let pause = scenario.started().len() == width && !held.swap(true, Ordering::SeqCst);
+            let crossed = Arc::clone(&crossed);
+            let read_started = read_started.clone();
+            let committed = Arc::clone(&committed);
+            let answers = answers.clone();
+            Box::pin(async move {
+                if pause {
+                    read_started.send_replace(true);
+                    committed.notified().await;
+                    crossed.store(true, Ordering::SeqCst);
+                } else if crossed.load(Ordering::SeqCst) {
+                    answers.send_replace(true);
+                }
+            })
+        }
+    });
+    hook.arm_after_commit({
+        let held = Arc::clone(&held);
+        let committed = Arc::clone(&committed);
+        move |label| {
+            if label == CommitLabel::ROUND_OUTCOME && held.load(Ordering::SeqCst) {
+                committed.notify_one();
+            }
+        }
+    });
+    let plan = if producer.code() {
+        vec![Route::Leaf; width]
+    } else {
+        vec![Route::Leaf, Route::Deferred, Route::Leaf, Route::Deferred]
+    };
+    let output = producers
+        .world
+        .run(&name, served::spec(1024), producer.script(&name, &plan))
+        .await;
+    assert!(
+        crossed.load(Ordering::SeqCst),
+        "a retained read crossed a real outcome commit"
+    );
+    let view = producers.world.read(&name).await;
+    assert!(
+        hook.calls("retained_revision_conflict") >= 1,
+        "a real store refusal of the stale revision"
+    );
+    assert_eq!(
+        replies(producer, &output, &view),
+        (0..width).collect::<Vec<_>>(),
+        "{name}: committed results survive the control read race\nresults: {:#?}\ncells: {:#?}",
+        served::results(&view),
+        output
+            .activities
+            .iter()
+            .filter(|activity| matches!(activity.event, lash::TurnEvent::CodeBlockCompleted { .. }))
+            .collect::<Vec<_>>()
+    );
+    assert_activation_shape(&name, producer, width, &scenario, &output, &view);
+    producers.world.shutdown().await;
+}
+
+async fn a_batch_member_commit_racing_a_control_read_preserves_live_answers(tier: Tier) {
+    member_commit_control_read_race(tier, Producer::Batch).await;
+}
+
+async fn a_cell_member_commit_racing_a_control_read_preserves_live_answers(tier: Tier) {
+    member_commit_control_read_race(tier, Producer::PromiseAll).await;
 }
 
 /// The reverse dependency: the input-first leaf answers only after the
@@ -1781,6 +1915,8 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
 }
 
 tiered_laws!(
+    a_batch_member_commit_racing_a_control_read_preserves_live_answers,
+    a_cell_member_commit_racing_a_control_read_preserves_live_answers,
     tool_group_members_start_before_any_finishes,
     tool_group_reverse_dependency,
     tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,

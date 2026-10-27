@@ -187,6 +187,10 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
         serde_json::json!({ "from": "w/batch/0" }),
         "a member's JSON presentation is embedded as JSON"
     );
+    assert_eq!(
+        presented["results"][2]["error"], "bad arguments",
+        "an unpresented failure retains its committed explanation"
+    );
     assert_eq!(wrapper.provider_call_id.as_deref(), Some("w"));
 }
 

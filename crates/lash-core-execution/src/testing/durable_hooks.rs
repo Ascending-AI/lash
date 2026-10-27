@@ -42,12 +42,19 @@ type CommitHook = Arc<
         + Sync,
 >;
 
+type RetainedBeginHook = Arc<
+    dyn Fn(lash_durable::StateRevision) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+>;
+type AfterCommitHook = Arc<dyn Fn(CommitLabel) + Send + Sync>;
+
 /// A durable store that runs its armed [`CommitHook`] before each owner
 /// commit. See the module documentation.
 #[derive(Clone)]
 pub struct DurableCommitHook {
     inner: Arc<dyn DurableStore>,
     hook: Arc<Mutex<Option<CommitHook>>>,
+    retained_begin: Arc<Mutex<Option<RetainedBeginHook>>>,
+    after_commit: Arc<Mutex<Option<AfterCommitHook>>>,
     calls: Arc<Mutex<std::collections::BTreeMap<&'static str, u64>>>,
     process_opens: Arc<Mutex<std::collections::BTreeMap<ActorKey, u64>>>,
 }
@@ -59,6 +66,8 @@ impl DurableCommitHook {
         Self {
             inner,
             hook: Arc::new(Mutex::new(None)),
+            retained_begin: Arc::default(),
+            after_commit: Arc::default(),
             calls: Arc::default(),
             process_opens: Arc::default(),
         }
@@ -97,9 +106,26 @@ impl DurableCommitHook {
         *self.hook.lock_recover() = Some(hook);
     }
 
+    /// Hold a retained open after its caller sampled the revision, before the store reads it.
+    pub fn arm_retained_begin<F, Fut>(&self, hook: F)
+    where
+        F: Fn(lash_durable::StateRevision) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        *self.retained_begin.lock_recover() =
+            Some(Arc::new(move |revision| Box::pin(hook(revision))));
+    }
+
+    /// Observe successful owner writes after storage, before their acknowledgements return.
+    pub fn arm_after_commit(&self, hook: impl Fn(CommitLabel) + Send + Sync + 'static) {
+        *self.after_commit.lock_recover() = Some(Arc::new(hook));
+    }
+
     /// Pass every commit through again.
     pub fn disarm(&self) {
         *self.hook.lock_recover() = None;
+        *self.retained_begin.lock_recover() = None;
+        *self.after_commit.lock_recover() = None;
     }
 
     /// Runs the armed hook, if any, before `tx` commits under `label`.
@@ -415,9 +441,18 @@ impl DurableStore for DurableCommitHook {
         max_mail_bytes: u64,
     ) -> Result<ActorTx, DurableError> {
         self.count("begin");
-        self.inner
+        let hook = self.retained_begin.lock_recover().clone();
+        if let Some(hook) = hook {
+            hook(expected).await;
+        }
+        let result = self
+            .inner
             .begin_retained(actor, epoch, expected, max_mail_bytes)
-            .await
+            .await;
+        if matches!(result, Err(DurableError::RevisionConflict { .. })) {
+            self.count("retained_revision_conflict");
+        }
+        result
     }
 
     async fn begin_process_retained(
@@ -452,7 +487,11 @@ impl DurableStore for DurableCommitHook {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         self.before_commit(&tx, label).await?;
-        self.inner.commit(tx, label).await
+        let committed = self.inner.commit(tx, label).await?;
+        if let Some(hook) = self.after_commit.lock_recover().clone() {
+            hook(label);
+        }
+        Ok(committed)
     }
 
     async fn commit_mail(

@@ -355,6 +355,26 @@ impl World {
         .await
     }
 
+    /// [`World::new`] with a decorator over the tier's real stores.
+    pub async fn layered(
+        tier: Tier,
+        layer: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        let scripts = Arc::new(Scripts::default());
+        Self::serving(
+            tier,
+            layer,
+            None,
+            Vec::new(),
+            model(Arc::clone(&scripts)),
+            scripts,
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+        .await
+    }
+
     /// [`World::new`] over a backend configured with `settings`.
     pub async fn configured(
         tier: Tier,
