@@ -483,7 +483,11 @@ Phase children are `lash.turn.claim`, `lash.turn.readback`, `lash.turn.admission
 `lash.turn.store_pool_wait`, `lash.turn.worker_checkout_wait` and
 `lash.turn.worker_IPC`, when reached. Each has `lash.turn.phase`; commits also
 have `lash.owner.revision`. They parent to `invoke_agent` and follow its
-sampling decision. Nested spans overlap; exclusive shares require an interval
+sampling decision. Their kind is `Agent`; the host's export policy and bounded
+enricher apply to each phase. Sinks recover the same phase identities through
+`TurnProfile::phase_positions` using the terminal's record id and position.
+Phase spans carry correlation ids and omit terminal content and usage.
+Nested spans overlap; exclusive shares require an interval
 union with precedence for the deepest active phase. No additional metric
 labels contain SQL shapes, origins, revisions, session ids or turn ids.
 

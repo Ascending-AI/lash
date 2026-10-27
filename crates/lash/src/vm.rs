@@ -133,7 +133,7 @@ pub use lash_vm_client::{
     PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBound,
     RunBounds, RunChargeLimiter, RunInput, RunMemoryLimiter, RunMeters, RunRefusal, SequenceFault,
     SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
-    WorkerWork,
+    WorkerResources, WorkerWork,
 };
 /// Why a process's run would not carry onto a successor pair's document
 /// (FIG-6121).

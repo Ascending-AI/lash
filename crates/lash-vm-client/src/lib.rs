@@ -38,7 +38,7 @@ pub use lash_protocol_types::engine_fault::{
 pub use lash_protocol_types::worker_limit::WorkerLimit;
 pub use lash_vm_protocol::{
     BoundReached, Charge, DecodeLimits, HostReadId, HostReadKind, LimitDecision, LimitedBound,
-    MemoryMeter, ProtocolBounds, RunBounds, RunMeters, VmOwner, WorkerWork,
+    MemoryMeter, ProtocolBounds, RunBounds, RunMeters, VmOwner, WorkerResources, WorkerWork,
 };
 
 pub use machine::{

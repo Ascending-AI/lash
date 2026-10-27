@@ -1135,19 +1135,29 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
         "PARK-PUBLICATION SQL {}",
         serde_json::to_string(&receipt).unwrap()
     );
-    // The park's write statements: inserts, updates and deletes only.
-    let writes: u64 = receipt
-        .shapes
-        .iter()
-        .filter(|(sql, _)| {
-            ["insert", "update", "delete"]
-                .iter()
-                .any(|verb| sql.starts_with(verb))
+    // Exclude transaction control, then let SQLite classify each data
+    // statement: the actor-fence UPDATE can start with a WITH clause.
+    assert_eq!(receipt.unretained_shape_statements, 0);
+    let shapes = receipt.shapes.clone();
+    let writes = tier
+        .store
+        .connection_for_testing()
+        .call(move |conn| {
+            let mut writes = 0;
+            for (sql, shape) in shapes {
+                if matches!(sql.as_str(), "begin immediate" | "commit") {
+                    continue;
+                }
+                if !conn.prepare(&sql)?.readonly() {
+                    writes += shape.statements;
+                }
+            }
+            Ok(writes)
         })
-        .map(|(_, shape)| shape.statements)
-        .sum();
-    // The park's write count, pinned: the publication's rows and its effect
-    // admission, with no semantic-admission row.
+        .await
+        .expect("classify the park's statements");
+    // Five writes: actor fence, four graph nodes in one batch, two edges in
+    // one batch, effect admission and execution root. No semantic admission.
     const EXPECTED: u64 = 5;
     assert_eq!(writes, EXPECTED, "the park's write count: {receipt:?}");
 }
