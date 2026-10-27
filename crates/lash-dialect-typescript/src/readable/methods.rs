@@ -84,6 +84,25 @@ impl Lifter<'_> {
             let read = Expr::Index(Box::new(self.expr(target)?), Box::new(self.expr(key)?));
             return Ok(Some((result.clone(), read, 4)));
         }
+        // A checked array's length: `ts.get(x, "length")` in the general arm.
+        if let [
+            k::Stmt::Assign {
+                place: k::Place::Variable(assigned),
+                value,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = general.as_slice()
+            && assigned == result
+            && let Some(args) = self.helper_read(value, "ts.get")
+            && args.as_slice()
+                == [
+                    target.clone(),
+                    k::Expr::Literal(k::Literal::Text("length".into())),
+                ]
+        {
+            let read = Expr::Field(Box::new(self.expr(target)?), "length".into());
+            return Ok(Some((result.clone(), read, 4)));
+        }
         let [
             k::Stmt::Let {
                 name: member,
@@ -182,6 +201,53 @@ impl Lifter<'_> {
                 && matches!(else_block.as_slice(), [k::Stmt::Throw { .. }])
                 && matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.array.is"))
                 && act.args.as_slice() == [target.clone()])
+    }
+
+    /// `x.method(args)` on a value that is not a list: the member read is a
+    /// temporary waiting to be read, and `call` applies it to `x`.
+    pub(super) fn method_call_expression(
+        &mut self,
+        held: &Name,
+        value: &k::Expr,
+        body: &k::Expr,
+    ) -> Lift<Option<Expr>> {
+        let k::Expr::Variable(member) = value else {
+            return Ok(None);
+        };
+        let k::Expr::Let {
+            body: selecting, ..
+        } = body
+        else {
+            return Ok(None);
+        };
+        let k::Expr::Let { value: selects, .. } = &**selecting else {
+            return Ok(None);
+        };
+        let k::Expr::Act(select) = &**selects else {
+            return Ok(None);
+        };
+        let [_, target, k::Expr::Literal(k::Literal::Text(method))] = select.args.as_slice() else {
+            return Ok(None);
+        };
+        let call = k::Expr::Let {
+            name: held.clone(),
+            value: Box::new(value.clone()),
+            body: Box::new(body.clone()),
+        };
+        let Some(args) = self.method_arguments(member, target, method, &call) else {
+            return Ok(None);
+        };
+        if self.pending_at(member).is_none() {
+            return Ok(None);
+        }
+        let Some(read @ Expr::Field(..)) = self.take_pending(member) else {
+            return Err("a method read that is not a member read".to_owned());
+        };
+        if !matches!(&read, Expr::Field(_, field) if field == method) {
+            return Err("a method called by another name than it was read by".to_owned());
+        }
+        let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        Ok(Some(Expr::Call(Box::new(read), args)))
     }
 
     /// The arguments `call` passes the method `member` holds, with `target`

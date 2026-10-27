@@ -16,7 +16,7 @@ export async function resilient_search(): Promise<{ failures: number; [key: stri
     /** If the search fails */
     catch (error) {
       /** Count the failure */
-      failures = num.add(failures, 1);
+      failures = failures + 1;
       /** Say that a search failed */
       await display.setStatus({ key: "search", value: "A search failed" });
     }

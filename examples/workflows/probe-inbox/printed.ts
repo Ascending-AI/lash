@@ -9,7 +9,7 @@ export async function digest(items: { title: string; }[]): Promise<{ sent: numbe
     /** Show the item's title */
     await display.showMessage({ text: item.title });
     /** Count the item as sent */
-    sent = num.add(sent, 1);
+    sent = sent + 1;
   }
   /** Report how many items were sent */
   return { sent };

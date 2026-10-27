@@ -17,7 +17,7 @@ export async function digest(topics: { title: string; urgent: boolean; }[]): Pro
       await sleep(2000);
     }
     /** Count the topic as seen */
-    seen = num.add(seen, 1);
+    seen = seen + 1;
   }
   /** Report how many topics were seen */
   return { seen };

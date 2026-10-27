@@ -112,6 +112,14 @@ impl Lifter<'_> {
                 "length".to_owned(),
             ));
         }
+        if let Some(method) = self.primitive_method(&name, args)? {
+            return Ok(method);
+        }
+        if self.style.operators
+            && let Some(operator) = self.operator(&name, args)
+        {
+            return operator;
+        }
         if let Some(spelling) =
             lash_kernel_dialect::value_constructors::Constructor::spelling(&name)
         {
@@ -154,6 +162,30 @@ impl Lifter<'_> {
         }
     }
 
+    /// The operator a numeric or text native lowers from, over operands
+    /// whose `number` checks the operator lowers again.
+    fn operator(&mut self, name: &str, args: &[k::Expr]) -> Option<Lift<Expr>> {
+        match (name, args) {
+            ("ts.number.checked", [value]) => Some(self.expr(value)),
+            // Text operands read as text without the assertions.
+            ("text.concat", [left, right]) => Some(self.binary("+", left, right)),
+            ("num.neg", [value]) => Some(
+                self.expr(value)
+                    .map(|value| Expr::Unary("-", Box::new(value))),
+            ),
+            ("bool.not", [k::Expr::Call { function, args }]) if self.is(function, "eq") => {
+                match args.as_slice() {
+                    [left, right] => Some(self.binary("!==", left, right)),
+                    _ => None,
+                }
+            }
+            (name, [left, right]) => {
+                binary_of(name).map(|operator| self.binary(operator, left, right))
+            }
+            _ => None,
+        }
+    }
+
     /// `left op right`. Pinned operands the source evaluated right to left
     /// are a comparison written the other way round.
     fn binary(&mut self, op: &'static str, left: &k::Expr, right: &k::Expr) -> Lift<Expr> {
@@ -167,7 +199,8 @@ impl Lifter<'_> {
             return Ok(Expr::Binary(mirrored, Box::new(right), Box::new(left)));
         }
         let mut operand = |value: &k::Expr| {
-            if matches!(op, "===" | "%")
+            if !self.style.operators
+                && matches!(op, "===" | "%")
                 && let k::Expr::Call { function, args } = value
                 && self.is(function, "ts.number.checked")
                 && let [value] = args.as_slice()
@@ -204,6 +237,9 @@ impl Lifter<'_> {
     /// `let name = value in body`: the scoped forms the front end writes.
     fn scoped(&mut self, name: &Name, value: &k::Expr, body: &k::Expr) -> Lift<Expr> {
         if let Some(method) = self.array_callback_expression(name, value, body)? {
+            return Ok(method);
+        }
+        if let Some(method) = self.method_call_expression(name, value, body)? {
             return Ok(method);
         }
         let bound = k::Expr::Variable(name.clone());
@@ -278,7 +314,7 @@ impl Lifter<'_> {
     }
 
     /// `if(same(name, null), true, same(name, absent))`.
-    fn nullish(&self, test: &k::Expr, name: &Name) -> bool {
+    pub(super) fn nullish(&self, test: &k::Expr, name: &Name) -> bool {
         let same = |expr: &k::Expr, literal: k::Literal| {
             matches!(expr, k::Expr::Call { function, args }
                 if self.is(function, "same")
@@ -431,6 +467,18 @@ impl Lifter<'_> {
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
         match (name, args) {
+            // A slice over constant bounds; an omitted end is the whole length.
+            ("ts.string.slice_units", [receiver, start, end]) => {
+                let receiver = self.expr(receiver)?;
+                let mut bounds = vec![self.expr(start)?, self.expr(end)?];
+                if bounds.last() == Some(&Expr::Undefined) {
+                    bounds.pop();
+                }
+                Ok(Expr::Call(
+                    Box::new(Expr::Field(Box::new(receiver), "slice".into())),
+                    bounds,
+                ))
+            }
             (
                 "ts.promise.start",
                 [

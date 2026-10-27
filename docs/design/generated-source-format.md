@@ -34,12 +34,18 @@ handling rather than a reserved kernel namespace.
 Typed data constructors preserve value kinds: `error.new`,
 `timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
 `tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.
-`tuple.at` expresses strict kernel indexing. TypeScript can spell strict
-numeric operations by their `num.*` helpers. `num.checked_float` preserves
-the TypeScript `ts.number.checked` guard without coercing an integer to Number.
-Strict text concatenation spells its operands with erased `as string`
-assertions, preserving `text.concat` when a materialized capture cell initially
-holds `null`. The assertions introduce no runtime conversion or check.
+`tuple.at` expresses strict kernel indexing. TypeScript prints a strict
+numeric operation over checked `number` operands as the operator it lowers
+from (`n < 1`, `n !== 0`): reading the operator lowers its checks again. Where
+that does not read back, it spells the operation by its `num.*` helper, and
+`num.checked_float` preserves the TypeScript `ts.number.checked` guard without
+coercing an integer to Number. A primitive text method over constant bounds
+(`slice`, `trim`, `split`, `indexOf`, `includes`, `startsWith`, `endsWith`)
+prints as the method call its natives lower from, receiver check included.
+Strict text concatenation first tries plain `+`. Its fallback spells the
+operands with erased `as string` assertions, preserving `text.concat` when a
+materialized capture cell initially holds `null`. The assertions introduce no
+runtime conversion or check.
 Known-token calls use `callable.invoke_token`; they lower normally and need no
 retained document.
 Native calls still select the installed helper by name and must reproduce its

@@ -1,7 +1,7 @@
 /** Echo a value unless it is negative */
 export async function demo(value: number): Promise<string> {
   /** Check for a negative value */
-  if (num.lt(num.checked_float(value), 0)) {
+  if (value < 0) {
     /** Stop and report that it is negative */
     return "negative";
   }

@@ -8,7 +8,7 @@ export async function demo(
   /** Go through each number */
   for (const item of items) {
     /** Add it to the total */
-    total = num.add(total, num.checked_float(item));
+    total = total + item;
   }
   /** Give back the total */
   return total;
