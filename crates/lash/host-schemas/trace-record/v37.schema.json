@@ -1530,6 +1530,16 @@
               "type": "null"
             }
           ]
+        },
+        "transport": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransportFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5983,6 +5993,47 @@
           "type": "object"
         }
       ]
+    },
+    "TransportErrorKind": {
+      "description": "Content-free cause observed at the HTTP transport boundary.",
+      "enum": [
+        "dns",
+        "connect",
+        "tls",
+        "connect_timeout",
+        "request_timeout",
+        "reset",
+        "body_read",
+        "other"
+      ],
+      "type": "string"
+    },
+    "TransportFailure": {
+      "description": "Transport diagnostics with no URL, headers, body or rendered error text.",
+      "properties": {
+        "elapsed_ms": {
+          "description": "Monotonic time since the HTTP send began, including response body reads.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/TransportErrorKind"
+        },
+        "server_address": {
+          "description": "Parsed endpoint host only, at most 253 ASCII bytes. No port or userinfo.",
+          "maxLength": 253,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "elapsed_ms"
+      ],
+      "type": "object"
     },
     "TurnFailureCode": {
       "type": "string"

@@ -1,3 +1,4 @@
+pub use lash_protocol_types::llm::types::{TransportErrorKind, TransportFailure};
 use lash_protocol_types::{
     llm::types::LlmResponse, llm::types::LlmTerminalReason, llm::types::ProviderFailureKind,
 };
@@ -64,13 +65,14 @@ pub enum HttpFailureContext {
 #[derive(Debug, thiserror::Error, Clone)]
 #[error("{message}")]
 pub struct LlmTransportError {
+    pub transport: Option<Box<TransportFailure>>,
     pub kind: ProviderFailureKind,
     /// Structured operation evidence used by higher-level adapters.
     pub context: Box<HttpFailureContext>,
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
-    rejected_slots: Vec<usize>,
+    rejected_slots: Box<[usize]>,
     /// The HTTP status, when the failure observed one. Carried exactly once —
     /// `code` never mirrors it.
     pub http_status: Option<u16>,
@@ -97,12 +99,13 @@ pub struct LlmTransportError {
 impl LlmTransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
+            transport: None,
             kind: ProviderFailureKind::Unknown,
             context: Box::new(HttpFailureContext::Other),
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
-            rejected_slots: Vec::new(),
+            rejected_slots: Box::default(),
             http_status: None,
             raw: None,
             code: None,
@@ -139,7 +142,7 @@ impl LlmTransportError {
     }
 
     pub fn with_rejected_slots(mut self, slots: Vec<usize>) -> Self {
-        self.rejected_slots = slots;
+        self.rejected_slots = slots.into_boxed_slice();
         self
     }
     /// Delivered slots identified by structured provider rejection evidence.

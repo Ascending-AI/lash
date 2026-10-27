@@ -194,9 +194,64 @@ pub enum ProtocolPosition {
     TerminalObserved,
 }
 
+/// Content-free cause observed at the HTTP transport boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportErrorKind {
+    Dns,
+    Connect,
+    Tls,
+    ConnectTimeout,
+    RequestTimeout,
+    Reset,
+    BodyRead,
+    Other,
+}
+
+impl TransportErrorKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dns => "dns",
+            Self::Connect => "connect",
+            Self::Tls => "tls",
+            Self::ConnectTimeout => "connect_timeout",
+            Self::RequestTimeout => "request_timeout",
+            Self::Reset => "reset",
+            Self::BodyRead => "body_read",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Transport diagnostics with no URL, headers, body or rendered error text.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
+pub struct TransportFailure {
+    pub kind: TransportErrorKind,
+    /// Parsed endpoint host only, at most 253 ASCII bytes. No port or userinfo.
+    #[schemars(length(max = 253))]
+    pub server_address: Option<String>,
+    /// Monotonic time since the HTTP send began, including response body reads.
+    pub elapsed_ms: u64,
+}
+
+impl TransportFailure {
+    /// Host text must already have been parsed from an endpoint URL.
+    pub fn bounded_server_address(&self) -> Option<&str> {
+        self.server_address.as_deref().filter(|host| {
+            !host.is_empty()
+                && host.len() <= 253
+                && host.bytes().all(|b| {
+                    b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']')
+                })
+        })
+    }
+}
+
 /// A journal-safe projection of a provider/transport failure.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct NormalizedError {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<Box<TransportFailure>>,
     pub class: ProviderFailureKind,
     /// The failure code, namespaced by who authored the spelling: `lash:` for
     /// workspace-authored codes, `provider:` for provider wire vocabulary,

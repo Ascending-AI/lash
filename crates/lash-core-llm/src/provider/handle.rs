@@ -1382,6 +1382,7 @@ fn failure_attempt_record(
         retry_budget_consumed,
         retry_decision,
         error: Some(NormalizedError {
+            transport: failure.transport.clone(),
             class: failure.kind,
             code: failure.code.clone(),
             http_status: failure.http_status,

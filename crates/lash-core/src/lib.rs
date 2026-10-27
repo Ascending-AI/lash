@@ -620,7 +620,8 @@ pub use lash_protocol_types::{
     llm::types::ProviderReplayKind, llm::types::ProviderRouteIdentity,
     llm::types::RecordedRequestTemplate, llm::types::ResponseContext, llm::types::ResponseContract,
     llm::types::RetryClass, llm::types::RetryDecision, llm::types::RetryDeclineCause,
-    llm::types::RetryWait, llm::types::ToolCallContract,
+    llm::types::RetryWait, llm::types::ToolCallContract, llm::types::TransportErrorKind,
+    llm::types::TransportFailure,
 };
 pub use lash_sansio::CheckpointDelivery;
 pub(crate) use lash_sansio::build_turn;

@@ -127,6 +127,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                     lash::provider::RetryDeclineCause::NotRetryable,
                 )),
                 error: Some(lash::provider::NormalizedError {
+                    transport: None,
                     class: lash::provider::ProviderFailureKind::Unknown,
                     code: Some(lash::provider::FailureCode::provider("request_cancelled")),
                     http_status: Some(499),
@@ -164,6 +165,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                 retry_budget_consumed: true,
                 retry_decision: None,
                 error: Some(lash::provider::NormalizedError {
+                    transport: None,
                     class: lash::provider::ProviderFailureKind::Stream,
                     code: Some(lash::provider::FailureCode::provider("eof")),
                     http_status: None,

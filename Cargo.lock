@@ -2632,9 +2632,11 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
+ "hyper",
  "lash-internal-protocol-types",
  "lash-internal-transport-failure",
  "reqwest",
+ "rustls",
  "tokio",
 ]
 

@@ -68,6 +68,7 @@ fn failure_attributes_preserve_typed_classes() {
                 evidence: None,
                 generation_disposition: None,
                 error: Some(crate::TraceNormalizedError {
+                    transport: None,
                     class: crate::TraceProviderFailureKind::Http,
                     code,
                     http_status: Some(429),
@@ -238,6 +239,102 @@ fn failure_attributes_preserve_typed_classes() {
                 .find(|a| a.key.as_str() == "lash.provider.validation")
                 .map(|a| a.value.to_string()),
             validation,
+        );
+    }
+    // FIG-7452: real attempt exports retain transport facts under default
+    // content policy, while HTTP responses retain a bounded provider code.
+    use lash_protocol_types::llm::types::{TransportErrorKind, TransportFailure};
+    for (kind, expected) in [
+        (TransportErrorKind::Dns, "dns"),
+        (TransportErrorKind::Connect, "connect"),
+        (TransportErrorKind::Tls, "tls"),
+        (TransportErrorKind::ConnectTimeout, "connect_timeout"),
+        (TransportErrorKind::RequestTimeout, "request_timeout"),
+        (TransportErrorKind::Reset, "reset"),
+        (TransportErrorKind::BodyRead, "body_read"),
+        (TransportErrorKind::Other, "other"),
+    ] {
+        let mut record = model_fixture(&adapter, "openai");
+        let TraceEvent::LlmCallCompleted {
+            attempts: Some(attempts),
+            ..
+        } = &mut record.event
+        else {
+            unreachable!()
+        };
+        let attempt = &mut attempts[0].attempt;
+        attempt.error.as_mut().unwrap().http_status = None;
+        attempt.error.as_mut().unwrap().transport = Some(Box::new(TransportFailure {
+            kind,
+            server_address: Some("api.example.com".into()),
+            elapsed_ms: 25,
+        }));
+        attempt.retry_decision = Some(lash_protocol_types::llm::types::RetryDecision::Scheduled {
+            delay: Duration::from_millis(42),
+            wait: lash_protocol_types::llm::types::RetryWait::Backoff,
+            class: lash_protocol_types::llm::types::RetryClass::NoResponse,
+        });
+        adapter.append(&record).unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = &spans[spans.len() - 2];
+        for (key, expected) in [
+            ("error.type", expected.to_string()),
+            ("lash.transport.error.kind", expected.to_string()),
+            ("server.address", "api.example.com".to_string()),
+            ("lash.transport.error.elapsed_ms", "25".to_string()),
+            ("lash.model.attempt.ordinal", "1".to_string()),
+            ("lash.model.attempt.retry_delay_ms", "42".to_string()),
+        ] {
+            assert_eq!(
+                span.attributes
+                    .iter()
+                    .find(|a| a.key.as_str() == key)
+                    .map(|a| a.value.to_string()),
+                Some(expected),
+                "{key}"
+            );
+        }
+        assert!(
+            !span
+                .attributes
+                .iter()
+                .any(|a| a.key.as_str() == "http.response.status_code")
+        );
+    }
+    for (code, expected) in [
+        ("rate_limit".to_owned(), Some("rate_limit")),
+        ("x".repeat(129), None),
+        ("private prompt".to_owned(), None),
+    ] {
+        let mut record = model_fixture(&adapter, "openai");
+        let TraceEvent::LlmCallCompleted {
+            attempts: Some(attempts),
+            ..
+        } = &mut record.event
+        else {
+            unreachable!()
+        };
+        attempts[0].attempt.error.as_mut().unwrap().code =
+            Some(crate::TraceFailureCode::provider(code));
+        adapter.append(&record).unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        let span = &spans[spans.len() - 2];
+        assert!(
+            span.attributes
+                .contains(&A::HttpResponseStatusCode.value(503_i64))
+        );
+        assert_eq!(
+            span.attributes
+                .iter()
+                .find(|a| a.key.as_str() == "lash.provider.error.code")
+                .map(|a| a.value.to_string()),
+            expected.map(str::to_string)
+        );
+        assert!(
+            !span
+                .attributes
+                .iter()
+                .any(|a| a.value.to_string().contains("private prompt"))
         );
     }
 }

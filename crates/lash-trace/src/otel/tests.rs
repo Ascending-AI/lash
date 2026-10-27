@@ -1978,6 +1978,7 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
                 retry_budget_consumed: true,
                 retry_decision: None,
                 error: (ordinal == 1).then(|| lash_protocol_types::llm::types::NormalizedError {
+                    transport: None,
                     class: crate::TraceProviderFailureKind::Http,
                     code: None,
                     http_status: Some(503),

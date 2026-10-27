@@ -50,6 +50,34 @@ Lash does not install a global provider or diagnostic subscriber. Rust
 `tracing` diagnostics remain the host's separate logging channel; see
 [logging and event practice](../agents/logging-and-events.md).
 
+## Transport failure evidence
+
+Failed HTTP attempts retain a typed `TransportFailure` in the attempt's
+`NormalizedError.transport`. It contains the kind, monotonic elapsed
+milliseconds since HTTP send began, and the parsed endpoint host only. The
+OTel adapter exports these without content consent as `error.type`,
+`lash.transport.error.kind`, `lash.transport.error.elapsed_ms` and
+`server.address`. The host is bounded to 253 ASCII bytes. Paths, queries,
+credentials and rendered errors never enter these attributes.
+
+The attempt ordinal is 1-based. `lash.model.attempt.retry_delay_ms` is the
+selected next retry wait, or zero for a terminal attempt. HTTP response
+failures keep `http.response.status_code` and export a typed provider code
+as `lash.provider.error.code` only when it contains at most 128 ASCII letters,
+digits, underscores, dots or hyphens. Invalid codes are omitted.
+
+`ReqwestHttpTransport` classifies connect and request timeouts, DNS, TLS,
+connection refusal and reset; body failures retain the observed HTTP status.
+The pinned reqwest release has no public DNS predicate, so the classifier
+recognizes its connector's exact `dns error` marker. Other sources use typed
+reqwest, rustls, hyper and I/O evidence. Custom transports must supply their
+own typed diagnostics. A request timeout before headers does not prove the
+provider never received the request.
+
+Admission policy remains host-owned under ADR 0015. Figments emits
+`lash.llm_admission`; its decorator must read transport evidence and its retry
+observer must attach the selected wait. Those spans are outside Lash's registry.
+
 ## Installing OpenTelemetry and sampling
 
 Enable the facade's `otel-trace` feature. The host builds a provider through
@@ -761,7 +789,7 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 | `producer` | 36 |
 | `agent` | 38 |
 | `model` | 47 |
-| `model_attempt` | 30 |
+| `model_attempt` | 35 |
 | `tool` | 31 |
 | `cell` | 29 |
 | `process` | 26 |

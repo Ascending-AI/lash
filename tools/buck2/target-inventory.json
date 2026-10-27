@@ -95621,9 +95621,11 @@
       "dependencies": [
         "async-trait",
         "bytes",
+        "hyper",
         "lash-internal-protocol-types",
         "lash-internal-transport-failure",
         "reqwest",
+        "rustls",
         "tokio"
       ],
       "doc": "//crates/lash-http-transport:lash-http-transport__doc",

@@ -8,11 +8,23 @@ use lash_protocol_types::{
 };
 
 pub(super) fn error_type(error: &NormalizedError) -> String {
+    if let Some(transport) = &error.transport {
+        return transport.kind.as_str().to_string();
+    }
     error
         .code
         .as_ref()
+        .filter(|code| bounded_error_code(code.spelling()))
         .map(ToString::to_string)
         .unwrap_or_else(|| error.class.code().to_string())
+}
+
+fn bounded_error_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 128
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 pub(super) fn call_attributes(
@@ -175,8 +187,37 @@ pub(super) fn attempt_attributes(attempt: &AttemptRecord, out: &mut Vec<KeyValue
         }
         if let Some(status) = error.http_status {
             out.push(A::HttpResponseStatusCode.value(i64::from(status)));
+            if let Some(code) = error.code.as_ref().filter(|code| {
+                code.namespace() == &lash_protocol_types::session_model::Namespace::PROVIDER
+                    && bounded_error_code(code.spelling())
+            }) {
+                out.push(A::ProviderErrorCode.value(code.spelling().to_string()));
+            }
+        }
+        if let Some(transport) = &error.transport {
+            out.push(A::TransportErrorKind.value(transport.kind.as_str()));
+            out.push(
+                A::TransportErrorElapsedMs
+                    .value(i64::try_from(transport.elapsed_ms).unwrap_or(i64::MAX)),
+            );
+            if let Some(host) = transport.bounded_server_address() {
+                out.push(A::ServerAddress.value(host.to_string()));
+            }
         }
     }
+    out.push(
+        A::ModelAttemptRetryDelayMs.value(
+            i64::try_from(
+                attempt
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.delay())
+                    .unwrap_or_default()
+                    .as_millis(),
+            )
+            .unwrap_or(i64::MAX),
+        ),
+    );
     if let Some(id) = attempt
         .evidence
         .as_ref()

@@ -719,9 +719,11 @@ PACKAGE_DEPS = {
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "bytes": "//third-party/rust:p0040",
+            "hyper": "//third-party/rust:p0155",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "reqwest": "//third-party/rust:p0280",
+            "rustls": "//third-party/rust:p0295",
             "tokio": "//third-party/rust:p0379"
         }
     },

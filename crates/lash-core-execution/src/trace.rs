@@ -658,6 +658,7 @@ mod span_identity_tests {
                         class: lash_protocol_types::llm::types::RetryClass::RejectedHttpResponse,
                     }),
                     error: Some(crate::NormalizedError {
+                        transport: None,
                         class: lash_protocol_types::llm::types::ProviderFailureKind::Http,
                         code: Some(crate::FailureCode::provider("rate_limit_exceeded")),
                         http_status: Some(429),

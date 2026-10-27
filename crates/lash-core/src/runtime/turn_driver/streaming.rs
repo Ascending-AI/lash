@@ -637,6 +637,7 @@ impl RuntimeTurnDriver<'_> {
                                         crate::RetryDeclineCause::NotRetryable,
                                     )),
                                     error: Some(crate::NormalizedError {
+                                        transport: None,
                                         class: crate::ProviderFailureKind::Unknown,
                                         code: Some(FailureCode::lash(
                                             TurnFailureCode::ProviderPanicked,

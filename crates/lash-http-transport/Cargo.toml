@@ -24,6 +24,8 @@ lash-transport-failure = { workspace = true }
 lash-protocol-types = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+hyper = { version = "1", default-features = false }
+rustls = { version = "0.23", default-features = false }
 reqwest = { workspace = true, features = ["json", "query", "stream", "rustls", "http2"] }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 

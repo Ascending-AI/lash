@@ -16,6 +16,8 @@ FIG-7426: `lash.effect.refused.kind`, `lash.effect.refused.controller_code` and 
 
 Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
 
+FIG-7452: Failed HTTP attempts retain a content-free transport kind in `error.type` and `lash.transport.error.kind`, monotonic elapsed milliseconds in `lash.transport.error.elapsed_ms`, and a parsed endpoint host of at most 253 ASCII bytes in `server.address`. Kinds are `dns`, `connect`, `tls`, `connect_timeout`, `request_timeout`, `reset`, `body_read`, and `other`. The 1-based attempt ordinal and `lash.model.attempt.retry_delay_ms` identify the attempt and selected next wait, with zero when no retry is scheduled. HTTP failures retain status and a typed provider code in `lash.provider.error.code` only when it is at most 128 ASCII letters, digits, underscores, dots or hyphens. No URL paths, queries, credentials, prompts or raw error text are exported. The host owns admission spans such as Figments `lash.llm_admission` and must consume the typed evidence there.
+
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
 
 | Span name or prefix | Kind | Ownership | Semconv type |
@@ -49,6 +51,11 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.process.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.llm_call.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.send.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `server.address` | String | Provenance | model_attempt |
+| `lash.transport.error.kind` | String | Provenance | model_attempt |
+| `lash.transport.error.elapsed_ms` | Integer | Provenance | model_attempt |
+| `lash.provider.error.code` | String | Provenance | model_attempt |
+| `lash.model.attempt.retry_delay_ms` | Integer | Provenance | model_attempt |
 | `http.response.status_code` | Integer | Provenance | model_attempt |
 | `lash.session.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.turn.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
@@ -167,7 +174,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `producer` | 36 |
 | `agent` | 38 |
 | `model` | 47 |
-| `model_attempt` | 30 |
+| `model_attempt` | 35 |
 | `tool` | 31 |
 | `cell` | 29 |
 | `process` | 26 |

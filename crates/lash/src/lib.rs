@@ -1321,7 +1321,8 @@ pub mod provider {
         DiscardedAfterCell, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
         ExecutionEvidenceMergeError, LlmRequest, LlmRequestOwner, LlmRequestScope, LlmResponse,
         LlmStreamEvidence, LlmTurnScope, NormalizedError, ProtocolPosition, ProviderEndpointError,
-        RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
+        RetryClass, RetryDecision, RetryDeclineCause, RetryWait, TransportErrorKind,
+        TransportFailure,
     };
     /// The namespaced failure code carried on
     /// [`LlmTransportError`] and attempt

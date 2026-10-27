@@ -1,6 +1,6 @@
 use std::fmt;
 use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -9,7 +9,9 @@ use lash_protocol_types::session_model::TurnFailureCode;
 
 #[cfg(test)]
 use lash_protocol_types::session_model::FailureCode;
-use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
+use lash_transport_failure::{
+    LlmTransportError, TransportErrorKind, TransportFailure, TransportRetryVerdict,
+};
 
 #[async_trait]
 pub trait HttpTransport: Send + Sync + fmt::Debug {
@@ -358,6 +360,10 @@ impl HttpTransport for ReqwestHttpTransport {
         request: HttpRequest,
         timeout: Option<Duration>,
     ) -> Result<HttpResponse, LlmTransportError> {
+        let started = Instant::now();
+        let host = reqwest::Url::parse(&request.url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned));
         let mut http = self
             .client
             .request(request.method.as_reqwest(), &request.url);
@@ -378,6 +384,7 @@ impl HttpTransport for ReqwestHttpTransport {
             .response_start_timeout_message
             .unwrap_or_else(|| "HTTP response start timed out".to_string());
 
+        let send_host = host.clone();
         run_with_timeout(
             async move {
                 http.send()
@@ -385,12 +392,18 @@ impl HttpTransport for ReqwestHttpTransport {
                     .map(|response| HttpResponse {
                         status: response.status().as_u16(),
                         headers: header_pairs(response.headers()),
-                        body: HttpResponseBody::from_reqwest_response(response),
+                        body: HttpResponseBody::streamed(ReqwestByteStream { response, started }),
                     })
                     .map_err(|err| {
                         let error = LlmTransportError::new(format!("HTTP request failed: {err}"))
                             .with_kind(ProviderFailureKind::Transport)
                             .with_retry_verdict(reqwest_error_retry_verdict(&err));
+                        let error = with_transport_failure(
+                            error,
+                            reqwest_error_kind(&err),
+                            send_host,
+                            started,
+                        );
                         if let Some(body) = body_for_error {
                             error.with_request_body(body)
                         } else {
@@ -402,17 +415,28 @@ impl HttpTransport for ReqwestHttpTransport {
             &timeout_message,
         )
         .await
+        .map_err(|error| {
+            if error.transport.is_some() {
+                error
+            } else {
+                with_transport_failure(error, TransportErrorKind::RequestTimeout, host, started)
+            }
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct ReqwestByteStream {
     response: reqwest::Response,
+    started: Instant,
 }
 
 impl ReqwestByteStream {
     pub fn new(response: reqwest::Response) -> Self {
-        Self { response }
+        Self {
+            response,
+            started: Instant::now(),
+        }
     }
 }
 
@@ -420,9 +444,16 @@ impl ReqwestByteStream {
 impl ByteStream for ReqwestByteStream {
     async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError> {
         self.response.chunk().await.map_err(|err| {
-            LlmTransportError::response_read(err.to_string())
+            let error = LlmTransportError::response_read(err.to_string())
+                .with_http_status(self.response.status().as_u16())
                 .with_kind(ProviderFailureKind::Transport)
-                .with_retry_verdict(reqwest_error_retry_verdict(&err))
+                .with_retry_verdict(reqwest_error_retry_verdict(&err));
+            with_transport_failure(
+                error,
+                TransportErrorKind::BodyRead,
+                self.response.url().host_str().map(str::to_owned),
+                self.started,
+            )
         })
     }
 }
@@ -591,8 +622,74 @@ pub fn header_pairs(headers: &reqwest::header::HeaderMap) -> Vec<(String, String
         .collect()
 }
 
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn with_transport_failure(
+    mut error: LlmTransportError,
+    kind: TransportErrorKind,
+    host: Option<String>,
+    started: Instant,
+) -> LlmTransportError {
+    error.transport = Some(Box::new(TransportFailure {
+        kind,
+        server_address: host.filter(|host| host.len() <= 253),
+        elapsed_ms: elapsed_ms(started),
+    }));
+    error
+}
+
+fn reqwest_error_kind(error: &reqwest::Error) -> TransportErrorKind {
+    use std::error::Error;
+    if error.is_timeout() {
+        return if error.is_connect() {
+            TransportErrorKind::ConnectTimeout
+        } else {
+            TransportErrorKind::RequestTimeout
+        };
+    }
+    let mut cause = error.source();
+    while let Some(source) = cause {
+        if source.is::<rustls::Error>() {
+            return TransportErrorKind::Tls;
+        }
+        // reqwest 0.13.4 exposes no is_dns. Its pinned connector wraps DNS
+        // failures in this exact marker; never inspect provider body prose.
+        if source.to_string() == "dns error" {
+            return TransportErrorKind::Dns;
+        }
+        if source.downcast_ref::<std::io::Error>().is_some_and(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::UnexpectedEof
+            )
+        }) || source
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_incomplete_message)
+        {
+            return TransportErrorKind::Reset;
+        }
+        cause = source.source();
+    }
+    if error.is_connect() {
+        TransportErrorKind::Connect
+    } else if error.is_body() || error.is_decode() {
+        TransportErrorKind::BodyRead
+    } else {
+        TransportErrorKind::Other
+    }
+}
+
 fn reqwest_error_retry_verdict(error: &reqwest::Error) -> TransportRetryVerdict {
-    if error.is_timeout() || error.is_connect() || error.is_body() {
+    if error.is_timeout()
+        || error.is_connect()
+        || error.is_body()
+        || reqwest_error_kind(error) == TransportErrorKind::Reset
+    {
         TransportRetryVerdict::RetryableTransient
     } else {
         TransportRetryVerdict::NotRetryable
@@ -621,6 +718,85 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7452: a failed HTTP attempt retains only a typed cause and host.
+    #[tokio::test]
+    async fn transport_failure_evidence_excludes_request_content() {
+        use lash_transport_failure::TransportErrorKind;
+        use std::io::{Read, Write};
+        let client = http_client_builder().no_proxy().build().unwrap();
+        let transport = ReqwestHttpTransport::from_client(client);
+        for (mode, expected) in [
+            ("refuse", TransportErrorKind::Connect),
+            ("reset", TransportErrorKind::Reset),
+            ("timeout", TransportErrorKind::RequestTimeout),
+            ("body_read", TransportErrorKind::BodyRead),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, hold) = std::sync::mpsc::channel::<()>();
+            let server = if mode == "refuse" {
+                drop(listener);
+                None
+            } else {
+                Some(std::thread::spawn(move || {
+                    let (mut socket, _) = listener.accept().unwrap();
+                    socket
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).unwrap();
+                    if mode == "body_read" {
+                        socket
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
+                            .unwrap();
+                        socket.shutdown(std::net::Shutdown::Write).unwrap();
+                    }
+                    if matches!(mode, "timeout" | "body_read") {
+                        let _ = hold.recv_timeout(Duration::from_secs(5));
+                    }
+                    // Closing with unread request bytes sends a TCP reset.
+                }))
+            };
+            let response = transport
+                .send(
+                    HttpRequest::post(
+                        format!("http://user:password@{address}/private?secret=value"),
+                        "private prompt",
+                    ),
+                    Some(Duration::from_millis(100)),
+                )
+                .await;
+            let error = if mode == "body_read" {
+                read_http_body_bytes(
+                    response.unwrap().body,
+                    100,
+                    Some(Duration::from_secs(2)),
+                    "body timed out",
+                )
+                .await
+                .unwrap_err()
+            } else {
+                response.unwrap_err()
+            };
+            let _ = release.send(());
+            if let Some(server) = server {
+                server.join().unwrap();
+            }
+            let evidence = error
+                .transport
+                .as_deref()
+                .expect("FIG-7452: transport evidence must survive failure");
+            assert_eq!(evidence.kind, expected, "{mode}");
+            assert_eq!(evidence.server_address.as_deref(), Some("127.0.0.1"));
+            assert_eq!(error.http_status, (mode == "body_read").then_some(200));
+            assert!(error.is_retryable(), "{mode} must remain transient");
+            if mode == "timeout" {
+                assert!(evidence.elapsed_ms >= 100);
+            }
+            assert!(!format!("{evidence:?}").contains("private"));
+        }
+    }
 
     #[derive(Debug)]
     struct BudgetFixtureStream {
