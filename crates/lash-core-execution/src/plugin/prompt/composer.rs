@@ -361,7 +361,11 @@ impl ResolvedPromptComposition {
                 if abandoned.load(Ordering::Acquire) {
                     return;
                 }
-                let _late_or_kept = sender.send(composition.compose_section(index, &cut));
+                let section = composition.compose_section(index, &cut);
+                // Publishing releases the caller to mutate its retained state.
+                // The renderer must have released every captured read view first.
+                drop((composition, cut, abandoned));
+                let _late_or_kept = sender.send(section);
             }))?;
             pending.push(receiver);
         }
