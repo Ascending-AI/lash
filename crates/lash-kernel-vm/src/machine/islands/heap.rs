@@ -4,6 +4,8 @@
 use super::*;
 use crate::compile::{Cx, Meter};
 
+mod answer;
+
 /// An accepted operation retains its ordered charges until the caller commits
 /// its counted action. A scalar native has one formula; a helper has its body
 /// events, which must never be collapsed into that formula's total.
@@ -220,82 +222,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             watching.general_formula(self.charging);
         }
         answer
-    }
-
-    /// Keep the partial helper's operand buffer and event owner out of the
-    /// common instruction loop's stack frame, including its ordinary calls.
-    #[inline(never)]
-    pub(super) fn call_answer(
-        &mut self,
-        site: &super::compiled::CallSite,
-        (args, inputs): (&[u32], Option<&[Value]>),
-        regs: &mut [Value],
-        before: u64,
-        root_occurrence: Option<usize>,
-    ) -> Result<bool, Stop> {
-        let (Some(lib), Some(extra)) = (site.library, site.answers) else {
-            return Ok(false);
-        };
-        let occurrence = site.occurrence.or(root_occurrence);
-        // Test the source frame-entry boundary before a shortcut can
-        // allocate. Its completion formula is atomic afterward.
-        if (self.accounting && !self.charging)
-            || !self.root_fits(before, 0, self.accounting)
-            || args.len() > MAX_ARGS
-            || occurrence.is_some_and(|at| !self.counters.can_advance(&[at]))
-        {
-            return Ok(false);
-        }
-        let mut values = [Value::Absent; MAX_ARGS];
-        for (at, (value, reg)) in values.iter_mut().zip(args.iter()).enumerate() {
-            *value = inputs.map_or_else(|| regs[*reg as usize], |values| values[at]);
-        }
-        let Some(answer) = self.library_answer(lib, extra, &values[..args.len()], before) else {
-            return Ok(false);
-        };
-        if let Some(at) = occurrence {
-            self.count(at)?;
-        }
-        self.root_arguments(before);
-        regs[site.reg as usize] = self.commit_heap(answer);
-        if site.after != 0 {
-            self.admit(site.after);
-        }
-        Ok(true)
-    }
-
-    /// A partial library answer leaves its ordinary body in the call
-    /// instruction. Unpaid immediate answers need no heap context.
-    pub(super) fn library_answer(
-        &mut self,
-        lib: crate::compile::LibId,
-        extra: u32,
-        args: &[Value],
-        before: u64,
-    ) -> Option<HeapAnswer> {
-        if !self.accounting {
-            let function = self.exe.lib(lib);
-            let (prepared, _) = function.prepared.as_ref()?;
-            let running = self.base + u64::from(self.depth);
-            if (function.operation() && running > self.call_depth)
-                || running.saturating_add(u64::from(extra)) > self.call_depth
-            {
-                return None;
-            }
-            if let Some(value) = prepared.call(args) {
-                return Some(HeapAnswer {
-                    value,
-                    units: 0,
-                    events: None,
-                });
-            }
-            let (heap, callees, natives) = prepared.heap(&|id| self.exe.library_lib(id))?;
-            return self.heap(0, false, |cx| {
-                let (value, charges) = cx.heap_paths(heap, callees, natives, args)?;
-                (charges.events.is_empty() && charges.pace == 0).then_some(value)
-            });
-        }
-        self.heap_answer(lib, args, Some(extra), false, before, false)
     }
 
     pub(super) fn heap_call(&mut self, site: &HeapSite, args: &[Value]) -> Answer {

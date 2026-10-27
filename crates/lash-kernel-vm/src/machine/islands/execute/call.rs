@@ -14,9 +14,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         slots: &mut usize,
     ) -> Result<Next, Stop> {
         // Borrow the source-sized window through admission and binding.
-        // Only a wide call initializes a maximum-arity window; an ordinary
-        // positional call carries its receiver and argument directly.
+        // Only a wide call initializes a maximum-arity window; small calls
+        // carry their source-sized operands directly.
         let small;
+        let triple;
         let mut wide;
         let inputs = if let Some(inputs) = &site.inputs {
             if let Some(held) = inputs.held() {
@@ -50,6 +51,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     })?;
                     small = [x, y];
                     &small
+                }
+                [first, second, third] if inputs.property().is_none() => {
+                    let x = self
+                        .operand(frame, first)
+                        .inspect_err(|_| self.call_prefix(frame, site, callee))?;
+                    let y = self.operand(frame, second).inspect_err(|_| {
+                        self.scratch.exit.regs.push((first.reg(), x));
+                        self.call_prefix(frame, site, callee);
+                    })?;
+                    let z = self.operand(frame, third).inspect_err(|_| {
+                        self.scratch.exit.regs.push((first.reg(), x));
+                        self.scratch.exit.regs.push((second.reg(), y));
+                        self.call_prefix(frame, site, callee);
+                    })?;
+                    triple = [x, y, z];
+                    &triple
                 }
                 args => {
                     if let Some(property) = inputs.property()

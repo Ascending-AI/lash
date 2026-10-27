@@ -166,41 +166,42 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         merge: &Merge,
         tail: bool,
     ) -> Option<Result<Next, Stop>> {
+        if tail {
+            return self.merge_tail(frame, merge);
+        }
         let value = |at| match frame.slots[at] {
             SlotState::Value(value) => Some(value),
             _ => None,
         };
-        let mut counters = [0i64; 7];
-        for (to, at) in counters.iter_mut().zip(merge.counters) {
+        let number = |at| {
             let Value::Int(number) = value(at)? else {
                 return None;
             };
-            if !(0..(1 << 48)).contains(&number) {
-                return None;
-            }
-            *to = number;
+            Some(number)
+        };
+        let dest = number(merge.counters[0])?;
+        let mut end = number(merge.counters[1])?;
+        let mut mid = number(merge.counters[2])?;
+        let mut left = number(merge.counters[3])?;
+        let mut right = number(merge.counters[4])?;
+        let n = number(merge.counters[6])?;
+        // A union has an upper or sign bit exactly when one counter has it.
+        if !(0..(1 << 48)).contains(&(dest | end | mid | left | right | n)) {
+            return None;
         }
-        let [dest, mut end, mut mid, mut left, mut right, width, n] = counters;
-        let (Value::List(sorted), Value::List(out)) =
-            (value(merge.lists[0])?, value(merge.lists[1])?)
-        else {
+        let Value::List(sorted) = value(merge.lists[0])? else {
             return None;
         };
-        if sorted == out
-            || dest >= n
-            || self.arena.len(sorted).ok()? < n as u64
-            || dest as u64 > self.arena.len(out).ok()?
-        {
+        if dest >= n {
             return None;
         }
-        let from_right = if tail {
-            match value(merge.order)? {
-                Value::Int(order) => order > 0,
-                Value::Float(order) => order.get() > 0.0,
-                _ => return None,
-            }
-        } else {
-            if dest == end {
+        let starts_run = dest == end;
+        let from_right = {
+            if starts_run {
+                let width = number(merge.counters[5])?;
+                if !(0..(1 << 48)).contains(&width) {
+                    return None;
+                }
                 mid = (dest + width).min(n);
                 end = (mid + width).min(n);
                 left = dest;
@@ -212,24 +213,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             if left < mid && right < end {
                 let first = self.arena.item(sorted, left as u64).ok()??;
                 let second = self.arena.item(sorted, right as u64).ok()??;
-                if self.arena.summary_of(&first).depth as usize > self.limits.value_depth()
-                    || self.arena.summary_of(&second).depth as usize > self.limits.value_depth()
-                {
+                if !self.merge_value_fits(&first) || !self.merge_value_fits(&second) {
                     return None;
                 }
-                for (at, number) in merge
-                    .counters
-                    .into_iter()
-                    .zip([dest, end, mid, left, right, width, n])
-                {
-                    frame.slots[at] = SlotState::Value(Value::Int(number));
+                if starts_run {
+                    for (at, number) in merge.counters[1..5].iter().zip([end, mid, left, right]) {
+                        frame.slots[*at] = SlotState::Value(Value::Int(number));
+                    }
                 }
                 frame.slots[merge.from_right] = SlotState::Value(Value::Bool(false));
                 frame.slots[merge.items[0]] = SlotState::Value(first);
                 frame.slots[merge.items[1]] = SlotState::Value(second);
-                frame.control.push(Position::Block(merge.body, 3));
-                frame.control.push(Position::Block(merge.compared[0], 1));
-                frame.control.push(Position::Block(merge.compared[1], 2));
+                frame.control.extend([
+                    Position::Block(merge.body, 3),
+                    Position::Block(merge.compared[0], 1),
+                    Position::Block(merge.compared[1], 2),
+                ]);
                 frame.statement = None;
                 frame.pc = merge.callback;
                 return Some(Ok(Next::Continue));
@@ -241,31 +240,78 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         }
         let item = self.arena.item(sorted, index as u64).ok()??;
-        if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
+        if !self.merge_value_fits(&item) {
+            return None;
+        }
+        let Value::List(out) = value(merge.lists[1])? else {
+            return None;
+        };
+        if sorted == out {
             return None;
         }
         // All reads and capacity checks precede the only fallible write.
         self.arena.list_set(out, dest as u64, item).ok()?;
-        if tail {
-            Self::pop_block(frame);
-            Self::pop_block(frame);
-        } else {
-            frame.control.push(Position::Block(merge.body, 5));
-        }
+        frame.control.push(Position::Block(merge.body, 5));
         if from_right {
             right += 1;
         } else {
             left += 1;
         }
-        for (at, number) in
-            merge
-                .counters
-                .into_iter()
-                .zip([dest + 1, end, mid, left, right, width, n])
+        for (at, number) in merge.counters[..5]
+            .iter()
+            .zip([dest + 1, end, mid, left, right])
         {
-            frame.slots[at] = SlotState::Value(Value::Int(number));
+            frame.slots[*at] = SlotState::Value(Value::Int(number));
         }
         frame.slots[merge.from_right] = SlotState::Value(Value::Bool(from_right));
         Some(self.finish_statement(frame, 1, None))
+    }
+
+    fn merge_tail(&mut self, frame: &mut Frame<'e>, merge: &Merge) -> Option<Result<Next, Stop>> {
+        let value = |at| match frame.slots[at] {
+            SlotState::Value(value) => Some(value),
+            _ => None,
+        };
+        let from_right = match value(merge.order)? {
+            Value::Int(order) => order > 0,
+            Value::Float(order) => order.get() > 0.0,
+            _ => return None,
+        };
+        let selected = merge.counters[if from_right { 4 } else { 3 }];
+        let (Value::Int(dest), Value::Int(index)) = (value(merge.counters[0])?, value(selected)?)
+        else {
+            return None;
+        };
+        if !(0..(1 << 48)).contains(&(dest | index)) {
+            return None;
+        }
+        let (Value::List(sorted), Value::List(out)) =
+            (value(merge.lists[0])?, value(merge.lists[1])?)
+        else {
+            return None;
+        };
+        if sorted == out {
+            return None;
+        }
+        // The item read and list write check their own bounds. The other
+        // merge counters are unchanged by this source suffix.
+        let item = self.arena.item(sorted, index as u64).ok()??;
+        if !self.merge_value_fits(&item) {
+            return None;
+        }
+        self.arena.list_set(out, dest as u64, item).ok()?;
+        Self::pop_block(frame);
+        Self::pop_block(frame);
+        frame.slots[merge.counters[0]] = SlotState::Value(Value::Int(dest + 1));
+        frame.slots[selected] = SlotState::Value(Value::Int(index + 1));
+        frame.slots[merge.from_right] = SlotState::Value(Value::Bool(from_right));
+        Some(self.finish_statement(frame, 1, None))
+    }
+
+    #[inline]
+    fn merge_value_fits(&self, value: &Value) -> bool {
+        // Only tuples and errors carry immutable nesting depth (K-VAL-034).
+        !matches!(value, Value::Tuple(_) | Value::Error(_))
+            || self.arena.summary_of(value).depth as usize <= self.limits.value_depth()
     }
 }
