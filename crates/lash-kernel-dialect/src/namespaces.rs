@@ -208,6 +208,11 @@ impl Namespaces {
         &self.packages
     }
 
+    /// Deferred package paths have no enumerated members to project.
+    pub fn deferred(&self) -> &BTreeSet<PackagePath> {
+        &self.deferred
+    }
+
     pub fn operations(
         &self,
     ) -> impl Iterator<Item = (QualifiedOperation, &crate::OperationSignature)> {

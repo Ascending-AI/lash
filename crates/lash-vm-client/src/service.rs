@@ -14,6 +14,7 @@ use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
 use lash_core_store::checkpoint_graph::stage::StageFault;
 use lash_vm_broker::kernel::pages::SpoolRoot;
 
+mod namespaces;
 mod source;
 pub use source::SourceServiceError;
 
@@ -27,6 +28,7 @@ pub enum Request {
         bindings: BTreeSet<Name>,
         functions: BTreeMap<Name, Option<lash_kernel_dialect::Written>>,
         /// The operations the cell is offered.
+        #[serde(with = "namespaces")]
         namespaces: lash_kernel_dialect::Namespaces,
     },
     /// Lower `source`, written in `dialect`, to a kernel document against
@@ -37,6 +39,7 @@ pub enum Request {
         /// The operations the cell is offered: each a catalog tool, a
         /// deferred grant or an unavailable note. The worker composes the
         /// cell's namespaces from them.
+        #[serde(with = "namespaces")]
         namespaces: lash_kernel_dialect::Namespaces,
         bindings: BTreeSet<Name>,
         /// Saved bindings' source call shapes; lowering reads no code or captures.
@@ -49,6 +52,7 @@ pub enum Request {
         language: lash_kernel_doc::SourceLanguage,
         source: String,
         /// The operations the workflow is offered.
+        #[serde(with = "namespaces")]
         namespaces: lash_kernel_dialect::Namespaces,
         /// The gate's package surface whose names the module resolves
         /// against: the worker's own set, or a stored one sent whole.
@@ -781,7 +785,11 @@ pub mod runtime_ops {
             })?
         }
 
-        fn request_blocking(&self, request: Request, for_run: bool) -> Result<Response, PoolError> {
+        fn request_blocking(
+            &self,
+            mut request: Request,
+            for_run: bool,
+        ) -> Result<Response, PoolError> {
             if let Request::Lower { source, .. } | Request::ToolCalls { source, .. } = &request
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
@@ -792,6 +800,7 @@ pub mod runtime_ops {
                     },
                 ));
             }
+            request.restrict_namespaces();
             let bytes = rmp_serde::to_vec_named(&request).map_err(|error| {
                 PoolError::payload(
                     lash_protocol_types::engine_fault::PayloadKind::ServiceRequest,

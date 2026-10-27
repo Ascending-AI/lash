@@ -113,8 +113,8 @@ pub enum CodecRefusal {
     FrameTooLarge { limit: u64, declared: u64 },
     #[error("payload nests deeper than {limit}")]
     DepthExceeded { limit: u32 },
-    #[error("payload holds more than {limit} values")]
-    NodeLimitExceeded { limit: u64 },
+    #[error("payload holds at least {observed} values, over the {limit}-value bound")]
+    NodeLimitExceeded { limit: u64, observed: u64 },
     #[error("payload would allocate {requested} bytes, over the {limit}-byte bound")]
     AllocationExceeded { limit: u64, requested: u64 },
     #[error("frame is malformed: {reason}")]
@@ -543,8 +543,11 @@ pub enum PoolFault {
     QueueFull { bytes: u64 },
     #[error("worker checkout exceeded its bounded wait")]
     CheckoutTimedOut,
-    #[error("repeated worker failures exhausted the restart window")]
-    RestartStorm,
+    #[error("repeated worker failures exhausted the restart window; first failure: {first}")]
+    RestartStorm {
+        #[source]
+        first: Box<InfrastructureOutcome>,
+    },
     #[error("worker pool configuration is invalid")]
     InvalidConfiguration,
     #[error("this platform has no worker descriptor adapter")]

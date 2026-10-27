@@ -55,9 +55,10 @@ pub struct DecodeLimits {
 }
 
 impl DecodeLimits {
-    /// The FIG-4157 measured presets: 4 MiB frames, including the envelope;
-    /// 100,000 charged nodes, about twice the densest measured continuation's
-    /// 50,044; 64 MiB of cumulative charged allocation, about 3.6 times the
+    /// The FIG-4157 and FIG-7501 measured presets: 4 MiB frames, including the envelope;
+    /// 160,000 charged nodes, about 21% over the measured host lowering
+    /// request's 132,218 values before namespace pruning and type sharing;
+    /// 64 MiB of cumulative charged allocation, about 3.6 times the
     /// largest measured decode's 18.6 MB; and depth 128, far above the
     /// protocol's own nesting, since VM state crosses as one opaque byte
     /// string.
@@ -65,7 +66,7 @@ impl DecodeLimits {
         Self {
             max_frame_bytes: 4 * 1024 * 1024,
             max_depth: 128,
-            max_nodes: 100_000,
+            max_nodes: 160_000,
             max_allocation_bytes: 64 * 1024 * 1024,
         }
     }
@@ -590,6 +591,7 @@ impl ObservationChunker {
         if charge.nodes >= self.limits.max_nodes {
             CodecRefusal::NodeLimitExceeded {
                 limit: self.limits.max_nodes,
+                observed: charge.nodes.saturating_add(1),
             }
         } else if charge.depth >= self.limits.max_depth {
             CodecRefusal::DepthExceeded {
@@ -819,6 +821,7 @@ impl StructureWalk<'_> {
         if self.nodes > self.limits.max_nodes {
             return Err(CodecRefusal::NodeLimitExceeded {
                 limit: self.limits.max_nodes,
+                observed: self.nodes,
             });
         }
         let marker = self.take(1)?[0];

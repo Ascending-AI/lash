@@ -39,8 +39,20 @@ struct State {
     queued_items: usize,
     queued_bytes: usize,
     next_lease: u64,
-    restarts: VecDeque<Instant>,
+    restarts: VecDeque<(Instant, InfrastructureOutcome)>,
     failed: bool,
+}
+impl State {
+    fn restart_storm(&self) -> PoolError {
+        PoolError::RestartStorm {
+            first: Box::new(
+                self.restarts
+                    .front()
+                    .map(|(_, cause)| cause.clone())
+                    .unwrap_or_else(|| PoolError::eof().into_outcome()),
+            ),
+        }
+    }
 }
 struct Pool {
     phases: Option<crate::phases::Recorder>,
@@ -284,21 +296,23 @@ impl Pool {
             })),
         }
     }
-    fn failed(&self, state: &mut State) {
+    fn failed(&self, state: &mut State, cause: &PoolError) {
         let now = Instant::now();
         while state
             .restarts
             .front()
-            .is_some_and(|time| now.duration_since(*time) >= self.config.restart_window)
+            .is_some_and(|(time, _)| now.duration_since(*time) >= self.config.restart_window)
         {
             state.restarts.pop_front();
         }
-        state.restarts.push_back(now);
+        state
+            .restarts
+            .push_back((now, cause.clone().into_outcome()));
         if state.restarts.len() >= self.config.max_restarts {
             state.failed = true;
         }
     }
-    fn discard(&self, mut worker: Worker, failed: bool) -> u64 {
+    fn discard(&self, mut worker: Worker, failed: bool, cause: Option<&PoolError>) -> u64 {
         {
             let mut measurements = lock(&self.measurements);
             measurements.counters.discards += 1;
@@ -309,7 +323,7 @@ impl Pool {
         let mut state = lock(&self.state);
         state.workers -= 1;
         if failed {
-            self.failed(&mut state);
+            self.failed(&mut state, cause.unwrap_or(&PoolError::eof()));
         }
         // The just-reaped slot stays reserved while its replacement starts.
         let replace = !state.failed && state.workers < self.config.min_workers;
@@ -329,9 +343,9 @@ impl Pool {
                     state = lock(&self.state);
                     state.workers -= 1;
                 }
-                Err(_) => {
+                Err(error) => {
                     state.workers -= 1;
-                    self.failed(&mut state);
+                    self.failed(&mut state, &error);
                 }
             }
             self.available.notify_all();
@@ -861,7 +875,7 @@ impl Checkout {
             .send(ParentMessage::Cancel, grace)
             .and_then(|()| self.answer(grace, false));
         let response = self.settle(response);
-        self.discard_for(false);
+        self.discard_for(false, None);
         response
     }
     /// Call once the run stands at a safe point the broker stops at: its end,
@@ -895,7 +909,7 @@ impl Checkout {
                     let mut state = lock(&self.pool.state);
                     if state.failed {
                         drop(state);
-                        self.pool.discard(worker, true);
+                        self.pool.discard(worker, true, None);
                     } else {
                         state.idle.push(worker);
                         self.pool.available.notify_all();
@@ -1243,7 +1257,7 @@ impl Checkout {
                     return Ok(message);
                 }
                 WorkerMessage::Cancelled => {
-                    self.discard_for(false);
+                    self.discard_for(false, None);
                     self.budget.replacement(false);
                     return Ok(WorkerMessage::Cancelled);
                 }
@@ -1257,7 +1271,7 @@ impl Checkout {
         }
     }
     fn discard(&mut self) {
-        self.discard_for(true);
+        self.discard_for(true, None);
     }
     /// Discards the worker after `error`: the run's own typed end, a limit
     /// of its own or a refusal of its own inputs, is no failure of the
@@ -1270,14 +1284,14 @@ impl Checkout {
             PoolError::Infrastructure(InfrastructureOutcome::RunRefused { .. }) => true,
             _ => false,
         };
-        self.discard_for(!own);
+        self.discard_for(!own, Some(error));
     }
-    fn discard_for(&mut self, failed: bool) {
+    fn discard_for(&mut self, failed: bool, cause: Option<&PoolError>) {
         if let Some(worker) = self.worker.take() {
             if let Some(scope) = &worker.phases {
                 scope.point("loss");
             }
-            let cpu = self.pool.discard(worker, failed);
+            let cpu = self.pool.discard(worker, failed, cause);
             let _ = self.charge_cpu(cpu);
             self.credited_cpu = cpu;
             if self.started || self.prepared {
@@ -1294,7 +1308,7 @@ impl Checkout {
 }
 impl Drop for Checkout {
     fn drop(&mut self) {
-        self.discard_for(false);
+        self.discard_for(false, None);
     }
 }
 
@@ -1352,7 +1366,7 @@ pub mod runtime_ops {
                     if state.failed {
                         self.0
                             .unqueue(&mut state, queued, queued_bytes, queue_started);
-                        return Err(PoolError::RestartStorm);
+                        return Err(state.restart_storm());
                     }
                     let worker = if let Some(worker) = state.idle.pop() {
                         Some(worker)
@@ -1371,7 +1385,7 @@ pub mod runtime_ops {
                                 worker.terminate();
                                 state = lock(&self.0.state);
                                 state.workers -= 1;
-                                return Err(PoolError::RestartStorm);
+                                return Err(state.restart_storm());
                             }
                             Err(error) => {
                                 #[cfg(feature = "testing")]
@@ -1391,11 +1405,11 @@ pub mod runtime_ops {
                                 state.workers -= 1;
                                 if !matches!(&error, PoolError::Infrastructure(outcome) if outcome.deployment_fault().is_some())
                                 {
-                                    self.0.failed(&mut state);
+                                    self.0.failed(&mut state, &error);
                                 }
                                 self.0.available.notify_all();
                                 return Err(if state.failed {
-                                    PoolError::RestartStorm
+                                    state.restart_storm()
                                 } else {
                                     error
                                 });

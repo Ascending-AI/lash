@@ -2352,3 +2352,155 @@ fn guest_recursion_uses_the_configured_depth_and_metered_heap() {
         );
     }
 }
+
+// FIG-7501: a host catalogue can exceed the protocol's original 100k values.
+fn host_catalogue() -> lash_kernel_dialect::Namespaces {
+    use lash_kernel_dialect::{NamespaceKind, NamespaceMember, OperationSignature};
+    use lash_kernel_value::names::{PackagePath, Segment};
+    use lash_kernel_value::types::{Param, RecordType, RecordTypeField, Signature, Type};
+    let result = Type::Record(RecordType {
+        fields: (0..1100)
+            .map(|i| RecordTypeField {
+                name: format!("field_{i}"),
+                ty: Type::Text,
+                optional: false,
+            })
+            .collect(),
+        rest: Default::default(),
+    });
+    let members = (0..24)
+        .map(|i| {
+            (
+                Segment::new(format!("read_record{}", char::from(b'a' + i))).expect("segment"),
+                NamespaceMember {
+                    visibility: lash_kernel_value::package::Visibility::Public,
+                    kind: NamespaceKind::Operation(OperationSignature {
+                        signature: Signature {
+                            params: vec![Param {
+                                name: Name::new(format!("key_{i}")),
+                                ty: Type::Text,
+                                optional: false,
+                            }],
+                            result: result.clone(),
+                        },
+                        controls: Default::default(),
+                        mode: lash_kernel_value::OperationMode::Read,
+                    }),
+                },
+            )
+        })
+        .collect();
+    lash_kernel_dialect::Namespaces::new(
+        [(PackagePath::parse("catalogue").expect("path"), members)].into(),
+        Default::default(),
+        &|_| false,
+    )
+    .expect("catalogue")
+}
+
+fn value_count(value: &serde_json::Value) -> u64 {
+    match value {
+        serde_json::Value::Array(items) => 1 + items.iter().map(value_count).sum::<u64>(),
+        serde_json::Value::Object(items) => {
+            1 + items.values().map(|v| 1 + value_count(v)).sum::<u64>()
+        }
+        _ => 1,
+    }
+}
+
+#[test]
+fn a_real_sized_catalogue_imports_under_default_decode_bounds() {
+    HOST_DIALECTS.set("typescript,python");
+    let namespaces = host_catalogue();
+    let before = value_count(&serde_json::to_value(&namespaces).expect("catalogue values"));
+    assert!(before >= 120_000, "real-sized fixture: {before}");
+    let workers = service::Service::new(config("normal"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        for source in [
+            "export async function digest(inbox: string): string { return inbox; }",
+            "export async function digest(inbox: string): string { await catalogue.readRecorda(inbox); return inbox; }",
+        ] {
+            let (document, _, _) = workers.import_workflow(
+                lash_kernel_doc::SourceLanguage::TypeScript, source, &namespaces, None,
+            ).await.expect("a real host catalogue fits default import bounds");
+            assert!(document.exports.contains_key(&Name::new("digest")));
+            let calls_catalogue = source.contains("catalogue.");
+            assert_eq!(document.imports.values().any(|import| import.name.package.to_string() == "catalogue"), calls_catalogue);
+            if calls_catalogue {
+                let import = document.imports.values().find(|import| import.name.package.to_string() == "catalogue").expect("catalogue import");
+                let (_, offered) = namespaces.operations().find(|(operation, _)| operation.name.as_str() == "read_recorda").expect("offered operation");
+                assert_eq!(import.kind, lash_kernel_value::names::ImportKind::Operation { signature: offered.signature.clone() });
+            }
+            let wire = serde_json::to_value(service::Request::ImportWorkflow {
+                language: lash_kernel_doc::SourceLanguage::TypeScript,
+                source: source.to_owned(), namespaces: namespaces.clone(), limits: None,
+            }).expect("shared request");
+            eprintln!("catalogue values before={before} shared_request={}", value_count(&wire));
+        }
+        use service::runtime_ops::ServiceRuntimeOps as _;
+        let response = workers.request_accounted(service::Request::Lower {
+            dialect: "typescript".into(), source: "await catalogue.readRecorda(\"key\");".into(),
+            namespaces: namespaces.clone(), bindings: Default::default(), functions: Default::default(),
+        }).await.expect("cell lowering with a real host catalogue");
+        assert!(matches!(response, service::Response::Lowered { .. }), "{response:?}");
+        let response = workers.request_accounted(service::Request::Lower {
+            dialect: "python".into(), source: "await \u{ff43}atalogue.read_recorda(\"key\")".into(),
+            namespaces: namespaces.clone(), bindings: Default::default(), functions: Default::default(),
+        }).await.expect("Python normalizes namespace identifiers");
+        assert!(matches!(response, service::Response::Lowered { .. }), "{response:?}");
+    });
+}
+
+#[test]
+fn a_restart_storm_preserves_its_first_codec_refusal() {
+    HOST_DIALECTS.set("typescript");
+    let mut config = config("normal");
+    config.max_restarts = 2;
+    let limit = config.protocol.decode.max_nodes;
+    let pool = WorkerPool::new(config).expect("pool");
+    let payload =
+        EncodedPayload(rmp_serde::to_vec(&vec![0u8; limit as usize + 1]).expect("payload"));
+    let mut first = None;
+    for payload in [payload, EncodedPayload(vec![0xc1])] {
+        let error = checkout(&pool)
+            .prepare(VmOwner::new("codec-refusal"), payload)
+            .expect_err("codec refusal");
+        first.get_or_insert(error.to_string());
+    }
+    let error = pool
+        .checkout(1, OwnerEpoch(1), FrameEpoch(1), ExecutionBudget::default())
+        .err()
+        .expect("restart storm");
+    assert!(pool.stats().restart_storm);
+    assert!(
+        error
+            .to_string()
+            .contains(first.as_deref().expect("first cause")),
+        "{error}"
+    );
+    let outcome = error.into_outcome();
+    let InfrastructureOutcome::ProtocolViolation {
+        breach:
+            ProtocolBreach::Pool {
+                fault: lash_protocol_types::engine_fault::PoolFault::RestartStorm { first },
+            },
+    } = outcome
+    else {
+        panic!("typed restart storm: {outcome:?}")
+    };
+    assert_eq!(
+        *first,
+        InfrastructureOutcome::ProtocolViolation {
+            breach: ProtocolBreach::Frame {
+                refusal: CodecRefusal::NodeLimitExceeded {
+                    limit,
+                    observed: limit + 1
+                }
+            },
+        }
+    );
+}

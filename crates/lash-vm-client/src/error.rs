@@ -19,8 +19,11 @@ pub enum PoolError {
     QueueFull { bytes: usize },
     #[error("worker checkout exceeded its bounded wait")]
     CheckoutTimedOut,
-    #[error("repeated worker failures exhausted the restart window")]
-    RestartStorm,
+    #[error("repeated worker failures exhausted the restart window; first failure: {first}")]
+    RestartStorm {
+        #[source]
+        first: Box<InfrastructureOutcome>,
+    },
     #[error("the execution exhausted its {bound} replacement attempts")]
     RetryLimitExceeded { bound: u32 },
     #[error("worker pool configuration is invalid")]
@@ -73,7 +76,7 @@ impl PoolError {
             }
             Self::QueueFull { .. }
             | Self::CheckoutTimedOut
-            | Self::RestartStorm
+            | Self::RestartStorm { .. }
             | Self::RetryLimitExceeded { .. }
             | Self::Cgroup { .. }
             | Self::Library(_) => true,
@@ -115,7 +118,7 @@ impl PoolError {
                 bytes: bytes as u64,
             },
             Self::CheckoutTimedOut => PoolFault::CheckoutTimedOut,
-            Self::RestartStorm => PoolFault::RestartStorm,
+            Self::RestartStorm { first } => PoolFault::RestartStorm { first },
             Self::InvalidConfiguration => PoolFault::InvalidConfiguration,
             Self::UnsupportedPlatform => PoolFault::UnsupportedPlatform,
             Self::Io { code, .. } => PoolFault::Io { code },

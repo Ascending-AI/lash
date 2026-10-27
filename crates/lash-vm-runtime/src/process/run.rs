@@ -845,7 +845,7 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
         } => match fault {
             PoolFault::QueueFull { .. } => Some(CapacityCause::QueueFull),
             PoolFault::CheckoutTimedOut => Some(CapacityCause::CheckoutTimedOut),
-            PoolFault::RestartStorm => Some(CapacityCause::RestartStorm),
+            PoolFault::RestartStorm { .. } => Some(CapacityCause::RestartStorm),
             PoolFault::Recovery
             | PoolFault::InvalidConfiguration
             | PoolFault::UnsupportedPlatform

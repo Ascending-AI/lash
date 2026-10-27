@@ -108,7 +108,10 @@ fn nesting_value_counts_and_declared_allocation_are_bounded() {
     let codec = FrameCodec::new(many);
     assert_eq!(
         codec.decode_worker(&frame_around(&codec, &wide)),
-        Err(CodecRefusal::NodeLimitExceeded { limit: 64 })
+        Err(CodecRefusal::NodeLimitExceeded {
+            limit: 64,
+            observed: 65
+        })
     );
 }
 
@@ -116,7 +119,7 @@ fn nesting_value_counts_and_declared_allocation_are_bounded() {
 fn the_standard_preset_charges_map_keys_as_nodes() {
     let codec = codec();
     let limit = DecodeLimits::standard().max_nodes;
-    assert_eq!(limit, 100_000);
+    assert_eq!(limit, 160_000);
 
     // An array of `limit - 1` nils is `limit` values: inside the budget, so
     // it fails as a message, not on the node bound.
@@ -136,7 +139,10 @@ fn the_standard_preset_charges_map_keys_as_nodes() {
     map.extend(std::iter::repeat_n(0xc0, (entries * 2) as usize));
     assert_eq!(
         codec.decode_worker(&frame_around(&codec, &map)),
-        Err(CodecRefusal::NodeLimitExceeded { limit })
+        Err(CodecRefusal::NodeLimitExceeded {
+            limit,
+            observed: limit + 1
+        })
     );
 }
 
@@ -358,7 +364,10 @@ fn an_observation_no_frame_carries_is_refused_with_its_bound() {
     let wide = rmp_serde::to_vec_named(&vec![0_u8; 200]).expect("an array");
     assert_eq!(
         chunker.push(&wide),
-        Err(CodecRefusal::NodeLimitExceeded { limit: 200 })
+        Err(CodecRefusal::NodeLimitExceeded {
+            limit: 200,
+            observed: 201
+        })
     );
     let deep = rmp_serde::to_vec_named(&vec![vec![vec![vec![0_u8]]]]).expect("nested arrays");
     assert_eq!(

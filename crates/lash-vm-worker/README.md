@@ -121,7 +121,7 @@ process it started. A nested checkout still has a bounded queue and returns
 `CheckoutTimedOut` when no slot frees. It never waits silently forever.
 
 The standard presets are min 1/max 4, two queued items/eight MiB, four MiB
-frames, two MiB parked state, one MiB effect values, 64 KiB source, 100,000
+frames, two MiB parked state, one MiB effect values, 64 KiB source, 160,000
 decoded nodes, 64 MiB charged decode allocation and five seconds IPC silence.
 Runs allow fifty million charge units, 64 MiB of machine memory, call depth
 1,024, 1,024 live tasks, 256 requests per park and 1,024 `join` members.
@@ -134,6 +134,15 @@ are host bounds, not latency targets or guarantees for arbitrary guests.
 `PoolConfig::codemode` raises parked state to 64 MiB, frames and queued input to
 128 MiB and charged decode allocation to 256 MiB. Hosts can supply a smaller
 `PoolConfig` for their own admitted workload.
+
+Source imports and cell lowering send only namespaces whose verbatim root
+occurs in the source. Escaped or non-ASCII source retains the full projection,
+including Python identifiers normalized by NFKC. Each reached
+namespace keeps all its members, including exported types and spelling repairs;
+shared operation parameter and result types cross once. The worker bounds the
+expanded signature allocation at 64 MiB before cloning shared types. A restart
+storm retains the first failure in its restart window as a typed cause,
+including a codec node refusal's observed count and configured limit.
 
 Effect values cross as JSON text with every number carried as written.
 Frames include their eight-byte envelope in the configured cap, and encoding
