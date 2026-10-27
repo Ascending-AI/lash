@@ -4,12 +4,12 @@
     "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;",
     "allocator": "stats_alloc",
     "build": "release",
-    "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false"
+    "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"console\",\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false"
   },
   "provenance": {
-    "commit": "792f1f44b63087a115bde05a9a3daaea537ea333",
-    "recorded_at": "2026-10-26T23:29:22.853366520+00:00",
-    "run_id": "fa8ebc1e4ddb4e65baab488f70f8d5ee"
+    "commit": "39550dd238a6d64c62a45254d70e78b7d6df6c32",
+    "recorded_at": "2026-10-27T02:04:33.975773059+00:00",
+    "run_id": "2f6d99c5ec1c4f39a5e436f58f80f391"
   },
   "geometry": {
     "spawns": 20,
@@ -19,28 +19,28 @@
     "startup/requested_sleep_ns": 0.0,
     "startup/sleep_calls": 0.0
   },
-  "spawn_to_ready_median_ns_diagnostic": 4052261.0,
+  "spawn_to_ready_median_ns_diagnostic": 4455424.5,
   "sleep_requests_ns": {
-    "482357": 0,
-    "482358": 0,
-    "482359": 0,
-    "482360": 0,
-    "482361": 0,
-    "482362": 0,
-    "482363": 0,
-    "482364": 0,
-    "482365": 0,
-    "482366": 0,
-    "482367": 0,
-    "482368": 0,
-    "482369": 0,
-    "482370": 0,
-    "482371": 0,
-    "482372": 0,
-    "482373": 0,
-    "482374": 0,
-    "482375": 0,
-    "482376": 0
+    "943982": 0,
+    "943983": 0,
+    "943984": 0,
+    "943985": 0,
+    "943986": 0,
+    "943987": 0,
+    "943988": 0,
+    "943989": 0,
+    "943990": 0,
+    "943992": 0,
+    "943993": 0,
+    "943994": 0,
+    "943995": 0,
+    "943996": 0,
+    "943997": 0,
+    "943998": 0,
+    "943999": 0,
+    "944000": 0,
+    "944011": 0,
+    "944018": 0
   },
   "noise": {
     "startup/requested_sleep_ns": 0.0,

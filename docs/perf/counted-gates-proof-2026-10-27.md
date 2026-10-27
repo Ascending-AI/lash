@@ -23,6 +23,15 @@ builds only the actual helper main executable with the original `d/injection.pat
 A superseded combined startup build was cancelled because it unnecessarily
 rebuilt the harness; it is not a proof result.
 
+The final committed CPU reference contains a fresh complete 40-row population
+from source `39550dd238a6`, with 20 replay counted metrics and the new main
+build identity. `ship-optimized-build.json` pins the actual optimized artifacts;
+`ship-cpu-calibration/` retains the raw qualified captures. The mutation pairs
+above remain attributed to their original source and are not relabeled as
+measurements of the landing revision. The final startup calibration repeats
+five populations of 20 Ready handshakes on those same optimized binaries;
+all requested sleep counts and nanoseconds remain exactly zero.
+
 The landing count baseline uses five complete captures from the actual hermetic
 executor with eight runtime workers and periodic node maintenance outside the
 foreground window. Each ceiling is maximum plus max-minus-min range. All 60
