@@ -708,11 +708,20 @@ macro_rules! identity {
         #[serde(try_from = "String", into = "String")]
         pub struct $name([u8; 32]);
 
-        // Identity order is lexicographic byte order. Slice comparison uses
-        // the byte comparison primitive without constructing word arrays.
+        // Big-endian words preserve byte order and keep comparisons inside
+        // the caller instead of dispatching a byte-comparison library call.
         impl Ord for $name {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.0.as_slice().cmp(other.0.as_slice())
+                let words = |digest: &[u8; 32]| {
+                    let (words, _) = digest.as_chunks::<8>();
+                    [
+                        u64::from_be_bytes(words[0]),
+                        u64::from_be_bytes(words[1]),
+                        u64::from_be_bytes(words[2]),
+                        u64::from_be_bytes(words[3]),
+                    ]
+                };
+                words(&self.0).cmp(&words(&other.0))
             }
         }
 
@@ -859,4 +868,25 @@ where
         }
     }
     deserializer.deserialize_str(Text(parse))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FunctionId;
+
+    #[test]
+    fn identity_order_is_lexicographic_by_digest_byte() {
+        for different_byte in 0..32 {
+            let mut low = [0x80; 32];
+            let mut high = low;
+            low[different_byte] = 0x7f;
+            low[different_byte + 1..].fill(0xff);
+            high[different_byte + 1..].fill(0);
+            let low = FunctionId::from_bytes(low);
+            let high = FunctionId::from_bytes(high);
+            assert!(low < high, "first difference at byte {different_byte}");
+            assert!(high > low, "first difference at byte {different_byte}");
+            assert_eq!(low.cmp(&low), std::cmp::Ordering::Equal);
+        }
+    }
 }
