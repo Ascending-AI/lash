@@ -728,7 +728,7 @@ impl super::ExecutionComposition {
                     namespaces: namespaces.clone(),
                     subscriptions: Mutex::new(Vec::new()),
                     revision: Mutex::new(SourceRevision {
-                        incarnation: uuid::Uuid::new_v4(),
+                        incarnation: lash_core_store::environment::fresh_identity(),
                         counter: 0,
                     }),
                 }),
@@ -813,7 +813,7 @@ impl ImmutableEnvironmentSource {
         Self(SourceSnapshot {
             source,
             revision: SourceRevision {
-                incarnation: uuid::Uuid::new_v4(),
+                incarnation: lash_core_store::environment::fresh_identity(),
                 counter: 0,
             },
             fragment,
@@ -852,7 +852,7 @@ impl PublishedEnvironmentSource {
                 snapshot: SourceSnapshot {
                     source,
                     revision: SourceRevision {
-                        incarnation: uuid::Uuid::new_v4(),
+                        incarnation: lash_core_store::environment::fresh_identity(),
                         counter: 0,
                     },
                     fragment,

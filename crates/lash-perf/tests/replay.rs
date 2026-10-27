@@ -36,6 +36,28 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
             .join("\n")
     );
     assert!(receipt.exists());
+    // REPLAY-DETERMINISM: every fresh capture of this counted fixture must
+    // give exactly the same host-byte history slope, before aggregation.
+    let slopes: Vec<_> = (0..5)
+        .map(|run| {
+            let raw: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(receipt.with_extension(format!("{run}.json"))).unwrap(),
+            )
+            .unwrap();
+            raw["workloads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["workload"] == "ts-codemode")
+                .unwrap()["summary"]["allocated_bytes"]["robust_slope_per_history_turn"]
+                .as_f64()
+                .expect("the counted fixture has a host-byte slope")
+        })
+        .collect();
+    assert!(
+        slopes.iter().all(|slope| *slope == slopes[0]),
+        "same-commit host allocation slopes differ: {slopes:?}"
+    );
 }
 
 /// FIG-6750 / FIG-6681: a retained megabyte scalar cannot starve cleanup

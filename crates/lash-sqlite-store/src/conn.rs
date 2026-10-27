@@ -1012,11 +1012,11 @@ impl SqliteConnection {
     {
         #[cfg(feature = "testing")]
         if self.inline_calls {
-            let (answer, result) = std::sync::mpsc::sync_channel(1);
+            let (answer, result) = worker::inline_reply();
             flatten(
                 self.inner
                     .write(batch::Member::new(&self.writer, f, move |value| {
-                        let _ = answer.send(value);
+                        answer.send(value);
                     }))
                     .map(Ok),
             )?;

@@ -424,6 +424,46 @@ test's debug build. It fails when:
 
 Wall time is never asserted.
 
+The TypeScript gate population uses a private current-thread runtime and the
+SQLite fixture's synchronous request/reply option. The reply uses a fixed
+allocation and a condition variable, so it cannot allocate a channel waiter
+according to which thread answers first. It fixes the injected clock,
+send IDs, lease incarnation, environment owner/source IDs and the logical
+publication domain. The
+physical files remain private to each capture; the stable logical domain keeps
+the original domain's byte length. The identity source is testing-only, installed
+once in the fresh capture process, and disabled when the TypeScript fixture ends.
+Each gate workload owns a runtime that is dropped before the next workload.
+This prevents detached tool-live flush/retirement tasks from an earlier workload
+entering a later workload's process-wide counters. The other gate workloads keep
+eight runtime workers, and ordinary replay retains its usual execution setup.
+
+The private TypeScript store uses local after-commit hints without cross-process
+wake listeners or publisher tasks. Facade follow/terminal recovery polls, SQLite
+wake polling and automatic WAL checkpoints are deferred beyond this population.
+Facade observations still wake from the private node's real activity events.
+The TypeScript tool-live publisher uses a 60-second flush interval and one-hour
+completed-slot linger; the fixtures emit no tool-progress facts. Completed slots
+therefore stay allocated through this short counted population, rather than
+retiring on the real-time flush cadence and moving the next Vec growth.
+Foreground commits, worker exchanges, send/outcome observation, and the
+before/after meter reads remain counted process-wide.
+Artifact cleanup and page retirement settle between turns. This gate measures
+foreground allocation growth, not the allocation cost of periodic maintenance
+or a concurrent scheduler. Each receipt's configured geometry records the runtime
+worker count, clock/identity policy and SQLite settings. No allocation is sampled,
+subtracted or replaced with an estimate.
+
+Private persistent indexes and the spool's reference-count map use a deterministic
+hasher so equal updates copy equal trie paths and cause equal table growth after
+removals. Cold resident indexes insert in resident-node order rather than a
+randomized source map's iteration order. This is an in-memory allocation
+property, not a stored or wire hash contract. Spool directory names pad the PID
+to ten decimal digits so their copied paths have a fixed byte length. Timed CPU
+sampling reads `/proc/self/stat` into a stack buffer and parses fields without
+heap allocation, keeping changing counter lengths out of the counted meter. The replay law also requires the five raw TypeScript host-byte history
+slopes to be exactly equal before their existing aggregate enters the gate.
+
 `known_breaches` lists budgets main exceeds today, each with the ticket that
 owns the fix. A known breach is reported, not failed, while it still breaches;
 when its owner's fix lands and it stops breaching, the gate fails until the

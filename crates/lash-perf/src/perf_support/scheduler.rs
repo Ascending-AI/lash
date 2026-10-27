@@ -134,8 +134,26 @@ pub fn process_cpu_ms() -> Option<f64> {
 }
 
 fn process_cpu_ticks() -> Option<u64> {
-    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
-    parse_process_cpu_ticks(&stat)
+    use std::io::Read;
+    // This timed observation runs between allocation-counter cuts. Its
+    // buffer must not grow with PID, address or CPU-counter digit counts.
+    let mut stat = [0; 4096];
+    let mut file = std::fs::File::open("/proc/self/stat").ok()?;
+    let mut used = 0;
+    loop {
+        if used == stat.len() {
+            return None;
+        }
+        let read = match file.read(&mut stat[used..]) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result.ok()?,
+        };
+        if read == 0 {
+            break;
+        }
+        used += read;
+    }
+    parse_process_cpu_ticks(std::str::from_utf8(&stat[..used]).ok()?)
 }
 
 fn process_clock_ticks_per_second() -> Option<u64> {
@@ -179,13 +197,9 @@ fn native_word(bytes: &[u8]) -> u64 {
 fn parse_process_cpu_ticks(stat: &str) -> Option<u64> {
     // `comm` is parenthesized and may contain spaces or `)` characters. The
     // final `)` is therefore the only safe boundary before field 3 (`state`).
-    let fields = stat
-        .rsplit_once(')')?
-        .1
-        .split_whitespace()
-        .collect::<Vec<_>>();
-    let utime = fields.get(11)?.parse::<u64>().ok()?;
-    let stime = fields.get(12)?.parse::<u64>().ok()?;
+    let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
+    let utime = fields.nth(11)?.parse::<u64>().ok()?;
+    let stime = fields.next()?.parse::<u64>().ok()?;
     utime.checked_add(stime)
 }
 

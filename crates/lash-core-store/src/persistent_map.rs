@@ -9,7 +9,7 @@
 //! no other clone holds happen in place.
 
 use std::borrow::Borrow;
-use std::hash::{BuildHasher, Hash, RandomState};
+use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hash};
 use std::sync::Arc;
 
 mod pairs;
@@ -18,9 +18,11 @@ use pairs::Pairs;
 /// Five hash bits per level: a branch has at most 32 entries.
 const BITS: u32 = 5;
 
+// Trie shape determines path-copy allocation costs. Identical keys must use
+// identical paths across owners and processes, independently of hash seeding.
 pub(crate) struct PersistentMap<K, V> {
     root: Option<Arc<Branch<K, V>>>,
-    hasher: RandomState,
+    hasher: BuildHasherDefault<DefaultHasher>,
 }
 
 struct Branch<K, V> {
@@ -72,7 +74,7 @@ impl<K, V> Default for PersistentMap<K, V> {
     fn default() -> Self {
         Self {
             root: None,
-            hasher: RandomState::new(),
+            hasher: BuildHasherDefault::default(),
         }
     }
 }
@@ -318,6 +320,41 @@ impl<K: Clone + Eq + Hash, V: Clone> FromIterator<(K, V)> for PersistentMap<K, V
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    /// REPLAY-GATE: independent maps receiving identical writes must allocate
+    /// the same trie paths, including when a held snapshot forces copying.
+    #[test]
+    fn identical_updates_build_identical_trie_shapes() {
+        fn shape(branch: &Branch<u64, u64>, out: &mut Vec<(u32, usize, usize)>) {
+            out.push((
+                branch.bitmap,
+                branch.entries.len(),
+                branch.entries.capacity(),
+            ));
+            for entry in &branch.entries {
+                if let Entry::Branch(child) = entry {
+                    shape(child, out);
+                }
+            }
+        }
+        let mut left = PersistentMap::default();
+        let mut right = PersistentMap::default();
+        let mut snapshots = Vec::new();
+        for key in 0..128 {
+            left.insert(key, key);
+            right.insert(key, key);
+            if key % 7 == 0 {
+                snapshots.push((left.clone(), right.clone()));
+            }
+        }
+        let mut shapes = (Vec::new(), Vec::new());
+        shape(left.root.as_deref().expect("populated map"), &mut shapes.0);
+        shape(right.root.as_deref().expect("populated map"), &mut shapes.1);
+        assert_eq!(
+            shapes.0, shapes.1,
+            "random hash seeds change allocated trie paths"
+        );
+    }
 
     /// The map answers every lookup and visits every entry exactly as a plain map
     /// does, across inserts, merges and removals, and across clones written

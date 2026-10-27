@@ -46,7 +46,7 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::fs::{self, File};
-use std::hash::{BuildHasher, Hasher};
+use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hasher};
 use std::io::{BufReader, BufWriter, ErrorKind, Read, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
@@ -329,7 +329,11 @@ impl SpoolRoot {
         }
         let mut nonce = std::collections::hash_map::RandomState::new().build_hasher();
         nonce.write_u32(std::process::id());
-        let dir = parent.join(format!("{}-{:016x}", std::process::id(), nonce.finish()));
+        let dir = parent.join(format!(
+            "{:010}-{:016x}",
+            std::process::id(),
+            nonce.finish()
+        ));
         fs::create_dir(&dir).map_err(|error| io(&error))?;
         let lock = fs::File::create(dir.join(LOCK)).map_err(|error| io(&error))?;
         lock.lock().map_err(|error| io(&error))?;
@@ -412,7 +416,9 @@ struct Candidate {
 #[derive(Debug, Default)]
 struct Resident {
     pages: HashMap<NodeId, VerifiedNode>,
-    refs: HashMap<NodeId, u64>,
+    // Removal tombstones affect the next reserve. A fixed seed keeps identical
+    // reference churn from changing the counted allocation window.
+    refs: HashMap<NodeId, u64, BuildHasherDefault<DefaultHasher>>,
 }
 
 /// Where a spool's staged pages and reference counts are: in memory until

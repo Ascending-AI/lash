@@ -177,7 +177,7 @@ impl PluginSession {
             session: self.clone(),
             owners,
             revision: Mutex::new(SourceRevision {
-                incarnation: uuid::Uuid::new_v4(),
+                incarnation: lash_core_store::environment::fresh_identity(),
                 counter: 0,
             }),
             witness: Mutex::new(None),

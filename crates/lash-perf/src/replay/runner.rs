@@ -20,6 +20,8 @@ const ROUND_WATCHDOG: Duration = Duration::from_secs(600);
 pub enum StoreChoice {
     /// A SQLite file store set under this directory.
     SqliteFile(std::path::PathBuf),
+    /// Counted SQLite execution with one issuing task and synchronous store calls.
+    CountedSqliteFile(std::path::PathBuf),
     /// An isolated database on the PostgreSQL server at this URL.
     Postgres(String),
 }
@@ -43,6 +45,40 @@ pub struct RunOptions {
     pub heap: super::ReplayHeapArgs,
 }
 
+#[derive(Debug)]
+struct CountedClock(Instant);
+
+#[async_trait::async_trait]
+impl lash_core::Clock for CountedClock {
+    fn now(&self) -> Instant {
+        self.0
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::UNIX_EPOCH + chrono::TimeDelta::seconds(1_700_000_000)
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    async fn sleep_until(&self, deadline: Instant) {
+        tokio::time::sleep(deadline.saturating_duration_since(self.0)).await;
+    }
+}
+
+fn sqlite_options(counted: bool) -> lash_sqlite_store::SqliteStoreSetOptions {
+    let mut options = lash_sqlite_store::SqliteStoreSetOptions::standard(
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    );
+    if counted {
+        options.inline_calls = true;
+        options.store.connection_policy.wal_autocheckpoint_pages = 0;
+        options.store.connection_policy.operational.wake_poll = Duration::from_secs(24 * 60 * 60);
+    }
+    options
+}
+
 /// What a store set must outlive.
 type Keep = Vec<Box<dyn std::any::Any + Send>>;
 
@@ -55,18 +91,36 @@ async fn open_stores(
     Keep,
 )> {
     match choice {
-        StoreChoice::SqliteFile(dir) => {
+        StoreChoice::SqliteFile(dir) | StoreChoice::CountedSqliteFile(dir) => {
             let dir = dir.join(workload);
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-            let stores = lash::sqlite::SqliteStoreSet::open(
+            let counted = matches!(choice, StoreChoice::CountedSqliteFile(_));
+            let clock: Arc<dyn lash_core::Clock> = if counted {
+                Arc::new(CountedClock(Instant::now()))
+            } else {
+                Arc::new(lash_core_ids::clock::SystemClock)
+            };
+            let stores = lash::sqlite::SqliteStoreSet::open_with_options_and_clock(
                 dir.join("lash.db"),
-                lash::sqlite::SqliteSynchronous::Normal,
+                sqlite_options(counted),
+                clock,
             )
             .await
             .map_err(|error| anyhow::anyhow!("open the SQLite store set: {error}"))?;
             let probe = StoreProbe::sqlite(&stores)?;
-            Ok((Arc::new(stores), probe, Vec::new()))
+            let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(stores);
+            let stores = if counted {
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .without_node_wakes()
+                    .with_binding_identity(lash_execution_contracts::backend::StoreBindingId::new(
+                        Arc::<str>::from(format!("sqlite:/tmp/lash-counted-00000000-0000-4000-8000-000000000000/{workload}/lash.db")),
+                    ))
+                    .into_store_set()
+            } else {
+                stores
+            };
+            Ok((stores, probe, Vec::new()))
         }
         StoreChoice::Postgres(url) => {
             let isolated = lash_postgres_store::testing::IsolatedDatabase::create(url).await;
@@ -113,7 +167,7 @@ pub(crate) fn build_core(
     workers: Option<&lash::vm::WorkerService>,
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> Result<lash::LashCore> {
-    build_core_with_sink(workload, backend, book, workers, tools, None)
+    build_core_with_sink(workload, backend, book, workers, tools, None, false)
 }
 
 fn build_core_with_sink(
@@ -123,6 +177,7 @@ fn build_core_with_sink(
     workers: Option<&lash::vm::WorkerService>,
     tools: Arc<dyn lash_core::ToolProvider>,
     sink: Option<Arc<lash::testing::RecordingTraceSink>>,
+    counted: bool,
 ) -> Result<lash::LashCore> {
     let builder = match (workload.protocol, workers) {
         (Protocol::Standard, _) => {
@@ -169,6 +224,31 @@ fn build_core_with_sink(
     } else {
         builder
     };
+    let builder = if counted {
+        let day = Duration::from_secs(24 * 60 * 60);
+        let poll = lash::PollPacing::new(day, day)?;
+        let live = lash::ToolLivePolicy::default();
+        let live = lash::ToolLivePolicy::new(
+            live.events(),
+            live.logs(),
+            live.bytes(),
+            live.fact_bytes(),
+            live.progress_bytes(),
+            live.calls(),
+            Duration::from_secs(60),
+            live.write_timeout(),
+            Duration::from_secs(3600),
+        )?;
+        builder
+            .tool_live_policy(live)
+            .observer_pacing(lash::ObserverPacing {
+                follow: poll,
+                terminal: poll,
+                ..lash::ObserverPacing::standard()
+            })
+    } else {
+        builder
+    };
     builder
         .serve_sessions(true)
         .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
@@ -184,7 +264,13 @@ fn build_core_with_sink(
         )?))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("lash-perf-replay"),
-            lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),
+            lash::persistence::LeaseIncarnationId::new(if counted {
+                // PID digit count changes repeated string and encoded-buffer
+                // allocations, even on otherwise identical private captures.
+                "1000000".to_owned()
+            } else {
+                std::process::id().to_string()
+            }),
         ))
         .map_err(|error| anyhow::anyhow!("build the replay core: {error}"))
 }
@@ -194,6 +280,7 @@ struct Lane {
     index: usize,
     session: lash::LashSession,
     inputs: Vec<(ScriptedTurn, String)>,
+    counted: bool,
 }
 
 /// The node's settings with page retirement left to the rounds' gaps: the
@@ -277,6 +364,11 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         "turns": options.turns.unwrap_or(workload.turn_count()).min(workload.turn_count()),
         "sessions": workload.sessions, "compact_every": workload.compact_every,
         "runtime_workers": tokio::runtime::Handle::current().metrics().num_workers(),
+        "input_policy": if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+            "fixed injected clock, send IDs, lease incarnation, sequential environment identities and same-length logical publication domain; private physical files; local wakes only; facade recovery polls deferred beyond run; tool-live flush 60s and slot linger 3600s"
+        } else {
+            "system clock; ordinary identity sources"
+        },
         "maintenance_policy": "private single node; after-commit wakes; periodic housekeeping deferred beyond the run",
         "worker_resources": options.worker_resources, "instructions": options.instructions,
         "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
@@ -291,9 +383,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     experiment.configured_durability = match &probe {
         StoreProbe::Sqlite { .. } => format!(
             "{:?}",
-            lash_sqlite_store::SqliteStoreSetOptions::standard(
-                lash_sqlite_store::SqliteSynchronous::Normal
-            )
+            sqlite_options(matches!(options.store, StoreChoice::CountedSqliteFile(_)))
         ),
         StoreProbe::Postgres { pool } => {
             let settings = crate::perf_support::postgres_settings(pool).await?;
@@ -400,6 +490,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         workers.as_ref(),
         tools,
         turn_sink.clone(),
+        matches!(options.store, StoreChoice::CountedSqliteFile(_)),
     )?;
     // Registration follows package holding. Finish both before session and
     // turn cuts, so install SQL belongs to startup even on a slow store.
@@ -461,6 +552,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             index,
             session,
             inputs,
+            counted: matches!(options.store, StoreChoice::CountedSqliteFile(_)),
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
@@ -893,7 +985,19 @@ async fn send(
             .context("fresh document requires host catalogue")?
             .attach_document();
     }
-    let send = lane.session.send(input);
+    let mut send = lane.session.send(input);
+    if lane.counted {
+        use sha2::{Digest as _, Sha256};
+        let mut hash = Sha256::new();
+        hash.update(lane.session.session_id().as_str());
+        hash.update(turn.to_le_bytes());
+        let digest = hash.finalize();
+        let mut id = [0; 16];
+        id.copy_from_slice(&digest[..16]);
+        send = send.id(lash_vocabulary::identity::TurnId::from_uuid(
+            uuid::Uuid::from_bytes(id).as_u128(),
+        ));
+    }
     let send = if scripted.capability_turn.is_some() {
         send.run(super::capabilities::run_spec())
     } else {

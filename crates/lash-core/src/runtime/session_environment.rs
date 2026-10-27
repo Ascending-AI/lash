@@ -253,7 +253,9 @@ impl SessionEnvironment {
         let sources = session
             .plugins()
             .environment_sources(Arc::new(move |change| {
-                target.lock_recover().push((uuid::Uuid::new_v4(), change));
+                target
+                    .lock_recover()
+                    .push((lash_core_store::environment::fresh_identity(), change));
             }))?;
         let head = store.environment_head(session.session_id()).await?;
         let body = match &head {
@@ -456,7 +458,7 @@ impl SessionEnvironment {
 
     pub fn refresh(&self) {
         self.mailbox.lock_recover().push((
-            uuid::Uuid::new_v4(),
+            lash_core_store::environment::fresh_identity(),
             EnvironmentChange::Refresh { sources: None },
         ));
     }
@@ -467,7 +469,7 @@ impl SessionEnvironment {
         let mut mailbox = self.mailbox.lock_recover();
         if reconcile {
             mailbox.push((
-                uuid::Uuid::new_v4(),
+                lash_core_store::environment::fresh_identity(),
                 EnvironmentChange::ConfigSelection {
                     sources: self.registered.clone(),
                 },
@@ -724,7 +726,7 @@ fn detached(
                 .get(source)
                 .cloned()
                 .unwrap_or_else(|| SourceRevision {
-                    incarnation: uuid::Uuid::new_v4(),
+                    incarnation: lash_core_store::environment::fresh_identity(),
                     counter: 0,
                 }),
             fragment: EnvironmentFragment::default(),

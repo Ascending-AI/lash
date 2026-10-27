@@ -208,6 +208,13 @@ impl LayeredStores {
         })
     }
 
+    /// Give private fixture stores a stable logical publication domain while
+    /// keeping their physical files isolated. Never combine independent stores.
+    pub fn with_binding_identity(mut self, binding: StoreBindingId) -> Self {
+        self.0.binding = binding;
+        self
+    }
+
     /// Replace the durable store with `layer` over the inner store set's.
     pub fn map_durable_store(
         mut self,
@@ -229,6 +236,13 @@ impl LayeredStores {
     /// would be.
     pub fn lose_wakes(mut self) -> Self {
         self.0.wakes = Some(lash_durable::runner::WakeSink::default());
+        self
+    }
+
+    /// Keep a private single-node fixture on local commit hints only, without
+    /// cross-process listener and publisher tasks entering counted windows.
+    pub fn without_node_wakes(mut self) -> Self {
+        self.0.node_wakes = None;
         self
     }
 

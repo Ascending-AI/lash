@@ -21,7 +21,12 @@ pub(crate) struct NodeIdIndex(PersistentMap<NodeId, usize>);
 
 impl NodeIdIndex {
     fn from_resident(by_id: HashMap<NodeId, usize>) -> Self {
-        Self(by_id.into_iter().collect())
+        // A trie branch born with one slot grows differently from one born
+        // with two. Seeded hashing alone cannot fix allocation costs when a
+        // randomized source map changes insertion order. Use resident order.
+        let mut entries: Vec<_> = by_id.into_iter().collect();
+        entries.sort_unstable_by_key(|(_, index)| *index);
+        Self(entries.into_iter().collect())
     }
 
     pub(crate) fn get(&self, node_id: &str) -> Option<usize> {

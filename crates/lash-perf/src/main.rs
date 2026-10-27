@@ -501,8 +501,7 @@ fn run_main() -> anyhow::Result<()> {
             return runtime.block_on(lash_perf::replay::run(options));
         }
         Some(Command::ReplayGate(options)) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(8)
+            let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .thread_stack_size(tokio_thread_stack_bytes(&args))
                 .build()?;

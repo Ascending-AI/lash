@@ -207,7 +207,12 @@ async fn run_workloads(
             identity: receipt.identity.clone(),
             worker_resources,
             instructions,
-            store: store.clone(),
+            store: match store {
+                StoreChoice::CountedSqliteFile(dir) if workload.name != "ts-codemode" => {
+                    StoreChoice::SqliteFile(dir.clone())
+                }
+                _ => store.clone(),
+            },
             turns: *turns,
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
@@ -223,11 +228,34 @@ async fn run_workloads(
             turns.unwrap_or(workload.turn_count()),
             workload.sessions
         );
-        receipt.workloads.push(
-            runner::run(workload, &options)
-                .await
-                .with_context(|| format!("workload `{}`", workload.name))?,
-        );
+        let result = if matches!(store, StoreChoice::CountedSqliteFile(_)) {
+            let workload = workload.clone();
+            let counted = matches!(options.store, StoreChoice::CountedSqliteFile(_));
+            std::thread::spawn(move || {
+                let _identities =
+                    counted.then(lash_core_store::environment::sequential_identities_for_testing);
+                let mut runtime = if counted {
+                    tokio::runtime::Builder::new_current_thread()
+                } else {
+                    let mut runtime = tokio::runtime::Builder::new_multi_thread();
+                    runtime.worker_threads(8);
+                    runtime
+                };
+                // Dropping this runtime finishes detached observers from this
+                // workload before the next workload's process-wide counters.
+                runtime
+                    .enable_all()
+                    .build()?
+                    .block_on(runner::run(&workload, &options))
+            })
+            .join()
+            .map_err(|_| anyhow::anyhow!("the counted replay thread panicked"))?
+        } else {
+            runner::run(workload, &options).await
+        };
+        receipt
+            .workloads
+            .push(result.with_context(|| format!("workload `{}`", workload.name))?);
         write_receipt(&receipt, out)?;
     }
     Ok(receipt)
@@ -394,7 +422,7 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
         receipts.push(
             run_workloads(
                 &workloads,
-                &StoreChoice::SqliteFile(stores.0.clone()),
+                &StoreChoice::CountedSqliteFile(stores.0.clone()),
                 &args.out,
                 &ReplayHeapArgs::default(),
                 Observers {

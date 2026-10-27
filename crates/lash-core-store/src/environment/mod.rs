@@ -25,6 +25,56 @@ pub use namespace_index::NamespaceIndex;
 #[cfg(test)]
 mod tests;
 
+// A counted replay runs in a fresh process with private stores and one issuing
+// runtime thread. Control identity entropy there as well as the injected clock:
+// UUID-bearing canonical bytes determine graph ordering and allocation paths.
+#[cfg(feature = "testing")]
+static FIXTURE_IDENTITIES: std::sync::OnceLock<std::sync::atomic::AtomicU64> =
+    std::sync::OnceLock::new();
+
+/// Install a sequential identity source for one isolated counted-replay process.
+/// Call before creating any sources or owners; never use with shared/live stores.
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub fn sequential_identities_for_testing() -> FixtureIdentities {
+    assert!(
+        FIXTURE_IDENTITIES
+            .set(std::sync::atomic::AtomicU64::new(1))
+            .is_ok(),
+        "the private replay process installs its identity source once"
+    );
+    FIXTURE_IDENTITIES_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+    FixtureIdentities(())
+}
+
+#[cfg(feature = "testing")]
+static FIXTURE_IDENTITIES_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Lifetime of the private replay's deterministic environment identities.
+#[cfg(feature = "testing")]
+#[doc(hidden)]
+pub struct FixtureIdentities(());
+#[cfg(feature = "testing")]
+impl Drop for FixtureIdentities {
+    fn drop(&mut self) {
+        FIXTURE_IDENTITIES_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Fresh environment lifetime or source identity. Production always uses UUIDv4.
+#[doc(hidden)]
+pub fn fresh_identity() -> uuid::Uuid {
+    #[cfg(feature = "testing")]
+    if FIXTURE_IDENTITIES_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+        && let Some(counter) = FIXTURE_IDENTITIES.get()
+    {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return uuid::Uuid::from_u128(u128::from(n) | (4_u128 << 76) | (2_u128 << 62));
+    }
+    uuid::Uuid::new_v4()
+}
+
 /// Stable registered source identity, shared by its tool and package projections.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
@@ -289,7 +339,7 @@ pub struct VersionOwner {
 impl VersionOwner {
     pub fn preparing(version: EnvironmentId) -> Self {
         Self {
-            id: VersionOwnerId(uuid::Uuid::new_v4()),
+            id: VersionOwnerId(fresh_identity()),
             version,
             state: VersionOwnerState::Preparing,
         }

@@ -74,6 +74,75 @@ impl Drop for Owner {
     }
 }
 
+// The counted fixture blocks its issuing thread, but must not allocate a
+// channel waiter only when the worker loses the race to answer.
+#[cfg(feature = "testing")]
+struct InlineAnswer<T> {
+    result: Mutex<Option<Result<T, ()>>>,
+    ready: std::sync::Condvar,
+}
+
+#[cfg(feature = "testing")]
+pub(super) struct InlineReply<T>(Arc<InlineAnswer<T>>);
+
+#[cfg(feature = "testing")]
+pub(super) struct InlineResult<T>(Arc<InlineAnswer<T>>);
+
+#[cfg(feature = "testing")]
+pub(super) fn inline_reply<T>() -> (InlineReply<T>, InlineResult<T>) {
+    let answer = Arc::new(InlineAnswer {
+        result: Mutex::new(None),
+        ready: std::sync::Condvar::new(),
+    });
+    (InlineReply(Arc::clone(&answer)), InlineResult(answer))
+}
+
+#[cfg(feature = "testing")]
+impl<T> InlineReply<T> {
+    pub(super) fn send(self, result: T) {
+        *self
+            .0
+            .result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(result));
+    }
+}
+
+#[cfg(feature = "testing")]
+impl<T> Drop for InlineReply<T> {
+    fn drop(&mut self) {
+        let mut result = self
+            .0
+            .result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A dropped command or a panicked callback must release its caller.
+        if result.is_none() {
+            *result = Some(Err(()));
+        }
+        self.0.ready.notify_one();
+    }
+}
+
+#[cfg(feature = "testing")]
+impl<T> InlineResult<T> {
+    pub(super) fn recv(self) -> Result<T, ()> {
+        let mut result = self
+            .0
+            .result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while result.is_none() {
+            result = self
+                .0
+                .ready
+                .wait(result)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        result.take().ok_or(())?
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Connection(Arc<Owner>);
 
@@ -153,13 +222,13 @@ impl Connection {
         T: Send + 'static,
         F: FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
     {
-        let (answer, result) = mpsc::sync_channel(1);
+        let (answer, result) = inline_reply();
         self.send(Command::Call(Box::new(move |connection| {
-            let _ = answer.send(work(connection));
+            answer.send(work(connection));
         })))?;
         result
             .recv()
-            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)?
+            .map_err(|()| tokio_rusqlite::Error::ConnectionClosed)?
             .map_err(tokio_rusqlite::Error::Error)
     }
 
@@ -279,6 +348,21 @@ mod drop_tests {
     use crate::conn::tests::installed;
     use crate::conn::{SqliteConnectionPolicy, SqliteSynchronous};
     use crate::location::DatabaseTarget;
+
+    /// INLINE-REPLY: a panicked worker callback releases its blocked caller,
+    /// preserving the channel-disconnection behavior of the counted fixture.
+    #[tokio::test]
+    async fn an_inline_callback_panic_releases_its_caller() {
+        let connection = super::Connection::start(rusqlite::Connection::open_in_memory)
+            .await
+            .expect("open inline connection");
+        let result = connection.call_inline::<(), _>(|_| panic!("failed callback"));
+        assert!(matches!(
+            result,
+            Err(tokio_rusqlite::Error::ConnectionClosed)
+        ));
+        connection.close().await.expect("join the failed worker");
+    }
 
     async fn rows(connection: &crate::conn::SqliteConnection) -> i64 {
         connection
