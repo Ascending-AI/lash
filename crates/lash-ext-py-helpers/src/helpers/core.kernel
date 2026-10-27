@@ -1626,6 +1626,7 @@ body {
 # here, at every depth.
 function py.reply(value: Any) -> Any
 kernel 1
+projection result_decode
 charge sum(4, deep(value))
 body {
   let go = absent

@@ -349,7 +349,8 @@ impl<'a> Lifter<'a> {
             .ok_or_else(|| "native export has no authored body".to_owned())?
             .block;
         // The implicit end of an async function returns undefined.
-        if let [rest @ .., k::Stmt::ReturnVia { value, policy }] = statements
+        if function.projection == k::ProjectionRole::ImplicitReturn
+            && let [rest @ .., k::Stmt::ReturnVia { value, policy }] = statements
             && matches!(value, k::Expr::Literal(k::Literal::Absent))
             && self.is(policy, "ts.promise.adopt")
             && self

@@ -195,6 +195,15 @@ impl FunctionCatalog for NamedLibrary {
         self.resolve(name)
     }
 
+    fn projection_helper(&self, role: lash_kernel_doc::ProjectionRole) -> Option<FunctionId> {
+        let mut found = self.iter().filter(|(_, function)| {
+            self.header(function)
+                .is_some_and(|header| header.projection == role)
+        });
+        let (_, function) = found.next()?;
+        found.next().is_none().then_some(function)
+    }
+
     fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
         self.registry.get(function)
     }

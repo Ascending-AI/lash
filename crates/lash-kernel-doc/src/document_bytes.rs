@@ -24,6 +24,7 @@ pub const DOCUMENT_GRAMMAR_VERSION: u32 = 1;
 /// available on that typed document, and never supplies identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentBytes {
+    source_language: Option<crate::SourceLanguage>,
     source_evidence:
         std::collections::BTreeMap<crate::FunctionId, Vec<crate::ImplicitTextConversion>>,
     grammar_version: u32,
@@ -37,11 +38,26 @@ impl DocumentBytes {
     #[must_use]
     pub fn from_parts(grammar_version: u32, id: DocumentId, body: impl Into<Arc<[u8]>>) -> Self {
         Self {
+            source_language: None,
             source_evidence: Default::default(),
             grammar_version,
             id,
             body: body.into(),
         }
+    }
+
+    /// Retain the authored language for diagnostics. This annotation changes
+    /// neither executable bytes nor identity, and is not part of `from_parts`.
+    #[must_use]
+    pub fn with_source_language(mut self, language: crate::SourceLanguage) -> Self {
+        self.source_language = Some(language);
+        self
+    }
+
+    /// The language retained for diagnostics by source import, if supplied.
+    #[must_use]
+    pub fn source_language(&self) -> Option<crate::SourceLanguage> {
+        self.source_language
     }
 
     /// Source facts retained by typed authoring, outside executable identity.

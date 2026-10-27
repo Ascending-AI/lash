@@ -100,8 +100,10 @@ pub struct WorkflowNode {
     pub bindings: Vec<usize>,
     pub reads: Vec<usize>,
     pub writes: Vec<usize>,
-    pub canonical: LineRange,
     pub readable: Vec<LineRange>,
+    /// Exact document action and statement sites folded into this authored
+    /// node. Execution counts and replay paths retain these coordinates.
+    pub folded: Vec<Site>,
     pub within: Option<Site>,
     pub lazy: Vec<LazyArm>,
     pub header: Option<ControlHeader>,
@@ -147,13 +149,15 @@ pub struct FlowEdge {
     pub kind: FlowKind,
 }
 
-/// A failed readable lens does not invalidate canonical membership or ranges.
+/// The requested readable source, or why no source is available.
+/// Projection remains available when printing is refused.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadableLens {
     Unrequested,
     Available {
         name: String,
+        source: String,
     },
     Refused {
         name: String,
@@ -161,7 +165,7 @@ pub enum ReadableLens {
     },
 }
 
-/// Typed printer refusal. Projection and the canonical lens remain available.
+/// Typed printer refusal. The projection remains available without source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReadableRefusal {
@@ -173,13 +177,13 @@ pub enum ReadableRefusal {
 }
 
 impl WorkflowView {
-    /// Exact action-site attribution, also for a nested operand whose enclosing
-    /// action has not issued. Occurrences and task identities stay with the
-    /// observation; a host never attributes by the owning statement.
+    /// Resolve an execution or replay coordinate to its authored node.
+    /// Lowering-only sites resolve to their consumer through `folded`;
+    /// authored sibling actions retain their distinct coordinates.
     pub fn node_at(&self, site: &Site) -> Option<&WorkflowNode> {
         self.nodes
             .iter()
-            .find(|node| node.site == *site)
+            .find(|node| node.site == *site || node.folded.contains(site))
             .or_else(|| self.nodes.iter().find(|node| node.members.contains(site)))
     }
 
@@ -187,9 +191,21 @@ impl WorkflowView {
         &self,
         site: &lash_kernel_value::sites::PositionLabel,
     ) -> Option<&WorkflowNode> {
-        self.nodes
-            .iter()
-            .find(|node| node.kind == WorkflowNodeKind::Action && node.site == *site)
+        self.nodes.iter().find(|node| {
+            node.kind == WorkflowNodeKind::Action
+                && (node.site == *site || node.folded.iter().any(|folded| *folded == *site))
+        })
+    }
+
+    /// Record a printer refusal and discard ranges from any previous lens.
+    pub fn refuse_readable(&mut self, name: String, cause: ReadableRefusal) {
+        for node in &mut self.nodes {
+            node.readable.clear();
+        }
+        for statement in &mut self.statements {
+            statement.readable.clear();
+        }
+        self.readable = ReadableLens::Refused { name, cause };
     }
 
     /// Attach the ranges a readable printer actually produced, validated for
@@ -227,7 +243,18 @@ impl WorkflowView {
                 })
                 .collect();
         }
-        self.readable = ReadableLens::Available { name };
+        for statement in &mut self.statements {
+            statement.readable = ranges
+                .get(&statement.site)
+                .into_iter()
+                .flat_map(|ranges| ranges.iter())
+                .map(|range| lines(source, *range))
+                .collect();
+        }
+        self.readable = ReadableLens::Available {
+            name,
+            source: source.to_owned(),
+        };
         Ok(())
     }
 }
@@ -239,8 +266,6 @@ pub(crate) fn project(
     view: &mut WorkflowView,
     context: &crate::ViewContext,
 ) {
-    let (source, ranges) = lash_kernel_doc::print_document_with_ranges(document);
-    view.canonical_source = source.clone();
     view.callables = view
         .scopes
         .iter()
@@ -261,8 +286,6 @@ pub(crate) fn project(
     let comparisons = crate::comparison::Comparisons::new(graph, &view.dataflow.bindings, context);
     let mut projection = Projection {
         view,
-        source: &source,
-        ranges: &ranges,
         nodes: Vec::new(),
         bearing: BTreeSet::new(),
         action_ordinals: document.action_ordinals(),
@@ -373,8 +396,6 @@ pub(crate) fn project(
 
 struct Projection<'a> {
     view: &'a WorkflowView,
-    source: &'a str,
-    ranges: &'a BTreeMap<Site, Span>,
     nodes: Vec<WorkflowNode>,
     bearing: BTreeSet<Site>,
     writes: BTreeMap<Site, usize>,
@@ -534,19 +555,6 @@ impl Projection<'_> {
         statement: &StatementView,
         members: Vec<Site>,
     ) -> WorkflowNode {
-        let span_sites = if kind == WorkflowNodeKind::Code {
-            members.clone()
-        } else {
-            vec![statement.site.clone()]
-        };
-        let spans: Vec<_> = span_sites
-            .iter()
-            .map(|site| lines(self.source, self.ranges[site]))
-            .collect();
-        let canonical = LineRange {
-            first: spans.iter().map(|span| span.first).min().unwrap_or(1),
-            last: spans.iter().map(|span| span.last).max().unwrap_or(1),
-        };
         let owns = |candidate: &Site| {
             if kind == WorkflowNodeKind::Code {
                 members.iter().any(|member| under(candidate, member))
@@ -642,8 +650,8 @@ impl Projection<'_> {
             bindings,
             reads,
             writes,
-            canonical,
             readable: Vec::new(),
+            folded: Vec::new(),
             within: None,
             lazy: Vec::new(),
             header: None,

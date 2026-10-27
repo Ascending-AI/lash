@@ -352,6 +352,7 @@ impl Lowerer<'_> {
             Some(Stmt::Return { .. } | Stmt::ReturnVia { .. })
         ) {
             self.source_return(Operand::undefined())?;
+            self.buf.implicit_return = true;
         }
         Ok(())
     }

@@ -484,8 +484,8 @@ fn coarse_departure() {
     );
 }
 
-/// COARSE-SPANS: canonical ranges exist without a readable lens; shadowed
-/// binding ids/scopes remain distinct and ranges cannot be used after reimport.
+/// COARSE-SPANS / FIG-7476: host views carry no kernel source; readable ranges
+/// address only the printed source and cannot be used after reimport.
 #[test]
 fn coarse_spans() {
     let definition=lash_kernel_doc::parse_definition("function flow() -> Int\nkernel 1\nmetering statements\nbody {let x = 1 if true {let x = 2} return x}").unwrap();
@@ -502,16 +502,37 @@ fn coarse_spans() {
     )
     .unwrap();
     let mut view = view::derive(&document, &context(&document)).unwrap();
+    let wire = serde_json::to_value(&view).expect("view serializes");
+    assert!(
+        wire.get("canonical_source").is_none(),
+        "a host view carries no kernel text"
+    );
+    assert!(
+        wire["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| node.get("canonical").is_none())
+    );
     let original = view.nodes.clone();
-    view.readable = ReadableLens::Refused {
-        name: "typescript".into(),
-        cause: ReadableRefusal::Invalid {
+    view.refuse_readable(
+        "typescript".into(),
+        ReadableRefusal::Invalid {
             message: "no readable spelling".into(),
         },
-    };
+    );
     assert_eq!(view.nodes, original);
-    assert!(view.nodes.iter().all(|node| node.canonical.first > 0
-        && node.canonical.last <= view.canonical_source.lines().count()));
+    assert!(view.nodes.iter().all(|node| node.readable.is_empty()));
+    assert!(
+        view.statements
+            .iter()
+            .all(|statement| statement.readable.is_empty())
+    );
+    assert!(
+        serde_json::to_value(&view).unwrap()["readable"]
+            .get("source")
+            .is_none()
+    );
     let shadowed: Vec<_> = view
         .dataflow
         .bindings
@@ -522,40 +543,87 @@ fn coarse_spans() {
     assert_ne!(shadowed[0].id, shadowed[1].id);
     assert!(view.nodes[0].bindings.contains(&shadowed[0].id));
     assert!(view.nodes[0].bindings.contains(&shadowed[1].id));
-    // A readable projection may use a host-owned map independent of a dialect printer.
-    let source = "function flow() { let x = 1; if (true) { let x = 2; } return x; }";
-    let map = lash::workflow::document::SourceMap::new(
-        document.document(),
-        source,
-        lash::workflow::document::SourceLanguage::TypeScript,
-        document
-            .document()
-            .ordinal_nodes()
-            .into_iter()
-            .map(|(site, _)| lash::workflow::document::SourceSite {
-                site,
-                ranges: vec![lash::workflow::document::Span {
-                    start: 0,
-                    end: source.len(),
-                }],
-                implicit: None,
-            })
-            .collect(),
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
+    let namespaces = Default::default();
+    let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
+    let authored = lash::typescript::lower(
+        "export async function flow(): number { let x = 1; if (true) { let x = 2; } return x; }",
+        &environment,
+        lash::dialect::Mode::Module,
+    )
+    .unwrap()
+    .document
+    .into_document();
+    let link = fixture_link(&authored);
+    let document = lash::workflow::WorkflowDocument::entered(
+        authored,
+        lash::package::LinkedStart {
+            link: link.identity(),
+            selector: lash::package::StartSelector::Export(Name::new("flow")),
+        },
+        lash::vm::helper_release().unwrap().helpers.as_ref(),
     )
     .unwrap();
-    view.readable_ranges(
+    let mut view = view::derive(&document, &context(&document)).unwrap();
+    let printed = lash::typescript::print(
         document.document(),
-        "generated_typescript".into(),
-        source,
-        &map,
+        None,
+        embedding.library(),
+        lash::dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
     )
-    .unwrap();
-    assert!(view.nodes.iter().all(|node| !node.readable.is_empty()));
+    .expect("readable TypeScript");
+    let source = printed.source.as_str();
+    let map = printed.source_map.expect("requested source map");
+    view.readable_ranges(document.document(), "typescript".into(), source, &map)
+        .unwrap();
+    assert!(
+        matches!(&view.readable, ReadableLens::Available { name, source: text }
+        if name == "typescript" && text == source)
+    );
+    let range_valid = |range: &view::LineRange| {
+        range.first > 0 && range.first <= range.last && range.last <= source.lines().count()
+    };
+    assert!(view.nodes.iter().any(|node| !node.readable.is_empty()));
+    assert!(
+        view.statements
+            .iter()
+            .any(|statement| !statement.readable.is_empty())
+    );
+    assert!(
+        view.nodes
+            .iter()
+            .flat_map(|node| &node.readable)
+            .all(range_valid)
+    );
+    assert!(
+        view.statements
+            .iter()
+            .flat_map(|statement| &statement.readable)
+            .all(range_valid)
+    );
+    let wire = serde_json::to_value(&view).unwrap();
+    assert!(wire.get("canonical_source").is_none());
+    assert_eq!(wire["readable"]["source"], source);
     let changed = checked(&format!("{HEADER} main {{ let x = 99 return x }}"), "flow");
     assert_ne!(view.document, changed.identity());
     assert_eq!(
         view.readable_ranges(changed.document(), "typescript".into(), source, &map),
         Err(lash::workflow::document::SourceMapRefusal::Document)
+    );
+    view.refuse_readable("typescript".into(), ReadableRefusal::Bytes { limit: 1 });
+    assert!(view.nodes.iter().all(|node| node.readable.is_empty()));
+    assert!(
+        view.statements
+            .iter()
+            .all(|statement| statement.readable.is_empty())
+    );
+    assert!(
+        serde_json::to_value(&view).unwrap()["readable"]
+            .get("source")
+            .is_none()
     );
 }
 

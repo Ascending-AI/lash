@@ -6,7 +6,6 @@
  */
 export type WorkflowView = {
   "callables": Array<CallableView>;
-  "canonical_source": string;
   "dataflow": Dataflow;
   "document": DocumentId;
   /**
@@ -858,13 +857,15 @@ export type Protocol = {
 };
 
 /**
- * A failed readable lens does not invalidate canonical membership or ranges.
+ * The requested readable source, or why no source is available.
+ * Projection remains available when printing is refused.
  */
 export type ReadableLens = ({
   "kind": "unrequested";
 } | {
   "kind": "available";
   "name": string;
+  "source": string;
 } | {
   "cause": ReadableRefusal;
   "kind": "refused";
@@ -872,7 +873,7 @@ export type ReadableLens = ({
 });
 
 /**
- * Typed printer refusal. Projection and the canonical lens remain available.
+ * Typed printer refusal. The projection remains available without source.
  */
 export type ReadableRefusal = ({
   "kind": "unprintable";
@@ -1083,6 +1084,10 @@ export type StatementView = {
    * The document ordinal shared with run counts and replay paths.
    */
   "ordinal": number;
+  /**
+   * Lines in the available readable source, empty without that lens.
+   */
+  "readable": Array<LineRange>;
   "site": Site;
   /**
    * The statement as the document writes it.
@@ -1270,10 +1275,14 @@ export type WorkflowNode = {
   "bindings": Array<number>;
   "block": Site;
   "callable": Site;
-  "canonical": LineRange;
   "condition_ordinal"?: (number | null);
   "departures": Array<Site>;
   "falls_through": boolean;
+  /**
+   * Exact document action and statement sites folded into this authored
+   * node. Execution counts and replay paths retain these coordinates.
+   */
+  "folded": Array<Site>;
   "header"?: (ControlHeader | null);
   "kind": WorkflowNodeKind;
   "lazy": Array<LazyArm>;

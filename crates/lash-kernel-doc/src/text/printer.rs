@@ -146,6 +146,15 @@ fn definition_with_ranges(
     printer
         .out
         .push_str(&format!("\nkernel {}\n", definition.kernel));
+    if !definition.projection.is_authored() {
+        let role = serde_json::to_value(definition.projection)
+            .unwrap_or_else(|_| unreachable!("projection role"));
+        printer.out.push_str(&format!(
+            "projection {}\n",
+            role.as_str()
+                .unwrap_or_else(|| unreachable!("projection role string"))
+        ));
+    }
     if !definition.errors.is_empty() {
         printer.out.push_str("errors ");
         for (index, kind) in definition.errors.iter().enumerate() {

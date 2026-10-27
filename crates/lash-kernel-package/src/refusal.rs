@@ -20,6 +20,7 @@ pub enum LinkRefusal {
     SignatureMismatch {
         slot: ImportSlot,
         name: QualifiedName,
+        mismatch: Option<Box<lash_kernel_value::SignatureMismatch>>,
     },
     #[error("Import {slot:?} ({name:?}) has another calling convention")]
     ConventionMismatch {

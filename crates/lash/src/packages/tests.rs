@@ -20,6 +20,7 @@ async fn a_publication_retains_its_link_after_the_installer_ends() {
         root: Segment::new("fixture").unwrap(),
     };
     let function = lash_kernel_doc::FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: lash_kernel_value::names::FunctionName::new("fixture.run").unwrap(),
         signature: lash_kernel_value::Signature {
@@ -191,6 +192,7 @@ async fn a_public_alias_retains_internal_fills_without_lending_their_authority()
     store.publish(&claim, &operation_record).await.unwrap();
     let slot = ImportSlot(0);
     let function = lash_kernel_doc::FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: lash_kernel_value::names::FunctionName::new("fixture.run").unwrap(),
         signature: signature.clone(),

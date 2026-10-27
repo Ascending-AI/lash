@@ -253,6 +253,20 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
     }
 }
 
+/// Render an admission signature mismatch in the authored language.
+pub fn render_signature_mismatch(
+    mismatch: &lash_kernel_value::SignatureMismatch,
+    spelling: Spelling,
+) -> String {
+    format!(
+        "{} at {}: expected {}, provided {}",
+        mismatch.side,
+        mismatch.path,
+        type_text(&mismatch.expected, spelling),
+        type_text(&mismatch.provided, spelling),
+    )
+}
+
 /// Render the entry annotation refusal; source coordinates remain available
 /// on the owning diagnostic for hosts to present alongside this text.
 pub fn render_signature_required(required: &lash_kernel_value::SignatureRequired) -> String {

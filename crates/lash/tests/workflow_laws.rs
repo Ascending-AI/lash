@@ -1460,6 +1460,7 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
 #[cfg(feature = "typescript")]
 #[tokio::test]
 async fn a_missing_operation_is_refused_at_workflow_publication() {
+    use lash::workflow::document::SourceLanguage;
     let core = core().await;
     let pin = lash::process::HostArtifactPin::mint();
     let document = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nimport 0 operation missing.tool(input: Json) -> Json\nmain { do perform 0(null) as Json return null }").unwrap();
@@ -1479,6 +1480,72 @@ async fn a_missing_operation_is_refused_at_workflow_publication() {
     assert!(
         matches!(error,lash::EmbedError::Plugin(lash_execution_contracts::PluginError::Package(cause)) if matches!(*cause,lash_execution_contracts::process::linking::EnginePortError::Refused(lash_execution_contracts::process::linking::AdmissionRefusal::MissingImport {slot:lash::package::ImportSlot(0),..})))
     );
+    // FIG-7476: publication formats the stale operation signature in the
+    // authored language while preserving the engine's typed mismatch.
+    let checked = core
+        .host_artifacts()
+        .workflow_environment(&request)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut packages = checked.namespaces().packages().clone();
+    let member = packages
+        .get_mut(&lash::package::PackagePath::parse("tools").unwrap())
+        .unwrap()
+        .get_mut(&lash::package::Segment::new("echo").unwrap())
+        .unwrap();
+    let lash::dialect::NamespaceKind::Operation(offer) = &mut member.kind else {
+        panic!("tool offer")
+    };
+    // An untyped tool result is JSON data, not a callable-capable Any.
+    assert_eq!(offer.signature.result, lash::schema::Type::Json);
+    offer.signature.result = lash::schema::Type::Record(lash::schema::RecordType {
+        fields: vec![],
+        rest: lash::schema::RecordRest::Closed,
+    });
+    let stale = lash::dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
+    for (language, source, expected) in [
+        (
+            SourceLanguage::TypeScript,
+            "export async function entry(): any { return await tools.echo({text: \"ok\"}); }",
+            "import `tools.echo` has no serving signature: output at /output: expected { [key: string]: never }, provided JsonValue",
+        ),
+        #[cfg(feature = "python")]
+        (
+            SourceLanguage::Python,
+            "async def entry() -> Any:\n    return await tools.echo({\"text\": \"ok\"})\n",
+            "import `tools.echo` has no serving signature: output at /output: expected TypedDict(\"Entry\", {}, closed=True), provided JsonValue",
+        ),
+    ] {
+        let (document, _, _) = checked
+            .worker_service()
+            .import_workflow(language, source, &stale, None)
+            .await
+            .unwrap();
+        let error = core
+            .host_artifacts()
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document)
+                    .with_source_language(language),
+                &lash::package::StartSelector::Export(Name::new("entry")),
+                &request,
+                None,
+                None,
+            )
+            .await
+            .expect_err("a stale signature is refused");
+        assert_eq!(error.to_string(), expected);
+        assert!(!error.is_retryable() && error.is_terminal());
+        let lash::EmbedError::WorkflowPublication { source, .. } = error else {
+            panic!("typed publication refusal")
+        };
+        assert!(
+            matches!(*source, lash_execution_contracts::process::linking::EnginePortError::Refused(
+            lash_execution_contracts::process::linking::AdmissionRefusal::SignatureMismatch { mismatch: Some(ref mismatch), .. }
+        ) if mismatch.path == "/output")
+        );
+    }
     core.shutdown().await.unwrap();
 }
 

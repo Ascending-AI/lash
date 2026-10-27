@@ -1358,6 +1358,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "projection": {
+          "$ref": "#/$defs/ProjectionRole"
+        },
         "signature": {
           "$ref": "#/$defs/Signature"
         }
@@ -2482,6 +2485,41 @@
         "block"
       ],
       "type": "object"
+    },
+    "ProjectionRole": {
+      "description": "A build helper's role in the authored workflow projection.",
+      "oneOf": [
+        {
+          "const": "authored",
+          "description": "Calls remain authored steps.",
+          "type": "string"
+        },
+        {
+          "const": "argument_copy",
+          "description": "Copy-out inserted around an effect argument, with an optional forwarder.",
+          "type": "string"
+        },
+        {
+          "const": "result_decode",
+          "description": "Decode an effect reply into the authored language's value representation.",
+          "type": "string"
+        },
+        {
+          "const": "duration_milliseconds",
+          "description": "Validate and convert a sleep argument expressed in milliseconds.",
+          "type": "string"
+        },
+        {
+          "const": "timer_seconds",
+          "description": "An authored wait whose argument is expressed in seconds.",
+          "type": "string"
+        },
+        {
+          "const": "implicit_return",
+          "description": "An authored function whose final return was inserted by lowering.",
+          "type": "string"
+        }
+      ]
     },
     "Protocol": {
       "additionalProperties": false,

@@ -1130,6 +1130,7 @@ impl Scope<'_> {
                     kind: ImportKind::Code { signature, .. },
                     ..
                 }) => Ok(Some(std::sync::Arc::new(crate::FunctionHeader {
+                    projection: Default::default(),
                     kernel: crate::KERNEL_VERSION,
                     name: FunctionName::new("import.call")
                         .unwrap_or_else(|_| unreachable!("valid name")),

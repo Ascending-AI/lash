@@ -203,18 +203,15 @@ impl SavedWorkflow {
                             && let Err(refusal) =
                                 view.readable_ranges(&document, lens.into(), &printed.source, map)
                         {
-                            view.readable = lash::workflow::view::ReadableLens::Refused {
-                                name: lens.into(),
-                                cause: lash::workflow::view::ReadableRefusal::Invalid {
+                            view.refuse_readable(
+                                lens.into(),
+                                lash::workflow::view::ReadableRefusal::Invalid {
                                     message: refusal.to_string(),
                                 },
-                            };
+                            );
                         }
                     } else if let Some(cause) = cause {
-                        view.readable = lash::workflow::view::ReadableLens::Refused {
-                            name: lens.into(),
-                            cause,
-                        };
+                        view.refuse_readable(lens.into(), cause);
                     }
                 }
                 (view, view_unavailable, printed, source_unavailable)

@@ -28,6 +28,37 @@ use {lash_kernel_value::tokens::encode_body, lash_kernel_value::tokens::logical_
 /// and kernel bodies: document `use` lines contain only names and identities.
 pub type FunctionDeclarations = BTreeMap<FunctionId, FunctionDefinition>;
 
+/// A build helper's role in the authored workflow projection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionRole {
+    #[default]
+    /// Calls remain authored steps.
+    Authored,
+    /// Copy-out inserted around an effect argument, with an optional forwarder.
+    ArgumentCopy,
+    /// Decode an effect reply into the authored language's value representation.
+    ResultDecode,
+    /// Validate and convert a sleep argument expressed in milliseconds.
+    DurationMilliseconds,
+    /// An authored wait whose argument is expressed in seconds.
+    TimerSeconds,
+    /// An authored function whose final return was inserted by lowering.
+    ImplicitReturn,
+}
+
+impl ProjectionRole {
+    pub fn is_authored(&self) -> bool {
+        *self == Self::Authored
+    }
+    pub fn is_glue(self) -> bool {
+        matches!(
+            self,
+            Self::ArgumentCopy | Self::ResultDecode | Self::DurationMilliseconds
+        )
+    }
+}
+
 /// A library function: its name, its typed signature over kernel values,
 /// its error kinds, what a call is charged, the guard that bounds its work,
 /// and how it is implemented. Its identity is the hash of all of it, so a
@@ -35,6 +66,8 @@ pub type FunctionDeclarations = BTreeMap<FunctionId, FunctionDefinition>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionDefinition {
+    #[serde(default, skip_serializing_if = "ProjectionRole::is_authored")]
+    pub projection: ProjectionRole,
     /// The kernel version the definition is written for.
     pub kernel: u32,
     pub name: FunctionName,
@@ -64,6 +97,7 @@ pub struct FunctionDefinition {
 /// preparation read the header, so a body is decoded only to compile it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionHeader {
+    pub projection: ProjectionRole,
     pub kernel: u32,
     pub name: FunctionName,
     pub signature: Signature,
@@ -86,6 +120,7 @@ impl FunctionHeader {
     #[must_use]
     pub fn of(definition: &FunctionDefinition) -> Self {
         Self {
+            projection: definition.projection,
             kernel: definition.kernel,
             name: definition.name.clone(),
             signature: definition.signature.clone(),

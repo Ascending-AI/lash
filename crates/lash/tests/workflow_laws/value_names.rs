@@ -75,7 +75,7 @@ fn binding<'v>(view: &'v WorkflowView, name: &str) -> &'v BindingView {
         .bindings
         .iter()
         .find(|binding| binding.name.as_str() == name)
-        .unwrap_or_else(|| panic!("a binding `{name}`:\n{}", view.canonical_source))
+        .unwrap_or_else(|| panic!("a binding `{name}`: {:#?}", view.dataflow.bindings))
 }
 
 /// Each captioned binding's name and title.
@@ -129,7 +129,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
             binding_captions(&holder, &authored, &captions),
             expected,
             "{format:?} authored:\n{}",
-            authored.canonical_source
+            k::print_document(holder.document())
         );
         let options = Default::default();
         let printed = match format {
@@ -184,8 +184,8 @@ fn produced_by_names_the_perform_a_binding_awaits() {
         (SourceFormat::TypeScriptV1, TYPESCRIPT),
         (SourceFormat::PythonV1, PYTHON),
     ] {
-        let (_, view) = view(lower(format, source).0);
-        let code = &view.canonical_source;
+        let (holder, view) = view(lower(format, source).0);
+        let code = k::print_document(holder.document());
         let performs: Vec<_> = view
             .dataflow
             .actions

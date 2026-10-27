@@ -10,7 +10,6 @@ use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::names::FunctionName;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
-use lash_kernel_value::types::Signature;
 use lash_kernel_value::types::Type;
 
 /// Everything that keeps a document from being admitted. Admission does not
@@ -70,17 +69,6 @@ pub enum RefusalReason {
     MissingEffect {
         slot: lash_kernel_value::names::ImportSlot,
     },
-    /// `K-ADM-002`: the environment's effect does not serve the signature
-    /// the document expects.
-    #[error(
-        "effect `{slot:?}` is provided with a signature that does not serve the one expected: {mismatch}"
-    )]
-    EffectSignature {
-        slot: lash_kernel_value::names::ImportSlot,
-        expected: Signature,
-        provided: Signature,
-        mismatch: Box<SignatureMismatch>,
-    },
     /// `K-ADM-003`: the environment holds no function of this identity.
     #[error("the environment holds no library function `{name}` ({function})")]
     MissingFunction {
@@ -119,7 +107,6 @@ impl RefusalReason {
         match self {
             Self::Invalid(_) => "invalid",
             Self::MissingEffect { .. } => "missing_effect",
-            Self::EffectSignature { .. } => "effect_signature",
             Self::MissingFunction { .. } => "missing_function",
             Self::UnboundVariable { .. } => "unbound_variable",
             Self::ArgumentType { .. } => "argument_type",

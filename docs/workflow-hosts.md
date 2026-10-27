@@ -317,8 +317,15 @@ pub async fn read(
 
 ### What is derived
 
-The view derives statements, scopes, dataflow, callables and execution sites.
-Draw a statement as one node with its actions as parts. An action's `role`
+The view derives nodes, statements, scopes, dataflow, callables and execution sites.
+Render `nodes` and `flow` for authored steps. Lowering adapters fold into their
+consumer, whose `folded` sites preserve execution-count and replay attribution.
+Use `node_at` or `action_node` to resolve those coordinates. The complete
+actions remain in dataflow and the document retains their execution semantics.
+The view carries no kernel source or canonical ranges. Request a readable
+printer map and attach it with `readable_ranges`: an available lens contains
+`name` and `source`, with node and statement ranges into that source.
+`refuse_readable` retains the refusal and clears source and ranges. An action's `role`
 identifies an effect, wait, sub-workflow, library call or task operation; use it
 instead of matching helper names. A wait's `static_duration` is an optional
 `std::time::Duration` (`{ secs, nanos }` in JSON), derived from a literal after
@@ -326,10 +333,10 @@ the pinned dialect helper's conversion to whole milliseconds. For example,
 TypeScript `sleep(90000)` and Python `asyncio.sleep(90)` both give 90 seconds.
 Computed arguments such as `sleep(x)` leave it absent. Render that typed fact
 in the host's own words; it describes the authored wait, not remaining time.
-`workflow_view_context` installs the build's exact duration-helper identities.
-Hosts constructing `ViewContext` directly supply those identities through
-`with_duration_helpers`, alongside `with_timer_operations`; document names and
-display labels never select duration semantics. `applies` identifies callable
+Duration conversion and adapter folding use projection roles on the pinned
+helper declarations admitted by the document. Hosts constructing `ViewContext`
+directly supply the helper catalog and `with_timer_operations`; document names
+and display labels never select duration semantics. `applies` identifies callable
 bodies the view can derive. An empty list does not prove that a dynamically supplied callable
 will do no work.
 

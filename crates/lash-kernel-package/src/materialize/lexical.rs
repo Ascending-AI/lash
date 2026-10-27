@@ -28,6 +28,7 @@ pub(super) fn definition(
         .map(|slot| (slot, document.imports[&slot].clone()))
         .collect();
     Ok(FunctionDefinition {
+        projection: Default::default(),
         kernel: KERNEL_VERSION,
         name: FunctionName::new(name).map_err(|e| MaterializeRefusal::Document {
             message: e.to_string(),

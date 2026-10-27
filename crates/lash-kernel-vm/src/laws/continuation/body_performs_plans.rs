@@ -21,18 +21,18 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
-    &PKG_DISCARD_PLAN,
-    &PKG_NOOP_PLAN,
-    &PKG_FETCH_NESTED_PLAN,
     &PKG_WRAP_PLAN,
     &PKG_FETCH_PLAN,
-    &PKG_EACH_PLAN,
+    &PKG_FETCH_NESTED_PLAN,
     &PKG_FETCH_YIELD_PLAN,
+    &PKG_NOOP_PLAN,
+    &PKG_DISCARD_PLAN,
+    &PKG_EACH_PLAN,
 ];
 
 const PKG_FETCH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.fetch",
-    function: p::function("c46ace0e92f45d3455f410895b13872c99783fbb05e08e81c32175d414e14fc3"),
+    function: p::function("1133d66e8fc1712c91562be120ccbc3bceddf9a93f2fcc69fe04339fb8e833cc"),
     callees: &[],
     literals: &[],
     fields: &[],
@@ -82,7 +82,7 @@ fn pkg_fetch(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
 
 const PKG_FETCH_NESTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.fetch_nested",
-    function: p::function("467d29ebacc8a7e8838694f8f6b5e26fa03202c3f64d1fc4ab2fa967c10f9691"),
+    function: p::function("1bcc6db6ca6922663e9f2c4b8dc7634ce560da804eddd6b412c96835f4528bed"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -139,9 +139,9 @@ fn pkg_fetch_nested(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const PKG_WRAP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.wrap",
-    function: p::function("9ccf921cdb6c4c4cfc97ea53251d53589e617603268e7b14f1691aabd30ec408"),
+    function: p::function("0f66e3d8243d540064d12dc2d9ddf1b0999a68fb9220d40308a440036a6aedbb"),
     callees: &[
-        p::function("c46ace0e92f45d3455f410895b13872c99783fbb05e08e81c32175d414e14fc3"),
+        p::function("1133d66e8fc1712c91562be120ccbc3bceddf9a93f2fcc69fe04339fb8e833cc"),
     ],
     literals: &[],
     fields: &[],
@@ -191,7 +191,7 @@ fn pkg_wrap(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
 
 const PKG_FETCH_YIELD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.fetch_yield",
-    function: p::function("f51ec8c84b79ab965f675927d6dd49dc6e0a464b7c4a8b60dd549f2b62b5a41e"),
+    function: p::function("28e2143fa4975a953cefeae28d6eef73fa193f51879b71a1294b2e359f84ceeb"),
     callees: &[],
     literals: &[],
     fields: &[],
@@ -241,9 +241,9 @@ fn pkg_fetch_yield(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
 
 const PKG_EACH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.each",
-    function: p::function("d89e957f7463771869827657a706697ed898d8d067dec520d9e126fbd743a2e9"),
+    function: p::function("b3dfd06022929191cb6f2b96fd5602f234dae0db7f9e34f30aeda66741b4b3bb"),
     callees: &[
-        p::function("7c13b64dab9bd9a4920e3e27f717a98016819418a0604ec8c226f2d3dcff859f"),
+        p::function("e75cc36a979c8481db7c6a321ea9dd2a3ee21f75354935fbb42acbd706cd6ab6"),
     ],
     literals: &[],
     fields: &[],
@@ -324,7 +324,7 @@ fn pkg_each(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
 
 const PKG_DISCARD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.discard",
-    function: p::function("35ce1ca9181f22b12bbd18d5a5d1910730bb69c918ecf7c66b74dd4547502317"),
+    function: p::function("5da59116478d0716a51a6808148c681c1b5d071d2618f5367f9ef5c57521f9eb"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Null,
@@ -376,7 +376,7 @@ fn pkg_discard(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
 
 const PKG_NOOP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "pkg.noop",
-    function: p::function("40493671a36121dcd33fca9c2895d273b3a7d4ea5b3ba95d31592b8a46172d66"),
+    function: p::function("4e95b75f4e50a1968f5c13ba60713db54698521f2d60f009c867dfd9f937e2cd"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Null,

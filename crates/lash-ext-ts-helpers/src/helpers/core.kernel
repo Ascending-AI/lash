@@ -1966,6 +1966,7 @@ body {
 # Frozen template records cross as their cooked/raw items, preserving guest state.
 function ts.copy_boundary(value: Any, forward: Any) -> Any
 kernel 1
+projection argument_copy
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
@@ -2058,6 +2059,7 @@ body {
 # timer boundary discarded sub-millisecond precision after validating it.
 function ts.sleep_duration(milliseconds: Any) -> Int
 kernel 1
+projection duration_milliseconds
 charge 1024
 body {
   let number = milliseconds

@@ -32,15 +32,9 @@ function linking(spans) {
   };
 }
 
-// Both lenses use ranges supplied by the view. Canvas membership and
-// canonical locations survive a readable printer's refusal.
-export function kernelLinking(text, view) {
-  if (text !== view.canonical_source) return undefined;
-  return linking(view.nodes.map((node) => ({ key: siteKey(node.site),
-    start: node.canonical.first - 1, end: node.canonical.last - 1 })));
-}
-export function readableLinking(view) {
-  if (view.readable?.kind !== "available") return undefined;
+// Readable ranges refer only to the source retained by this lens.
+export function readableLinking(view, text = view.readable?.source) {
+  if (view.readable?.kind !== "available" || text !== view.readable.source) return undefined;
   const spans = view.nodes.filter((node) => node.readable.length).map((node) => ({
     key: siteKey(node.site), start: Math.min(...node.readable.map((range) => range.first)) - 1,
     end: Math.max(...node.readable.map((range) => range.last)) - 1,

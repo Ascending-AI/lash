@@ -46,6 +46,7 @@ fn work_start(
         .as_ref()
         .clone();
     let body = lash_kernel_doc::FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: FunctionName::new("test.work").unwrap(),
         signature: Signature {

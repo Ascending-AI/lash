@@ -72,18 +72,18 @@ pub mod document {
         JoinMode, KERNEL_VERSION, KernelVersion, LibraryDependencies, Literal, MAX_NESTING_DEPTH,
         MapEntry, Measure, Member, Metering, MissingHelper, NativeCall, NativeCtor, NativeError,
         NativeFunction, NewObject, Node, NodeMut, NumberPolicy, NumberToken, Nursery, Operand,
-        Ordinals, ParseError, ParseErrorReason, Place, PreparedAnswer, PreparedNative, Protocol,
-        RecordEntry, RegisteredFunction, RegistryError, ReleasedFunctions, Reservation,
-        RestoreSelection, Retry, Rhs, Selection, Semantics, SequenceView, SignatureOrigin,
-        SignaturePosition, SignatureRequired, SourceLanguage, SourceMap, SourceMapRefusal,
-        SourceSite, Span, StartConvention, StatementForm, StatementRuleViolation, Stmt, Survivor,
-        TableView, TaskId, TextView, Timestamp, TryStmt, TypeDef, TypeMember, TypeMismatch,
-        ValidatedFunctions, Value, ValueKind, WorkCounter, WrittenSignature, arena,
-        check_declarations, check_statement, core_support, document_work, heap, parse_definition,
-        parse_definition_with_limits, parse_document, parse_document_with_limits, plan,
-        print_definition, print_document, require_entry_signature, required_declarations, scalar,
-        validate_definition, validate_definition_with_limits, validate_document,
-        validate_document_with_limits,
+        Ordinals, ParseError, ParseErrorReason, Place, PreparedAnswer, PreparedNative,
+        ProjectionRole, Protocol, RecordEntry, RegisteredFunction, RegistryError,
+        ReleasedFunctions, Reservation, RestoreSelection, Retry, Rhs, Selection, Semantics,
+        SequenceView, SignatureOrigin, SignaturePosition, SignatureRequired, SourceLanguage,
+        SourceMap, SourceMapRefusal, SourceSite, Span, StartConvention, StatementForm,
+        StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TextView, Timestamp, TryStmt,
+        TypeDef, TypeMember, TypeMismatch, ValidatedFunctions, Value, ValueKind, WorkCounter,
+        WrittenSignature, arena, check_declarations, check_statement, core_support, document_work,
+        heap, parse_definition, parse_definition_with_limits, parse_document,
+        parse_document_with_limits, plan, print_definition, print_document,
+        require_entry_signature, required_declarations, scalar, validate_definition,
+        validate_definition_with_limits, validate_document, validate_document_with_limits,
     };
     pub use {
         lash_kernel_value::names::DocumentId, lash_kernel_value::names::FunctionId,
@@ -177,7 +177,6 @@ pub mod view {
     pub use lash_kernel_view::ControlArm;
     pub use lash_kernel_view::ControlHeader;
     pub use lash_kernel_view::Dataflow;
-    pub use lash_kernel_view::DurationConversion;
     pub use lash_kernel_view::EntryParamView;
     pub use lash_kernel_view::EntryView;
     pub use lash_kernel_view::ExecutionSiteView;

@@ -104,7 +104,9 @@ impl WorkflowView {
                     .iter()
                     .any(|site| site.site == position)
                 {
-                    Ok(position)
+                    Ok(self
+                        .node_at(position.site())
+                        .map_or(position, |node| node.site.position()))
                 } else if matches!(position.site().unit, Unit::Library(_)) {
                     if !self
                         .execution_sites

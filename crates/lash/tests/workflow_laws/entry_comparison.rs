@@ -27,7 +27,7 @@ enum Dialect {
 
 /// The view of `entry` in `source`, lowered as a module against one
 /// `inbox.send_item` tool.
-fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
+fn view(dialect: Dialect, source: &str, entry: &str) -> (WorkflowView, String) {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let effects = BTreeMap::from([(
         k::EffectName::new("inbox.send_item").expect("a tool's name"),
@@ -55,7 +55,11 @@ fn view(dialect: Dialect, source: &str, entry: &str) -> WorkflowView {
     };
     let unit = super::export_unit(&document, entry);
     let (holder, context) = super::holder(document);
-    derive_callable(&holder, &unit, &context).expect("view")
+    let source = k::print_document(holder.document());
+    (
+        derive_callable(&holder, &unit, &context).expect("view"),
+        source,
+    )
 }
 
 fn binding(view: &WorkflowView, name: &str) -> usize {
@@ -63,7 +67,7 @@ fn binding(view: &WorkflowView, name: &str) -> usize {
         .bindings
         .iter()
         .find(|binding| binding.name.as_str() == name)
-        .unwrap_or_else(|| panic!("a binding `{name}`:\n{}", view.canonical_source))
+        .unwrap_or_else(|| panic!("a binding `{name}`: {:#?}", view.dataflow.bindings))
         .id
 }
 
@@ -100,8 +104,7 @@ fn text(value: &str) -> ValueRef {
 /// nothing.
 #[test]
 fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns() {
-    let view = view(Dialect::TypeScript, TRIAGE, "triage");
-    let source = &view.canonical_source;
+    let (view, source) = view(Dialect::TypeScript, TRIAGE, "triage");
     let entry = &view.entry;
     assert_eq!(
         entry.name,
@@ -182,7 +185,7 @@ fn the_triage_entry_states_its_declared_parameters_and_the_union_of_its_returns(
 /// facet beside what its returns build.
 #[test]
 fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
-    let view = view(
+    let (view, source) = view(
         Dialect::Python,
         "async def check(flag: bool) -> str | None:\n    if flag:\n        return \"yes\"\n",
         "check",
@@ -191,7 +194,7 @@ fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
         view.entry.result_facet,
         lash::schema::Type::Union(vec![lash::schema::Type::Text, lash::schema::Type::Null]),
         "{}",
-        view.canonical_source
+        source
     );
 }
 
@@ -201,7 +204,7 @@ fn an_entry_that_may_fall_through_has_null_in_its_result_facet() {
 #[test]
 fn a_typescript_and_a_python_equality_read_as_eq_of_the_parameter_and_the_literal() {
     let python = "async def triage(title: str, priority: str) -> Any:\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"Urgent request\"})\n        return {\"routed\": \"urgent\"}\n    else:\n        await inbox.send_item({\"title\": \"Request filed\"})\n        return {\"routed\": \"later\"}\n";
-    for view in [
+    for (view, source) in [
         view(Dialect::TypeScript, TRIAGE, "triage"),
         view(Dialect::Python, python, "triage"),
     ] {
@@ -212,7 +215,7 @@ fn a_typescript_and_a_python_equality_read_as_eq_of_the_parameter_and_the_litera
                 right: text("high"),
             })],
             "{}",
-            view.canonical_source
+            source
         );
     }
 }
@@ -223,7 +226,7 @@ fn a_typescript_and_a_python_equality_read_as_eq_of_the_parameter_and_the_litera
 /// nothing.
 #[test]
 fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned_one() {
-    let view = view(
+    let (view, source) = view(
         Dialect::TypeScript,
         r#"export async function route(priority: string): any {
   const reply = await inbox.sendItem({ title: priority });
@@ -239,7 +242,6 @@ fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned
 }"#,
         "route",
     );
-    let source = &view.canonical_source;
     let reply = view
         .dataflow
         .bindings
@@ -279,15 +281,10 @@ fn a_condition_reads_through_once_bound_variables_and_never_through_a_reassigned
 /// function no library declares a comparison, reads as nothing.
 #[test]
 fn a_condition_on_a_reassigned_parameter_or_a_non_comparison_call_has_no_comparison() {
-    let view = view(
+    let (view, source) = view(
         Dialect::Python,
         "async def route(priority: str, tags: list) -> None:\n    if len(tags):\n        await inbox.send_item({\"title\": \"1\"})\n    priority = \"low\"\n    if priority == \"high\":\n        await inbox.send_item({\"title\": \"2\"})\n",
         "route",
     );
-    assert_eq!(
-        comparisons(&view),
-        [None, None],
-        "{}",
-        view.canonical_source
-    );
+    assert_eq!(comparisons(&view), [None, None], "{}", source);
 }

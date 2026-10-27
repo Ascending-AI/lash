@@ -195,6 +195,7 @@ impl Namespace<'_> {
                             return Err(LinkRefusal::SignatureMismatch {
                                 slot: *slot,
                                 name: import.name.clone(),
+                                mismatch: None,
                             });
                         }
                         chosen = Some(Fill::Deferred {
@@ -369,24 +370,22 @@ pub(crate) fn compatible(
         slot,
         name: import.name.clone(),
     };
-    let signature = || LinkRefusal::SignatureMismatch {
-        slot,
-        name: import.name.clone(),
-    };
+    let signature =
+        |mismatch: Option<lash_kernel_value::SignatureMismatch>| LinkRefusal::SignatureMismatch {
+            slot,
+            name: import.name.clone(),
+            mismatch: mismatch.map(Box::new),
+        };
     match (&import.kind, fill) {
         (
             ImportKind::Operation {
                 signature: expected,
             },
             Fill::Operation(requirement),
-        ) => {
-            if lash_kernel_value::type_relations::serves(&requirement.signature, expected).is_none()
-            {
-                Ok(())
-            } else {
-                Err(signature())
-            }
-        }
+        ) => match lash_kernel_value::type_relations::serves(&requirement.signature, expected) {
+            None => Ok(()),
+            Some(mismatch) => Err(signature(Some(mismatch))),
+        },
         (
             ImportKind::Operation {
                 signature: expected,
@@ -398,7 +397,7 @@ pub(crate) fn compatible(
                 || !expected.params.iter().all(|p| p.ty == Type::Json)
                 || expected.result != Type::Json
             {
-                Err(signature())
+                Err(signature(None))
             } else {
                 Ok(())
             }
@@ -417,10 +416,10 @@ pub(crate) fn compatible(
                         name: import.name.clone(),
                     });
                 }
-                if lash_kernel_value::type_relations::serves(&function.signature, expected)
-                    .is_some()
+                if let Some(mismatch) =
+                    lash_kernel_value::type_relations::serves(&function.signature, expected)
                 {
-                    return Err(signature());
+                    return Err(signature(Some(mismatch)));
                 }
                 Ok(())
             }

@@ -104,6 +104,7 @@ pub use document::{
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,
     FunctionHeader, Guard, Implementation, ImplementationKind, Measure, Metering, Operand,
+    ProjectionRole,
 };
 pub use function_value::{
     CallablePresentation, FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionLocation,

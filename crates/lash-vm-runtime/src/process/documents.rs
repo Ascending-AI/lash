@@ -222,9 +222,15 @@ pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
         LinkRefusal::SignatureRequired(source) => AdmissionRefusal::SignatureRequired { source },
         LinkRefusal::MissingImport { slot, name } => AdmissionRefusal::MissingImport { slot, name },
         LinkRefusal::KindMismatch { slot, name } => AdmissionRefusal::KindMismatch { slot, name },
-        LinkRefusal::SignatureMismatch { slot, name } => {
-            AdmissionRefusal::SignatureMismatch { slot, name }
-        }
+        LinkRefusal::SignatureMismatch {
+            slot,
+            name,
+            mismatch,
+        } => AdmissionRefusal::SignatureMismatch {
+            slot,
+            name,
+            mismatch,
+        },
         LinkRefusal::ConventionMismatch { slot, name } => {
             AdmissionRefusal::ConventionMismatch { slot, name }
         }

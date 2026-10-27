@@ -148,6 +148,7 @@ pub enum AdmissionRefusal {
     SignatureMismatch {
         slot: ImportSlot,
         name: QualifiedName,
+        mismatch: Option<Box<SignatureMismatch>>,
     },
     ConventionMismatch {
         slot: ImportSlot,
@@ -226,6 +227,9 @@ pub enum EnginePortError {
 
 impl std::fmt::Display for EnginePortError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::Refused(AdmissionRefusal::SignatureMismatch { name, .. }) = self {
+            return write!(f, "import `{name}` has no serving signature");
+        }
         write!(f, "{self:?}")
     }
 }

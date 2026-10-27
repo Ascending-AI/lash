@@ -151,6 +151,7 @@ body {
 # run and asks the host for nothing.
 function py.sleep(seconds: Any) -> Null
 kernel 1
+projection timer_seconds
 charge 512
 body {
   let ok = invoke py.is_number(seconds)

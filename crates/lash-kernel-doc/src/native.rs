@@ -81,6 +81,18 @@ pub trait FunctionCatalog: Send + Sync {
         None
     }
 
+    /// Resolve a unique build-owned helper declaration with this projection role.
+    fn projection_helper(&self, role: crate::ProjectionRole) -> Option<FunctionId> {
+        let helpers = self.helper_library()?;
+        let mut matching = helpers.members().filter(|id| {
+            helpers
+                .header(id)
+                .is_some_and(|header| header.projection == role)
+        });
+        let function = *matching.next()?;
+        matching.next().is_none().then_some(function)
+    }
+
     /// The immutable build-owned helper universe, when this catalog is its owner.
     fn helper_library(&self) -> Option<&crate::BuildHelpers> {
         None
@@ -119,6 +131,14 @@ impl FunctionCatalog for BTreeMap<FunctionId, FunctionDefinition> {
             .filter(|(_, definition)| definition.name.as_str() == name);
         let (id, _) = found.next()?;
         found.next().is_none().then_some(*id)
+    }
+
+    fn projection_helper(&self, role: crate::ProjectionRole) -> Option<FunctionId> {
+        let mut found = self
+            .iter()
+            .filter(|(_, definition)| definition.projection == role);
+        let (function, _) = found.next()?;
+        found.next().is_none().then_some(*function)
     }
 
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
@@ -1193,6 +1213,14 @@ impl FunctionCatalog for FunctionRegistry {
         let mut found = self.named(name);
         let id = found.next()?;
         found.next().is_none().then_some(id)
+    }
+
+    fn projection_helper(&self, role: crate::ProjectionRole) -> Option<FunctionId> {
+        let mut found = self
+            .iter()
+            .filter(|(_, registered)| registered.header().projection == role);
+        let function = *found.next()?.0;
+        found.next().is_none().then_some(function)
     }
 
     fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {

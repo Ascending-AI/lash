@@ -1085,16 +1085,41 @@ impl TokenCodec for Implementation {
         )
     }
 }
+impl TokenCodec for crate::ProjectionRole {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.unsigned(match self {
+            Self::Authored => 0,
+            Self::ArgumentCopy => 1,
+            Self::ResultDecode => 2,
+            Self::DurationMilliseconds => 3,
+            Self::TimerSeconds => 4,
+            Self::ImplicitReturn => 5,
+        });
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match input.unsigned_u32()? {
+            0 => Self::Authored,
+            1 => Self::ArgumentCopy,
+            2 => Self::ResultDecode,
+            3 => Self::DurationMilliseconds,
+            4 => Self::TimerSeconds,
+            5 => Self::ImplicitReturn,
+            other => return Err(unsupported(other)),
+        })
+    }
+}
+
 /// Read only the header and implementation metering; skip the executable body.
 pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, TokenError> {
     let mut input = TokenReader::new(bytes)
         .with_data_limits(lash_kernel_value::data_limits::KernelDataLimits::standard());
-    input.expect_struct(7)?;
+    input.expect_struct(8)?;
     let kernel = input.unsigned_u32()?;
     let name = FunctionName::decode(&mut input)?;
     let signature = Signature::decode(&mut input)?;
     let errors = BTreeSet::decode(&mut input)?;
     let guard = Option::decode(&mut input)?;
+    let projection = crate::ProjectionRole::decode(&mut input)?;
     let kind = variant(&mut input, |v| match v {
         0 => Some(1),
         1 | 2 => Some(2),
@@ -1106,6 +1131,7 @@ pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, Token
         crate::Metering::Formula(Formula::decode(&mut input)?)
     };
     Ok(crate::FunctionHeader {
+        projection,
         kernel,
         name,
         signature,
@@ -1123,24 +1149,26 @@ pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, Token
 /// Node kind 14's typed body.
 impl TokenCodec for FunctionDefinition {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(7);
+        out.seq(8);
         out.unsigned(u64::from(self.kernel));
         self.name.encode(out);
         self.signature.encode(out);
         self.errors.encode(out);
         self.guard.encode(out);
+        self.projection.encode(out);
         self.implementation.encode(out);
         out.unsigned(u64::from(self.native_version));
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(7)?;
+        input.expect_struct(8)?;
         Ok(Self {
             kernel: input.unsigned_u32()?,
             name: FunctionName::decode(input)?,
             signature: Signature::decode(input)?,
             errors: BTreeSet::decode(input)?,
             guard: Option::decode(input)?,
+            projection: crate::ProjectionRole::decode(input)?,
             implementation: Implementation::decode(input)?,
             native_version: input.unsigned_u32()?,
         })

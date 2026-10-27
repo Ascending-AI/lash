@@ -32,7 +32,6 @@ import {
 } from "./captions.mjs";
 import {
   highlightLine,
-  kernelLinking,
   readableLinking,
   sourceLinking,
 } from "./codepane.mjs";
@@ -59,7 +58,7 @@ let workflow,
   examples = [],
   // The dialect used to open examples that declare a source in that language.
   dialect = "typescript",
-  codeView = "kernel",
+  codeView = "printed",
   codeLinking,
   calls = new Map(),
   runInputs = {},
@@ -767,14 +766,14 @@ function model(s) {
 // The printed line a node's readable range starts on.
 function printedLine(carrier) {
   const first = carrier?.readable?.[0]?.first;
-  return first && workflow.source?.split("\n")[first - 1];
+  const lens = viewOf(workflow).readable;
+  return first && lens.kind === "available" && lens.source.split("\n")[first - 1];
 }
 function describe(s) {
   if (s.node_kind === "code") {
     const carrier = viewOf(workflow).nodes.find((node) => node.kind === "code" && key(node.site) === key(s.site));
-    const range = carrier.canonical;
     return { s, info: { name: "Code", app: "Code", icon: "status" },
-      title: "Code", subtitle: `Kernel lines ${range.first}–${range.last} · ${carrier.members.length} statements`, generic: true };
+      title: "Code", subtitle: `${carrier.members.length} statements`, generic: true };
   }
   const effect = effectOf(workflow, s);
   if (effect) {
@@ -1851,9 +1850,15 @@ function openNode(node) {
     });
   }
   if (node.kind === "code") {
-    const range = node.carrier.canonical;
-    const source = viewOf(workflow).canonical_source.split("\n").slice(range.first - 1, range.last).join("\n");
-    container.append(el("p", "help", "Edit this code in source. This group is entered once per first-statement start; individual lines may return or fail earlier."), el("pre", "code-fragment", source));
+    const lens = viewOf(workflow).readable;
+    container.append(el("p", "help", "Edit this code in source. This group is entered once per first-statement start; individual lines may return or fail earlier."));
+    if (lens.kind === "available") {
+      const lines = lens.source.split("\n");
+      const source = node.carrier.readable.map((range) => lines.slice(range.first - 1, range.last).join("\n")).join("\n");
+      container.append(el("pre", "code-fragment", source));
+    } else {
+      container.append(el("p", "help", "Readable source is unavailable for this revision."));
+    }
     controls();
     return;
   }
@@ -2040,7 +2045,10 @@ function zoomToSelection() {
 function codeText() {
   if (!workflow) return undefined;
   if (codeView === "source") return workflow.authored?.text;
-  if (codeView === "printed") return workflow.source;
+  if (codeView === "printed") {
+    const lens = viewOf(workflow).readable;
+    return lens.kind === "available" ? lens.source : undefined;
+  }
   return workflow.text;
 }
 function codeNote() {
@@ -2057,7 +2065,7 @@ function codeNote() {
     return workflow.source
       ? `Lash's exact ${dialectName(workflow.sourceDialect)} printer${codeLinking ? " · linked through its source map" : ""}`
       : `No printed source: ${workflow.sourceUnavailable}`;
-  return `Kernel document text${codeLinking ? " · linked to coarse nodes" : " · not linked: no matching printer ranges"}`;
+  return "Kernel document debug print";
 }
 function renderCode() {
   if (!workflow) return;
@@ -2067,12 +2075,9 @@ function renderCode() {
       button.setAttribute("aria-pressed", String(button.dataset.code === codeView)),
     );
   const text = codeText();
-  codeLinking =
-    codeView === "printed" && workflow.source
-      ? readableLinking(viewOf(workflow))
-      : codeView === "kernel"
-        ? kernelLinking(workflow.text, viewOf(workflow))
-        : sourceLinking(workflow);
+  codeLinking = codeView === "printed"
+    ? readableLinking(viewOf(workflow), text)
+    : codeView === "source" ? sourceLinking(workflow) : undefined;
   $("code-note").textContent = codeNote();
   $("code-note").title = codeNote();
   const language =

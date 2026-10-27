@@ -696,6 +696,11 @@ impl HostArtifacts {
         origin: &lash_vocabulary::package::CallableOrigin,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<ProcessDefinition> {
+        let language = function
+            .written_signature
+            .as_ref()
+            .map(|written| written.language)
+            .or_else(|| authored_language(&function.convention));
         let (request, starts) = diagnostics::phase(
             "admit",
             tracing::debug_span!("lash.artifacts.admit"),
@@ -725,7 +730,7 @@ impl HostArtifacts {
                 starts
                     .inspect(&request)
                     .await
-                    .map_err(lash_execution_contracts::PluginError::from)?;
+                    .map_err(|error| workflow_publication_error(pin, error, language))?;
                 Ok((request, starts))
             },
         )
@@ -759,16 +764,16 @@ impl HostArtifacts {
                     &lash_execution_contracts::process::linking::ContentRef::Link(*link),
                 )
                 .await
-                .map_err(|error| publication_error(pin, error))?;
+                .map_err(|error| workflow_publication_error(pin, error, language))?;
         }
         let realized = diagnostics::phase(
             "fulfil",
             tracing::debug_span!("lash.artifacts.fulfil"),
             async {
-                Ok(starts
+                starts
                     .realize(&claim, &request)
                     .await
-                    .map_err(|error| publication_error(pin, error))?)
+                    .map_err(|error| workflow_publication_error(pin, error, language))
             },
         )
         .await?;
@@ -858,7 +863,15 @@ impl HostArtifacts {
                     .await
                 {
                     Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
-                        document: crate::workflow::document::DocumentBytes::from(document),
+                        document: crate::workflow::document::DocumentBytes::from(document)
+                            .with_source_language(match format {
+                                crate::dialect::SourceFormat::TypeScriptV1 => {
+                                    lash_kernel_doc::SourceLanguage::TypeScript
+                                }
+                                crate::dialect::SourceFormat::PythonV1 => {
+                                    lash_kernel_doc::SourceLanguage::Python
+                                }
+                            }),
                         captions,
                     }),
                     Err(error) => crate::workflow::import::source_refusal(error),
@@ -953,6 +966,20 @@ impl HostArtifacts {
             )
             .await?;
         }
+        let language = source
+            .map(|(map, _)| map.language)
+            .or(document.source_language())
+            .or_else(|| match selector {
+                lash_kernel_value::StartSelector::Export(name) => {
+                    match typed.document().exports.get(name) {
+                        Some(lash_kernel_doc::Export::Function(function)) => {
+                            authored_language(&function.convention)
+                        }
+                        _ => None,
+                    }
+                }
+                lash_kernel_value::StartSelector::Main => None,
+            });
         let request = lash_vm_runtime::WorkflowPublishRequest {
             document: document.clone(),
             selector: selector.clone(),
@@ -963,7 +990,7 @@ impl HostArtifacts {
             .documents()?
             .publish(&claim, &request)
             .await
-            .map_err(|error| publication_error(pin, error))?;
+            .map_err(|error| workflow_publication_error(pin, error, language))?;
         if let Some((map, text)) = source {
             self.documents()?
                 .publish_source_map(&claim, &typed, map, text)
@@ -1218,16 +1245,7 @@ impl HostArtifacts {
                 lash_execution_contracts::PluginError::Invoke(error.to_string())
             })?;
         }
-        Ok(context
-            .with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned())
-            .with_duration_helpers(release.functions.names().filter_map(|(name, id)| {
-                use crate::workflow::view::DurationConversion;
-                match name {
-                    "ts.sleep_duration" => Some((id, DurationConversion::Milliseconds)),
-                    "py.sleep" => Some((id, DurationConversion::Seconds)),
-                    _ => None,
-                }
-            })))
+        Ok(context.with_timer_operations(lash_vm_runtime::TIMER_OPERATIONS.iter().cloned()))
     }
 
     /// Read the workflow document `reference` names, with the entry it
@@ -1278,6 +1296,72 @@ impl HostArtifacts {
             .await?;
         Ok(())
     }
+}
+
+#[cfg(feature = "codemode")]
+fn authored_language(
+    convention: &lash_kernel_doc::StartConvention,
+) -> Option<lash_kernel_doc::SourceLanguage> {
+    use lash_kernel_doc::{SourceLanguage, StartConvention};
+    match convention {
+        StartConvention::TsDirect { .. } | StartConvention::TsArgsList { .. } => {
+            Some(SourceLanguage::TypeScript)
+        }
+        StartConvention::PyDirect { .. } | StartConvention::PyArgsList { .. } => {
+            Some(SourceLanguage::Python)
+        }
+        StartConvention::Direct => None,
+    }
+}
+
+#[cfg(feature = "codemode")]
+fn workflow_publication_error(
+    pin: &HostArtifactPin,
+    error: lash_execution_contracts::process::linking::EnginePortError,
+    language: Option<lash_kernel_doc::SourceLanguage>,
+) -> crate::EmbedError {
+    use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
+    use lash_kernel_dialect::{SpellKind, Spelling};
+    if let (
+        Some(language),
+        EnginePortError::Refused(AdmissionRefusal::SignatureMismatch {
+            name,
+            mismatch: Some(mismatch),
+            ..
+        }),
+    ) = (language, &error)
+    {
+        let spelling = match language {
+            lash_kernel_doc::SourceLanguage::TypeScript => Spelling::TypeScript,
+            lash_kernel_doc::SourceLanguage::Python => Spelling::Python,
+        };
+        let mut parts: Vec<_> = name
+            .package
+            .iter()
+            .map(|segment| spelling.spell(SpellKind::PathSegment, segment))
+            .collect();
+        parts.push(spelling.spell(
+            if name.type_member.is_some() {
+                SpellKind::TypeName
+            } else {
+                SpellKind::Member
+            },
+            &name.member,
+        ));
+        if let Some(member) = &name.type_member {
+            parts.push(spelling.spell(SpellKind::Member, member));
+        }
+        let message = format!(
+            "import `{}` has no serving signature: {}",
+            parts.join("."),
+            lash_tool_presenter_api::entry::render_signature_mismatch(mismatch, spelling)
+        );
+        return crate::EmbedError::WorkflowPublication {
+            message,
+            source: Box::new(error),
+        };
+    }
+    publication_error(pin, error).into()
 }
 
 /// Classify a publication failure while its host ownership is still known.

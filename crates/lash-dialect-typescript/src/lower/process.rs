@@ -167,6 +167,7 @@ impl Lowerer<'_> {
         self.declared_captions
             .extend(function.captions.entries(&entry, &names));
         let (params, body, packed) = self.lift(function)?;
+        let implicit_return = body.implicit_return;
         let (body, notes) = body.into_parts();
         let mut definition = lash_kernel_dialect::authoring::local_function(
             params,
@@ -177,6 +178,9 @@ impl Lowerer<'_> {
         );
         if let Ok(authored) = lash_kernel_value::FunctionName::new(name) {
             definition.name = authored;
+        }
+        if implicit_return {
+            definition.projection = lash_kernel_doc::ProjectionRole::ImplicitReturn;
         }
         let identity = definition.identity();
         let convention = self.entry_convention(packed)?;

@@ -433,6 +433,7 @@ export type FunctionDefinition = {
    * than the first.
    */
   "native_version"?: number;
+  "projection"?: ProjectionRole;
   "signature": Signature;
 };
 
@@ -670,6 +671,11 @@ export type Position = {
   "before"?: (Site | null);
   "block": Site;
 };
+
+/**
+ * A build helper's role in the authored workflow projection.
+ */
+export type ProjectionRole = ("authored" | "argument_copy" | "result_decode" | "duration_milliseconds" | "timer_seconds" | "implicit_return");
 
 /**
  * A dialect's iteration protocol: the library functions a `for … via`

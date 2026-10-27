@@ -503,6 +503,7 @@ fn definition(
         errors.retain(|kind| kind == "arity");
     }
     FunctionDefinition {
+        projection: Default::default(),
         kernel: KERNEL_VERSION,
         name: FunctionName::new(name.name()).expect("fixed catalogue name is valid"),
         signature: Signature {

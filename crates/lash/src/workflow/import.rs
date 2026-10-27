@@ -68,7 +68,7 @@ pub(crate) async fn import(
     };
     Ok(WorkflowImport::Imported {
         environment: Box::new(environment),
-        document: DocumentBytes::from(document),
+        document: DocumentBytes::from(document).with_source_language(language),
         source_map,
         source: source.to_owned(),
         captions,

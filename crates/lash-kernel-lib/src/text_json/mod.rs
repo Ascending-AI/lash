@@ -205,6 +205,7 @@ fn prepared_definition(
     let arity = params.iter().filter(|param| !param.optional).count()..=params.len();
     Function {
         definition: Some(FunctionDefinition {
+            projection: Default::default(),
             kernel: KERNEL_VERSION,
             name,
             signature: Signature { params, result },

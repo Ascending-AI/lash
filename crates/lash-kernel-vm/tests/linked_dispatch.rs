@@ -95,6 +95,7 @@ fn function(
     block: Vec<Stmt>,
 ) -> FunctionDefinition {
     FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: FunctionName::new(name)
             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
@@ -902,6 +903,7 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             _ => Implementation::Both { body, charge },
         };
         let definition = FunctionDefinition {
+            projection: Default::default(),
             kernel: lash_kernel_doc::KERNEL_VERSION,
             name: FunctionName::new("test.native")
                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
@@ -1053,6 +1055,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             },
         };
         let definition = FunctionDefinition {
+            projection: Default::default(),
             kernel: lash_kernel_doc::KERNEL_VERSION,
             name: FunctionName::new("test.answer")
                 .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
@@ -1547,6 +1550,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
 #[test]
 fn unused_native_declarations_do_not_enlarge_selected_reach() {
     let unused = FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: FunctionName::new("unused.native")
             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),

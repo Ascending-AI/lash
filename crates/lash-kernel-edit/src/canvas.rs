@@ -93,7 +93,11 @@ impl Source {
             return Ok(value);
         }
         Ok(Expr::Act(Box::new(ActExpr {
-            kind: ActKind::Call(Callee::Local(helper(catalog, "ts.copy_boundary", site)?)),
+            kind: ActKind::Call(Callee::Local(
+                catalog
+                    .projection_helper(lash_kernel_doc::ProjectionRole::ArgumentCopy)
+                    .ok_or_else(|| at(site, Cause::UnsupportedCanvasEdit))?,
+            )),
             args: vec![value, Expr::Literal(Literal::Absent)],
         })))
     }
@@ -108,7 +112,11 @@ impl Source {
             return Ok(act);
         }
         Ok(ActExpr {
-            kind: ActKind::Call(Callee::Local(helper(catalog, "py.reply", site)?)),
+            kind: ActKind::Call(Callee::Local(
+                catalog
+                    .projection_helper(lash_kernel_doc::ProjectionRole::ResultDecode)
+                    .ok_or_else(|| at(site, Cause::UnsupportedCanvasEdit))?,
+            )),
             args: vec![Expr::Act(Box::new(act))],
         })
     }
@@ -161,7 +169,7 @@ fn pure_argument(
 ) -> bool {
     if let Node::Expr(Expr::Act(act)) = node
         && let ActKind::Call(Callee::Local(id)) = act.kind
-        && catalog.named_helper("ts.copy_boundary") == Some(id)
+        && catalog.projection_helper(lash_kernel_doc::ProjectionRole::ArgumentCopy) == Some(id)
         && let [value, Expr::Literal(Literal::Absent)] = act.args.as_slice()
     {
         // With no forwarding factory, copy-out can only traverse data. The

@@ -9,7 +9,7 @@
 //! hosts render the supplied nodes. Action issue order follows runtime evaluation,
 //! including a value-first assignment's RHS before its place, rather than
 //! universal child order.
-//! Canonical printer lines and optional readable-lens ranges belong to this
+//! Optional readable source and its ranges belong to this
 //! document revision. Every kernel form is matched here, so a new form fails to
 //! compile here instead of requiring a host to learn it.
 //!
@@ -43,10 +43,11 @@ mod coarse;
 mod comparison;
 mod context;
 pub use comparison::{ComparisonView, ValueRef, ValueSource};
-pub use context::{DurationConversion, ViewContext};
+pub use context::ViewContext;
 /// Display facts and refusals accepted by a view's retained label sidecars.
 pub use lash_kernel_labels::{Comparison, LabelError, MemberDisplay};
 mod entry;
+mod folding;
 mod produced;
 pub use coarse::{
     CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,
@@ -115,7 +116,6 @@ pub struct WorkflowView {
     pub nodes: Vec<WorkflowNode>,
     pub callables: Vec<CallableView>,
     pub flow: Vec<FlowEdge>,
-    pub canonical_source: String,
     pub readable: ReadableLens,
     /// The entry's statements in document order, nested blocks after the
     /// statement that holds them.
@@ -147,6 +147,8 @@ pub struct StatementView {
     /// arguments before it, left to right (`K-EVAL-001`). A run reports
     /// each at its site. A closure's actions are its body's statements'.
     pub actions: Vec<Site>,
+    /// Lines in the available readable source, empty without that lens.
+    pub readable: Vec<LineRange>,
 }
 
 /// One block of the entry and what opens it.
@@ -576,7 +578,6 @@ pub fn derive_callable(
             nodes: Vec::new(),
             callables: Vec::new(),
             flow: Vec::new(),
-            canonical_source: String::new(),
             readable: ReadableLens::Unrequested,
             statements: Vec::new(),
             scopes: Vec::new(),
@@ -643,7 +644,9 @@ pub fn derive_callable(
         .collect();
     view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view, callable);
+    let folded = folding::prepare(document, &mut view, context);
     coarse::project(document, graph, functions, &mut view, context);
+    folded.attach(&mut view);
     Ok(view)
 }
 
@@ -885,6 +888,7 @@ impl<'a> Walk<'a> {
             block: at.block.clone(),
             depth: at.depth,
             actions: issued(graph, node),
+            readable: Vec::new(),
         });
         match statement {
             StmtNode::If {

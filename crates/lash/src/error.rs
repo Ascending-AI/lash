@@ -5,6 +5,16 @@ use lash_kernel_value::identity::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// A publication signature refusal in the authored language. The engine's
+    /// typed cause retains its import and mismatch coordinates.
+    #[cfg(feature = "codemode")]
+    #[error("{message}")]
+    WorkflowPublication {
+        message: String,
+        #[source]
+        source: Box<lash_execution_contracts::process::linking::EnginePortError>,
+    },
+
     #[cfg(feature = "codemode")]
     #[error(transparent)]
     WorkflowMaterialization(#[from] lash_kernel_package::MaterializeRefusal),
@@ -544,6 +554,7 @@ impl EmbedError {
             }
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(_)
+            | Self::WorkflowPublication { .. }
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
             | Self::ConflictingOperationRoutes { .. } => false,
@@ -644,6 +655,7 @@ impl EmbedError {
             }
             #[cfg(feature = "codemode")]
             Self::WorkflowSource(_)
+            | Self::WorkflowPublication { .. }
             | Self::WorkflowBytes(_)
             | Self::WorkflowSourceMap(_)
             | Self::ConflictingOperationRoutes { .. } => true,

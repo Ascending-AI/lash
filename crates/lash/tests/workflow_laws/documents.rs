@@ -511,7 +511,6 @@ async fn a_saved_cell_callable_has_a_checked_view_of_its_frozen_environment() {
         .await
         .unwrap();
     let view = lash::workflow::view::derive(&inspection.document, &context).unwrap();
-    assert!(!view.canonical_source.is_empty());
     assert_eq!(view.entry.written_signature, function.written_signature);
     assert_eq!(
         view.entry.params.len(),

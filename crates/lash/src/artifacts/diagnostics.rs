@@ -51,6 +51,7 @@ fn report(phase: &str, error: &EmbedError) {
     }
     match error {
         EmbedError::WorkflowSource(error) => source_refused(phase, error),
+        EmbedError::WorkflowPublication { source, .. } => engine_refused(phase, source),
         EmbedError::WorkflowBytes(_) => refused(phase, "document_bytes"),
         EmbedError::WorkflowSourceMap(_) => refused(phase, "source_map"),
         EmbedError::ConflictingOperationRoutes { .. } => {

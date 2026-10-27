@@ -133,8 +133,9 @@ The read-only pane offers three lenses:
   The host keeps the publication's source-map id beside the definition id.
   Browser linking converts UTF-8 offsets to UTF-16 offsets before selecting
   lines. Authoring edits keep the historical text and drop its map.
-- **Printed** shows the selected dialect's exact printer output and fresh map.
-- **Kernel** shows canonical text with the view's canonical line ranges.
+- **Printed** shows the readable lens's source and ranges from its fresh map.
+- **Kernel** is an explicit developer debug print, outside the host view.
+  It has no canvas selection ranges.
 
 The canvas derives from the stored document and its retained declarations;
 reading a saved view does not link against the current registry. Library action

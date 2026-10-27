@@ -207,6 +207,7 @@ pub fn parse_definition_over(
     let name = parser.qualified_name()?;
     let signature = parser.signature()?;
     let mut kernel = None;
+    let mut projection = None;
     let mut errors = BTreeSet::new();
     let mut charge = None;
     let mut statements = false;
@@ -222,6 +223,12 @@ pub fn parse_definition_over(
             "kernel" => {
                 let version = parser.version()?;
                 parser.once(kernel.replace(version), "`kernel`")?;
+            }
+            "projection" => {
+                let role = parser.keyword("a projection role")?;
+                let role = serde_json::from_value(serde_json::Value::String(role))
+                    .map_err(|_| parser.unexpected_previous("a projection role"))?;
+                parser.once(projection.replace(role), "`projection`")?;
             }
             "errors" => loop {
                 errors.insert(parser.text()?);
@@ -298,6 +305,7 @@ pub fn parse_definition_over(
         (false, None) => return Err(parser.missing("native or body")),
     };
     let definition = FunctionDefinition {
+        projection: projection.unwrap_or_default(),
         kernel: kernel.ok_or_else(|| parser.missing("the `kernel` line"))?,
         name,
         signature,
@@ -1307,6 +1315,7 @@ impl Parser {
                             block,
                         };
                         let definition = FunctionDefinition {
+                            projection: Default::default(),
                             kernel: self.kernel,
                             name: FunctionName::new("kernel.anonymous")
                                 .unwrap_or_else(|_| unreachable!("valid name")),

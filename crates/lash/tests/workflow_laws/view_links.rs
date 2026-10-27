@@ -21,9 +21,9 @@ fn echo() -> BTreeMap<k::EffectName, lash::schema::Signature> {
     )])
 }
 
-/// The TypeScript and Python views, each with its canonical source for
+/// The TypeScript and Python views, each with its explicit kernel print for
 /// failure messages.
-fn views() -> [(&'static str, WorkflowView); 2] {
+fn views() -> [(&'static str, WorkflowView, String); 2] {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let effects = echo();
     let environment_namespaces = super::namespaces(effects);
@@ -57,10 +57,12 @@ fn views() -> [(&'static str, WorkflowView); 2] {
         (
             "TypeScript",
             derive_callable(&typescript, &unit, &ts_context).expect("view"),
+            k::print_document(typescript.document()),
         ),
         (
             "Python",
             derive_callable(&python, &k::Unit::Main, &py_context).expect("view"),
+            k::print_document(python.document()),
         ),
     ]
 }
@@ -97,8 +99,7 @@ fn within<'a>(view: &'a WorkflowView, callable: &Site) -> Vec<&'a ActionView> {
 /// `work`, and that call opens onto `work`'s body.
 #[test]
 fn an_action_that_runs_a_derivable_closure_names_its_callable() {
-    for (dialect, view) in views() {
-        let source = &view.canonical_source;
+    for (dialect, view, source) in views() {
         let wrapper = match dialect {
             "TypeScript" => "ts.promise.start",
             _ => "py.task.run",
@@ -160,8 +161,7 @@ fn an_action_that_runs_a_derivable_closure_names_its_callable() {
 /// among them, and every `perform` and `sleep` is.
 #[test]
 fn an_actions_role_picks_the_steps_a_person_recognises() {
-    for (dialect, view) in views() {
-        let source = &view.canonical_source;
+    for (dialect, view, source) in views() {
         let mut recognised = BTreeMap::<&str, usize>::new();
         for action in &view.dataflow.actions {
             let expected = match (action.kind, &action.callee) {

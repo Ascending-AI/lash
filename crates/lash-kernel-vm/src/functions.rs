@@ -95,6 +95,7 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
         ),
     };
     FunctionDefinition {
+        projection: Default::default(),
         kernel,
         name: FunctionName::new(name).expect("a constant qualified name"),
         signature: Signature { params, result },

@@ -86,6 +86,7 @@ pub fn local_function(
         .collect();
     let used = used_imports(&block);
     FunctionDefinition {
+        projection: Default::default(),
         kernel: lash_kernel_doc::KERNEL_VERSION,
         name: FunctionName::new("local.function")
             .unwrap_or_else(|error| panic!("qualified: {error}")),

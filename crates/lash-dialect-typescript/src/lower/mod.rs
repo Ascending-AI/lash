@@ -148,6 +148,7 @@ pub(crate) use lash_kernel_dialect::Note;
 /// its source layers, so a move, removal or fold carries both.
 #[derive(Debug, Default)]
 pub(crate) struct Buf {
+    implicit_return: bool,
     emitted: Vec<Emitted>,
 }
 
@@ -161,6 +162,7 @@ impl Buf {
     /// The block of the one statement `stmt`.
     fn one(stmt: Stmt, note: Note) -> Self {
         Self {
+            implicit_return: false,
             emitted: vec![Emitted { stmt, note }],
         }
     }
@@ -216,6 +218,9 @@ impl Buf {
     }
 
     fn extend(&mut self, buf: Buf) {
+        if !buf.is_empty() {
+            self.implicit_return = buf.implicit_return;
+        }
         self.emitted.extend(buf.emitted);
     }
 
@@ -1050,6 +1055,7 @@ impl Lowerer<'_> {
         authored_name: &str,
     ) -> Operand {
         let name = self.temp();
+        let implicit_return = body.implicit_return;
         let (block, notes) = body.into_parts();
         let mut definition = lash_kernel_dialect::authoring::local_function(
             params,
@@ -1060,6 +1066,9 @@ impl Lowerer<'_> {
         );
         if let Ok(name) = lash_kernel_value::FunctionName::new(authored_name) {
             definition.name = name;
+        }
+        if implicit_return {
+            definition.projection = lash_kernel_doc::ProjectionRole::ImplicitReturn;
         }
         let function = definition.identity();
         self.local_functions.insert(function, definition);

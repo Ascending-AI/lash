@@ -17,7 +17,6 @@ pub struct ViewContext {
     content: LinkedContent,
     /// Closure derived once from each immutable Link's document manifest.
     admitted_helpers: BTreeMap<LinkId, BTreeSet<lash_kernel_value::FunctionId>>,
-    duration_helpers: BTreeMap<lash_kernel_value::FunctionId, DurationConversion>,
     timers: std::collections::BTreeSet<(lash_kernel_value::PackageId, lash_kernel_value::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
 }
@@ -44,7 +43,6 @@ impl ViewContext {
             admitted_helpers,
             labels,
             timers: Default::default(),
-            duration_helpers: Default::default(),
         })
     }
     /// Install build-owned display facts for exact helpers in each Link's
@@ -320,7 +318,7 @@ impl ViewContext {
 /// Both conversions round down to whole milliseconds and saturate at `i64::MAX`
 /// milliseconds. They confer display facts only, never execution authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DurationConversion {
+enum DurationConversion {
     /// Finite, nonnegative milliseconds, as accepted by TypeScript sleep.
     Milliseconds,
     /// Python sleep's seconds: nonpositive numbers yield a zero duration;
@@ -329,20 +327,24 @@ pub enum DurationConversion {
 }
 
 impl ViewContext {
-    /// Supply duration semantics for pinned helper identities from the build.
-    /// A document's spelling or display label never selects a conversion.
-    pub fn with_duration_helpers(
-        mut self,
-        helpers: impl IntoIterator<Item = (lash_kernel_value::FunctionId, DurationConversion)>,
-    ) -> Self {
-        self.duration_helpers.extend(helpers);
-        self
+    pub(crate) fn projection_role(&self, callable: CallableId) -> lash_kernel_doc::ProjectionRole {
+        use lash_kernel_doc::FunctionCatalog as _;
+        if !self.admits_helper(&callable) {
+            return Default::default();
+        }
+        self.helpers
+            .header(&callable.function)
+            .map_or(Default::default(), |header| header.projection)
     }
 
     fn duration_conversion(&self, callable: CallableId) -> Option<DurationConversion> {
-        self.admits_helper(&callable)
-            .then(|| self.duration_helpers.get(&callable.function).copied())
-            .flatten()
+        match self.projection_role(callable) {
+            lash_kernel_doc::ProjectionRole::DurationMilliseconds => {
+                Some(DurationConversion::Milliseconds)
+            }
+            lash_kernel_doc::ProjectionRole::TimerSeconds => Some(DurationConversion::Seconds),
+            _ => None,
+        }
     }
 
     pub(crate) fn static_duration(

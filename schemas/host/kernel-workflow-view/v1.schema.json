@@ -2275,7 +2275,7 @@
       "type": "object"
     },
     "ReadableLens": {
-      "description": "A failed readable lens does not invalidate canonical membership or ranges.",
+      "description": "The requested readable source, or why no source is available.\nProjection remains available when printing is refused.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -2299,11 +2299,15 @@
             },
             "name": {
               "type": "string"
+            },
+            "source": {
+              "type": "string"
             }
           },
           "required": [
             "kind",
-            "name"
+            "name",
+            "source"
           ],
           "type": "object"
         },
@@ -2331,7 +2335,7 @@
       ]
     },
     "ReadableRefusal": {
-      "description": "Typed printer refusal. Projection and the canonical lens remain available.",
+      "description": "Typed printer refusal. The projection remains available without source.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -2940,6 +2944,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "readable": {
+          "description": "Lines in the available readable source, empty without that lens.",
+          "items": {
+            "$ref": "#/$defs/LineRange"
+          },
+          "type": "array"
+        },
         "site": {
           "$ref": "#/$defs/Site"
         },
@@ -2954,7 +2965,8 @@
         "statement",
         "block",
         "depth",
-        "actions"
+        "actions",
+        "readable"
       ],
       "type": "object"
     },
@@ -3753,9 +3765,6 @@
         "callable": {
           "$ref": "#/$defs/Site"
         },
-        "canonical": {
-          "$ref": "#/$defs/LineRange"
-        },
         "condition_ordinal": {
           "format": "uint32",
           "minimum": 0,
@@ -3772,6 +3781,13 @@
         },
         "falls_through": {
           "type": "boolean"
+        },
+        "folded": {
+          "description": "Exact document action and statement sites folded into this authored\nnode. Execution counts and replay paths retain these coordinates.",
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
         },
         "header": {
           "anyOf": [
@@ -3856,8 +3872,8 @@
         "bindings",
         "reads",
         "writes",
-        "canonical",
         "readable",
+        "folded",
         "lazy",
         "arms",
         "departures",
@@ -3901,9 +3917,6 @@
         "$ref": "#/$defs/CallableView"
       },
       "type": "array"
-    },
-    "canonical_source": {
-      "type": "string"
     },
     "dataflow": {
       "$ref": "#/$defs/Dataflow"
@@ -3958,7 +3971,6 @@
     "nodes",
     "callables",
     "flow",
-    "canonical_source",
     "readable",
     "statements",
     "scopes",

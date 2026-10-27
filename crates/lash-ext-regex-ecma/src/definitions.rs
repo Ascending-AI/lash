@@ -171,6 +171,7 @@ impl Operation {
             }
         };
         FunctionDefinition {
+            projection: Default::default(),
             kernel: KERNEL_VERSION,
             name: FunctionName::new(self.name()).expect("a qualified name"),
             signature: Signature { params, result },

@@ -1123,40 +1123,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "`K-ADM-002`: the environment's effect does not serve the signature\nthe document expects.",
-          "properties": {
-            "effect_signature": {
-              "additionalProperties": false,
-              "properties": {
-                "expected": {
-                  "$ref": "#/$defs/Signature"
-                },
-                "mismatch": {
-                  "$ref": "#/$defs/SignatureMismatch"
-                },
-                "provided": {
-                  "$ref": "#/$defs/Signature"
-                },
-                "slot": {
-                  "$ref": "#/$defs/ImportSlot"
-                }
-              },
-              "required": [
-                "slot",
-                "expected",
-                "provided",
-                "mismatch"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "effect_signature"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "`K-ADM-003`: the environment holds no function of this identity.",
           "properties": {
             "missing_function": {
@@ -1287,39 +1253,6 @@
         "result"
       ],
       "type": "object"
-    },
-    "SignatureMismatch": {
-      "additionalProperties": false,
-      "description": "The first incompatible part found by the signature's serving relation.\n`path` uses JSON pointer escaping in the projected type structure:\n`/input`, `/output`, and their properties, items or additional properties.\nThe types are the kernel's projections, not the original JSON schemas.",
-      "properties": {
-        "expected": {
-          "$ref": "#/$defs/Type"
-        },
-        "path": {
-          "type": "string"
-        },
-        "provided": {
-          "$ref": "#/$defs/Type"
-        },
-        "side": {
-          "$ref": "#/$defs/SignatureSide"
-        }
-      },
-      "required": [
-        "side",
-        "path",
-        "expected",
-        "provided"
-      ],
-      "type": "object"
-    },
-    "SignatureSide": {
-      "description": "The side of an effect signature that cannot serve its declaration.",
-      "enum": [
-        "input",
-        "output"
-      ],
-      "type": "string"
     },
     "Site": {
       "additionalProperties": false,
