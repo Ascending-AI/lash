@@ -5,28 +5,38 @@ use super::{Object, Receiver, Row};
 /// `new Promise(executor)` would need a task something else can end.
 pub(super) fn object() -> Object {
     let mut rows = vec![
+        Row::Class {
+            class: "Promise",
+            length: 1,
+        },
         Row::Function {
             path: "Promise.resolve",
+            length: 1,
             function: "ts.promise.resolve",
         },
         Row::Function {
             path: "Promise.reject",
+            length: 1,
             function: "ts.promise.reject",
         },
         Row::Function {
             path: "Promise.all",
+            length: 1,
             function: "ts.promise.all",
         },
         Row::Function {
             path: "Promise.allSettled",
+            length: 1,
             function: "ts.promise.all_settled",
         },
         Row::Function {
             path: "Promise.race",
+            length: 1,
             function: "ts.promise.race",
         },
         Row::Function {
             path: "Promise.any",
+            length: 1,
             function: "ts.promise.any",
         },
         Row::InstanceOf {
@@ -36,12 +46,13 @@ pub(super) fn object() -> Object {
     ];
     rows.extend(
         [
-            ("Promise.prototype.then", "ts.promise.then"),
-            ("Promise.prototype.catch", "ts.promise.catch"),
-            ("Promise.prototype.finally", "ts.promise.finally"),
+            ("Promise.prototype.then", 2, "ts.promise.then"),
+            ("Promise.prototype.catch", 1, "ts.promise.catch"),
+            ("Promise.prototype.finally", 1, "ts.promise.finally"),
         ]
-        .map(|(path, function)| Row::Method {
+        .map(|(path, length, function)| Row::Method {
             path,
+            length,
             receivers: &[Receiver::Brand("typescript.promise")],
             function,
         }),

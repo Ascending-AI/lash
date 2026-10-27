@@ -2,7 +2,7 @@
 
 pub mod methods;
 pub mod package;
-mod pure_modules;
+pub mod pure_modules;
 
 /// Installed helpers use the same argument metadata and binder as authored defs.
 pub fn helper_value(name: &str, params: &[(&str, u8, bool)], body: &str) -> String {

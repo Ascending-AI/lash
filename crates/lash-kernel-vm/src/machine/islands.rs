@@ -1391,7 +1391,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
 /// result, set for a nonzero word integer, whose size is 2.
 #[inline(always)]
 pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
-    let bit = |value: &Value| u8::from(matches!(value, Value::Int(word) if *word != 0));
+    let bit = |value: &Value| lash_kernel_doc::scalar::size_bit(*value).unwrap_or(0);
     args.iter()
         .enumerate()
         .fold(bit(result) << 3, |mask, (index, value)| {

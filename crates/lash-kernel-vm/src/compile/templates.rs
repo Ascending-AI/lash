@@ -265,14 +265,7 @@ pub(crate) fn inner(function: &super::Lib) -> Option<&Entry> {
 /// The helper's formula, rather than any callee's, indexes this mask.
 #[inline]
 pub(super) fn scalar_sizes(args: &[Value], value: Value) -> Option<u8> {
-    #[inline]
-    fn bit(value: Value) -> Option<u8> {
-        match value {
-            Value::Int(word) => Some(u8::from(word != 0)),
-            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => Some(0),
-            _ => None,
-        }
-    }
+    use lash_kernel_doc::scalar::size_bit as bit;
     let result = bit(value)? << 3;
     let args = match args {
         [] => 0,

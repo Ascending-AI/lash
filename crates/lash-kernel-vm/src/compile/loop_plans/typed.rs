@@ -230,7 +230,7 @@ impl Domain for i64 {
     }
     #[inline(always)]
     fn sized(self) -> u8 {
-        u8::from(self != 0)
+        scalar::word_size_bit(self)
     }
     fn same(self, other: Self) -> bool {
         self == other

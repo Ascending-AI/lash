@@ -396,6 +396,18 @@ pub enum FormCharge {
     LoopTest,
 }
 
+impl FormCharge {
+    /// Fixed units and whether this form also paces charge-Off execution.
+    #[inline]
+    pub fn measurement(self) -> (u64, bool) {
+        match self {
+            Self::Statement | Self::Argument | Self::LoopTest => (1, true),
+            Self::Expression => (1, false),
+            Self::Construction(members) => (u64::from(members), false),
+        }
+    }
+}
+
 /// The machine as a plan performs a body's forms through it. Each method
 /// is the form of the same name in the body, with the body's meaning:
 /// errors it raises are [`PlanExit::Raise`], bounds and faults

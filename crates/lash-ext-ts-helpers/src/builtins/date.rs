@@ -6,6 +6,7 @@ pub(super) fn object() -> Object {
         rows: vec![
             Row::Method {
                 path: "Date.prototype.toLocaleString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -14,6 +15,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getTimezoneOffset",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -22,6 +24,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toDateString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -30,6 +33,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toLocaleDateString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -38,6 +42,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toLocaleTimeString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -46,6 +51,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toTimeString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -54,6 +60,7 @@ pub(super) fn object() -> Object {
             },
             Row::Constructor {
                 class: "Date",
+                length: None,
                 function: "ts.date.construct",
             },
             Row::InstanceOf {
@@ -62,22 +69,27 @@ pub(super) fn object() -> Object {
             },
             Row::Function {
                 path: "Date",
+                length: 7,
                 function: "ts.date.call",
             },
             Row::Function {
                 path: "Date.now",
+                length: 0,
                 function: "ts.date.now",
             },
             Row::Function {
                 path: "Date.parse",
+                length: 1,
                 function: "ts.date.parse",
             },
             Row::Function {
                 path: "Date.UTC",
+                length: 7,
                 function: "ts.date.UTC",
             },
             Row::Method {
                 path: "Date.prototype.getTime",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -86,6 +98,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.valueOf",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -94,6 +107,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCFullYear",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -102,6 +116,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCMonth",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -110,6 +125,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCDate",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -118,6 +134,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCDay",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -126,6 +143,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCHours",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -134,6 +152,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCMinutes",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -142,6 +161,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCSeconds",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -150,6 +170,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getUTCMilliseconds",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -158,6 +179,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toISOString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -166,6 +188,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toUTCString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -174,6 +197,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toString",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -182,6 +206,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.toJSON",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -190,6 +215,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getFullYear",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -198,6 +224,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getMonth",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -206,6 +233,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getDate",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -214,6 +242,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getDay",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -222,6 +251,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getHours",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -230,6 +260,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getMinutes",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -238,6 +269,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getSeconds",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -246,6 +278,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.getMilliseconds",
+                length: 0,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -254,6 +287,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setTime",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -262,6 +296,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setFullYear",
+                length: 3,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -270,6 +305,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setMonth",
+                length: 2,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -278,6 +314,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setDate",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -286,6 +323,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setHours",
+                length: 4,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -294,6 +332,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setMinutes",
+                length: 3,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -302,6 +341,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setSeconds",
+                length: 2,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -310,6 +350,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setMilliseconds",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -318,6 +359,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCFullYear",
+                length: 3,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -326,6 +368,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCMonth",
+                length: 2,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -334,6 +377,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCDate",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -342,6 +386,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCHours",
+                length: 4,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -350,6 +395,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCMinutes",
+                length: 3,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -358,6 +404,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCSeconds",
+                length: 2,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),
@@ -366,6 +413,7 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Date.prototype.setUTCMilliseconds",
+                length: 1,
                 receivers: &[
                     Receiver::Timestamp,
                     Receiver::Brand("date.ecma.invalid_date"),

@@ -6,6 +6,7 @@ pub(super) fn object() -> Object {
         rows: vec![
             Row::Constructor {
                 class: "URL",
+                length: Some(1),
                 function: "ts.url.construct",
             },
             Row::InstanceOf {
@@ -14,20 +15,24 @@ pub(super) fn object() -> Object {
             },
             Row::Function {
                 path: "URL.canParse",
+                length: 1,
                 function: "ts.url.canParse",
             },
             Row::Method {
                 path: "URL.prototype.toString",
+                length: 0,
                 receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.toString",
             },
             Row::Method {
                 path: "URL.prototype.toJSON",
+                length: 0,
                 receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.toJSON",
             },
             Row::Method {
                 path: "URL.prototype.valueOf",
+                length: 0,
                 receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.valueOf",
             },

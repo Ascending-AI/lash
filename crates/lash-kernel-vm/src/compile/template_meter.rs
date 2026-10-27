@@ -25,12 +25,7 @@ impl TemplateMeter for Collector<'_> {
         self.events.truncate(mark);
     }
     fn form(&mut self, function: FunctionId, form: FormCharge) {
-        let (units, pace) = match form {
-            FormCharge::Statement | FormCharge::Argument => (1, true),
-            FormCharge::Expression => (1, false),
-            FormCharge::Construction(members) => (u64::from(members), false),
-            FormCharge::LoopTest => (1, true),
-        };
+        let (units, pace) = form.measurement();
         self.events.push((units, Some(function), pace));
     }
     fn bill(&mut self, function: FunctionId, args: &[Value], result: Value) {

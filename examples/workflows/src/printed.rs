@@ -3,7 +3,7 @@
 //! any text is written:
 //!
 //! - READABLE-FIXPOINT: print, read and print again gives the same text.
-//! - READABLE-IDENTITY: a print with no region in kernel form lowers, as a
+//! - READABLE-IDENTITY: every authored print lowers, as a
 //!   plain workflow module under the import's own environment and with no
 //!   base, to the document it was printed from: the same identity and the
 //!   same captions.
@@ -11,9 +11,6 @@ use anyhow::{Result, ensure};
 use lash_kernel_doc::{Captions, Document, SourceLanguage};
 
 use super::Printing;
-
-/// The directive that opens a region printed in kernel form.
-const KERNEL_FORM: &str = "\"use kernel\"";
 
 /// The kernel scaffolding a lifted region never spells.
 pub const SCAFFOLDING: [&str; 4] = ["await await", "helper_", "__ts_brand", "k.returnVia"];
@@ -44,18 +41,16 @@ pub(super) fn laws(
         "READABLE-FIXPOINT: print -> read -> print changed the text\n{source}\n---\n{}",
         again.source
     );
-    if !source.contains(KERNEL_FORM) {
-        let lowered = super::lower(source, lang, printing.environment, printing.mode)
-            .map_err(|diagnostic| anyhow::anyhow!("READABLE-IDENTITY: {diagnostic}\n{source}"))?;
-        ensure!(
-            lowered.document.id() == document.identity(),
-            "READABLE-IDENTITY: the lifted print lowers to another document\n{source}"
-        );
-        ensure!(
-            lowered.captions.entries() == captions.entries(),
-            "READABLE-IDENTITY: the lifted print lowers with other captions\n{source}"
-        );
-    }
+    let lowered = super::lower(source, lang, printing.environment, printing.mode)
+        .map_err(|diagnostic| anyhow::anyhow!("READABLE-IDENTITY: {diagnostic}\n{source}"))?;
+    ensure!(
+        lowered.document.id() == document.identity(),
+        "READABLE-IDENTITY: the lifted print lowers to another document\n{source}"
+    );
+    ensure!(
+        lowered.captions.entries() == captions.entries(),
+        "READABLE-IDENTITY: the lifted print lowers with other captions\n{source}"
+    );
     Ok(())
 }
 
@@ -66,35 +61,17 @@ pub struct Lifted {
     pub language: SourceLanguage,
     /// Whether this is the case's canvas edit.
     pub edited: bool,
-    /// Its regions: each declared function, and `main`.
-    pub regions: usize,
-    /// Those printed as authored source.
-    pub lifted: usize,
     pub source: String,
 }
 
 impl Lifted {
-    pub(super) fn of(
-        case: &str,
-        language: SourceLanguage,
-        edited: bool,
-        document: &Document,
-        source: &str,
-    ) -> Self {
-        let regions = document.functions.len() + 1;
+    pub(super) fn of(case: &str, language: SourceLanguage, edited: bool, source: &str) -> Self {
         Self {
             case: case.to_owned(),
             language,
             edited,
-            regions,
-            lifted: regions - source.matches(KERNEL_FORM).count(),
             source: source.to_owned(),
         }
-    }
-
-    /// Whether every region printed as authored source.
-    pub fn whole(&self) -> bool {
-        self.lifted == self.regions
     }
 }
 

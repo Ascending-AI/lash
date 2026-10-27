@@ -378,7 +378,10 @@ impl Lowerer<'_> {
             return self.invoke("py.time", &[], Ty::Float);
         }
         if self.call_path(&call.func).is_some_and(|(path, bound)| {
-            !bound && matches!(path.first().map(String::as_str), Some("math" | "json"))
+            !bound
+                && path
+                    .first()
+                    .is_some_and(|name| lash_ext_py_helpers::pure_modules::installed(name))
         }) {
             return self.call_function(call, awaited);
         }

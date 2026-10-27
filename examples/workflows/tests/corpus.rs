@@ -41,10 +41,10 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
 
 /// FIG-6953 READABLE-FIXPOINT and READABLE-IDENTITY over every TypeScript
 /// corpus document and its canvas edit: each print reads back to its
-/// document and prints again to itself, and a print with every region
-/// lifted lowers, as a plain module with no base, to that document.
+/// document and prints again to itself, and every print lowers as a plain
+/// module with no base to that document.
 #[test]
-fn every_print_reads_back_and_its_whole_prints_lower_to_their_documents() -> anyhow::Result<()> {
+fn every_print_reads_back_and_lowers_to_its_document() -> anyhow::Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let report = workflow_corpus::readable_prints(root)?;
     for language in [
@@ -55,23 +55,11 @@ fn every_print_reads_back_and_its_whole_prints_lower_to_their_documents() -> any
             .iter()
             .filter(|printed| printed.language == language)
             .collect();
-        let regions: usize = report.iter().map(|printed| printed.regions).sum();
-        let lifted: usize = report.iter().map(|printed| printed.lifted).sum();
-        let whole = report.iter().filter(|printed| printed.whole()).count();
-        eprintln!(
-            "readable {language:?} print: documents={} whole={whole} regions={regions} lifted={lifted}",
-            report.len()
+        eprintln!("readable {language:?} print: documents={}", report.len());
+        anyhow::ensure!(
+            !report.is_empty(),
+            "no {language:?} corpus document printed"
         );
-        for printed in report.iter().filter(|printed| !printed.whole()) {
-            eprintln!(
-                "  kernel form: {}{} ({} of {} regions lifted)",
-                printed.case,
-                if printed.edited { " (canvas edit)" } else { "" },
-                printed.lifted,
-                printed.regions
-            );
-        }
-        anyhow::ensure!(whole > 0, "no {language:?} corpus document lifted");
     }
     Ok(())
 }
@@ -468,21 +456,6 @@ fn a_canvas_edited_workflow_prints_without_kernel_scaffolding() -> anyhow::Resul
             .iter()
             .filter(|printed| printed.edited && printed.language == language)
         {
-            let unedited = report
-                .iter()
-                .find(|other| {
-                    other.case == printed.case && other.language == language && !other.edited
-                })
-                .ok_or_else(|| anyhow::anyhow!("{} has no unedited print", printed.case))?;
-            if !unedited.whole() {
-                continue;
-            }
-            anyhow::ensure!(
-                printed.whole(),
-                "{}: the canvas edit made a region unliftable\n{}",
-                printed.case,
-                printed.source
-            );
             for scaffolding in workflow_corpus::SCAFFOLDING {
                 anyhow::ensure!(
                     !printed.source.contains(scaffolding),

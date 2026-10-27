@@ -73,7 +73,7 @@ pub use saved::{
 /// host carries one between the dialect and the machine, never into it.
 #[doc(hidden)]
 pub use saved::{HeldAt, MemberBody, SavedFunction, Token};
-pub use source::{SourceError, define_functions, define_functions_with};
+pub use source::{SourceError, define_function_sources, define_functions, define_functions_with};
 pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
 

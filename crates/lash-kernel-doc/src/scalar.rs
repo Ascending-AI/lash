@@ -7,6 +7,52 @@
 
 use crate::{Float, Value};
 
+/// The scalar charge table bit: a nonzero word has size 2, other
+/// immediate scalar values have size 1. Heap values need measurement.
+#[inline(always)]
+pub fn size_bit(value: Value) -> Option<u8> {
+    match value {
+        Value::Int(word) => Some(word_size_bit(word)),
+        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => Some(0),
+        _ => None,
+    }
+}
+
+/// The size bit for a value already proven to be a word integer.
+#[inline(always)]
+pub fn word_size_bit(word: i64) -> u8 {
+    u8::from(word != 0)
+}
+
+/// Guest equality for values whose answer needs no arena reads.
+#[inline]
+pub fn immediate_equal(a: &Value, b: &Value) -> Option<bool> {
+    use Value as V;
+    let numeric = |value: &Value| matches!(value, V::Int(_) | V::BigInt(_) | V::Float(_));
+    Some(match (a, b) {
+        (V::Null, V::Null) | (V::Absent, V::Absent) => true,
+        (V::Bool(a), V::Bool(b)) => a == b,
+        (V::Int(a), V::Int(b)) => a == b,
+        (V::Float(a), V::Float(b)) => a.get() == b.get(),
+        (V::Int(i), V::Float(f)) | (V::Float(f), V::Int(i)) => {
+            // 2^63 is the first float past every word integer.
+            const PAST: f64 = 9_223_372_036_854_775_808.0;
+            let float = f.get();
+            float.fract() == 0.0 && (-PAST..PAST).contains(&float) && float as i64 == *i
+        }
+        (V::Text(a), V::Text(b)) => a == b,
+        (V::Text(_), V::LongText(_))
+        | (V::LongText(_), V::Text(_))
+        | (V::Int(_), V::BigInt(_))
+        | (V::BigInt(_), V::Int(_)) => false,
+        (V::Timestamp(a), V::Timestamp(b)) => a == b,
+        (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
+        (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
+        _ if a.kind() != b.kind() && !(numeric(a) && numeric(b)) => false,
+        _ => return None,
+    })
+}
+
 /// A numeric operator a prepared entry answers two immediates by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarOp {

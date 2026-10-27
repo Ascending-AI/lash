@@ -132,7 +132,10 @@ impl Lowerer<'_> {
     /// never an ambient loader or host object.
     pub(super) fn imported_value(&mut self, id: &str) -> Option<Lowering<Operand>> {
         let path = self.imported.get(id)?;
-        if !matches!(path.first().map(String::as_str), Some("math" | "json")) {
+        if !path
+            .first()
+            .is_some_and(|name| lash_ext_py_helpers::pure_modules::installed(name))
+        {
             return None;
         }
         let module = path[0].clone();

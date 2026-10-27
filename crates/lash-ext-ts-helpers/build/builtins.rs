@@ -54,10 +54,12 @@ pub(crate) fn generate() -> String {
     let (mut functions, mut values) = (BTreeMap::new(), BTreeMap::new());
     let (mut constructors, mut instance_tests) = (BTreeMap::new(), BTreeMap::new());
     let (mut globals, mut classes) = (BTreeSet::new(), BTreeSet::new());
+    let mut lengths = BTreeMap::new();
     for row in objects().into_iter().flat_map(|object| object.rows) {
         match row {
             Row::Method {
                 path,
+                length,
                 receivers,
                 function,
             } => {
@@ -65,6 +67,7 @@ pub(crate) fn generate() -> String {
                     .rsplit_once('.')
                     .filter(|(parent, _)| parent.ends_with(".prototype"))
                     .unwrap_or_else(|| panic!("method `{path}` is no `X.prototype.<name>`"));
+                assert!(lengths.insert(path, length).is_none());
                 globals.insert(root(path));
                 insert(&mut functions, path, function);
                 for receiver in receivers {
@@ -78,7 +81,12 @@ pub(crate) fn generate() -> String {
             } => {
                 member(&mut properties, name, receiver, function);
             }
-            Row::Function { path, function } => {
+            Row::Function {
+                path,
+                length,
+                function,
+            } => {
+                assert!(lengths.insert(path, length).is_none());
                 globals.insert(root(path));
                 insert(&mut functions, path, function);
             }
@@ -86,10 +94,22 @@ pub(crate) fn generate() -> String {
                 globals.insert(root(path));
                 insert(&mut values, path, function);
             }
-            Row::Constructor { class, function } => {
+            Row::Constructor {
+                class,
+                length,
+                function,
+            } => {
+                if let Some(length) = length {
+                    assert!(lengths.insert(class, length).is_none());
+                }
                 globals.insert(class);
                 classes.insert(class);
                 insert(&mut constructors, class, function);
+            }
+            Row::Class { class, length } => {
+                globals.insert(class);
+                classes.insert(class);
+                assert!(lengths.insert(class, length).is_none());
             }
             Row::InstanceOf { class, function } => {
                 globals.insert(class);
@@ -136,7 +156,18 @@ pub(crate) fn generate() -> String {
         "name",
         "size",
     ]);
+    for path in functions.keys().chain(classes.iter()) {
+        assert!(
+            lengths.contains_key(path),
+            "`{path}` has no declared function length"
+        );
+    }
     let mut out = String::from("Table {\n");
+    out.push_str("lengths: SortedMap::borrowed(&[\n");
+    for (path, length) in lengths {
+        let _ = writeln!(out, "({path:?}, {length}),");
+    }
+    out.push_str("]),\n");
     for (name, index) in [("methods", methods), ("properties", properties)] {
         out.push_str(&format!("{name}: SortedMap::borrowed(&[\n"));
         for (key, rows) in index {

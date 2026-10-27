@@ -11,6 +11,7 @@ pub(super) fn object() -> Object {
                 "info" => "console.info",
                 _ => "console.debug",
             },
+            length: 0,
             function: "ts.console.log",
         })
         .collect();

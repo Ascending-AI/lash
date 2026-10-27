@@ -85,6 +85,8 @@ pub enum Row {
     /// so `receiver.name(args)` calls it.
     Method {
         path: &'static str,
+        /// JavaScript function length, before optional or rest parameters.
+        length: u8,
         receivers: &'static [Receiver],
         function: &'static str,
     },
@@ -98,6 +100,7 @@ pub enum Row {
     /// A call of a global path: `Math.max(...)`, `parseInt(...)`.
     Function {
         path: &'static str,
+        length: u8,
         function: &'static str,
     },
     /// A read of a global path: `Math.PI`. The function is called with no
@@ -109,8 +112,12 @@ pub enum Row {
     /// `new Class(args)`.
     Constructor {
         class: &'static str,
+        /// Supplied here only when no Function row owns this class's length.
+        length: Option<u8>,
         function: &'static str,
     },
+    /// Class metadata when no function or constructor row owns its length.
+    Class { class: &'static str, length: u8 },
     /// `value instanceof Class`: the function is called with the value as
     /// its one argument and gives a bool.
     InstanceOf {

@@ -55,6 +55,75 @@ pub fn define_functions(
     define_functions_with(source, library, operations, &mut |_, _| Ok(()))
 }
 
+/// Composes helper source owners in dependency order. The kernel parser
+/// supplies symbolic references before the ordinary loader resolves them.
+pub fn define_function_sources(
+    sources: &[&str],
+    library: &mut NamedLibrary,
+    operations: &[crate::authoring::HelperOperation],
+) -> Result<Vec<FunctionDefinition>, SourceError> {
+    use std::collections::BTreeSet;
+    let mut uses = BTreeSet::new();
+    let mut pending = Vec::new();
+    for source in sources {
+        let (header, chunks) = split(source)?;
+        uses.extend(header.uses);
+        for body in chunks {
+            let name = body
+                .lines()
+                .next()
+                .and_then(|line| line.strip_prefix("function "))
+                .and_then(|rest| rest.split('(').next())
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let references =
+                lash_kernel_doc::core_support::function_references(&body).map_err(|error| {
+                    SourceError::Parse {
+                        function: name.clone(),
+                        line: error.line,
+                        column: error.column,
+                        reason: error.reason,
+                    }
+                })?;
+            pending.push((name, body, references));
+        }
+    }
+    let names: BTreeSet<_> = pending.iter().map(|(name, _, _)| name.clone()).collect();
+    let mut pending: Vec<_> = pending
+        .into_iter()
+        .map(|(name, body, references)| {
+            let dependencies: BTreeSet<_> = references
+                .intersection(&names)
+                .filter(|dependency| **dependency != name)
+                .cloned()
+                .collect();
+            let header = references
+                .intersection(&uses)
+                .map(|name| format!("use {name}\n"))
+                .collect::<String>();
+            (name, format!("{header}{body}"), dependencies)
+        })
+        .collect();
+    let mut ready = BTreeSet::new();
+    let mut definitions = Vec::new();
+    while !pending.is_empty() {
+        let Some(position) = pending
+            .iter()
+            .position(|(_, _, dependencies)| dependencies.is_subset(&ready))
+        else {
+            return Err(SourceError::Complete {
+                function: "<helpers>".into(),
+                reason: "helper owners have a recursive dependency".into(),
+            });
+        };
+        let (name, source, _) = pending.remove(position);
+        definitions.extend(define_functions(&source, library, operations)?);
+        ready.insert(name);
+    }
+    Ok(definitions)
+}
+
 /// [`define_functions`], with `complete` given each definition as read,
 /// before it is checked and joins `library`: a package builder adds the
 /// argument checks a member's body begins with there.

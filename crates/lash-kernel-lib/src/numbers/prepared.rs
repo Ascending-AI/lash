@@ -1,7 +1,7 @@
 //! Library-owned entries specialized by operation and operand domain.
 
 use lash_kernel_doc::PreparedAnswer;
-use lash_kernel_doc::scalar::ScalarOp;
+use lash_kernel_doc::scalar::{ScalarOp, size_bit, word_size_bit};
 
 use super::{Binary, Domain, Math, Operation, PreparedNative, Unary, Value, plain};
 
@@ -23,8 +23,7 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
         {
             return Some(PreparedAnswer {
                 value,
-                scalar_sizes: CHARGED
-                    .then_some(u8::from(matches!(value, Value::Int(n) if n != 0)) << 3),
+                scalar_sizes: CHARGED.then_some(size_bit(value).unwrap_or(0) << 3),
             });
         }
         let value = match S::OPERATION {
@@ -44,8 +43,7 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
         if let Some(value) = value {
             return Some(PreparedAnswer {
                 value,
-                scalar_sizes: CHARGED
-                    .then_some(u8::from(matches!(value, Value::Int(n) if n != 0)) << 3),
+                scalar_sizes: CHARGED.then_some(size_bit(value).unwrap_or(0) << 3),
             });
         }
     }
@@ -71,10 +69,8 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
             return Some(PreparedAnswer {
                 value,
                 scalar_sizes: CHARGED.then(|| {
-                    let nonzero = |word: i64| u8::from(word != 0);
-                    nonzero(*a)
-                        | nonzero(*b) << 1
-                        | u8::from(matches!(value, Value::Int(n) if n != 0)) << 3
+                    let nonzero = word_size_bit;
+                    nonzero(*a) | nonzero(*b) << 1 | size_bit(value).unwrap_or(0) << 3
                 }),
             });
         }
@@ -94,8 +90,8 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
                     if DOMAIN == 3 {
                         return None;
                     }
-                    if CHARGED && *word != 0 {
-                        sizes = sizes.map(|mask| mask | (1 << index));
+                    if CHARGED {
+                        sizes = sizes.map(|mask| mask | (word_size_bit(*word) << index));
                     }
                 }
                 Value::Float(_) => {
@@ -120,21 +116,11 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
     // Errors decline to the general entry, which charges the raise using
     // the original formula and its absent result measurement.
     let value = plain(S::OPERATION, args, None).ok()??;
-    let result_size = if CHARGED {
-        match value {
-            Value::Int(word) => Some(word != 0),
-            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => Some(false),
-            _ => None,
-        }
-    } else {
-        None
-    };
+    let result_size = if CHARGED { size_bit(value) } else { None };
     Some(PreparedAnswer {
         value,
         scalar_sizes: if CHARGED {
-            sizes
-                .zip(result_size)
-                .map(|(mask, nonzero)| mask | (u8::from(nonzero) << 3))
+            sizes.zip(result_size).map(|(mask, bit)| mask | (bit << 3))
         } else {
             None
         },

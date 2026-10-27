@@ -40,6 +40,30 @@ use {
     lash_kernel_value::types::Type,
 };
 
+/// Symbolic call and function-literal references before helper identities
+/// are resolved. Uses the kernel lexer and qualified-name grammar, so text,
+/// comments and suffixes of another name cannot create dependency edges.
+pub fn function_references(text: &str) -> Result<BTreeSet<String>, ParseError> {
+    let mut parser = Parser::new(
+        text,
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
+    )?;
+    let mut names = BTreeSet::new();
+    while parser.peek() != &Token::End {
+        if parser.peek() == &Token::Ampersand {
+            parser.position += 1;
+            if matches!(parser.peek(), Token::Word(_)) {
+                names.insert(parser.qualified_name()?.to_string());
+            }
+        } else if parser.at_named_call() {
+            names.insert(parser.qualified_name()?.to_string());
+        } else {
+            parser.position += 1;
+        }
+    }
+    Ok(names)
+}
+
 /// Reads a document from kernel text.
 ///
 /// A document is one whole workflow: the `kernel` and `numbers` header

@@ -29,7 +29,6 @@ use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 mod catalog;
-mod lengths;
 mod metadata;
 mod sorted;
 mod values;
@@ -124,6 +123,7 @@ pub struct Table {
     /// read calls.
     pub properties: SortedMap<Rows>,
     pub functions: SortedMap<&'static str>,
+    lengths: SortedMap<u8>,
     pub positional: SortedMap<Positional>,
     pub values: SortedMap<&'static str>,
     pub constructors: SortedMap<&'static str>,
@@ -146,6 +146,14 @@ pub struct Table {
 }
 
 impl Table {
+    /// The JavaScript function length declared by the owning row.
+    fn length(&self, path: &str) -> u8 {
+        *self
+            .lengths
+            .get(path)
+            .unwrap_or_else(|| panic!("`{path}` has no length in its owning builtin row"))
+    }
+
     /// What `path` names as a value, when it is a built-in: a function
     /// row's path, then a class, then a class's prototype, then an object
     /// a function or value row's path runs through.
@@ -153,7 +161,7 @@ impl Table {
         if let Some(helper) = self.functions.get(path) {
             return Some(Builtin::Function {
                 call: Call::Helper(helper),
-                length: length(path),
+                length: self.length(path),
             });
         }
         if self.classes.contains(path) {
@@ -163,7 +171,7 @@ impl Table {
             };
             return Some(Builtin::Function {
                 call,
-                length: length(path),
+                length: self.length(path),
             });
         }
         if let Some(class) = path.strip_suffix(".prototype")
@@ -278,14 +286,6 @@ pub fn object_tag(path: &str) -> &'static str {
         "URLSearchParams.prototype" => "URLSearchParams",
         _ => "Object",
     }
-}
-
-/// The JavaScript `length` of the built-in function at `path`.
-fn length(path: &str) -> u8 {
-    lengths::LENGTHS
-        .binary_search_by(|(row, _)| (*row).cmp(path))
-        .map(|found| lengths::LENGTHS[found].1)
-        .unwrap_or_else(|_| panic!("`{path}` has no length in builtins/lengths.rs"))
 }
 
 /// The build derives these sorted indexes from the owning rows once. A

@@ -7,35 +7,12 @@ use lash_kernel_doc::{Args, NativeError, Nursery, Value};
 
 use std::cmp::Ordering;
 
-fn numeric(value: &Value) -> bool {
-    matches!(value, Value::Int(_) | Value::BigInt(_) | Value::Float(_))
-}
-
-/// A prepared comparison reads only operands held in its values.
+/// Prepared equality can resolve identical function handles without an arena.
+#[inline]
 pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
-    use Value as V;
-    Some(match (a, b) {
-        (V::Float(a), V::Float(b)) => crate::numeric::float_cmp(*a, *b) == Some(Ordering::Equal),
-        (V::Int(_) | V::Float(_), V::Int(_) | V::Float(_)) => {
-            scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?).ok()?
-                == Some(Ordering::Equal)
-        }
-        (V::Null, V::Null) | (V::Absent, V::Absent) => true,
-        (V::Bool(a), V::Bool(b)) => a == b,
-        (V::Text(a), V::Text(b)) => a == b,
-        (V::Function(a), V::Function(b)) if a == b => true,
-        (V::Function(_), V::Function(_)) => return None,
-        // A short text or name is never equal to a long one, nor a word
-        // integer to a big one.
-        (V::Text(_), V::LongText(_))
-        | (V::LongText(_), V::Text(_))
-        | (V::Int(_), V::BigInt(_))
-        | (V::BigInt(_), V::Int(_)) => false,
-        (V::Timestamp(a), V::Timestamp(b)) => a == b,
-        (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
-        (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
-        _ if a.kind() != b.kind() && !(numeric(a) && numeric(b)) => false,
-        _ => return None,
+    lash_kernel_doc::scalar::immediate_equal(a, b).or_else(|| match (a, b) {
+        (Value::Function(a), Value::Function(b)) if a == b => Some(true),
+        _ => None,
     })
 }
 

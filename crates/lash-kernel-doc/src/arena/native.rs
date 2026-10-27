@@ -343,23 +343,13 @@ impl<'call> Args<'call> {
     /// through the arena's semantics.
     #[inline]
     pub fn equal(&self, a: &Value, b: &Value) -> Result<bool, NativeError> {
-        use Value as V;
-        Ok(match (a, b) {
-            (V::Null, V::Null) | (V::Absent, V::Absent) => true,
-            (V::Bool(a), V::Bool(b)) => a == b,
-            (V::Int(a), V::Int(b)) => a == b,
-            (V::Float(a), V::Float(b)) => a.get() == b.get(),
-            (V::Int(i), V::Float(f)) | (V::Float(f), V::Int(i)) => word_float(*i, f.get()),
-            (V::Text(a), V::Text(b)) => a == b,
-            (V::Function(_), V::Function(_)) => self.function(a)? == self.function(b)?,
-            // A short text is never equal to a long one.
-            (V::Text(_), V::LongText(_)) | (V::LongText(_), V::Text(_)) => false,
-            (V::Timestamp(a), V::Timestamp(b)) => a == b,
-            (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
-            (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
-            _ if a.kind() != b.kind() && !(numeric(a) && numeric(b)) => false,
-            _ => return self.semantics.equal(a, b),
-        })
+        if let Some(equal) = crate::scalar::immediate_equal(a, b) {
+            return Ok(equal);
+        }
+        match (a, b) {
+            (Value::Function(_), Value::Function(_)) => Ok(self.function(a)? == self.function(b)?),
+            _ => self.semantics.equal(a, b),
+        }
     }
 }
 
@@ -384,18 +374,6 @@ fn warm(object: ArenaHandle, chunks: &Chunks) -> Result<(), NativeError> {
         None => Ok(()),
         Some(chunk) => Err(Retry::Cold { object, chunk }.into()),
     }
-}
-
-fn numeric(value: &Value) -> bool {
-    matches!(value, Value::Int(_) | Value::BigInt(_) | Value::Float(_))
-}
-
-/// Whether a word integer equals a float: only an integral one.
-#[inline]
-fn word_float(int: i64, float: f64) -> bool {
-    // 2^63: the first float past every word integer.
-    const PAST: f64 = 9_223_372_036_854_775_808.0;
-    float.fract() == 0.0 && (-PAST..PAST).contains(&float) && float as i64 == int
 }
 
 impl<'call> SequenceView<'call> {

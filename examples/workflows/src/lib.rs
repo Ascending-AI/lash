@@ -485,7 +485,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             };
             let source = roundtrip(document, &lowered.captions, lang, &printing)
                 .with_context(|| format!("{} {extension}: authored print/read", case.name))?;
-            report.push(Lifted::of(&case.name, lang, false, document, &source));
+            report.push(Lifted::of(&case.name, lang, false, &source));
             if case.mode == CaseMode::Module
                 && let Some(transaction) = canvas_edit(document, env.library)
             {
@@ -499,13 +499,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     .with_context(|| {
                         format!("{} {extension}: edited authored print/read", case.name)
                     })?;
-                report.push(Lifted::of(
-                    &case.name,
-                    lang,
-                    true,
-                    draft.document(),
-                    &edited,
-                ));
+                report.push(Lifted::of(&case.name, lang, true, &edited));
             }
             outputs.insert(format!("{prefix}printed.{extension}"), source);
             if case.edit {

@@ -128,6 +128,7 @@ fn builtin_indexes_project_the_owning_rows() {
                 path,
                 receivers,
                 function,
+                ..
             } => {
                 assert_eq!(table.functions.get(path), Some(&function));
                 let (root, _) = path.split_once('.').unwrap();
@@ -149,15 +150,18 @@ fn builtin_indexes_project_the_owning_rows() {
                     .or_default()
                     .push((receiver, function));
             }
-            Row::Function { path, function } => {
+            Row::Function { path, function, .. } => {
                 assert_eq!(table.functions.get(path), Some(&function));
                 assert!(builtins::is_global(path.split('.').next().unwrap()));
             }
             Row::Value { path, function } => assert_eq!(table.values.get(path), Some(&function)),
-            Row::Constructor { class, function } => {
+            Row::Constructor {
+                class, function, ..
+            } => {
                 assert_eq!(table.constructors.get(class), Some(&function));
                 assert!(builtins::is_global(class));
             }
+            Row::Class { class, .. } => assert!(builtins::is_global(class)),
             Row::InstanceOf { class, function } => {
                 assert_eq!(table.instance_tests.get(class), Some(&function));
                 assert!(builtins::is_global(class));

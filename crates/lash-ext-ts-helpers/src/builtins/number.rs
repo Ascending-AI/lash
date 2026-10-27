@@ -6,67 +6,82 @@ pub(super) fn object() -> Object {
         rows: vec![
             Row::Method {
                 path: "Number.prototype.toLocaleString",
+                length: 0,
                 receivers: &[Receiver::Number],
                 function: "ts.number.toLocaleString",
             },
             Row::Function {
                 path: "Number",
+                length: 1,
                 function: "ts.number.convert",
             },
             Row::Function {
                 path: "Number.isFinite",
+                length: 1,
                 function: "ts.number.isFinite",
             },
             Row::Function {
                 path: "Number.isNaN",
+                length: 1,
                 function: "ts.number.isNaN",
             },
             Row::Function {
                 path: "Number.isInteger",
+                length: 1,
                 function: "ts.number.isInteger",
             },
             Row::Function {
                 path: "Number.isSafeInteger",
+                length: 1,
                 function: "ts.number.isSafeInteger",
             },
             Row::Function {
                 path: "Number.parseFloat",
+                length: 1,
                 function: "ts.number.parseFloat",
             },
             Row::Function {
                 path: "parseFloat",
+                length: 1,
                 function: "ts.number.parseFloat",
             },
             Row::Function {
                 path: "Number.parseInt",
+                length: 2,
                 function: "ts.number.parseInt",
             },
             Row::Function {
                 path: "parseInt",
+                length: 2,
                 function: "ts.number.parseInt",
             },
             Row::Method {
                 path: "Number.prototype.valueOf",
+                length: 0,
                 receivers: &[Receiver::Number],
                 function: "ts.number.valueOf",
             },
             Row::Method {
                 path: "Number.prototype.toString",
+                length: 1,
                 receivers: &[Receiver::Number],
                 function: "ts.number.toString",
             },
             Row::Method {
                 path: "Number.prototype.toFixed",
+                length: 1,
                 receivers: &[Receiver::Number],
                 function: "ts.number.toFixed",
             },
             Row::Method {
                 path: "Number.prototype.toExponential",
+                length: 1,
                 receivers: &[Receiver::Number],
                 function: "ts.number.toExponential",
             },
             Row::Method {
                 path: "Number.prototype.toPrecision",
+                length: 1,
                 receivers: &[Receiver::Number],
                 function: "ts.number.toPrecision",
             },
@@ -104,10 +119,12 @@ pub(super) fn object() -> Object {
             },
             Row::Function {
                 path: "isFinite",
+                length: 1,
                 function: "ts.number.global_isFinite",
             },
             Row::Function {
                 path: "isNaN",
+                length: 1,
                 function: "ts.number.global_isNaN",
             },
         ],
