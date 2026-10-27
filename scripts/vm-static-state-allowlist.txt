@@ -30,6 +30,16 @@ crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profi
 crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value
 crates/lash-kernel-vm/src/perf_witness.rs::<module>::WORK  # opt-in diagnostic work counters, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
 crates/lash-kernel-vm/src/perf_witness.rs::<module>::PREPARATION  # opt-in host-installed first-use library compilation probe; receives only registered library function identities and begin/end boundaries, no guest values; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
+crates/lash-kernel-vm/src/perf_witness.rs::<module>::MEMORY_OBSERVER  # opt-in calling-thread diagnostic function pointer; receives only four capacity counts, retains no guest state; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
+crates/lash-vm-worker/src/cell_memory.rs::<module>::OUTSTANDING  # cell-memory development allocator's process-wide outstanding-byte count; allocator hooks require global access and retain no guest values
+crates/lash-vm-worker/src/cell_memory.rs::<module>::BUSY  # cell-memory allocator observation recursion guard, restored on drop; no guest values
+crates/lash-vm-worker/src/cell_memory.rs::<module>::CAPTURE  # opt-in cell-memory allocator window: native addresses, allocation sizes, numeric guest-site tokens and capacity/process counters only; no guest source, values or executable state; allocator hooks require thread-local access and finish takes the window
+crates/lash-vm-worker/src/cell_memory.rs::<module>::DIRECTORY  # cell-memory report destination supplied by host command-line configuration before guest work; no guest input
+crates/lash-vm-worker/src/cell_memory.rs::<module>::ENABLED  # cell-memory host command-line observation switch; no guest input
+crates/lash-vm-worker/src/cell_memory.rs::<module>::REQUESTS  # cell-memory allocator request and reallocation counts on this thread; two aggregate integers, no guest values
+crates/lash-vm-worker/src/cell_memory.rs::<module>::WINDOW_REQUESTS  # cell-memory baseline of the thread's two allocator request counts; no guest values
+crates/lash-vm-worker/src/cell_memory.rs::<module>::ORDINAL  # cell-memory report filename sequence on this worker thread; no guest input or values
+crates/lash-vm-worker/src/cell_memory.rs::<module>::STACK  # cell-memory native stack mapping bounds and paint extent for diagnostics; three addresses only, no retained stack bytes or guest values
 crates/lash-kernel-state/src/perf_witness.rs::<module>::WORK  # opt-in fixed integer work counts and completed-trace scratch maxima, no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/paged/tree.rs::<module>::BINDING_COPIES  # opt-in binding-leaf and row copy counts, holds only two aggregate integers, no guest values or identities (ADR 0123); cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/arena/mod.rs::<module>::COLD_CLOSURE_SITE  # immutable empty Unit::Main site shared by cold closure placeholders; initialized only from constants, no guest input or mutable run state

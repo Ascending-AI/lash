@@ -759,7 +759,7 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 | Span kind | attribute_reserve |
 |---|---|
 | `producer` | 36 |
-| `agent` | 26 |
+| `agent` | 38 |
 | `model` | 47 |
 | `model_attempt` | 30 |
 | `tool` | 31 |
