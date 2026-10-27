@@ -158,7 +158,7 @@ async fn run(args: Args) -> Result<()> {
         let lash_core::SessionHistoryRecord::Protocol(event) = event else {
             continue;
         };
-        if let Some(entry) = lash_protocol_rlm::decode_rlm_protocol_event(&event)?
+        if let Some(entry) = lash_protocol_rlm::decode_rlm_protocol_event(event)?
             && let lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(cell) = entry.as_ref()
         {
             cells += 1;
