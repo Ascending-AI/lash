@@ -156,6 +156,75 @@ cannot qualify as instruction baselines. Host/compiler/allocator/build/CPU,
 source, geometry, observation and metering identities must match. External
 reference rows remain descriptive. This is an opt-in developer gate.
 
+## Current comparison
+
+The full optimized run on 2026-10-27 completed all **17/17 Python workloads**
+on Monty 1.4.0. All **170/170 measured Monty outputs exactly equal CPython's**,
+including the floating-point row. There were **85 engine/workload rows and
+850 measured samples**, with no unsupported features, missing rows or checksum
+errors. Lash uses fewer instructions than Monty for integer arithmetic, and
+more for the other 16 rows. The largest ratios are JSON transformation at
+14.67× and keyed object sorting at 11.68×. No interpreter changes were made.
+
+This is one full optimized compare invocation at implementation commit
+`565d2761a7c8f5b0e9adc52beac2a58641070a93`, based on main `46b88ac7dbccd3278db4fed77b06112fd62caa97`.
+Main at run start was `7064395d3a437e377b0c5c541af97463d570e40b`; its intervening prompt/read-race
+changes did not change the benchmark or interpreter sources. Every engine
+received the checked-in workload, including the restricted JSON codec then on
+main. The stdlib JSON workload from the concurrent lane was not yet on main.
+
+Five measured pairs, one fixed low-count warmup, factor 20, CPU 0, observation
+off, exact charge and memory metering on. The 340 scoped Lash windows and 510
+reference processes all qualified, with 100% PMU running time. Peak whole-run
+RSS was 482,508 KiB under the 8 GiB address-space cap. Shared-host wall time is
+not a latency claim. Values below are median incremental instructions/op;
+ratios above one mean Lash executed more instructions. Different Python/TS
+work units, especially sorting, keep their own denominators.
+
+| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Likely cause from source |
+|---|---:|---:|---:|---:|---|
+| json_transform | 102940835.89 | 7015212.26 | 14.67× | 2.14× | The restricted codec repeatedly splits/replaces text, calls guest functions and accesses dictionaries. |
+| object_sort | 90770.03 | 7769.08 | 11.68× | 8.87× | Key extraction calls a Python lambda and reads each record before the native key sort; the secant is nonlinear. |
+| map_set_string | 45581.25 | 5408.45 | 8.43× | 8.01× | Each batch builds 1,000 text keys twice, stores dictionary entries and checks membership. |
+| records | 174035856.11 | 20827344.47 | 8.36× | 8.51× | Two materialized comprehensions, dictionary reads and helper-based summation traverse 10,000 records. |
+| templating | 3461959.00 | 565692.79 | 6.12× | 7.34× | Two f-string substitutions per line use Python formatting helpers before text concatenation. |
+| sort_bench | 21633352.16 | 5576494.58 | 3.88× | 22.98× | Text conversion, list population and order-checking surround the native sort. |
+| array_read | 2194.81 | 695.25 | 3.16× | 8.64× | Ten indexed reads per trip retain typed access guards and VM operand handling. |
+| prop_read | 2338.00 | 1023.24 | 2.28× | 9.89× | Four dictionary reads per trip use the proven dictionary helper, including its membership check. |
+| string_build1 | 2483.33 | 1242.50 | 2.00× | 8.41× | The inner loop repeatedly concatenates and replaces text with Python add semantics. |
+| float_arith | 2431.69 | 1251.47 | 1.94× | 2.36× | Multiply and float-add operations retain Python numeric dispatch alongside loop control. |
+| prop_write | 1409.00 | 742.00 | 1.90× | 9.63× | Four resident map stores per trip retain VM/store bookkeeping around each update. |
+| empty_loop | 325.99 | 193.53 | 1.68× | 3.42× | Only range/loop control and VM metering remain; their individual shares are unmeasured. |
+| object_build | 5897.86 | 3768.07 | 1.57× | 1.90× | Record/list allocation, integer remainder and list append occur once per object. |
+| func_closure_call | 2472.99 | 1771.85 | 1.40× | 6.98× | Four calls per trip mutate a captured binding, adding closure access to call/return work. |
+| func_call | 1182.99 | 902.59 | 1.31× | 2.95× | Four virtual calls per trip return a constant, so call/return and accumulation are the main work. |
+| int_to_string | 1770.70 | 1470.97 | 1.20× | 3.43× | Three integer conversions per trip use the Python string helper and native number formatting. |
+| int_arith | 534.99 | 720.53 | 0.74× | 2.43× | The scalar integer loop reaches numeric natives; its measured instruction count is below Monty. |
+
+The cause column is a source-based hypothesis, not a profile or causal
+ablation. Typed indexing is selected in
+[`lower/subscripts.rs`](../../crates/lash-dialect-python/src/lower/subscripts.rs).
+Its Python helper definitions, numeric/string operations and mutation rules
+are in [`core.kernel`](../../crates/lash-ext-py-helpers/src/helpers/core.kernel).
+Collection methods live in
+[`methods.kernel`](../../crates/lash-ext-py-helpers/src/helpers/methods.kernel);
+key extraction and summation in
+[`builtins.kernel`](../../crates/lash-ext-py-helpers/src/helpers/builtins.kernel);
+f-string formatting in
+[`format.kernel`](../../crates/lash-ext-py-helpers/src/helpers/format.kernel).
+VM fast paths can bypass helper execution, so these sources do not establish
+how much of a row's instructions each helper consumed.
+
+The reference identities are Monty executable
+`4479e7306fdf0c6a2a567aa139150ac47c75ab3c0138ec2c4efa010c382a87e0`,
+QuickJS source `04be246001599f5995fa2f2d8c91a0f198d3f34c`, executable
+`ec68673b92708e38971b58682bae94ca3775e106358c82f6fcd55526b8fd3ec4`,
+and CPython 3.12.3. The receipt retains each executable/source hash.
+Raw evidence is `/workspace/notes/lash/tasks/lanes/r33/monty.evidence/`,
+including `compare.json`, its Markdown output, 510 reference perf files,
+source wrappers/stdout/stderr, `verification.json`, result-population SHA-256s,
+release identities, the full optimized build report, and outer perf/time logs.
+
 `--profile <directory>` performs a separate `perf record` run per selected lash
 workload and dialect, writing perf data, perf-script stacks, and Inferno folded
 stacks. It requires `perf` and `inferno-collapse-perf` on PATH. Profiles include
