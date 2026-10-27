@@ -164,6 +164,11 @@ impl Renderer<'_> {
                 }
                 _ => return None,
             },
+            // Numeric accumulators use a pure helper even when the right
+            // operand is unknown. Only augmented assignment lowers to it.
+            k::Expr::Call { function, args } if self.operators.is(function, "py.number.iadd") => {
+                ("+", args.as_slice())
+            }
             k::Expr::Call { function, args } => {
                 let operator = self.operators.token(function, args, &self.scope.types)?;
                 if !matches!(operator, "+" | "-" | "*" | "/" | "//" | "%" | "**") {

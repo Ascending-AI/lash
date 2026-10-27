@@ -1,9 +1,9 @@
 language: TypeScript
 exceptions: none
 main/0 [30..339] "async function demo(items: string[]): Promise<string[]> {\n  /** Start an empty list of replies */\n  const out = [];\n  /** Go through each item */\n  for (const item of items) {\n    /** Echo the item and keep the reply */\n    out.push(await corpus.echo(item));\n  }\n  /** Give back the replies */\n  return out;\n}"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/0 [130..145] "const out = [];"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/1 [178..292] "for (const item of items) {\n    /** Echo the item and keep the reply */\n    out.push(await corpus.echo(item));\n  }"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/1/1/0 [254..288] "out.push(await corpus.echo(item));"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/1/1/0/2 [254..288] "out.push(await corpus.echo(item));"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/1/1/0/2/0 [254..288] "out.push(await corpus.echo(item));"
-function 2bc976f54d4026448183f6d96ae575616a97067738aef5ba6217ccedfac6f7ed/2 [326..337] "return out;"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/0 [130..145] "const out = [];"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/1 [178..292] "for (const item of items) {\n    /** Echo the item and keep the reply */\n    out.push(await corpus.echo(item));\n  }"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/1/1/0 [254..288] "out.push(await corpus.echo(item));"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/1/1/0/2 [254..288] "out.push(await corpus.echo(item));"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/1/1/0/2/0 [254..288] "out.push(await corpus.echo(item));"
+function 54583a69500065b342899ef8513eb6322e623333623ef00a1ab4ecb7017f0b47/2 [326..337] "return out;"

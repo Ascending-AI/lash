@@ -167,7 +167,7 @@ impl Lifter<'_> {
             return Ok(Expr::Binary(mirrored, Box::new(right), Box::new(left)));
         }
         let mut operand = |value: &k::Expr| {
-            if op == "==="
+            if matches!(op, "===" | "%")
                 && let k::Expr::Call { function, args } = value
                 && self.is(function, "ts.number.checked")
                 && let [value] = args.as_slice()
@@ -604,7 +604,7 @@ fn binary_of(name: &str) -> Option<&'static str> {
         "num.sub" | "ts.sub" => "-",
         "num.mul" | "ts.mul" => "*",
         "num.div" | "ts.div" => "/",
-        "ts.rem" => "%",
+        "num.rem_trunc" | "ts.rem" => "%",
         "num.lt" | "ts.lt" => "<",
         "num.le" | "ts.le" => "<=",
         "ts.gt" => ">",

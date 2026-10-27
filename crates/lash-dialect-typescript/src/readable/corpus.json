@@ -1,5 +1,9 @@
 [
   {
+    "name": "FIG-7477 typed iteration retains native remainder",
+    "source": "export async function demo(items: number[]): Promise<number> { let total = 0; for (const item of items) { total += item % 3; } return total; }"
+  },
+  {
     "name": "pure helper",
     "source": "function headline(count: number): string { return count === 1 ? \"One new card\" : count + \" new cards\"; }\nexport async function digest(): Promise<void> { const found = await people.lookup({ me: true }); await inbox.sendItem({ title: headline(1), body: \"Your daily digest.\" }); }",
     "names": [

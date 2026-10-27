@@ -3,10 +3,10 @@ numbers float
 import 3 operation corpus.echo(input?: Json) -> Json
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5\",\"signature\":{\"params\":[{\"name\":\"flag\",\"ty\":\"bool\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(flag: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if flag {\n    return perform 3(\"yes\") as Json then yield via ts.promise.adopt\n  }\n  return \"no\" via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"3a46da05c913b170d539b7b359750a045ff68dea046b8b052c1bc0fbfe3b3956\",\"signature\":{\"params\":[{\"name\":\"flag\",\"ty\":\"bool\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(flag: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if flag {\n    return perform 3(\"yes\") as Json then yield via ts.promise.adopt\n  }\n  return \"no\" via ts.promise.adopt\n}\n"
 main {
-  let demo = &local.function
+  let demo = &demo
 }
 
-unit Library(FunctionId(f97e4de319f9332c7fd046bcebc898bd2680308714a80f9a3338151b6a9788f5)): statements=3 scopes=3 sites=5
+unit Library(FunctionId(3a46da05c913b170d539b7b359750a045ff68dea046b8b052c1bc0fbfe3b3956)): statements=3 scopes=3 sites=5

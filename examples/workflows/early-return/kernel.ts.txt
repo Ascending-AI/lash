@@ -6,10 +6,10 @@ library @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0
 library @2e8da4b6a10282da6a5e25cf94737222b11699ffdbd3e0772d18b82369a7fe97
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"23b6597653e7184550791348b725b73f37832108ae48958a9b142e69b6fef284\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse ts.copy_boundary = @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f\nuse ts.number.checked = @2e8da4b6a10282da6a5e25cf94737222b11699ffdbd3e0772d18b82369a7fe97\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if num.lt(ts.number.checked(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 3(invoke ts.copy_boundary(value, absent)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0\nuse ts.copy_boundary = @072584af16d8a47b121fe68efce58b4daa3dd343174845ea05a8e3979691d36f\nuse ts.number.checked = @2e8da4b6a10282da6a5e25cf94737222b11699ffdbd3e0772d18b82369a7fe97\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  if num.lt(ts.number.checked(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 3(invoke ts.copy_boundary(value, absent)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
 main {
-  let demo = &local.function
+  let demo = &demo
 }
 
-unit Library(FunctionId(23b6597653e7184550791348b725b73f37832108ae48958a9b142e69b6fef284)): statements=4 scopes=3 sites=7
+unit Library(FunctionId(648150a9fb5b04e9ba7ccc03cb30974d677a3c1e2fa630a167e80bd33173c978)): statements=4 scopes=3 sites=7

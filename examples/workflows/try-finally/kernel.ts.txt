@@ -3,10 +3,10 @@ numbers float
 import 3 operation corpus.echo(input?: Json) -> Json
 library @8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02
 library @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = perform 3(\"try\") as Json then yield\n  } catch error {\n    set `result` = \"caught\"\n  } finally {\n    do perform 3(\"finally\") as Json then yield\n  }\n  return `result` via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5011568dc185141959a546a6916910e82898ebe7b919f27a0ae9be3930373e5a\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"8bd348870902413a55e083d033e454f48f05ac805d876274636cb11b7b9c8c02\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @cd93a1286044f83f7592b185afd72c923c095f5b7546f4f2af538a1426dbab1f\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = perform 3(\"try\") as Json then yield\n  } catch error {\n    set `result` = \"caught\"\n  } finally {\n    do perform 3(\"finally\") as Json then yield\n  }\n  return `result` via ts.promise.adopt\n}\n"
 main {
-  let demo = &local.function
+  let demo = &demo
 }
 
-unit Library(FunctionId(45240cee25b719bd69e019664839b61741fdf5d90c3d5617742a10db117d6d5c)): statements=6 scopes=4 sites=9
+unit Library(FunctionId(5011568dc185141959a546a6916910e82898ebe7b919f27a0ae9be3930373e5a)): statements=6 scopes=4 sites=9
