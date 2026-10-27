@@ -27,6 +27,7 @@ use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::library::Library;
 
+mod bulk;
 mod forwarding;
 mod metering;
 use metering::tree;
@@ -1501,6 +1502,9 @@ pub(crate) fn emit(
 ) -> Option<(String, String)> {
     if definition.guard.is_some() {
         return None;
+    }
+    if let Some(template) = bulk::emit(library, definition, ident) {
+        return Some(template);
     }
     let mut evaluator = Evaluator {
         library,

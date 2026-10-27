@@ -22,6 +22,10 @@ pub(crate) enum Taken {
 }
 
 impl Meter {
+    pub(super) fn recording(&self) -> bool {
+        self.record
+    }
+
     pub(crate) fn new(record: bool) -> Self {
         Self {
             units: 0,

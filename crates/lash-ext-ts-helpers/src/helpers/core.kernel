@@ -1206,6 +1206,7 @@ body {
 function ts.spread(parts: List(List(Any))) -> List(Any)
 kernel 1
 charge sum(2, deep(parts))
+native
 body {
   let flat = []
   for part in parts {

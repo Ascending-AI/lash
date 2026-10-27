@@ -1139,7 +1139,8 @@
   },
   "crates/lash-ext-helper-compiler": {
     "compile_data": [
-      "tests/control.kernel"
+      "tests/control.kernel",
+      "src/template/*.kernel"
     ]
   },
   "crates/lash-kernel-package": {

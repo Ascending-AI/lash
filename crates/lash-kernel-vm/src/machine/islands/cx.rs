@@ -28,6 +28,7 @@ use crate::compile::{
     inner_entry as inner,
 };
 mod collections;
+mod copies;
 mod meter;
 mod texts;
 pub(super) use texts::append_text;
@@ -60,6 +61,7 @@ pub(crate) struct Cx<'a> {
     /// held at the region's entry and the nursery the capacity meter's
     /// headroom admitted there (§3.5). Within it no verdict refuses.
     pub(crate) ceiling: u64,
+    pub(crate) copy_ceiling: u64,
     /// What the running statement sets aside of the room until it ends:
     /// its native calls' work; while a construction collects its members,
     /// the least it will hold; and the bound of the write it holds.
@@ -952,6 +954,13 @@ impl TemplateMeter for HeapCx<'_, '_> {
 }
 
 impl TemplateHeap for HeapCx<'_, '_> {
+    fn concat(&mut self, receiver: Value, arguments: Value, read_units: u64) -> Option<Value> {
+        self.concat_sources(receiver, arguments, read_units)
+    }
+    fn dense(&mut self, source: Value, read_units: u64, loop_units: u64) -> Option<Value> {
+        self.dense_source(source, read_units, loop_units)
+    }
+
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {
         if self.cx.held.is_some() || self.cx.concatenated() {
             return None;

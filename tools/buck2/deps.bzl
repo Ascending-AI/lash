@@ -237,9 +237,7 @@ PACKAGE_DEPS = {
     },
     "lash-ext-helper-compiler": {
         "build": {},
-        "dev": {
-            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
-        },
+        "dev": {},
         "normal": {
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
@@ -252,6 +250,7 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         }

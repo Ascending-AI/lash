@@ -215,6 +215,20 @@ pub trait TemplateHeap: TemplateMeter {
     fn field(&mut self, target: Value, field: &str) -> Option<Value>;
     /// The tuple of `items`.
     fn tuple(&mut self, items: &[Value]) -> Option<Value>;
+    /// A source-certified shallow concatenation. The body reads each
+    /// present list member through an ordinary charged closure costing
+    /// `read_units` plus its immutable nested comparison size; holes are
+    /// copied without that read. Records retain their branded-array path.
+    fn concat(&mut self, receiver: Value, arguments: Value, read_units: u64) -> Option<Value> {
+        let _ = (receiver, arguments, read_units);
+        None
+    }
+    /// A certified dense snapshot, converting holes to Absent and retaining
+    /// the body's charged reads and all continuation tests of its loop.
+    fn dense(&mut self, source: Value, read_units: u64, loop_units: u64) -> Option<Value> {
+        let _ = (source, read_units, loop_units);
+        None
+    }
     /// `set target[index] = value`: its growth held and what it changes
     /// marked dirty, or nothing written.
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()>;

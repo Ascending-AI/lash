@@ -121,6 +121,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             limits: self.limits,
             memory: self.memory,
             ceiling: self.ceiling.saturating_sub(self.register_bytes),
+            copy_ceiling: self.copy_ceiling.saturating_sub(self.register_bytes),
             transient: self.transient,
             fault: None,
             declined: false,

@@ -182,3 +182,109 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// FIG-7472 / K-CHG-007 / PLAN-INDEP: shallow bulk copies preserve the
+/// body's charge and held bytes, including holes and shared nested lists.
+/// A known-length copy executes a bounded number of helper statements.
+#[test]
+fn bulk_array_copies_keep_charge_and_held_bytes() {
+    let runner = crate::helper_plans::runner::Runner::new("typescript").unwrap();
+    let lowered = crate::helper_plans::runner::Case {
+        id: "bulk-copy".into(),
+        dialect: "typescript".into(),
+        source: "null;".into(),
+        bits: 0,
+        stride: 0,
+        nanoseconds: 0,
+    };
+    let crate::helper_plans::runner::Lowered::Program(base) = runner.lower(&lowered).unwrap()
+    else {
+        panic!("the bulk-copy library lowers")
+    };
+    let large = (0..513)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let build = format!(
+        "let big = [{large}] set big = list.concat(big, big) set big = list.concat(big, big) set big = list.concat(big, big) set big = list.concat(big, big)"
+    );
+    let large_values = || {
+        (0..16)
+            .flat_map(|_| 0..513)
+            .map(|i| Datum::Int(i.into()))
+            .collect::<Vec<_>>()
+    };
+    for (name, body, expected, bulk) in [
+        ("concat holes and nested aliases",
+         "let nested = [7] let out = invoke ts.array.concat([(), nested], [[absent, (), nested], 3]) set nested[0] = 9 return out".to_owned(),
+         Datum::List(vec![Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Absent, Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Int(3.into())]), true),
+        ("concat immutable comparison",
+         "let out = invoke ts.array.concat([(1, 2)], [[]]) return out".to_owned(),
+         Datum::List(vec![Datum::Tuple(vec![Datum::Int(1.into()), Datum::Int(2.into())])]), true),
+        ("concat non-array argument",
+         "let out = invoke ts.array.concat([1], [{x: 2}]) return out".to_owned(),
+         Datum::List(vec![Datum::Int(1.into()), Datum::Record(vec![("x".into(), Datum::Int(2.into()))])]), false),
+        ("concat large", format!("{build} let out = invoke ts.array.concat(big, [[1, 2]]) return out"),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+        ("concat nursery turnover",
+         "let acc = [] let i = 0 while num.lt(i, 96) { let next = invoke ts.array.concat(acc, [[1, 2]]) set acc = next set i = num.add(i, 1) } return acc".to_owned(),
+         Datum::List((0..96).flat_map(|_| [Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+        ("spread operand snapshots",
+         "let xs = [1] let first = invoke ts.array.spread(xs) set xs[0] = 9 let second = invoke ts.array.spread(xs) return ts.spread([first, second])".to_owned(),
+         Datum::List(vec![Datum::Int(1.into()), Datum::Int(9.into())]), true),
+        ("spread holes",
+         "let out = invoke ts.array.spread([(), [7], absent]) return out".to_owned(),
+         Datum::List(vec![Datum::Absent, Datum::List(vec![Datum::Int(7.into())]), Datum::Absent]), true),
+        ("dense large", format!("{build} let out = invoke ts.array.dense(big) return out"),
+         Datum::List(large_values()), true),
+        ("spread nested dense large", format!("{build} let out = invoke ts.array.spread(big) return out"),
+         Datum::List(large_values()), true),
+        ("spread large", format!("{build} let out = invoke ts.spread([big, [1, 2]]) return out"),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+        ("slice large", format!("return list.slice([{large}], 63, 130)"),
+         Datum::List((63..130).map(|i| Datum::Int(i.into())).collect()), true),
+        ("list plus", format!("{build} return list.concat(big, [1, 2])"),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+    ] {
+        let text = format!("kernel 1\nnumbers by_spelling\nmain {{ {body} }}");
+        let document = crate::document_fixture::authored(&text, base.library.registry());
+        let mut case = kernel_case(name, "main { return null }");
+        case.environment.bounds.call_depth = 200;
+        case.document = print_document(&document);
+        let natural = case_program(&base.library, &case).unwrap();
+        let bodies = Program { library: in_layout(&base.library, Layout(3)), ..natural.clone() };
+        let mut reference_case = case.clone();
+        reference_case.name.push_str(" reference");
+        let reference = finished::<3>(&bodies, &reference_case, u64::MAX);
+        assert_eq!(reference.0, ExpectedEnd::Finished(expected), "{name}");
+        let (actual, census) = crate::projection::counted(|| finished::<0>(&natural, &case, u64::MAX));
+        assert_eq!(actual, reference, "{name}: value, charge and held bytes");
+        if matches!(name, "concat holes and nested aliases" | "spread holes") {
+            for limit in [30, reference.1.unwrap() / 2, reference.1.unwrap()] {
+                let mut bounded = case.clone();
+                bounded.environment.bounds.charge = limit;
+                assert_eq!(finished::<0>(&natural, &bounded, u64::MAX), finished::<3>(&bodies, &bounded, u64::MAX), "{name} at charge {limit}");
+            }
+            for memory in [4096, 65536] {
+                let mut bounded = case.clone();
+                bounded.environment.bounds.memory = memory;
+                let actual = finished::<0>(&natural, &bounded, u64::MAX);
+                let reference = finished::<3>(&bodies, &bounded, u64::MAX);
+                // K-MACH-008 / K-BND-003 permit the first resident-memory
+                // refusal to differ. Successful held-byte counts do not.
+                if matches!(&reference.0, ExpectedEnd::Bound { name, .. } if name == "memory") {
+                    assert_eq!(actual.0, reference.0, "{name} at memory {memory}");
+                    assert!(actual.2 >= memory && reference.2 >= memory);
+                } else {
+                    assert_eq!(actual, reference, "{name} at memory {memory}");
+                }
+            }
+            assert_eq!(finished::<0>(&natural, &case, 7), reference, "{name} at slice 7");
+        }
+        if bulk {
+            let statements: u64 = census.statements.values().sum();
+            let limit = if name == "concat nursery turnover" { 2000 } else { 100 };
+            assert!(statements < limit, "{name}: a bulk copy executes no per-element helper loop: {census:?}");
+        }
+    }
+}

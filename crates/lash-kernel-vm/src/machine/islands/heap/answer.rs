@@ -103,9 +103,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             else {
                 return Ok(false);
             };
-            self.heap(0, false, |cx| {
+            let recording = self.recorder.is_some();
+            self.heap(0, true, |cx| {
                 let (value, charges) = cx.heap_paths(heap, callees, natives, args)?;
-                (charges.events.is_empty() && charges.pace == 0).then_some(value)
+                // The enclosing formula covers library calls, but ordinary
+                // closures and declared loop tests still bill their work.
+                // A recording retains their individual source events.
+                if recording && (!charges.events.is_empty() || charges.pace != 0) {
+                    return None;
+                }
+                cx.body_paths = charges.pace != 0;
+                cx.meter.charges(charges, false, None);
+                Some(value)
             })
         };
         let Some(answer) = answer else {

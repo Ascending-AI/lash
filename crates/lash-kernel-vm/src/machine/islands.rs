@@ -307,6 +307,9 @@ struct Island<'a, const OBSERVING: bool> {
     memory: bool,
     /// Entry nursery and outstanding per-statement native/construction credit.
     ceiling: u64,
+    /// A certified whole-copy operation may use the remaining entry room,
+    /// after reserving the separately admitted physical frames.
+    copy_ceiling: u64,
     transient: u64,
     /// Live physical register windows share the statement/nursery allowance.
     register_bytes: u64,

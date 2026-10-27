@@ -433,6 +433,48 @@ impl<'call> SequenceView<'call> {
     pub fn chunks(self) -> impl Iterator<Item = Result<&'call [Value], NativeError>> + 'call {
         values(self.object, &self.sequence.chunks)
     }
+
+    /// The values in `start..end`, chunk by chunk. Chunks outside the range
+    /// are never read, including cold chunks before its first member.
+    pub fn range(
+        self,
+        start: u64,
+        end: u64,
+    ) -> impl Iterator<Item = Result<&'call [Value], NativeError>> + 'call {
+        let end = end.min(self.len());
+        let start = start.min(end);
+        let (mut chunk, mut at) = self.sequence.locate(start);
+        let mut left = end - start;
+        std::iter::from_fn(move || {
+            if left == 0 {
+                return None;
+            }
+            let answer = match self.sequence.chunks.get(chunk) {
+                Some(Chunk::Resident(values)) => {
+                    let count = (values.len() - at).min(left as usize);
+                    left -= count as u64;
+                    Ok(&values[at..at + count])
+                }
+                Some(Chunk::Cold { .. }) => {
+                    left = 0;
+                    Err(Retry::Cold {
+                        object: self.object,
+                        chunk: chunk as u32,
+                    }
+                    .into())
+                }
+                None => {
+                    left = 0;
+                    Err(NativeError::Malformed(
+                        "a sequence's chunks miss its length",
+                    ))
+                }
+            };
+            chunk += 1;
+            at = 0;
+            Some(answer)
+        })
+    }
 }
 
 impl<'call> TableView<'call> {

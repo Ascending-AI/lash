@@ -23,6 +23,7 @@
 //! an embedder installs each plan and adds each native beside the helper
 //! its build registered ([`implement`]).
 
+mod arrays;
 mod bitwise;
 mod conversions;
 mod number_index;
@@ -127,6 +128,7 @@ macro_rules! natives {
 }
 
 natives!(name, kernel;
+        "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
         "ts.sub" => Arc::new(Subtract {
             native: kernel("num.sub")?,

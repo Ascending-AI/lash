@@ -184,7 +184,8 @@ impl KernelMachine {
         if self.boundary.is_some() {
             return Ok(None);
         }
-        if gate.projecting
+        if gate.observed
+            || gate.projecting
             || self.charged >= gate.slice_end
             || gate.base.saturating_add(u64::from(
                 prepared.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)),
@@ -221,8 +222,11 @@ impl KernelMachine {
             arena: &mut arena,
             sites: &mut self.sites,
             session: &mut self.session,
-            // No charged work may be hidden before the source completion.
-            bound: self.charged,
+            bound: if gate.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
             limiters: None,
         };
         let mut island = open::<false>(
@@ -231,28 +235,34 @@ impl KernelMachine {
             &mut running.counters,
             self.charged,
         );
-        Ok(island
-            .heap(0, true, |cx| {
-                let (value, charges) = cx.heap_paths(
-                    heap,
-                    callees,
-                    natives,
+        let answer = island.heap(0, true, |cx| {
+            let (value, charges) = cx.heap_paths(
+                heap,
+                callees,
+                natives,
+                &self.regs[args..args + function.arity],
+            )?;
+            // Ordinary closures and loop tests charge before completion.
+            // Admit both parts before publishing any staged write.
+            if !completion_room.is_none_or(|room| {
+                cx.completion_fits(
+                    function,
                     &self.regs[args..args + function.arity],
-                )?;
-                // Scheduled work retains its ordered source events and boundaries.
-                (charges.events.is_empty()
-                    && charges.pace == 0
-                    && completion_room.is_none_or(|room| {
-                        cx.completion_fits(
-                            function,
-                            &self.regs[args..args + function.arity],
-                            &value,
-                            room,
-                        )
-                    }))
-                .then_some(value)
-            })
-            .map(|answer| answer.value))
+                    &value,
+                    room.saturating_sub(charges.pace),
+                )
+            }) {
+                return None;
+            }
+            cx.body_paths = charges.pace != 0;
+            cx.meter.charges(charges, false, None);
+            Some(value)
+        });
+        Ok(answer.map(|answer| {
+            let value = island.commit_heap(answer);
+            self.charged = island.charged;
+            value
+        }))
     }
 
     /// Runs the root call action of `running` of code `code`, with the
@@ -1109,6 +1119,15 @@ fn open<'a, const OBSERVING: bool>(
             .saturating_sub(ground.base)
             .min(u64::from(ISLAND_DEPTH)) as u32,
     );
+    let copy_ceiling = if ground.memory {
+        entry.arena.held().saturating_add(
+            ground
+                .headroom
+                .saturating_sub(u64::from(admitted) * super::FRAME_ROOM),
+        )
+    } else {
+        u64::MAX
+    };
     Island {
         public_return: false,
         link: ground.link,
@@ -1135,6 +1154,7 @@ fn open<'a, const OBSERVING: bool>(
         limits: ground.limits,
         memory: ground.memory,
         ceiling,
+        copy_ceiling,
         transient: 0,
         register_bytes: 0,
         base: ground.base,

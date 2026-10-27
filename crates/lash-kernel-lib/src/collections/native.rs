@@ -700,10 +700,8 @@ fn append_range(
     let Some(sequence) = args.sequence(value)? else {
         return Err(NativeError::Malformed("sequence has another kind"));
     };
-    for index in start..end {
-        items.push(*sequence.get(index as u64)?.ok_or(NativeError::Malformed(
-            "an admitted sequence member is absent",
-        ))?);
+    for chunk in sequence.range(start as u64, end as u64) {
+        items.extend_from_slice(chunk?);
     }
     Ok(())
 }
