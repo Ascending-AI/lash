@@ -314,8 +314,40 @@ pub(crate) fn trace_tool_call_output(
     }
 }
 
+/// Preserve the cell's outcome and control identity without copying omitted content.
+pub fn trace_cell_outcome(
+    result: &crate::CellOutcome,
+    content: lash_trace::ContentPolicy,
+) -> crate::CellOutcome {
+    use lash_protocol_types::{CellControl, CellOutcome, OutputValue};
+    match result {
+        CellOutcome::Completed => CellOutcome::Completed,
+        CellOutcome::Failed(failure) => CellOutcome::Failed(trace_cell_failure(failure, content)),
+        CellOutcome::Controlled {
+            tool_name,
+            call_id,
+            control,
+        } => CellOutcome::Controlled {
+            tool_name: tool_name.clone(),
+            call_id: call_id.clone(),
+            control: match control {
+                CellControl::Finish { value } => CellControl::Finish {
+                    value: if content.captures(lash_trace::ContentCategory::CodeOutput) {
+                        value.clone()
+                    } else {
+                        OutputValue::Inline(serde_json::Value::Null)
+                    },
+                },
+                CellControl::SwitchAgentFrame { frame_key } => CellControl::SwitchAgentFrame {
+                    frame_key: frame_key.clone(),
+                },
+            },
+        },
+    }
+}
+
 /// Build a cell's classification without copying omitted diagnostics or repairs.
-pub fn trace_cell_failure(
+fn trace_cell_failure(
     failure: &crate::CellFailure,
     content: lash_trace::ContentPolicy,
 ) -> crate::CellFailure {

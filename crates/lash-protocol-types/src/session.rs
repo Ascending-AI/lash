@@ -319,7 +319,9 @@ impl From<String> for CellPrint {
 /// What an executed cell resolved to. One of three: a cell never carries a
 /// failure and a control at once, and a cell that finished with `null` is
 /// distinct from one that ran to its end without a control call.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum CellOutcome {
     /// The cell ran to its end without a control call.
@@ -338,13 +340,16 @@ pub enum CellOutcome {
 }
 
 /// The control that ended a cell, as history records it.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CellControl {
     /// The turn finished with this value: inline, or retained out of
     /// history when its encoding was too long for it (FIG-1643).
     Finish {
         #[serde(with = "finish_value")]
+        #[schemars(with = "finish_value::Owned")]
         value: crate::OutputValue,
     },
     /// The turn switched to the agent frame `frame_key` names.
@@ -405,9 +410,10 @@ mod finish_value {
         Retained(&'a RetainedValue),
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, schemars::JsonSchema)]
     #[serde(rename_all = "snake_case")]
-    enum Owned {
+    #[schemars(rename = "CellFinishValue")]
+    pub(super) enum Owned {
         Inline(serde_json::Value),
         Retained(RetainedValue),
     }

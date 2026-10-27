@@ -1219,15 +1219,15 @@ impl<'a> Projection<'a> {
                 out.push(A::ErrorType.value(crate::wire_tag(reason)));
             }
             TraceEvent::ExecCodeCompleted {
-                error, tool_calls, ..
+                result, tool_calls, ..
             } => {
-                let outcome = if error.is_some() {
+                let outcome = if result.is_failed() {
                     "failed"
                 } else {
                     "completed"
                 };
                 cell_attributes(record, outcome, Some(tool_calls.len()), out);
-                if let Some(error) = error {
+                if let Some(error) = result.failure() {
                     let reason = error
                         .exec_failure
                         .as_ref()

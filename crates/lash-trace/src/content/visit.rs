@@ -21,7 +21,7 @@ fn text(
 // Typed fields supply bounds operations without a JSON detour. New field
 // types must implement these operations; hooks alone request the lazy
 // mutable JSON adapter.
-trait NativeField: Serialize + DeserializeOwned + Default {
+trait NativeField: Serialize + DeserializeOwned {
     fn truncate_leaves(
         &mut self,
         limit: usize,
@@ -117,6 +117,14 @@ impl NativeField for std::collections::BTreeMap<String, Value> {
     }
 }
 
+impl NativeField for lash_protocol_types::RetainedValue {
+    fn truncate_leaves(&mut self, limit: usize, _: bool, path: &str, marks: &mut ContentMarks) {
+        if super::truncate::cut(&mut self.output.witness, limit) {
+            marks.truncated.push(format!("{path}.output.witness"));
+        }
+    }
+}
+
 struct DeferredJson<'a, T> {
     original: &'a mut T,
     encoded: Option<Value>,
@@ -139,12 +147,23 @@ impl<T: NativeField> JsonField for DeferredJson<'_, T> {
         self.encoded = None;
     }
 }
-fn json<T: NativeField>(
+fn json<T: NativeField + Default>(
     category: C,
     path: impl Into<String>,
     value: &mut T,
     f: &mut dyn FnMut(&mut ContentField<'_>),
 ) {
+    if !typed_json(category, path, value, f) {
+        *value = T::default();
+    }
+}
+
+fn typed_json<T: NativeField>(
+    category: C,
+    path: impl Into<String>,
+    value: &mut T,
+    f: &mut dyn FnMut(&mut ContentField<'_>),
+) -> bool {
     // A policy callback can omit without ever serializing or cloning the field.
     let mut deferred = DeferredJson {
         original: value,
@@ -158,10 +177,15 @@ fn json<T: NativeField>(
         omitted: false,
     });
     if deferred.omitted {
-        *deferred.original = T::default();
-    } else if let Some(encoded) = deferred.encoded {
-        *deferred.original = serde_json::from_value(encoded).unwrap_or_default();
+        return false;
     }
+    if let Some(encoded) = deferred.encoded {
+        let Ok(decoded) = serde_json::from_value(encoded) else {
+            return false;
+        };
+        *deferred.original = decoded;
+    }
+    true
 }
 
 // JSON already belongs to the record: hooks and bounds mutate it in place.
@@ -571,8 +595,7 @@ impl TraceEvent {
                 trailing_discarded: _,
                 code,
                 output,
-                error,
-                terminal_finish,
+                result,
                 language: _,
                 started_at_ms: _,
                 duration_ms: _,
@@ -583,17 +606,17 @@ impl TraceEvent {
             } => {
                 text(C::Code, "code", code, f);
                 text(C::CodeOutput, "code_output", output, f);
-                if let Some(error) = error {
+                if let lash_protocol_types::CellOutcome::Failed(error) = result {
                     text(
                         C::CodeOutput,
-                        "code_output.error.message",
+                        "code_output.result.failure.message",
                         &mut error.message,
                         f,
                     );
                     for (i, feedback) in error.feedback.iter_mut().enumerate() {
                         json(
                             C::CodeOutput,
-                            format!("code_output.error.feedback[{i}].repairs"),
+                            format!("code_output.result.failure.feedback[{i}].repairs"),
                             &mut feedback.repairs,
                             f,
                         );
@@ -607,21 +630,35 @@ impl TraceEvent {
                             | lash_kernel_value::json_schema::SchemaAdmissionError::Unprojectable {
                                 message,
                                 ..
-                            } => text(C::CodeOutput, "code_output.error.schema", message, f),
+                            } => text(C::CodeOutput, "code_output.result.failure.schema", message, f),
                             lash_kernel_value::json_schema::SchemaAdmissionError::NonLocalReference {
                                 reference,
                                 ..
-                            } => text(C::CodeOutput, "code_output.error.reference", reference, f),
+                            } => text(C::CodeOutput, "code_output.result.failure.reference", reference, f),
                             lash_kernel_value::json_schema::SchemaAdmissionError::InvalidKind { .. } => {}
                         }
                     }
                 }
-                optional_value(
-                    C::CodeOutput,
-                    "code_output.terminal_finish",
-                    terminal_finish,
-                    f,
-                );
+                if let lash_protocol_types::CellOutcome::Controlled { control, .. } = result {
+                    match control {
+                        lash_protocol_types::CellControl::Finish { value: output } => {
+                            let path = "code_output.result.finish";
+                            match output {
+                                lash_protocol_types::OutputValue::Inline(inline) => {
+                                    value(C::CodeOutput, path, inline, f);
+                                }
+                                lash_protocol_types::OutputValue::Retained(retained) => {
+                                    if !typed_json(C::CodeOutput, path, retained, f) {
+                                        *output =
+                                            lash_protocol_types::OutputValue::Inline(Value::Null);
+                                    }
+                                }
+                            }
+                        }
+                        // A frame key is a derived identity, not caller material.
+                        lash_protocol_types::CellControl::SwitchAgentFrame { frame_key: _ } => {}
+                    }
+                }
             }
             Self::ExecCodeFailed {
                 trailing_discarded: _,

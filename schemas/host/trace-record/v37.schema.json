@@ -17,6 +17,77 @@
       ],
       "type": "string"
     },
+    "AttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "media_type",
+        "byte_len"
+      ],
+      "type": "object"
+    },
+    "AttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "image",
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "AttemptOutcome": {
       "enum": [
         "completed",
@@ -261,6 +332,45 @@
         }
       ]
     },
+    "CellControl": {
+      "description": "The control that ended a cell, as history records it.",
+      "oneOf": [
+        {
+          "description": "The turn finished with this value: inline, or retained out of\nhistory when its encoding was too long for it (FIG-1643).",
+          "properties": {
+            "type": {
+              "const": "finish",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/CellFinishValue"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The turn switched to the agent frame `frame_key` names.",
+          "properties": {
+            "frame_key": {
+              "$ref": "#/$defs/FrameKey"
+            },
+            "type": {
+              "const": "switch_agent_frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame_key"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "CellDefect": {
       "description": "A rule of a session's cells that a cell's program broke.",
       "oneOf": [
@@ -489,6 +599,100 @@
         "repairs"
       ],
       "type": "object"
+    },
+    "CellFinishValue": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "inline": true
+          },
+          "required": [
+            "inline"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "retained": {
+              "$ref": "#/$defs/RetainedValue"
+            }
+          },
+          "required": [
+            "retained"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CellOutcome": {
+      "description": "What an executed cell resolved to. One of three: a cell never carries a\nfailure and a control at once, and a cell that finished with `null` is\ndistinct from one that ran to its end without a control call.",
+      "oneOf": [
+        {
+          "description": "The cell ran to its end without a control call.",
+          "properties": {
+            "kind": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The cell failed.",
+          "properties": {
+            "kind": {
+              "const": "failed",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/CellFailure"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A declared control call ended the cell: the call of `tool_name`\nrecorded under `call_id`. The control stays in the record, because\ncall lists are bounded and pruned.",
+          "properties": {
+            "kind": {
+              "const": "controlled",
+              "type": "string"
+            },
+            "value": {
+              "properties": {
+                "call_id": {
+                  "type": "string"
+                },
+                "control": {
+                  "$ref": "#/$defs/CellControl"
+                },
+                "tool_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "call_id",
+                "control"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ChargeSafetyDenialReason": {
       "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",
@@ -1071,6 +1275,31 @@
       "type": "object"
     },
     "FailureCode": {
+      "type": "string"
+    },
+    "FieldShape": {
+      "additionalProperties": false,
+      "description": "One key of an object's shape.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "optional": {
+          "description": "Some object merged at this position did not hold the key.",
+          "type": "boolean"
+        },
+        "shape": {
+          "$ref": "#/$defs/ValueShape"
+        }
+      },
+      "required": [
+        "key",
+        "shape"
+      ],
+      "type": "object"
+    },
+    "FrameKey": {
+      "pattern": "^frame-key/v2/[0-9a-f]{64}$",
       "type": "string"
     },
     "FunctionId": {
@@ -1857,6 +2086,42 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "RetainedOutput": {
+      "additionalProperties": false,
+      "description": "An output history does not hold: the attachment that holds its complete\nbytes, and the bounded witness history keeps in its place.\n\nThe witness is what a reader of history \u2014 the model, a transcript \u2014 sees\nof the output. It is never expanded automatically: the complete bytes are\nread only by resolving `reference` through the session's attachment store.",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/AttachmentRef",
+          "description": "The session attachment holding the complete output."
+        },
+        "witness": {
+          "description": "The bounded text history keeps in the output's place.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "witness"
+      ],
+      "type": "object"
+    },
+    "RetainedValue": {
+      "additionalProperties": false,
+      "description": "A code mode value retained out of history (FIG-1439): the retention of\nits JSON encoding, and the shape of the value, which history keeps for a\nprogram to read in its place.",
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/RetainedOutput"
+        },
+        "shape": {
+          "$ref": "#/$defs/ValueShape"
+        }
+      },
+      "required": [
+        "output",
+        "shape"
+      ],
       "type": "object"
     },
     "RetryClass": {
@@ -6357,6 +6622,147 @@
         }
       ]
     },
+    "ValueShape": {
+      "description": "What a JSON value is made of. A position that held several values \u2014 the\nelements of an array \u2014 is their merge: its sizes are the largest\nobserved, an object key not every one of them held is `optional`, and a\nposition whose values differ in type is [`ValueShape::OneOf`] them.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "null",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "boolean",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "number",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "description": "The string's length in UTF-8 bytes.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "string",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ValueShape"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The shape of the elements; absent for an empty array and for one\nwhose contents the bound counts."
+            },
+            "length": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "array",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "length"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fields": {
+              "description": "The described keys, in the order first observed.",
+              "items": {
+                "$ref": "#/$defs/FieldShape"
+              },
+              "type": "array"
+            },
+            "omitted": {
+              "description": "Keys the bound counted instead of describing.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "object",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Values of more than one type, one shape per type in the order first\nobserved.",
+          "properties": {
+            "shapes": {
+              "items": {
+                "$ref": "#/$defs/ValueShape"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "one_of",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "shapes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "W3cSpanId": {
       "description": "A nonzero W3C span id: 16 lowercase hex digits.",
       "pattern": "^[0-9a-f]{16}$",
@@ -7229,16 +7635,6 @@
           "minimum": 0,
           "type": "integer"
         },
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CellFailure"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "language": {
           "type": "string"
         },
@@ -7261,12 +7657,14 @@
           "minimum": 0,
           "type": "integer"
         },
+        "result": {
+          "$ref": "#/$defs/CellOutcome"
+        },
         "started_at_ms": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "terminal_finish": true,
         "tool_calls": {
           "items": {
             "$ref": "#/$defs/TraceExecToolCall"
@@ -7294,6 +7692,7 @@
         "output_chars",
         "observation_count",
         "observation_projections",
+        "result",
         "tool_calls"
       ],
       "type": "object"

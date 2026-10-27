@@ -235,6 +235,10 @@ fn known_trace_event_tolerates_unknown_field() {
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "frame fixture material is a nonempty literal"
+)]
 fn event_samples() -> Vec<TraceEvent> {
     vec![
         TraceEvent::TurnStarted {
@@ -516,6 +520,19 @@ fn event_samples() -> Vec<TraceEvent> {
             code_chars: 8,
         },
         exec_code_completed_event(),
+        exec_code_completed_with_result(lash_protocol_types::CellOutcome::finished_by(
+            "finish", lash_protocol_types::ToolCallId::fixture("finish"), serde_json::Value::Null,
+        )),
+        exec_code_completed_with_result(lash_protocol_types::CellOutcome::finished_by(
+            "finish", lash_protocol_types::ToolCallId::fixture("finish"), retained_finish(),
+        )),
+        exec_code_completed_with_result(lash_protocol_types::CellOutcome::Controlled {
+            tool_name: "switch_agent_frame".into(),
+            call_id: lash_protocol_types::ToolCallId::fixture("switch"),
+            control: lash_protocol_types::CellControl::SwitchAgentFrame {
+                frame_key: lash_protocol_types::FrameKey::from_caller_material("frame").expect("nonempty frame material"),
+            },
+        }),
         TraceEvent::ExecCodeFailed {
             trailing_discarded: 0,
             code: String::new(),
@@ -712,14 +729,42 @@ fn exec_code_completed_event() -> TraceEvent {
         output_chars: 11,
         observation_count: 2,
         observation_projections: Vec::new(),
-        error: None,
-        terminal_finish: None,
+        result: lash_protocol_types::CellOutcome::Completed,
         tool_calls: vec![TraceExecToolCall {
             call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             name: "read_file".to_string(),
             status: TraceToolCallStatus::Success,
         }],
     }
+}
+
+fn exec_code_completed_with_result(outcome: lash_protocol_types::CellOutcome) -> TraceEvent {
+    let mut event = exec_code_completed_event();
+    let TraceEvent::ExecCodeCompleted { result, .. } = &mut event else {
+        unreachable!()
+    };
+    *result = outcome;
+    event
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "attachment fixture identity and media type are valid literals"
+)]
+fn retained_finish() -> lash_protocol_types::OutputValue {
+    lash_protocol_types::OutputValue::Retained(lash_protocol_types::RetainedValue {
+        output: lash_protocol_types::RetainedOutput {
+            reference: lash_protocol_types::AttachmentRef::new(
+                lash_protocol_types::AttachmentId::parse("a".repeat(64)).expect("lowercase digest"),
+                lash_protocol_types::MediaType::parse("application/json").expect("JSON media type"),
+                100_000,
+                None,
+                Some(CONTENT.into()),
+            ),
+            witness: CONTENT.into(),
+        },
+        shape: lash_protocol_types::ValueShape::String { bytes: 100_000 },
+    })
 }
 
 fn published_schema(document: &str) -> Result<jsonschema::Validator, String> {
@@ -1351,7 +1396,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             output_chars: 14,
             observation_count: 1,
             observation_projections: Vec::new(),
-            error: Some({
+            result: lash_protocol_types::CellOutcome::Failed({
                 let mut failure =
                     lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, CONTENT);
                 failure.feedback.push(lash_protocol_types::CellFailureRepair {
@@ -1361,13 +1406,18 @@ fn content_bearing_events() -> Vec<TraceEvent> {
                 });
                 failure
             }),
-            terminal_finish: Some(json!(CONTENT)),
             tool_calls: vec![TraceExecToolCall {
                 call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
                 name: "search".to_string(),
                 status: TraceToolCallStatus::Failure,
             }],
         },
+        exec_code_completed_with_result(lash_protocol_types::CellOutcome::finished_by(
+            "finish", lash_protocol_types::ToolCallId::fixture("finish"), json!(CONTENT),
+        )),
+        exec_code_completed_with_result(lash_protocol_types::CellOutcome::finished_by(
+            "finish", lash_protocol_types::ToolCallId::fixture("finish"), retained_finish(),
+        )),
         TraceEvent::ExecCodeFailed {
             trailing_discarded: 0,
             code: String::new(),
@@ -1517,10 +1567,10 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
             }
         };
         let mut event = exec_code_completed_event();
-        let TraceEvent::ExecCodeCompleted { error, .. } = &mut event else {
+        let TraceEvent::ExecCodeCompleted { result, .. } = &mut event else {
             unreachable!()
         };
-        *error = Some(
+        *result = lash_protocol_types::CellOutcome::Failed(
             lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, COMPILATION)
                 .with_schema_admission(diagnostic),
         );
@@ -1545,12 +1595,103 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
         assert_eq!(omitted["duration_ms"], 12);
         assert_eq!(omitted["output_chars"], 11);
         assert_eq!(omitted["observation_count"], 2);
-        assert_eq!(omitted["error"]["kind"], "program");
-        assert_eq!(omitted["error"]["schema_admission"]["kind"], kind);
-        assert_eq!(omitted["error"]["schema_admission"]["schema_path"], path);
+        assert_eq!(omitted["result"]["value"]["kind"], "program");
+        assert_eq!(omitted["result"]["value"]["schema_admission"]["kind"], kind);
+        assert_eq!(
+            omitted["result"]["value"]["schema_admission"]["schema_path"],
+            path
+        );
         assert_eq!(
             omitted["tool_calls"][0]["call_id"],
             lash_protocol_types::ToolCallId::fixture("call-1").to_string(),
         );
     }
+}
+
+/// FIG-7487: governance and JSONL readback keep completion, null finish, and frame switch distinct.
+#[test]
+fn governed_cell_outcome_preserves_null_finish() {
+    use lash_protocol_types::{CellControl, CellOutcome, OutputValue};
+    let call = lash_protocol_types::ToolCallId::fixture("control");
+    let outcomes = [
+        CellOutcome::Completed,
+        CellOutcome::finished_by("finish", call.clone(), serde_json::Value::Null),
+        CellOutcome::finished_by("finish", call.clone(), json!({"answer": CONTENT})),
+        CellOutcome::finished_by("finish", call.clone(), retained_finish()),
+        CellOutcome::Controlled {
+            tool_name: "switch_agent_frame".into(),
+            call_id: call,
+            control: CellControl::SwitchAgentFrame {
+                frame_key: lash_protocol_types::FrameKey::from_caller_material("frame")
+                    .expect("nonempty frame material"),
+            },
+        },
+    ];
+    for original in outcomes {
+        for policy in [
+            lash_trace::ContentPolicy::captured(),
+            lash_trace::ContentPolicy::omitted(),
+        ] {
+            let record = fixture_record(
+                TraceContext::default(),
+                exec_code_completed_with_result(original.clone()),
+            )
+            .governed(policy);
+            let wire = serde_json::to_string(&record).unwrap();
+            let decoded: TraceRecord = serde_json::from_str(&wire).unwrap();
+            let TraceEvent::ExecCodeCompleted { result, .. } = decoded.event else {
+                unreachable!()
+            };
+            let mut expected = original.clone();
+            if !policy.captures(lash_trace::ContentCategory::CodeOutput) {
+                if let CellOutcome::Controlled {
+                    control: CellControl::Finish { value },
+                    ..
+                } = &mut expected
+                {
+                    *value = OutputValue::Inline(serde_json::Value::Null);
+                }
+                assert!(!wire.contains(CONTENT), "{wire}");
+                assert!(
+                    decoded
+                        .content
+                        .omitted
+                        .iter()
+                        .any(|path| path == "code_output")
+                );
+            }
+            assert_eq!(result, expected);
+        }
+    }
+
+    // An oversized non-string payload is dropped by the attribute bound, but remains a finish.
+    let record = fixture_record(
+        TraceContext::default(),
+        exec_code_completed_with_result(CellOutcome::finished_by(
+            "finish",
+            lash_protocol_types::ToolCallId::fixture("bounded"),
+            json!(vec![123456; 350_000]),
+        )),
+    )
+    .governed(lash_trace::ContentPolicy::captured());
+    assert!(
+        record
+            .content
+            .oversize
+            .iter()
+            .any(|path| path == "code_output.result.finish")
+    );
+    let decoded: TraceRecord =
+        serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+    let TraceEvent::ExecCodeCompleted { result, .. } = decoded.event else {
+        unreachable!()
+    };
+    assert_eq!(
+        result,
+        CellOutcome::finished_by(
+            "finish",
+            lash_protocol_types::ToolCallId::fixture("bounded"),
+            serde_json::Value::Null
+        )
+    );
 }

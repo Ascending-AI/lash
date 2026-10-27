@@ -820,8 +820,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 output_chars: 6,
                 observation_count: 0,
                 observation_projections: Vec::new(),
-                error: None,
-                terminal_finish: None,
+                result: lash_protocol_types::CellOutcome::Completed,
                 tool_calls: Vec::new(),
             },
             "execute_tool python",
@@ -925,11 +924,10 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 output_chars: 14,
                 observation_count: 0,
                 observation_projections: Vec::new(),
-                error: Some(crate::CellFailure::new(
+                result: lash_protocol_types::CellOutcome::Failed(crate::CellFailure::new(
                     crate::CellFailureKind::Program,
                     "bad program",
                 )),
-                terminal_finish: None,
                 tool_calls: Vec::new(),
             },
             "program",
@@ -945,14 +943,13 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 output_chars: 0,
                 observation_count: 0,
                 observation_projections: Vec::new(),
-                error: Some(
+                result: lash_protocol_types::CellOutcome::Failed(
                     lash_protocol_types::ExecCodeFailure::new(
                         crate::ExecCodeFailureReason::ExecutorUnavailable,
                         "missing executor",
                     )
                     .into(),
                 ),
-                terminal_finish: None,
                 tool_calls: Vec::new(),
             },
             "executor_unavailable",

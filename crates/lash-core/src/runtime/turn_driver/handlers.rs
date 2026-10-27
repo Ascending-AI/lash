@@ -912,13 +912,7 @@ impl RuntimeTurnDriver<'_> {
                                 + output.prints.len().saturating_sub(1),
                             observation_count: output.prints.len(),
                             observation_projections,
-                            error: output
-                                .error()
-                                .map(|failure| crate::trace::trace_cell_failure(failure, content)),
-                            terminal_finish: content
-                                .capture(lash_trace::ContentCategory::CodeOutput, || {
-                                    output.finish_value().cloned()
-                                }),
+                            result: crate::trace::trace_cell_outcome(&output.result, content),
                             tool_calls: output
                                 .tool_calls
                                 .iter()

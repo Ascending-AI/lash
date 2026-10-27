@@ -79,8 +79,8 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    transcript disclosure's `<summary>` text (`typescript completed[ in Nms] · N tool(s)`; the
    duration clause is optional). Do **not**
    look for a language field on `exec_code_completed`: its keys are `context`, `duration_ms`,
-   `error`, `id`, `observation_count`, `observation_projections`, `output`, `output_chars`,
-   `schema_version`, `terminal_finish`, `timestamp`, `tool_calls`, `type`, and
+   `result`, `id`, `observation_count`, `observation_projections`, `output`, `output_chars`,
+   `schema_version`, `timestamp`, `tool_calls`, `type`, and
    `exec_code_started` carries only `code`, `code_chars`, `context`, `id`, `schema_version`,
    `timestamp` — a driver taking the older wording literally has no field to read and fails a
    gate the product satisfies. `/api/state.settings` carries only `model`, `model_variant`, `model_variants`, `session_id` and `session_name`.

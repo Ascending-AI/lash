@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    CellFailure, ExecCodeFailureReason, TextProjectionMetadata, TraceAttemptObservation,
-    TraceDomainCompletion, TraceDomainStatus, TraceEffectEnvelopeDiffEvent, TraceError,
-    TraceExecToolCall, TraceLanguageExecution, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceNodeFact,
-    TraceProgramStepOutcome, TracePromptComponent, TraceProviderEvent,
-    TraceProviderReplayDropEvent, TraceRetryAttempt, TraceRuntimeStreamEvent, TraceStoreErrorClass,
-    TraceToolCallOutcome, TraceToolCallOutput, TraceToolSpec, TraceTurnOutcome,
+    ExecCodeFailureReason, TextProjectionMetadata, TraceAttemptObservation, TraceDomainCompletion,
+    TraceDomainStatus, TraceEffectEnvelopeDiffEvent, TraceError, TraceExecToolCall,
+    TraceLanguageExecution, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceLlmRequest, TraceLlmResponse, TraceNodeFact, TraceProgramStepOutcome,
+    TracePromptComponent, TraceProviderEvent, TraceProviderReplayDropEvent, TraceRetryAttempt,
+    TraceRuntimeStreamEvent, TraceStoreErrorClass, TraceToolCallOutcome, TraceToolCallOutput,
+    TraceToolSpec, TraceTurnOutcome,
 };
 
 #[derive(
@@ -216,8 +216,7 @@ pub enum TraceEvent {
         output_chars: usize,
         observation_count: usize,
         observation_projections: Vec<TextProjectionMetadata>,
-        error: Option<CellFailure>,
-        terminal_finish: Option<Value>,
+        result: lash_protocol_types::CellOutcome,
         tool_calls: Vec<TraceExecToolCall>,
     },
     /// A code cell answered with a failure, and the commit that consumed its
@@ -339,7 +338,7 @@ impl TraceEvent {
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
     /// - [`Self::ExecCodeFailed`] always and [`Self::ExecCodeCompleted`] when
-    ///   its executor reported a [`CellFailure`];
+    ///   its executor reported a [`lash_protocol_types::CellFailure`];
     /// - [`Self::DomainCompleted`] only with [`TraceDomainStatus::Failed`];
     /// - [`Self::ToolCallCompleted`] only with [`TraceToolCallOutcome::Failure`];
     /// - [`Self::TurnCompleted`] only with [`TraceTurnOutcome::Failed`], for any
@@ -363,7 +362,7 @@ impl TraceEvent {
             | Self::EffectEnvelopeDiff { .. }
             | Self::StoreErrorObserved { .. }
             | Self::ExecCodeFailed { .. } => true,
-            Self::ExecCodeCompleted { error, .. } => error.is_some(),
+            Self::ExecCodeCompleted { result, .. } => result.is_failed(),
             Self::ProgramStep { outcome, .. } => match outcome {
                 TraceProgramStepOutcome::Ok => false,
                 TraceProgramStepOutcome::Failure { .. } => true,

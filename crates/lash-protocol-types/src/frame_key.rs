@@ -119,6 +119,21 @@ impl serde::Serialize for FrameKey {
     }
 }
 
+impl schemars::JsonSchema for FrameKey {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FrameKey".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = <String as schemars::JsonSchema>::json_schema(generator);
+        schema.insert(
+            "pattern".into(),
+            serde_json::json!(format!("^{FRAME_KEY_PREFIX}[0-9a-f]{{64}}$")),
+        );
+        schema
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for FrameKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
