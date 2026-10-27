@@ -161,6 +161,60 @@ impl lash_core::ToolProvider for Tools {
     }
 }
 
+fn namespace_host_geometry(args: &Args) -> Result<Option<crate::replay::script::HostGeometry>> {
+    if !matches!(args.case, Case::WorkflowNamespace) || args.workload == "smoke-v1" {
+        return Ok(None);
+    }
+    Ok(Some(
+        crate::replay::script::resolve(&args.workload)?
+            .host
+            .context("workflow-namespace --workload requires a replay host geometry")?,
+    ))
+}
+
+struct NamespaceTools {
+    lifecycle: Arc<dyn lash_core::ToolProvider>,
+    host: Arc<crate::replay::HostTools>,
+}
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for NamespaceTools {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash::tools::ToolManifest>, lash::plugins::PluginError> {
+        let mut manifests = self.lifecycle.tool_manifests(config)?;
+        manifests.extend(self.host.tool_manifests(config)?);
+        Ok(manifests)
+    }
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash::tools::ToolContract>> {
+        self.lifecycle
+            .resolve_contract(name, config)
+            .or_else(|| self.host.resolve_contract(name, config))
+    }
+    fn link_payload(
+        &self,
+        manifest: &lash::tools::ToolManifest,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<(lash::plugins::FormatVersion, serde_json::Value)> {
+        if manifest.tool() == "tools.mark" {
+            self.lifecycle.link_payload(manifest, config)
+        } else {
+            self.host.link_payload(manifest, config)
+        }
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name().as_str() == "tools.mark" {
+            self.lifecycle.execute(call).await
+        } else {
+            self.host.execute(call).await
+        }
+    }
+}
+
 impl Fleet {
     /// `nodes` served nodes over one product store. `configure` finishes each
     /// node's builder; it receives the node's index.
@@ -237,6 +291,14 @@ impl Fleet {
                         lash_protocol_rlm::CellDialect::typescript(),
                     );
                     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(Tools::new(meter)?);
+                    let tools: Arc<dyn lash_core::ToolProvider> =
+                        match namespace_host_geometry(args)? {
+                            Some(geometry) => Arc::new(NamespaceTools {
+                                lifecycle: tools,
+                                host: crate::replay::HostTools::new(Some(&geometry))?,
+                            }),
+                            None => tools,
+                        };
                     lash::LashCore::rlm_builder(backend, factory)
                         .plugin(Arc::new(crate::perf_support::tool_plugin(
                             "tools",

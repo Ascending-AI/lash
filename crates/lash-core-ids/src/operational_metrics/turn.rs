@@ -13,6 +13,7 @@ pub struct Context {
     started: Instant,
     profile: Arc<Mutex<TurnProfile>>,
     phase: &'static str,
+    phase_index: Option<usize>,
     depth: u32,
     revision: Option<i64>,
 }
@@ -30,6 +31,7 @@ impl Default for Context {
                 ..Default::default()
             })),
             phase: "owner orchestration",
+            phase_index: None,
             depth: 0,
             revision: None,
         }
@@ -64,6 +66,7 @@ impl Context {
             backend,
             shape,
             statements,
+            round_trips,
             rows_returned: rows,
             rows_affected: affected,
             bound_bytes: bound,
@@ -72,6 +75,15 @@ impl Context {
         } = work;
         let mut profile = self.profile.lock().unwrap_or_else(PoisonError::into_inner);
         profile.statements += statements;
+        if let Some(index) = self.phase_index {
+            let interval = &mut profile.phases[index];
+            interval.statements += statements;
+            interval.round_trips += round_trips;
+            interval.rows_returned += rows;
+            interval.rows_affected += affected;
+            interval.bound_bytes += bound;
+            interval.result_bytes += result;
+        }
         let verb = shape.split_whitespace().next().unwrap_or_default();
         if matches!(verb, "insert" | "update" | "delete" | "replace") {
             profile.dml += statements;
@@ -80,7 +92,8 @@ impl Context {
             profile.transactions += statements;
         }
         let existing = profile.sql.iter().position(|r| {
-            r.phase == self.phase
+            r.phase_index == self.phase_index
+                && r.phase == self.phase
                 && r.origin == origin
                 && r.owner_commit == owner_commit
                 && r.shape == shape
@@ -92,6 +105,7 @@ impl Context {
             None if profile.sql.len() < SQL_KEY_LIMIT => {
                 profile.sql.push(TurnSqlWork {
                     phase: self.phase.into(),
+                    phase_index: self.phase_index,
                     origin,
                     owner_commit,
                     shape,
@@ -108,6 +122,7 @@ impl Context {
         };
         let row = &mut profile.sql[index];
         row.statements += statements;
+        row.round_trips += round_trips;
         row.rows_returned += rows;
         row.rows_affected += affected;
         row.bound_bytes += bound;
@@ -161,10 +176,12 @@ fn interval(phase: &'static str, revision: Option<i64>) -> Option<Interval> {
                     end_ns: u64::MAX,
                     depth: context.depth,
                     revision,
+                    ..Default::default()
                 });
                 Some(index)
             }
         };
+        context.phase_index = index;
         Interval { index, context }
     })
 }
@@ -294,6 +311,14 @@ impl Context {
         let mut profile = self.snapshot();
         if !first {
             profile.sql.clear();
+            for interval in &mut profile.phases {
+                interval.statements = 0;
+                interval.round_trips = 0;
+                interval.rows_returned = 0;
+                interval.rows_affected = 0;
+                interval.bound_bytes = 0;
+                interval.result_bytes = 0;
+            }
             profile.writes.clear();
             profile.statements = 0;
             profile.dml = 0;
@@ -304,5 +329,76 @@ impl Context {
             profile: Arc::new(Mutex::new(profile)),
             ..self.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// TURN-PHASE-SQL: repeated and nested intervals own each physical SQL
+    /// execution once, and a shared claim assigns SQL to only its first actor.
+    #[tokio::test]
+    async fn physical_sql_belongs_to_the_exact_deepest_interval() {
+        let context = Context::default();
+        context
+            .within(async {
+                let window = super::super::sql::Window::new("phase-law", "postgres");
+                window
+                    .within(async {
+                        for _ in 0..2 {
+                            phase("prompt/environment build", None, async {
+                                window.statement("SELECT $1");
+                                window.payload("SELECT $1", 0, 13, 17);
+                                phase("nested", None, async {
+                                    window.statement("SELECT $2");
+                                })
+                                .await;
+                            })
+                            .await;
+                        }
+                    })
+                    .await;
+            })
+            .await;
+        let profile = context.snapshot();
+        assert_eq!(profile.statements, 4);
+        assert_eq!(profile.phases.len(), 4);
+        for (index, interval) in profile.phases.iter().enumerate() {
+            assert_eq!(interval.statements, 1);
+            assert_eq!(interval.round_trips, 1);
+            assert_eq!(
+                profile
+                    .sql
+                    .iter()
+                    .filter(|row| row.phase_index == Some(index))
+                    .map(|row| row.statements)
+                    .sum::<u64>(),
+                1
+            );
+        }
+        assert_eq!(profile.phases[0].bound_bytes, 13);
+        assert_eq!(profile.phases[0].result_bytes, 17);
+        context
+            .within(phase("overflow", None, async {
+                let window = super::super::sql::Window::new("overflow", "postgres");
+                for index in 0..=SQL_KEY_LIMIT {
+                    window.statement(&format!("SELECT field{index}"));
+                }
+            }))
+            .await;
+        let bounded = context.snapshot();
+        assert_eq!(
+            bounded.phases.last().unwrap().statements,
+            SQL_KEY_LIMIT as u64 + 1
+        );
+        assert_eq!(bounded.sql.len(), SQL_KEY_LIMIT);
+        assert!(bounded.omitted_sql_keys > 0);
+        let follower = context.claimed_actor(false).snapshot();
+        assert_eq!(follower.statements, 0);
+        assert!(follower.phases.iter().all(|phase| phase.statements == 0
+            && phase.round_trips == 0
+            && phase.bound_bytes == 0
+            && phase.result_bytes == 0));
     }
 }

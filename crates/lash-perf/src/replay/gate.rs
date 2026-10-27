@@ -239,6 +239,51 @@ impl Baseline {
         })
     }
 
+    /// Preserve the existing upper bounds while refreshing measured gains.
+    pub(super) fn tighten_against(&mut self, old: &Self) -> Result<()> {
+        for (name, row) in &mut self.workloads {
+            if let Some(prior) = old.workloads.get(name) {
+                for (metric, value) in &prior.depth_slope {
+                    if let Some(slope) = row.depth_slope.get_mut(metric) {
+                        *slope = slope.min(*value);
+                    }
+                }
+                for (metric, ceiling) in &mut row.median_ceiling {
+                    if let Some(prior_ceiling) = prior.median_ceiling.get(metric) {
+                        let maximum = row
+                            .per_turn_median
+                            .get(metric)
+                            .context("calibration has no measured maximum")?;
+                        ensure!(
+                            maximum <= prior_ceiling,
+                            "refuse loosening {name}/{metric}: observed {maximum} > {prior_ceiling}"
+                        );
+                        if *ceiling > *prior_ceiling {
+                            // Keep the entire prior calibration when a wider
+                            // sampled noise margin alone would raise its bound.
+                            *ceiling = *prior_ceiling;
+                            row.per_turn_median.insert(
+                                metric.clone(),
+                                *prior
+                                    .per_turn_median
+                                    .get(metric)
+                                    .context("prior calibration has no measured maximum")?,
+                            );
+                            row.median_noise.insert(
+                                metric.clone(),
+                                *prior
+                                    .median_noise
+                                    .get(metric)
+                                    .context("prior calibration has no noise bound")?,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Calibrate five complete ordinary receipts, refusing identity or population drift.
     pub fn calibrate(receipts: &[ReplayReceipt]) -> Result<Self> {
         ensure!(
@@ -770,6 +815,48 @@ mod tests {
                 .into_iter()
                 .collect(),
         }
+    }
+
+    /// BASELINE-RATCHET: sampled noise that still fits an existing ceiling
+    /// cannot block tightening another metric or raise any counted ceiling.
+    #[test]
+    fn a_noisier_metric_keeps_its_bound_while_other_metrics_tighten() {
+        let population = |bytes: [f64; 5], allocations| {
+            bytes.map(|bytes| {
+                let mut candidate = receipt(0.0);
+                let row = &mut candidate.workloads[0];
+                for round in &mut row.rounds {
+                    round.metrics.insert("sql_bytes_written".into(), bytes);
+                    round.metrics.insert("allocations".into(), allocations);
+                }
+                row.summary = summarize(&row.rounds);
+                candidate
+            })
+        };
+        let old = Baseline::calibrate(&population(
+            [40_000.0, 40_002.0, 40_001.0, 40_001.0, 40_002.0],
+            100.0,
+        ))
+        .unwrap();
+        let mut measured = Baseline::calibrate(&population(
+            [39_996.0, 40_001.0, 39_997.0, 40_000.0, 39_998.0],
+            80.0,
+        ))
+        .unwrap();
+        measured.tighten_against(&old).unwrap();
+        let row = &measured.workloads["chat-short"];
+        assert_eq!(row.median_ceiling["allocations"], 80.0);
+        assert_eq!(row.per_turn_median["sql_bytes_written"], 40_002.0);
+        assert_eq!(row.median_noise["sql_bytes_written"], 2.0);
+        assert_eq!(row.median_ceiling["sql_bytes_written"], 40_004.0);
+        for (metric, ceiling) in &row.median_ceiling {
+            assert!(*ceiling <= old.workloads["chat-short"].median_ceiling[metric]);
+        }
+        let mut breach = Baseline::calibrate(&population([40_005.0; 5], 80.0)).unwrap();
+        assert!(
+            breach.tighten_against(&old).is_err(),
+            "an observed maximum above the old ceiling remains a refusal"
+        );
     }
 
     /// FIG-6620: an unknown slope cannot satisfy a counted ceiling or baseline.

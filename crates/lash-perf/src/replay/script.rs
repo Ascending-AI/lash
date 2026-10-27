@@ -23,6 +23,9 @@ pub struct Workload {
     pub name: String,
     pub description: String,
     pub protocol: Protocol,
+    /// Resident host catalogue geometry; omitted by the original corpus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostGeometry>,
     /// Explicit compute budget for full manual/scheduled cells; omitted in the counted corpus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instruction_limit: Option<u64>,
@@ -36,6 +39,18 @@ pub struct Workload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_every: Option<usize>,
     pub turns: Vec<TurnGroup>,
+}
+
+/// Host deployment dimensions, independent of the scripted turn's work.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostGeometry {
+    pub tools: usize,
+    pub schema_fields: usize,
+    #[serde(default = "one")]
+    pub package_roots: usize,
+    /// Figments supplies owner/model options on every turn.
+    pub run_override: bool,
 }
 
 fn one() -> usize {
@@ -317,7 +332,11 @@ fn expand_reply(reply: &Reply, vars: &[(&str, String)]) -> Reply {
 }
 
 /// The committed corpus, compiled in so a test target needs no runfiles.
-pub const CORPUS: [(&str, &str); 9] = [
+pub const CORPUS: [(&str, &str); 10] = [
+    (
+        "hostturn",
+        include_str!("../../workloads/replay/hostturn.json"),
+    ),
     (
         "ts-record-sort-200k",
         include_str!("../../workloads/replay/ts-record-sort-200k.json"),

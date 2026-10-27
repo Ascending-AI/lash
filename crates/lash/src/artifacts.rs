@@ -322,8 +322,26 @@ impl HostArtifacts {
         packages.consumer = Some(consumer);
         let claim = claim(pin)?;
         let store = self.core.backend().package_store();
+        let keys = packages
+            .snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.key())
+            .collect();
+        let missing = store
+            .unheld_publications(&claim, &keys)
+            .await
+            .map_err(|error| {
+                publication_error(
+                    pin,
+                    lash_execution_contracts::plugin_error::registry_error(error),
+                )
+            })?;
         let mut held = std::collections::BTreeSet::new();
         for accepted in &packages.snapshot.advertisements {
+            if !missing.contains(&accepted.publication.key()) {
+                continue;
+            }
             if configured.snapshot.advertisements.contains(accepted) {
                 diagnostics::phase(
                     "holds",

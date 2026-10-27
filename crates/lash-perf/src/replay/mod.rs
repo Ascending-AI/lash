@@ -23,6 +23,7 @@ mod workers;
 pub use workers::python_worker_entry;
 
 mod capabilities;
+pub(crate) use capabilities::HostTools;
 
 use std::path::PathBuf;
 
@@ -446,23 +447,7 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
     if let Some(path) = &args.bless {
         let mut baseline = gate::Baseline::calibrate(&receipts)?;
         let old = gate::Baseline::committed()?;
-        for (name, row) in &mut baseline.workloads {
-            if let Some(prior) = old.workloads.get(name) {
-                for (metric, value) in &prior.depth_slope {
-                    if let Some(slope) = row.depth_slope.get_mut(metric) {
-                        *slope = slope.min(*value);
-                    }
-                }
-                for (metric, ceiling) in &row.median_ceiling {
-                    if let Some(prior) = prior.median_ceiling.get(metric) {
-                        anyhow::ensure!(
-                            ceiling <= prior,
-                            "refuse loosening {name}/{metric}: {ceiling} > {prior}"
-                        );
-                    }
-                }
-            }
-        }
+        baseline.tighten_against(&old)?;
         std::fs::write(path, serde_json::to_string_pretty(&baseline)? + "\n")
             .with_context(|| format!("write {}", path.display()))?;
         println!("replay gate: blessed baseline {}", path.display());

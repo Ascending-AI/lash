@@ -309,7 +309,7 @@ impl OtelTelemetry {
             name = custom.into_owned();
         }
         let (start, end) = match projection.phase {
-            Some((phase, base)) => {
+            Some((phase, base, _)) => {
                 let at = |offset| {
                     std::time::UNIX_EPOCH
                         + std::time::Duration::from_nanos(base)
@@ -353,11 +353,11 @@ impl OtelTelemetry {
         else {
             return;
         };
-        for (phase, position) in profile.phase_positions(&record.id, parent) {
+        for (index, (phase, position)) in profile.phase_positions(&record.id, parent).enumerate() {
             let Some(mut projection) = Projection::for_record(record, &position) else {
                 continue;
             };
-            projection.phase = Some((phase, profile.started_at_unix_ns));
+            projection.phase = Some((phase, profile.started_at_unix_ns, index));
             self.export_projection(record, &position, None, projection);
         }
     }
@@ -774,8 +774,77 @@ struct Projection<'a> {
     attempt: Option<&'a crate::TraceModelAttempt>,
     usage: Option<Result<LlmUsage, TokenUsageOverflow>>,
     extension: Option<&'a crate::ExtensionSpanRecord>,
-    phase: Option<(&'a crate::TurnPhaseInterval, u64)>,
+    phase: Option<(&'a crate::TurnPhaseInterval, u64, usize)>,
 }
+fn phase_sql_attributes(
+    profile: &crate::TurnProfile,
+    index: usize,
+    phase: &crate::TurnPhaseInterval,
+    out: &mut Vec<KeyValue>,
+) {
+    let mut grouped = std::collections::BTreeMap::new();
+    for row in profile
+        .sql
+        .iter()
+        .filter(|row| row.phase_index == Some(index))
+    {
+        let group = grouped
+            .entry((&row.backend, &row.shape))
+            .or_insert_with(|| crate::TurnSqlWork {
+                backend: row.backend.clone(),
+                shape: row.shape.clone(),
+                ..Default::default()
+            });
+        group.statements += row.statements;
+        group.round_trips += row.round_trips;
+        group.rows_returned += row.rows_returned;
+        group.rows_affected += row.rows_affected;
+        group.bound_bytes += row.bound_bytes;
+        group.result_bytes += row.result_bytes;
+    }
+    let mut rows: Vec<_> = grouped.into_values().collect();
+    for (key, count) in [
+        ("lash.turn.sql.statements", phase.statements),
+        ("lash.turn.sql.round_trips", phase.round_trips),
+        ("lash.turn.sql.rows_returned", phase.rows_returned),
+        ("lash.turn.sql.rows_affected", phase.rows_affected),
+        ("lash.turn.sql.bound_bytes", phase.bound_bytes),
+        ("lash.turn.sql.result_bytes", phase.result_bytes),
+    ] {
+        out.push(KeyValue::new(key, count as i64));
+    }
+    rows.sort_by(|a, b| {
+        b.statements
+            .cmp(&a.statements)
+            .then_with(|| a.shape.cmp(&b.shape))
+            .then_with(|| a.backend.cmp(&b.backend))
+    });
+    let shapes: Vec<_> = rows
+        .iter()
+        .take(8)
+        .map(|row| {
+            serde_json::json!({
+                "shape": row.shape.chars().take(256).collect::<String>(),
+                "backend": row.backend,
+                "statements": row.statements,
+                "round_trips": row.round_trips,
+                "rows_returned": row.rows_returned,
+                "rows_affected": row.rows_affected,
+                "bound_bytes": row.bound_bytes,
+                "result_bytes": row.result_bytes,
+            })
+        })
+        .collect();
+    out.push(KeyValue::new(
+        "lash.turn.sql.top_shapes",
+        serde_json::Value::Array(shapes).to_string(),
+    ));
+    out.push(KeyValue::new(
+        "lash.turn.sql.omitted_shapes",
+        rows.len().saturating_sub(8) as i64,
+    ));
+}
+
 impl<'a> Projection<'a> {
     fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
         let mut projection = Self {
@@ -857,7 +926,7 @@ impl<'a> Projection<'a> {
         Some(projection)
     }
     fn name(&self) -> String {
-        if let Some((phase, _)) = self.phase {
+        if let Some((phase, _, _)) = self.phase {
             return format!("lash.turn.{}", phase.phase.replace([' ', '/'], "_"));
         }
         if let Some(extension) = self.extension {
@@ -917,10 +986,17 @@ impl<'a> Projection<'a> {
     }
 
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
-        if let Some((phase, _)) = self.phase {
+        if let Some((phase, _, index)) = self.phase {
             out.push(KeyValue::new("lash.turn.phase", phase.phase.clone()));
             if let Some(revision) = phase.revision {
                 out.push(KeyValue::new("lash.owner.revision", revision));
+            }
+            if let TraceEvent::TurnCompleted {
+                profile: Some(profile),
+                ..
+            } = &record.event
+            {
+                phase_sql_attributes(profile, index, phase, out);
             }
             return;
         }

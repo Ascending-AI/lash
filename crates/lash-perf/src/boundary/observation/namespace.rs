@@ -176,6 +176,8 @@ pub(in crate::boundary) async fn run(
         &meter,
         serde_json::json!({"namespace_windows":windows}),
         serde_json::json!({"workload":"workflow-namespace-v1","definition_identity":definitions,
+            "host_geometry":super::namespace_host_geometry(args)?,
+            "lifecycle_tool":"tools.mark is additional to the host catalogue",
             "oracle":"published definition identity unchanged iff content unchanged; retained replacement starts successfully and returns replacement value",
             "cold":"first lifecycle on a fresh core and database per definition variant",
             "warm":"later lifecycles on the same core and database; fresh host pins",

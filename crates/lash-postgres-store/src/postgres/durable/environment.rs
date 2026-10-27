@@ -275,7 +275,7 @@ pub(super) async fn apply(
     }
     match write {
         EnvironmentWrite::Prepare { owner, body_json } => {
-            let body: EnvironmentBody = env::decode(body_json)?;
+            let body = env::decoded_body(owner.version(), body_json)?;
             if body.validate().is_err()
                 || body.id() != owner.version()
                 || owner.state() != VersionOwnerState::Preparing

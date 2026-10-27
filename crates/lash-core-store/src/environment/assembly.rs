@@ -178,6 +178,7 @@ pub fn assemble(
         fragments,
         id,
         validation: Arc::new(std::sync::OnceLock::from(Ok(()))),
+        encoded: Arc::default(),
     };
     let checked = body.shared_validation();
     // Reuse completed validation, keeping its owner alive across equal

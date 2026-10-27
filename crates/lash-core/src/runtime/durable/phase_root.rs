@@ -308,6 +308,7 @@ pub(in crate::runtime) struct StagedPhase {
     staging: GraphStaging,
     held: Vec<NodeId>,
     prepared: Vec<std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>>,
+    supplied: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
     stored: PhaseStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
 }
@@ -458,9 +459,11 @@ impl StagedPhase {
             .and_then(|config| config.publication.clone());
         let mut config_stored = RunConfigStored::default();
         let mut prepared = Vec::new();
+        let mut supplied = Vec::new();
         if let Some(config) = config {
             held_nodes.extend(config.held);
             prepared = config.prepared;
+            supplied = config.supplied;
             config_stored = config.stored;
         }
         Ok(Self {
@@ -478,6 +481,7 @@ impl StagedPhase {
             staging,
             held: held_nodes,
             prepared,
+            supplied,
             stored: PhaseStored {
                 content: stored,
                 config: config_stored,
@@ -501,6 +505,7 @@ impl StagedPhase {
         for node in self.prepared {
             tx.require_exact(node);
         }
+        tx.stage(self.supplied);
         tx.stage_all(self.staging);
         tx.phase(self.root, self.surface, self.environments);
         (self.root, self.stored)

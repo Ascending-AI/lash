@@ -482,7 +482,20 @@ Phase children are `lash.turn.claim`, `lash.turn.readback`, `lash.turn.admission
 `lash.turn.store_queue_wait`, `lash.turn.store_gate_wait`,
 `lash.turn.store_pool_wait`, `lash.turn.worker_checkout_wait` and
 `lash.turn.worker_IPC`, when reached. Each has `lash.turn.phase`; commits also
-have `lash.owner.revision`. They parent to `invoke_agent` and follow its
+have `lash.owner.revision`. Each child exports exclusive SQL counters for its
+exact interval: `lash.turn.sql.statements`, `lash.turn.sql.round_trips`,
+`lash.turn.sql.rows_returned`, `lash.turn.sql.rows_affected`,
+`lash.turn.sql.bound_bytes` and `lash.turn.sql.result_bytes`.
+Round trips count observed PostgreSQL statement submissions, excluding pool
+checks and protocol control; SQLite contributes zero. Bytes are parameter
+and returned scalar payload, excluding framing, WAL and fsync.
+`lash.turn.sql.top_shapes` is a JSON array of at most eight shape entries,
+ranked by statement count, with literals removed and each shape capped at
+256 characters. Entries combine all origins for the same backend and shape, and contain
+statements, round trips, rows and payload bytes.
+`lash.turn.sql.omitted_shapes` counts additional captured backend/shape keys;
+`lash.turn.profile.omitted_sql_keys` on the parent reports capture overflow.
+Repeated phase names have independent counters. They parent to `invoke_agent` and follow its
 sampling decision. Their kind is `Agent`; the host's export policy and bounded
 enricher apply to each phase. Sinks recover the same phase identities through
 `TurnProfile::phase_positions` using the terminal's record id and position.

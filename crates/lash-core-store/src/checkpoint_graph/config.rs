@@ -117,6 +117,63 @@ fn stage_value(staging: &mut GraphStaging, value: Value) -> Result<NodeId, Strin
         .map_err(|error| error.to_string())
 }
 
+/// Replace or remove one recorded object field, encoding only the path and
+/// replacement. Unchanged children keep their exact graph identities.
+///
+/// # Errors
+/// The source is incomplete or corrupt, a path traverses a non-object, or
+/// the replacement cannot be encoded.
+pub fn replace_field(
+    staging: &mut GraphStaging,
+    source: &dyn super::NodeSource,
+    root: NodeId,
+    path: &[&str],
+    replacement: Option<Value>,
+) -> Result<NodeId, String> {
+    if path.len() > MAX_JSON_DEPTH {
+        return Err("config field path exceeds nesting limit".into());
+    }
+    let (field, rest) = path
+        .split_first()
+        .ok_or_else(|| "empty config field path".to_owned())?;
+    let mut decoder = GraphDecoder::new(source, super::DecodeLimits::within_total(u64::MAX));
+    let ConfigValue::Object(mut fields) = decoder
+        .decode(root, NodeKind::CONFIG_VALUE)
+        .map_err(|error| error.to_string())?
+    else {
+        return Err("config field path traverses a non-object".into());
+    };
+    if fields.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err("config object keys are not strictly ascending".into());
+    }
+    let at = fields.binary_search_by(|(key, _)| key.as_str().cmp(field));
+    let next = if rest.is_empty() {
+        replacement
+            .map(|value| stage_value(staging, value))
+            .transpose()?
+    } else {
+        let child = at.map_err(|_| format!("missing config field {field}"))?;
+        Some(replace_field(
+            staging,
+            source,
+            fields[child].1,
+            rest,
+            replacement,
+        )?)
+    };
+    match (at, next) {
+        (Ok(at), Some(next)) => fields[at].1 = next,
+        (Err(at), Some(next)) => fields.insert(at, ((*field).to_owned(), next)),
+        (Ok(at), None) => {
+            fields.remove(at);
+        }
+        (Err(_), None) => {}
+    }
+    staging
+        .encode_value(NodeKind::CONFIG_VALUE, &ConfigValue::Object(fields))
+        .map_err(|error| error.to_string())
+}
+
 /// Reconstruct exactly the recorded data, without resolving live owners.
 ///
 /// # Errors

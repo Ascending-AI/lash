@@ -694,20 +694,63 @@ async fn env_takeover() {
     assert_eq!(f.calls.load(Ordering::SeqCst), 0);
 }
 
+struct CountedNamespace;
+#[async_trait::async_trait]
+impl crate::plugin::packages::PackageProvider for CountedNamespace {
+    fn roots(
+        &self,
+        _: &crate::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash_kernel_value::names::Segment> {
+        [lash_kernel_value::names::Segment::new("environment").unwrap()].into()
+    }
+    fn advertise(
+        &self,
+        _: &crate::OwnerConfigView,
+        context: &lash_kernel_value::package::PublicationContext,
+    ) -> Result<
+        Vec<crate::plugin::packages::PackageContribution>,
+        lash_execution_contracts::PluginError,
+    > {
+        let advertisement = lash_kernel_value::package::PackageAdvertisement::Enumerated(
+            lash_kernel_value::package::Package {
+                path: lash_kernel_value::names::Vec1::new(context.root.clone()),
+                members: Default::default(),
+            },
+        );
+        Ok(vec![crate::plugin::packages::PackageContribution {
+            publication: crate::plugin::packages::operation_publication(context, &advertisement)?,
+            advertisement,
+            routes: Vec::new(),
+        }])
+    }
+    async fn hold(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &[&lash_kernel_value::package::PackageAdvertisement],
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
+}
+
 async fn replace_source_composition(f: &mut Fixture) -> Arc<AtomicUsize> {
     let unaffected = Arc::new(AtomicUsize::new(0));
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial("replacement_tools"),
-        crate::PluginSpec::new().with_tool_provider(
-            crate::tool_provider_key!("tools"),
-            Arc::new(CountedTools {
-                calls: f.calls.clone(),
-                value: f.value.clone(),
-                refused: f.refused.clone(),
-                refreshes: f.refreshes.clone(),
-            }),
-        ),
+        crate::PluginSpec::new()
+            .with_tool_provider(
+                crate::tool_provider_key!("tools"),
+                Arc::new(CountedTools {
+                    calls: f.calls.clone(),
+                    value: f.value.clone(),
+                    refused: f.refused.clone(),
+                    refreshes: f.refreshes.clone(),
+                }),
+            )
+            .with_package_provider(
+                crate::tool_provider_key!("packages"),
+                Arc::new(CountedNamespace),
+            ),
     )));
     factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
         crate::plugin::PluginDeclaration::initial("unaffected_tools"),
@@ -794,7 +837,20 @@ async fn env_override_keeps_base_head() {
         .owner
         .clone();
     f.driver.adopted_environment = None;
-    boundary(&mut f, 1).await;
+    let (_, sql) = lash_core_ids::operational_metrics::sql::collect(
+        "override-repeat",
+        "sqlite",
+        boundary(&mut f, 1),
+    )
+    .await;
+    assert!(
+        !sql.shapes
+            .keys()
+            .any(|shape| shape.contains("artifact_refs")
+                && shape.starts_with("select")
+                && shape.contains("blobs.encoding")),
+        "FIG-7453: unchanged override hydrated immutable package payloads again: {sql:?}"
+    );
     publish(&mut f, "equal-override-owner").await;
     assert_ne!(
         f.driver.run_config.current_environment().unwrap().owner,

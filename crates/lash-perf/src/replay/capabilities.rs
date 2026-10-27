@@ -27,9 +27,34 @@ pub struct HostTools {
     state: Mutex<State>,
 }
 impl HostTools {
-    pub fn new() -> Result<Arc<Self>> {
-        let definitions = (0..31)
-            .map(|i| definition(&format!("host{i}")))
+    pub fn new(geometry: Option<&super::script::HostGeometry>) -> Result<Arc<Self>> {
+        let roots = geometry.map_or(1, |g| g.package_roots);
+        ensure!(
+            roots > 0 && roots <= 11,
+            "host package_roots must be between 1 and 11"
+        );
+        let definitions = (0..geometry.map_or(31, |g| g.tools))
+            .map(|i| {
+                let root = [
+                    "tools",
+                    "information",
+                    "people",
+                    "artifacts",
+                    "workflows",
+                    "integrations",
+                    "inbox",
+                    "jev",
+                    "documents",
+                    "onboarding",
+                    "confirmation",
+                ][i % roots];
+                match geometry {
+                    Some(geometry) => {
+                        host_definition(root, &format!("host{i}"), geometry.schema_fields)
+                    }
+                    None => definition(&format!("host{i}")),
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
         Ok(Arc::new(Self {
             definitions,
@@ -69,6 +94,177 @@ impl HostTools {
         )
     }
 }
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    lash::plugins::schemars::JsonSchema,
+)]
+#[schemars(crate = "lash::plugins::schemars")]
+pub struct HostOptions {
+    catalogue: Vec<ToolDefinition>,
+    for_run: bool,
+}
+struct HostOwner(HostOptions);
+impl lash::plugins::ConfigOwner for HostOwner {
+    type Create = HostOptions;
+    type Recorded = HostOptions;
+    type Refusal = String;
+    type RunOptions = HostOptions;
+    fn create(&self, input: Option<HostOptions>) -> Result<Option<HostOptions>, String> {
+        Ok(Some(input.unwrap_or_else(|| self.0.clone())))
+    }
+    fn validate(
+        &self,
+        _: &HostOptions,
+        _: Option<&HostOptions>,
+        _: &lash::plugins::CandidateFacts<'_>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn apply_run_options(
+        &self,
+        _: &HostOptions,
+        options: HostOptions,
+    ) -> Result<HostOptions, String> {
+        Ok(options)
+    }
+}
+struct HostFactory {
+    inner: Arc<lash::plugins::StaticPluginFactory>,
+    initial: HostOptions,
+}
+impl lash::plugins::PluginMetadata for HostFactory {
+    fn plugin_declaration(&self) -> lash::plugins::PluginDeclaration {
+        lash::plugins::PluginDeclaration::initial("tools")
+    }
+}
+impl lash::plugins::PluginFactory for HostFactory {
+    fn id(&self) -> &'static str {
+        "tools"
+    }
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::PluginRecipe, lash::plugins::PluginError> {
+        let mut config = lash::plugins::ConfigRegistrar::new("tools");
+        config.owner_with_run_options(
+            HostOwner(self.initial.clone()),
+            lash::RunOptionsKey::new("tools"),
+        )?;
+        Ok(self.inner.clone().recipe()?.with_configuration(config))
+    }
+}
+impl HostTools {
+    pub fn factory(
+        self: &Arc<Self>,
+        tools: Arc<dyn ToolProvider>,
+    ) -> Result<Arc<dyn lash::plugins::PluginFactory>> {
+        Ok(Arc::new(HostFactory {
+            inner: Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial("tools"),
+                lash::plugins::PluginSpec::new()
+                    .with_tool_provider(lash::tool_provider_key!("tools"), tools.clone())
+                    .with_package_provider(
+                        lash::tool_provider_key!("tools"),
+                        Arc::new(HostPackages {
+                            roots: self
+                                .definitions
+                                .iter()
+                                .map(|d| d.manifest.operation.package.as_slice()[0].clone())
+                                .collect(),
+                            tools,
+                        }),
+                    ),
+            )),
+            initial: HostOptions {
+                catalogue: self.definitions.clone(),
+                for_run: false,
+            },
+        }))
+    }
+    pub fn run_spec(
+        &self,
+        geometry: Option<&super::script::HostGeometry>,
+        turn: usize,
+    ) -> Result<lash::RunSpec> {
+        let mut spec = run_spec_for(geometry);
+        if geometry.is_some_and(|g| g.run_override) {
+            spec.overrides.owners.set(
+                lash::RunOptionsKey::new("tools"),
+                HostOptions {
+                    catalogue: self.definitions.clone(),
+                    for_run: true,
+                },
+            )?;
+        }
+        if geometry.is_some() {
+            let bindings: Vec<_> = self
+                .definitions
+                .iter()
+                .map(|definition| {
+                    serde_json::json!({
+                        "operation": definition.manifest.tool(), "turn_id": turn.to_string(),
+                    })
+                })
+                .collect();
+            spec.capabilities.insert(
+                lash::SlotId::new("documents"),
+                lash::CapabilityRef {
+                    contract: lash::ContractRef::new("replay.documents", 1),
+                    binding: lash::BindingId::new(format!("replay:turn-{turn}")),
+                    args: serde_json::json!({"read":true,"bindings":bindings}),
+                },
+            );
+        }
+        Ok(spec)
+    }
+}
+
+/// Figments advertises each root independently, without sharing a tool-source
+/// snapshot. Keep that provider geometry in this host replay.
+struct HostPackages {
+    roots: std::collections::BTreeSet<lash::package::Segment>,
+    tools: Arc<dyn ToolProvider>,
+}
+#[async_trait::async_trait]
+impl lash::package::PackageProvider for HostPackages {
+    fn roots(&self, _: &OwnerConfigView) -> std::collections::BTreeSet<lash::package::Segment> {
+        self.roots.clone()
+    }
+    fn advertise(
+        &self,
+        config: &OwnerConfigView,
+        context: &lash::package::PublicationContext,
+    ) -> Result<Vec<lash::package::PackageContribution>, lash::plugins::PluginError> {
+        lash::package::ToolPackageProvider::new(
+            "tools",
+            lash::tool_provider_key!("tools"),
+            self.roots.clone(),
+            self.tools.clone(),
+        )
+        .advertise(config, context)
+    }
+    async fn hold(
+        &self,
+        _: &lash::persistence::ReferrerClaim,
+        _: &[&lash::package::PackageAdvertisement],
+    ) -> Result<(), lash::package::EnginePortError> {
+        Ok(())
+    }
+}
+
+fn host_definition(root: &str, name: &str, fields: usize) -> Result<ToolDefinition> {
+    let properties: serde_json::Map<String, serde_json::Value> = (0..fields)
+        .map(|i| (format!("field{i}"), serde_json::json!({
+            "type":"string", "description":"Optional host record field used to select the document, source, person, or workflow to inspect."
+        }))).collect();
+    Ok(ToolDefinition::raw(
+        format!("replay-{name}"), format!("{root}.{name}"), "Host capability guarded document operation",
+        serde_json::json!({"title":name,"type":"object","properties":properties,"additionalProperties":false}),
+        serde_json::json!({"type":"object","properties":{"authorized":{"type":"boolean"}},"required":["authorized"],"additionalProperties":false}),
+    )?.with_execution(std::time::Duration::from_secs(1)))
+}
+
 fn definition(name: &str) -> Result<ToolDefinition> {
     Ok(ToolDefinition::raw(
         format!("replay-{name}"), format!("tools.{name}"), "Host capability guarded document operation",
@@ -130,7 +326,24 @@ impl ToolProvider for HostTools {
         ))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.context.run_capabilities() != &run_spec().capabilities {
+        let capabilities = call.context.run_capabilities();
+        let host_authorized = capabilities
+            .get(&lash::SlotId::new("documents"))
+            .is_some_and(|capability| {
+                capability.contract == lash::ContractRef::new("replay.documents", 1)
+                    && capability.args["read"] == true
+                    && capability.args["bindings"]
+                        .as_array()
+                        .is_some_and(|bindings| {
+                            bindings.iter().any(|binding| {
+                                binding["operation"].as_str() == Some(call.name().as_str())
+                                    && binding["turn_id"].as_str().is_some_and(|turn| {
+                                        capability.binding.as_str() == format!("replay:turn-{turn}")
+                                    })
+                            })
+                        })
+            });
+        if capabilities != &run_spec().capabilities && !host_authorized {
             return lash_core::ToolOutcome::err("missing host document capability").into();
         }
         self.state.lock_recover().authorized_calls += 1;
@@ -171,7 +384,20 @@ impl ToolProvider for Snapshot {
     }
 }
 pub fn run_spec() -> lash::RunSpec {
-    let mut spec = lash::RunSpec::default();
+    run_spec_for(None)
+}
+pub fn run_spec_for(geometry: Option<&super::script::HostGeometry>) -> lash::RunSpec {
+    let mut spec = if geometry.is_some_and(|g| g.run_override) {
+        lash::RunSpec::overrides(lash::RunOverrides {
+            generation: Some(lash::direct::GenerationOptions {
+                output_token_cap: std::num::NonZeroUsize::new(4096),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    } else {
+        lash::RunSpec::default()
+    };
     spec.capabilities.insert(
         lash::SlotId::new("documents"),
         lash::CapabilityRef {

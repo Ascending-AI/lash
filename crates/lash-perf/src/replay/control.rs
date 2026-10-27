@@ -168,6 +168,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         name: leg.name().to_owned(),
         description: "Identical lookup inputs; orchestration control.".to_owned(),
         protocol,
+        host: None,
         instruction_limit: None,
         memory_limit_mib: None,
         sessions: 1,

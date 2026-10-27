@@ -387,7 +387,17 @@ impl RuntimeTurnServices {
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
         let start = match recorded {
-            Some(recorded) => TurnStart::Resumed(recorded),
+            Some(RecordedPreparation {
+                before_turn,
+                trace,
+                config,
+                cell,
+            }) => TurnStart::Resumed {
+                before_turn,
+                trace,
+                config: Box::new(config),
+                cell,
+            },
             None => TurnStart::Fresh(row.admission.trace().cloned()),
         };
         let turn = Box::pin(runtime.prepare_durable_turn(

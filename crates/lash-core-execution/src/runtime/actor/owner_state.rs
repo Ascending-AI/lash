@@ -218,15 +218,51 @@ pub struct SessionProjection {
 /// Preparation shared by the turns of one acknowledged configuration. This
 /// is discarded with its owner projection, and a changed head's exact value
 /// invalidates it even if the caller did not change its config revision.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SessionConfiguration {
     prepared: std::sync::Arc<std::sync::OnceLock<Result<PreparedConfiguration, DurableError>>>,
+    run: std::sync::Arc<std::sync::Mutex<Option<PreparedRunConfiguration>>>,
 }
 
 /// Exact configuration bytes prepared from an acknowledged head, with their content identity.
+#[derive(Debug)]
 pub struct PreparedConfiguration {
     pub value: lash_core_store::session_graph::PersistedSessionConfig,
     pub node: std::sync::Arc<lash_core_store::checkpoint_graph::node::VerifiedNode>,
+}
+
+#[derive(Debug)]
+struct PreparedRunConfiguration {
+    value: std::sync::Arc<lash_core_store::run_spec::ResolvedRun>,
+    root: lash_core_store::checkpoint_graph::NodeId,
+    nodes: std::sync::Arc<[lash_core_store::checkpoint_graph::EncodedNode]>,
+}
+
+fn same_run_configuration(
+    left: &lash_core_store::run_spec::ResolvedRun,
+    right: &lash_core_store::run_spec::ResolvedRun,
+) -> bool {
+    use lash_core_store::run_spec::RunSpec;
+    let RunSpec {
+        observe,
+        definition,
+        context,
+        overrides,
+        capabilities: _,
+    } = left.spec();
+    let RunSpec {
+        observe: other_observe,
+        definition: other_definition,
+        context: other_context,
+        overrides: other_overrides,
+        capabilities: _,
+    } = right.spec();
+    left.base() == right.base() && left.config() == right.config() && left.render == right.render
+        && observe == other_observe && definition == other_definition
+        && context == other_context && overrides == other_overrides
+        // A formerly default spec has no object to patch. Its next use takes
+        // the ordinary cold encoder; every other field above must match.
+        && !left.spec().is_default()
 }
 
 impl SessionConfiguration {
@@ -261,6 +297,38 @@ impl SessionConfiguration {
             })
             .as_ref()
             .map_err(Clone::clone)
+    }
+
+    /// Reuse acknowledged configuration children; capability authority may change.
+    /// The next commit resupplies the DAG and checks it under its own fence.
+    pub fn retained_run(
+        &self,
+        run: &lash_core_store::run_spec::ResolvedRun,
+    ) -> Option<(
+        lash_core_store::checkpoint_graph::NodeId,
+        std::sync::Arc<[lash_core_store::checkpoint_graph::EncodedNode]>,
+    )> {
+        let held = self
+            .run
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        held.as_ref()
+            .filter(|held| same_run_configuration(&held.value, run))
+            .map(|held| (held.root, held.nodes.clone()))
+    }
+
+    /// Record a successful phase's configuration, without owning a durable root.
+    pub fn remember_run(
+        &self,
+        value: std::sync::Arc<lash_core_store::run_spec::ResolvedRun>,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        nodes: std::sync::Arc<[lash_core_store::checkpoint_graph::EncodedNode]>,
+    ) {
+        *self
+            .run
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(PreparedRunConfiguration { value, root, nodes });
     }
 
     fn retaining(&self, head: &lash_core_store::session_state::RuntimeSessionState) -> Self {

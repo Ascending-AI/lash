@@ -34,6 +34,7 @@ pub use tool_execution::{CompletedProtocolToolCall, ToolInvocation, ToolInvocati
 #[derive(Debug, Default)]
 struct ToolCatalogDerived {
     catalog: OnceLock<Arc<Vec<serde_json::Value>>>,
+    publications: OnceLock<Arc<lash_durable::packages::PreparedPublications>>,
 }
 
 struct ToolCatalogArtifact {
@@ -70,6 +71,17 @@ pub(crate) struct EnvironmentProjections {
 impl ToolCatalogHandle {
     pub(crate) fn version(&self) -> &lash_core_store::environment::EnvironmentId {
         &self.0.version
+    }
+
+    /// Pure prepared retention metadata; it carries no lifetime owner.
+    pub fn prepared_publications(
+        &self,
+    ) -> Option<&Arc<lash_durable::packages::PreparedPublications>> {
+        self.0.derived.publications.get()
+    }
+
+    pub fn remember_publications(&self, prepared: lash_durable::packages::PreparedPublications) {
+        let _ = self.0.derived.publications.set(Arc::new(prepared));
     }
 
     /// The surface's calls, each routed to its entry's provider.

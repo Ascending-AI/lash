@@ -629,8 +629,54 @@ async fn released_pin_publications_keep_the_typed_artifact_refusal() {
             .map(|accepted| accepted.publication.key())
             .collect(),
     };
+    let (repeated, sql) = lash::tracing::sql::collect(
+        "namespace-repeat",
+        "sqlite",
+        artifacts.process_namespace(
+            &retained,
+            &source_environment(false),
+            environment.context.clone(),
+        ),
+    )
+    .await;
+    repeated.expect("an unchanged namespace remains admissible");
+    assert_eq!(
+        sql.rows_affected, 0,
+        "FIG-7427: unchanged namespace changed package records: {sql:?}"
+    );
+    assert_eq!(
+        sql.shapes
+            .iter()
+            .filter(|(shape, _)| matches!(
+                shape.split_whitespace().next(),
+                Some("insert" | "update" | "delete" | "replace")
+            ))
+            .map(|(_, work)| work.statements)
+            .sum::<u64>(),
+        0,
+        "FIG-7427: unchanged namespace submitted package-store writes: {sql:?}"
+    );
     let pin = lash::process::HostArtifactPin::mint();
     artifacts.release(pin.clone()).await.unwrap();
+    let store = core.backend().package_store();
+    let empty = store.prepare_publications(&[]).await.unwrap();
+    let claim = lash::persistence::ReferrerClaim::unguarded(
+        lash::persistence::ArtifactReferrer::HostPin(pin.clone()),
+    )
+    .unwrap();
+    let error = store
+        .acquire_prepared_publications(&claim, &empty)
+        .await
+        .expect_err("an empty prepared closure still checks the released owner");
+    assert!(
+        matches!(
+            error,
+            lash_durable::DurableError::Package(
+                lash_durable::packages::PackageRefusal::ReferrerEnded(_)
+            )
+        ),
+        "{error:?}"
+    );
     let errors = [
         (
             "publish_workflow",

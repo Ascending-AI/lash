@@ -671,16 +671,33 @@ async fn prepare(
         body,
     )?));
     cx.commit(tx, CommitLabel::ENVIRONMENT_PREPARE).await?;
-    session
-        .plugins()
-        .composition()
-        .retain_environment_packages(
-            owner.id(),
-            handle.surface().packages(),
-            cx.backend().stores().package_store().as_ref(),
-        )
-        .await
-        .map_err(lash_execution_contracts::PluginError::from)?;
+    let store = cx.backend().stores().package_store();
+    let reused = if let Some(prepared) = handle.prepared_publications() {
+        let claim = crate::ReferrerClaim::guarded(crate::ReferrerGuard::EnvironmentVersionRetired(
+            owner.id().clone(),
+        ));
+        match store.acquire_prepared_publications(&claim, prepared).await {
+            Ok(()) => true,
+            Err(lash_durable::DurableError::Package(
+                lash_durable::packages::PackageRefusal::Missing(_),
+            )) => false,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        false
+    };
+    if !reused {
+        session
+            .plugins()
+            .composition()
+            .retain_environment_packages(owner.id(), handle.surface().packages(), store.as_ref())
+            .await
+            .map_err(lash_execution_contracts::PluginError::from)?;
+        let prepared = store
+            .prepare_publications(&handle.surface().packages().publications())
+            .await?;
+        handle.remember_publications(prepared);
+    }
     Ok(owner.id().clone())
 }
 

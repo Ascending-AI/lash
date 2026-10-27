@@ -76,6 +76,33 @@ the counted subset or its baseline. Wall time on shared hosts is noise-affected;
 no wall-time number gates a merge. The SQL sidecar uses these same turn cuts
 and retains shape × store-origin attribution.
 
+### Host catalogues with per-turn authority
+
+```sh
+just profile-turn hostturn --turn 3
+# The existing namespace lifecycle, with the same host catalogue plus tools.mark:
+python3 scripts/profile_runtime.py --boundary workflow-namespace --release \
+  --boundary-arg=--workload=hostturn --boundary-arg=--operations=1 \
+  --out .kiln/hostturn-namespace.json
+```
+
+`hostturn` supplies 31 structured tools across 11 package roots, owner options
+on every send, and a fresh capability binding with per-tool `turn_id` values.
+It warms one TypeScript RLM turn, then runs three quiet text turns with no
+cells or tool calls. Quiet turns assert zero snapshot, manifest and link-payload
+callbacks. `host.tools`, `host.schema_fields` and `host.package_roots` vary the
+catalogue independently of the turn's work. Prompt limits are 128 KiB per
+section and 512 KiB total.
+
+The root/provider, owner-option, authority and prompt-limit geometry follows
+Figments revision `083899321`, specifically `apps/lash-runtime/src/tools.rs`,
+`crates/figments-lash-runtime-api/src/turn_run.rs`, `run_authority.rs`, `lib.rs`
+and `prompt.rs`. Schemas and tool distribution are synthetic. This workload
+reproduces those mechanisms, without claiming a byte-identical production
+session. Compare matching profiles and backends; the supplied Figments trace
+used a debug build. Phase wall durations on a shared host are observations,
+not latency guarantees.
+
 ### Warm host capabilities and a fresh document
 
 ```sh
@@ -478,7 +505,14 @@ terminal-window copy on a tree blessed without it failed the gate on the
 When a change moves the baseline on purpose, run `just perf-replay-bless`
 and commit the rewritten `workloads/replay/baseline.json` with the change,
 stating why in the commit body. The gate compiles `budgets.json` and
-`baseline.json` in, so a rebuilt test reads the new baseline. The gate prints `improved ...` lines when a
+`baseline.json` in, so a rebuilt test reads the new baseline.
+
+The writer never raises an existing ceiling. If every sampled maximum fits an
+existing ceiling but a wider sampled noise range would raise it, the writer
+retains that metric's complete previous calibration and tightens the other
+metrics. A sampled maximum above its existing ceiling still refuses the refresh.
+
+The gate prints `improved ...` lines when a
 median or slope falls below its tolerance band; re-bless then to ratchet the
 gain. Re-bless only from a clean tree at the change's commit: the baseline
 records `blessed_from`, build profile and allocator. Blessing refuses missing

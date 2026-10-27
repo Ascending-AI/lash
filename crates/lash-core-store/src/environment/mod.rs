@@ -188,6 +188,8 @@ pub struct EnvironmentBody {
     id: EnvironmentId,
     #[serde(skip)]
     validation: Arc<std::sync::OnceLock<Result<(), AssemblyRefusal>>>,
+    #[serde(skip)]
+    encoded: Arc<std::sync::OnceLock<Result<String, AssemblyRefusal>>>,
 }
 impl PartialEq for EnvironmentBody {
     fn eq(&self, other: &Self) -> bool {
@@ -198,6 +200,18 @@ impl EnvironmentBody {
     pub fn id(&self) -> &EnvironmentId {
         &self.id
     }
+    /// The immutable body's exact serialized form, prepared once per value.
+    pub fn canonical_json(&self) -> Result<&str, AssemblyRefusal> {
+        self.encoded
+            .get_or_init(|| {
+                serde_json::to_string(self).map_err(|error| AssemblyRefusal::Encoding {
+                    message: error.to_string(),
+                })
+            })
+            .as_deref()
+            .map_err(Clone::clone)
+    }
+
     pub fn fragments(&self) -> &BTreeMap<SourceId, Arc<PreparedFragment>> {
         &self.fragments
     }
@@ -237,9 +251,13 @@ impl EnvironmentBody {
 
     /// Check both global invariants and all stored roots against canonical facts.
     pub fn validate(&self) -> Result<(), AssemblyRefusal> {
-        self.shared_validation()
-            .get_or_init(|| self.validate_content())
-            .clone()
+        if let Some(result) = self.validation.get() {
+            return result.clone();
+        }
+        let shared = self.shared_validation();
+        let result = shared.get_or_init(|| self.validate_content()).clone();
+        let _ = self.validation.set(result.clone());
+        result
     }
 
     fn shared_validation(&self) -> Arc<std::sync::OnceLock<Result<(), AssemblyRefusal>>> {

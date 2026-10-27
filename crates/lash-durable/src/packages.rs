@@ -126,11 +126,20 @@ pub enum PackageHold<'a> {
 }
 
 /// A prepared immutable root and its closure, passed intact to storage.
+#[derive(Debug)]
 pub struct PackageRecordHold {
     pub reference: String,
     pub bytes: Option<Vec<u8>>,
     pub document: bool,
     pub dependencies: Vec<String>,
+}
+
+/// Prepared publication retention. Each acquisition checks the complete
+/// immutable closure and its fresh owner fence atomically.
+#[derive(Debug)]
+pub struct PreparedPublications {
+    publications: Vec<PublicationRecord>,
+    holds: Option<Vec<PackageRecordHold>>,
 }
 
 /// Trusted package content storage. A successful hold retains the whole DAG
@@ -147,6 +156,38 @@ pub trait PackageStore: Send + Sync {
         claim: &ReferrerClaim,
         holds: &[PackageHold<'_>],
     ) -> Result<(), DurableError>;
+
+    /// Prepare retention metadata for immutable publications. A store may defer
+    /// discovering their dependency DAG until acquisition.
+    async fn prepare_publications(
+        &self,
+        publications: &[PublicationRecord],
+    ) -> Result<PreparedPublications, DurableError> {
+        Ok(PreparedPublications {
+            publications: publications.to_vec(),
+            holds: None,
+        })
+    }
+
+    /// Acquire a prepared DAG under today's owner, refusing missing pointers.
+    async fn acquire_prepared_publications(
+        &self,
+        claim: &ReferrerClaim,
+        prepared: &PreparedPublications,
+    ) -> Result<(), DurableError> {
+        if prepared.publications.is_empty() {
+            return self
+                .unheld_publications(claim, &std::collections::BTreeSet::new())
+                .await
+                .map(|_| ());
+        }
+        let holds: Vec<_> = prepared
+            .publications
+            .iter()
+            .map(PackageHold::Publication)
+            .collect();
+        self.acquire_batch(claim, &holds).await
+    }
 
     /// Requested publication closures not held by this exact owner. Checks
     /// owner admission and its permanent fence even for an empty set.
@@ -526,6 +567,56 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
             first.dependencies = dependencies.difference(&supplied).cloned().collect();
         }
         self.hold_package_batch(claim, &records).await
+    }
+
+    async fn prepare_publications(
+        &self,
+        publications: &[PublicationRecord],
+    ) -> Result<PreparedPublications, DurableError> {
+        let mut roots = Vec::with_capacity(publications.len());
+        for publication in publications {
+            let key = publication.key();
+            if self.publication(&key).await?.as_ref() != Some(publication) {
+                return Err(PackageRefusal::Identity(publication_reference(&key)).into());
+            }
+            roots.push(publication_reference(&key));
+        }
+        let dependencies = closure(self, roots).await?;
+        let holds = dependencies
+            .into_iter()
+            .map(|reference| PackageRecordHold {
+                reference,
+                bytes: None,
+                document: false,
+                dependencies: Vec::new(),
+            })
+            .collect();
+        Ok(PreparedPublications {
+            publications: publications.to_vec(),
+            holds: Some(holds),
+        })
+    }
+
+    async fn acquire_prepared_publications(
+        &self,
+        claim: &ReferrerClaim,
+        prepared: &PreparedPublications,
+    ) -> Result<(), DurableError> {
+        match &prepared.holds {
+            Some(holds) if holds.is_empty() => self
+                .unheld_publication_records(claim, &std::collections::BTreeSet::new())
+                .await
+                .map(|_| ()),
+            Some(holds) => self.hold_package_batch(claim, holds).await,
+            None => {
+                let holds: Vec<_> = prepared
+                    .publications
+                    .iter()
+                    .map(PackageHold::Publication)
+                    .collect();
+                self.acquire_batch(claim, &holds).await
+            }
+        }
     }
 
     async fn unheld_publications(

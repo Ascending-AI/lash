@@ -207,6 +207,12 @@ pub(super) fn merge(
         phase.end_ns += offset;
         phase.depth += 10;
     }
+    let phase_offset = client.phases.len();
+    for row in &mut owner.sql {
+        if let Some(index) = &mut row.phase_index {
+            *index += phase_offset;
+        }
+    }
     client.phases.extend(owner.phases);
     client.sql.extend(owner.sql);
     client.writes.extend(owner.writes);

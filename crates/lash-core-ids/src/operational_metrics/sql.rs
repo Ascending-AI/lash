@@ -129,7 +129,7 @@ thread_local! { static WORKER: RefCell<Option<Window>> = const { RefCell::new(No
 impl Window {
     pub fn new(operation: impl Into<String>, backend: &'static str) -> Self {
         let parent = Self::current();
-        let parent_operation = parent.as_ref().map(|p| p.snapshot().operation);
+        let parent_operation = parent.as_ref().map(|p| p.identity().1);
         Self {
             started: std::time::Instant::now(),
             turn: super::turn::Context::current()
@@ -251,6 +251,11 @@ impl Window {
                 backend: receipt.backend.into(),
                 shape: key.shape.to_string(),
                 statements,
+                round_trips: if receipt.backend == "postgres" {
+                    statements
+                } else {
+                    0
+                },
                 rows_returned: rows,
                 rows_affected: affected,
                 bound_bytes: bound,

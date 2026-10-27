@@ -197,6 +197,7 @@ pub fn script<'a>(
         name: name.to_owned(),
         description: format!("Captured by `lash-perf replay-record`: {name}."),
         protocol,
+        host: None,
         instruction_limit: None,
         memory_limit_mib: None,
         sessions: 1,

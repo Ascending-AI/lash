@@ -249,19 +249,25 @@ fn build_core_with_sink(
     } else {
         builder
     };
-    builder
+    let builder = builder
         .serve_sessions(true)
         .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .serve_test_llm_profile(provider::model(book), provider::metadata()?)
-        .plugin(Arc::new(crate::perf_support::tool_plugin(
+        .serve_test_llm_profile(provider::model(book), provider::metadata()?);
+    let builder = if workload.host.is_some() {
+        let host = super::capabilities::HostTools::new(workload.host.as_ref())?;
+        builder.plugin(host.factory(tools)?)
+    } else {
+        builder.plugin(Arc::new(crate::perf_support::tool_plugin(
             "tools",
             lash::tool_provider_key!("tools"),
             tools,
         )?))
+    };
+    builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("lash-perf-replay"),
             lash::persistence::LeaseIncarnationId::new(if counted {
@@ -447,6 +453,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         || Some("none (standard protocol)".to_owned()),
         |service| crate::perf_support::git::artifact_sha256(&service.config().entry.executable)
     ));
+    geometry["host"] = serde_json::to_value(&workload.host)?;
     if let Some(limit) = workload.instruction_limit {
         geometry["cell_instruction_limit"] = serde_json::json!(limit);
     }
@@ -473,7 +480,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .turns
         .iter()
         .any(|turn| turn.capability_turn.is_some())
-        .then(super::capabilities::HostTools::new)
+        .then(|| super::capabilities::HostTools::new(workload.host.as_ref()))
         .transpose()?;
     let tools = match &host_tools {
         Some(host) => host.counted(&capability_counts),
@@ -539,8 +546,21 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         } else {
             spec
         };
+        let mut creation = lash::SessionCreation::root(spec);
+        if workload.host.is_some() {
+            creation = creation.with_prompt_plan(lash::prompt::PromptPlan {
+                limits: lash::prompt::PromptLimits {
+                    max_section_bytes: std::num::NonZeroU32::new(128 * 1024)
+                        .context("host section bytes")?,
+                    max_total_bytes: std::num::NonZeroU32::new(512 * 1024)
+                        .context("host total prompt bytes")?,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
         core.session(id.clone())
-            .create(lash::SessionCreation::root(spec))
+            .create(creation)
             .await
             .map_err(|error| anyhow::anyhow!("create {id}: {error}"))?;
         let session = core
@@ -634,7 +654,13 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                     .turn_report
                     .as_ref()
                     .map(|_| lash_core_ids::operational_metrics::turn::Context::default());
-                let future = send(lane, turn, phase_capture.is_some(), host_tools.as_deref());
+                let future = send(
+                    lane,
+                    turn,
+                    phase_capture.is_some(),
+                    host_tools.as_deref(),
+                    workload.host.as_ref(),
+                );
                 let outcome = match &client {
                     Some(context) => {
                         context
@@ -960,6 +986,7 @@ async fn send(
     turn: usize,
     observe_result: bool,
     host_tools: Option<&super::capabilities::HostTools>,
+    host_geometry: Option<&super::script::HostGeometry>,
 ) -> Result<(Option<String>, Option<serde_json::Value>, String)> {
     let (scripted, input) = &lane.inputs[turn];
     let mut input = lash::TurnInput::text(input.clone());
@@ -998,8 +1025,12 @@ async fn send(
             uuid::Uuid::from_bytes(id).as_u128(),
         ));
     }
-    let send = if scripted.capability_turn.is_some() {
-        send.run(super::capabilities::run_spec())
+    let send = if scripted.capability_turn.is_some() || host_geometry.is_some() {
+        send.run(
+            host_tools
+                .context("host turn requires its catalogue")?
+                .run_spec(host_geometry, turn + 1)?,
+        )
     } else {
         send
     };

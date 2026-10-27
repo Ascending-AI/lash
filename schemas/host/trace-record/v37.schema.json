@@ -6040,6 +6040,11 @@
     },
     "TurnPhaseInterval": {
       "properties": {
+        "bound_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "depth": {
           "format": "uint32",
           "minimum": 0,
@@ -6053,6 +6058,11 @@
         "phase": {
           "type": "string"
         },
+        "result_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "revision": {
           "format": "int64",
           "type": [
@@ -6060,7 +6070,28 @@
             "null"
           ]
         },
+        "round_trips": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows_affected": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows_returned": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "start_ns": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statements": {
+          "description": "SQL directly executed in this interval, excluding nested intervals.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
@@ -6070,7 +6101,13 @@
         "phase",
         "start_ns",
         "end_ns",
-        "depth"
+        "depth",
+        "statements",
+        "round_trips",
+        "rows_returned",
+        "rows_affected",
+        "bound_bytes",
+        "result_bytes"
       ],
       "type": "object"
     },
@@ -6189,6 +6226,15 @@
         "phase": {
           "type": "string"
         },
+        "phase_index": {
+          "description": "Index of the exact deepest interval, so repeated phase names stay distinct.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "result_bytes": {
           "format": "uint64",
           "minimum": 0,
@@ -6200,6 +6246,11 @@
             "integer",
             "null"
           ]
+        },
+        "round_trips": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         },
         "rows_affected": {
           "format": "uint64",
@@ -6227,6 +6278,7 @@
         "backend",
         "owner_commit",
         "statements",
+        "round_trips",
         "rows_returned",
         "rows_affected",
         "bound_bytes",

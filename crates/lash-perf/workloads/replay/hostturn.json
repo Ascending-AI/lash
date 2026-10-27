@@ -1,0 +1,33 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "hostturn",
+  "description": "FIG-7453: RLM host with 31 tools across 11 roots and a full owner-options catalogue on every turn. One setup turn then three quiet turns. Root/provider and run-option geometry follows Figments 083899321; schemas and tool distribution are synthetic. Vary host.tools, host.schema_fields and host.package_roots for scaling. Prompt limits match Figments at 128 KiB per section and 512 KiB total. Every turn carries a fresh authority binding and per-tool turn_id, matching run_authority.rs and ToolExecutionHandler::ChatTool.",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "setup": true,
+      "user": "Warm the host catalogue with the document capability.",
+      "replies": [
+        {
+          "text": "READY"
+        }
+      ]
+    },
+    {
+      "capability_turn": "quiet",
+      "user": "A quiet model turn with the same document capability and unchanged host catalogue.",
+      "replies": [
+        {
+          "text": "Quiet warm host capability turn complete."
+        }
+      ],
+      "repeat": 3
+    }
+  ],
+  "host": {
+    "tools": 31,
+    "schema_fields": 24,
+    "run_override": true,
+    "package_roots": 11
+  }
+}

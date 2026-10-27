@@ -24,17 +24,26 @@ pub struct TurnProfile {
     pub omitted_sql_keys: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TurnPhaseInterval {
     pub phase: String,
     pub start_ns: u64,
     pub end_ns: u64,
     pub depth: u32,
     pub revision: Option<i64>,
+    /// SQL directly executed in this interval, excluding nested intervals.
+    pub statements: u64,
+    pub round_trips: u64,
+    pub rows_returned: u64,
+    pub rows_affected: u64,
+    pub bound_bytes: u64,
+    pub result_bytes: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TurnSqlWork {
+    /// Index of the exact deepest interval, so repeated phase names stay distinct.
+    pub phase_index: Option<usize>,
     pub phase: String,
     pub origin: String,
     pub shape: String,
@@ -42,6 +51,7 @@ pub struct TurnSqlWork {
     pub owner_commit: bool,
     pub revision: Option<i64>,
     pub statements: u64,
+    pub round_trips: u64,
     pub rows_returned: u64,
     pub rows_affected: u64,
     pub bound_bytes: u64,

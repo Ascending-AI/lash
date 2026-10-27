@@ -148,36 +148,52 @@ static BODIES: std::sync::LazyLock<std::sync::Mutex<std::collections::VecDeque<B
 const BODY_ENTRIES: usize = 32;
 const BODY_BYTES: usize = 2 << 20;
 
-fn validated_body(version: &EnvironmentId, json: String) -> Result<EnvironmentBody, DurableError> {
+/// Decode an exact body, reusing admitted immutable content when resident.
+/// The caller retains its validation and live-owner checks on cold input.
+pub fn decoded_body(version: &EnvironmentId, json: &str) -> Result<EnvironmentBody, DurableError> {
     use lash_protocol_types::sync::MutexExt;
-    let find = |entries: &std::collections::VecDeque<BodyEntry>| {
-        entries
-            .iter()
-            .find(|entry| entry.body.id() == version && entry.json == json)
-            .map(|entry| entry.body.clone())
-    };
-    if let Some(body) = find(&BODIES.lock_recover()) {
+    if let Some(body) = BODIES
+        .lock_recover()
+        .iter()
+        .find(|entry| entry.body.id() == version && entry.json == json)
+        .map(|entry| entry.body.clone())
+    {
         return Ok(body);
     }
-    let body: EnvironmentBody = decode(&json)?;
+    decode(json)
+}
+
+fn validated_body(version: &EnvironmentId, json: String) -> Result<EnvironmentBody, DurableError> {
+    let body = decoded_body(version, &json)?;
     body.validate().map_err(corrupt)?;
-    if json.len() <= BODY_BYTES && body.id() == version {
-        let mut entries = BODIES.lock_recover();
-        if let Some(body) = find(&entries) {
-            return Ok(body);
-        }
-        let mut bytes: usize = entries.iter().map(|entry| entry.json.len()).sum();
-        while entries.len() >= BODY_ENTRIES || bytes + json.len() > BODY_BYTES {
-            if let Some(entry) = entries.pop_front() {
-                bytes -= entry.json.len();
-            }
-        }
-        entries.push_back(BodyEntry {
-            json,
-            body: body.clone(),
-        });
+    if body.id() == version {
+        remember_body(&body, json);
     }
     Ok(body)
+}
+
+fn remember_body(body: &EnvironmentBody, json: String) {
+    use lash_protocol_types::sync::MutexExt;
+    if json.len() > BODY_BYTES {
+        return;
+    }
+    let mut entries = BODIES.lock_recover();
+    if entries
+        .iter()
+        .any(|entry| entry.body.id() == body.id() && entry.json == json)
+    {
+        return;
+    }
+    let mut bytes: usize = entries.iter().map(|entry| entry.json.len()).sum();
+    while entries.len() >= BODY_ENTRIES || bytes + json.len() > BODY_BYTES {
+        if let Some(entry) = entries.pop_front() {
+            bytes -= entry.json.len();
+        }
+    }
+    entries.push_back(BodyEntry {
+        json,
+        body: body.clone(),
+    });
 }
 
 /// Shared row decoder. Stored state, owner identity and body are all checked.
@@ -318,10 +334,9 @@ impl EnvironmentWrite {
         if owner.state() != VersionOwnerState::Preparing || owner.version() != body.id() {
             return Err(EnvironmentRefusal::Content.into());
         }
-        Ok(Self::Prepare {
-            owner,
-            body_json: json(body)?,
-        })
+        let body_json = body.canonical_json().map_err(corrupt)?.to_owned();
+        remember_body(body, body_json.clone());
+        Ok(Self::Prepare { owner, body_json })
     }
 }
 

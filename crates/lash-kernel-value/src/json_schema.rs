@@ -100,46 +100,65 @@ struct KernelTypes {
 
 pub(crate) mod admissions {
     use super::*;
+    use std::hash::{Hash, Hasher};
+
+    struct Entry {
+        hash: u64,
+        admitted: Weak<Admitted>,
+    }
+
+    fn fingerprint(value: &Value) -> u64 {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        value.hash(&mut hash);
+        hash.finish()
+    }
 
     /// Share only pure admission results while a schema still owns them. No
     /// cache entry keeps a body or validator alive, and keys compare whole JSON
     /// bodies so annotations, defaults and refusal diagnostics remain exact.
     #[derive(Default)]
-    pub struct Admissions(Mutex<std::collections::VecDeque<Weak<Admitted>>>);
+    pub struct Admissions(Mutex<std::collections::VecDeque<Entry>>);
     impl Admissions {
         /// Admit a schema, sharing its immutable preparation with live owners
         /// in this cache. Dropping the cache discards all lookup state.
         pub fn admit(&self, value: Value) -> Result<JsonSchema, SchemaAdmissionError> {
+            let hash = fingerprint(&value);
             if let Some(admitted) = self
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .iter()
-                .filter_map(Weak::upgrade)
+                .filter(|entry| entry.hash == hash)
+                .filter_map(|entry| entry.admitted.upgrade())
                 .find(|found| *found.value == value)
             {
                 return Ok(JsonSchema { admitted });
             }
-            let compiled = JsonSchema::admit(value)?;
+            let compiled = JsonSchema::admit_fresh(value)?;
             Ok(self.keep(compiled))
         }
 
         // Compilation is outside the lock. Classify again under its owner so
         // concurrent admissions transfer the same immutable result to callers.
         pub(super) fn keep(&self, compiled: JsonSchema) -> JsonSchema {
+            let hash = fingerprint(&compiled.admitted.value);
             let mut entries = self
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            entries.retain(|entry| entry.strong_count() != 0);
+            entries.retain(|entry| entry.admitted.strong_count() != 0);
             if let Some(admitted) = entries
                 .iter()
-                .filter_map(Weak::upgrade)
+                .filter(|entry| entry.hash == hash)
+                .filter_map(|entry| entry.admitted.upgrade())
                 .find(|found| found.value == compiled.admitted.value)
             {
                 return JsonSchema { admitted };
             }
-            entries.push_back(Arc::downgrade(&compiled.admitted));
+            entries.push_back(Entry {
+                hash,
+                admitted: Arc::downgrade(&compiled.admitted),
+            });
             while entries.len() > 128 {
                 entries.pop_front();
             }
@@ -150,6 +169,11 @@ pub(crate) mod admissions {
 
 impl JsonSchema {
     pub fn admit(value: Value) -> Result<Self, SchemaAdmissionError> {
+        static ADMISSIONS: OnceLock<admissions::Admissions> = OnceLock::new();
+        ADMISSIONS.get_or_init(Default::default).admit(value)
+    }
+
+    fn admit_fresh(value: Value) -> Result<Self, SchemaAdmissionError> {
         let kind = match &value {
             Value::Null => Some(InvalidSchemaKind::Null),
             Value::Number(_) => Some(InvalidSchemaKind::Number),
@@ -410,6 +434,16 @@ mod preparation_tests {
             .unwrap();
         assert_ne!(repeated, other);
         assert_eq!(repeated.as_value(), &value);
+        let public = JsonSchema::admit(value.clone()).unwrap();
+        let decoded: JsonSchema = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            Arc::ptr_eq(&public.admitted, &decoded.admitted),
+            "FIG-7453: decoding an unchanged schema recompiled its validator and kernel projection"
+        );
+        let public_weak = Arc::downgrade(&public.admitted);
+        drop(public);
+        drop(decoded);
+        assert!(public_weak.upgrade().is_none());
         let weak = Arc::downgrade(&repeated.admitted);
         drop(results);
         drop(repeated);

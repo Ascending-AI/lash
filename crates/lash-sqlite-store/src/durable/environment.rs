@@ -224,7 +224,7 @@ pub(super) fn apply(
     }
     match write {
         EnvironmentWrite::Prepare { owner, body_json } => {
-            let body: EnvironmentBody = match env::decode(body_json) {
+            let body = match env::decoded_body(owner.version(), body_json) {
                 Ok(b) => b,
                 Err(e) => return Ok(Err(e)),
             };

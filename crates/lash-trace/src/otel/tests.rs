@@ -2199,11 +2199,78 @@ fn a_turn_closer_exports_input_with_the_global_meter_provider() {
             }],
         });
     }
+    if let TraceEvent::TurnCompleted { profile, .. } = &mut closer.event {
+        *profile = Some(crate::TurnProfile {
+            elapsed_ns: 100,
+            phases: vec![crate::TurnPhaseInterval {
+                statements: 7,
+                round_trips: 7,
+                rows_returned: 11,
+                bound_bytes: 13,
+                result_bytes: 17,
+                phase: "prompt/environment build".into(),
+                start_ns: 0,
+                end_ns: 100,
+                depth: 1,
+                revision: None,
+                ..Default::default()
+            }],
+            sql: vec![
+                crate::TurnSqlWork {
+                    phase_index: Some(0),
+                    phase: "prompt/environment build".into(),
+                    backend: "postgres".into(),
+                    shape: "select ?".into(),
+                    statements: 4,
+                    rows_returned: 11,
+                    bound_bytes: 13,
+                    result_bytes: 17,
+                    ..Default::default()
+                },
+                crate::TurnSqlWork {
+                    phase_index: Some(0),
+                    phase: "prompt/environment build".into(),
+                    backend: "postgres".into(),
+                    shape: "select ?".into(),
+                    origin: "other".into(),
+                    statements: 3,
+                    ..Default::default()
+                },
+            ],
+            statements: 7,
+            ..Default::default()
+        });
+    }
     let closer = closer.governed(crate::ContentPolicy::captured());
     adapter.append(&closer).unwrap();
     let spans = exporter.get_finished_spans().unwrap();
-    assert_eq!(spans.len(), 1);
-    let input = spans[0]
+    assert_eq!(spans.len(), 2);
+    let phase = spans
+        .iter()
+        .find(|s| s.name == "lash.turn.prompt_environment_build")
+        .unwrap();
+    let value = |key: &str| {
+        phase
+            .attributes
+            .iter()
+            .find(|a| a.key.as_str() == key)
+            .map(|a| a.value.to_string())
+    };
+    assert_eq!(value("lash.turn.sql.statements"), Some("7".into()));
+    assert_eq!(value("lash.turn.sql.round_trips"), Some("7".into()));
+    assert_eq!(value("lash.turn.sql.rows_returned"), Some("11".into()));
+    assert_eq!(value("lash.turn.sql.bound_bytes"), Some("13".into()));
+    assert_eq!(value("lash.turn.sql.result_bytes"), Some("17".into()));
+    let shapes: serde_json::Value =
+        serde_json::from_str(&value("lash.turn.sql.top_shapes").unwrap()).unwrap();
+    assert_eq!(shapes.as_array().unwrap().len(), 1);
+    assert_eq!(shapes[0]["shape"], "select ?");
+    assert_eq!(shapes[0]["statements"], 7);
+    assert_eq!(value("lash.turn.sql.omitted_shapes"), Some("0".into()));
+    let input = spans
+        .iter()
+        .find(|s| s.name == "invoke_agent")
+        .unwrap()
         .attributes
         .iter()
         .find(|attr| attr.key.as_str() == "gen_ai.input.messages")

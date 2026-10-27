@@ -34,7 +34,12 @@ pub(in crate::runtime) enum TurnStart {
     /// A fresh turn, with the trace scope its admission retained.
     Fresh(Option<lash_trace::DurableTraceScope>),
     /// A resumed turn, with what its checkpoint recorded.
-    Resumed(crate::runtime::durable::session::RecordedPreparation),
+    Resumed {
+        before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+        trace: Option<lash_trace::DurableTraceScope>,
+        config: Box<crate::runtime::durable::run_config::RecordedRunConfig>,
+        cell: Option<crate::runtime::durable::session::CellStart>,
+    },
 }
 
 impl LashRuntime {
@@ -78,12 +83,12 @@ impl LashRuntime {
         self.transition_turn_plugins(controller).await?;
         let fresh = matches!(&start, TurnStart::Fresh(_));
         let (recorded_before_turn, retained_trace, run_config, cell_start) = match start {
-            TurnStart::Resumed(recorded) => (
-                Some(recorded.before_turn),
-                recorded.trace,
-                recorded.config,
-                recorded.cell,
-            ),
+            TurnStart::Resumed {
+                before_turn,
+                trace,
+                config,
+                cell,
+            } => (Some(before_turn), trace, *config, cell),
             TurnStart::Fresh(admitted_trace) => (
                 None,
                 admitted_trace,
@@ -423,6 +428,19 @@ impl LashRuntime {
                     RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
                 })?;
             run_config.with_head_config(&config.value, config.node.clone())
+        } else {
+            run_config
+        };
+        let run_config = if fresh && projection.head.undelivered_config_change.is_none() {
+            // Initialize preparation while this exact head is acknowledged, so
+            // the owner retains its run cache only across equal configurations.
+            projection
+                .configuration
+                .get(&projection.head)
+                .map_err(|error| {
+                    RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
+                })?;
+            run_config.with_claim_configuration(projection.configuration.clone())
         } else {
             run_config
         };
