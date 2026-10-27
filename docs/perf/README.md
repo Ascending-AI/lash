@@ -86,6 +86,10 @@ interactive view, attach `tokio-console file://localhost<directory>/tasks.sock`
 while the replay runs. The receipt includes task/resource/async-operation event
 drops. Poll busy elapsed time is not CPU time; this view cannot reconstruct a
 suspended future's stack or see VM worker processes.
+Console also counts task-span destructor entries as polls. A cancelled task's
+`scheduled_ns` can include its preceding sleep; it is not sufficient evidence
+of run-queue starvation. See [task-span timing limits](instruments/async-scheduling-queues.md#tokio-console-task-spans)
+before interpreting scheduled totals or `completed`.
 
 `perf-tasks` measures the same `concurrent-16` replay with tracing off and on,
 using the optimized symbolized frame-pointer platform for both configurations,
