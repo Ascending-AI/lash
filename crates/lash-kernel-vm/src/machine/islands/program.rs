@@ -44,11 +44,35 @@ pub(in crate::machine::islands) enum Read {
 }
 
 impl Read {
+    fn source(op: &Op) -> Option<Self> {
+        match *op {
+            Op::Constant { dst, value } => Some(Self::Literal { reg: dst, value }),
+            Op::Local {
+                dst,
+                at,
+                shared,
+                miss,
+            } => Some(Self::Local {
+                reg: dst,
+                at,
+                shared,
+                miss,
+            }),
+            _ => None,
+        }
+    }
+
     pub(in crate::machine::islands) fn reg(&self) -> u32 {
         match self {
             Self::Literal { reg, .. } | Self::Local { reg, .. } => *reg,
         }
     }
+}
+
+pub(in crate::machine::islands) struct StoreInputs {
+    pub(in crate::machine::islands) reads: [Read; 3],
+    /// Target, index and value positions in source evaluation order.
+    pub(in crate::machine::islands) roles: [usize; 3],
 }
 
 pub(in crate::machine::islands) enum Op {
@@ -171,10 +195,11 @@ pub(in crate::machine::islands) enum Op {
         site: HeapSite,
         args: Box<[u32]>,
     },
-    ElementRead {
+    MemberAccess {
         site: HeapSite,
         args: Box<[u32]>,
-        units: super::ElementRead,
+        units: super::MemberAccess,
+        reads: Option<Box<[Read; 2]>>,
     },
     MemberStore {
         site: HeapSite,
@@ -215,6 +240,8 @@ pub(in crate::machine::islands) enum Op {
         value: u32,
         field: Option<usize>,
         pc: u32,
+        inputs: Option<Box<StoreInputs>>,
+        finish: Option<u32>,
     },
     Unit {
         site: UnitSite,
@@ -843,6 +870,8 @@ impl<'e> Build<'e> {
                     value: *value,
                     field: *field,
                     pc: *pc,
+                    inputs: None,
+                    finish: None,
                 });
                 self.emit(Op::Done {
                     leaves: statement.leaves,
@@ -1255,11 +1284,11 @@ impl<'e> Build<'e> {
                     && args.len() == 2
                     && let Some(lib) = library
                     && let Some(extra) = super::answer_depth(self.exe, lib)
-                    && let Some(units) = self.element_read_charge(lib)
+                    && let Some(units) = self.member_charge(lib)
                 {
                     let depth = Depth::Template(extra);
                     self.site(depth, true);
-                    self.emit(Op::ElementRead {
+                    self.emit(Op::MemberAccess {
                         site: HeapSite {
                             lib,
                             close: closes.first().copied(),
@@ -1273,6 +1302,7 @@ impl<'e> Build<'e> {
                         },
                         args: args.clone(),
                         units,
+                        reads: None,
                     });
                     self.result(reg, &args);
                     return Some(());

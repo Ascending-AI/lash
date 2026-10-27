@@ -67,21 +67,27 @@ pub(in crate::machine::islands) enum AccessShape {
 }
 
 impl Build<'_> {
-    pub(super) fn element_read_charge(&self, lib: LibId) -> Option<super::super::ElementRead> {
-        use super::super::ElementRead;
+    pub(super) fn member_charge(&self, lib: LibId) -> Option<super::super::MemberAccess> {
+        use super::super::MemberAccess;
         use lash_kernel_doc::plan::Element;
         let function = self.exe.lib(lib);
         let (entry, _) = function.prepared.as_ref()?;
         let charge = |index| function.charge.known_charge(&[None, Some(index)], None);
         match entry.element()? {
-            Element::Read => Some(ElementRead::Float(charge(Value::Float(
+            Element::Read => Some(MemberAccess::Float(charge(Value::Float(
                 lash_kernel_doc::Float::new(0.0),
             ))?)),
-            Element::ReadInt => Some(ElementRead::Int {
+            Element::ReadInt => Some(MemberAccess::Int {
                 zero: charge(Value::Int(0))?,
                 nonzero: charge(Value::Int(1))?,
             }),
-            Element::ReadMap => Some(ElementRead::Map(function.charge.short_text_charge(1)?)),
+            Element::ReadMap => Some(MemberAccess::Map(function.charge.short_text_charge(1)?)),
+            Element::Append(values) => Some(MemberAccess::Append {
+                units: function
+                    .charge
+                    .known_charge(&[None, None], Some(Value::Null))?,
+                values,
+            }),
             Element::Write => None,
         }
     }
@@ -186,12 +192,17 @@ impl Build<'_> {
                 continue;
             };
             if args.len() == 2 {
-                if let Some(units) = self.element_read_charge(site.lib) {
+                if let Some(units) = self.member_charge(site.lib) {
                     let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
                     let Op::Heap { site, args } = original else {
                         unreachable!()
                     };
-                    self.ops[at].op = Op::ElementRead { site, args, units };
+                    self.ops[at].op = Op::MemberAccess {
+                        site,
+                        args,
+                        units,
+                        reads: None,
+                    };
                 }
                 continue;
             }

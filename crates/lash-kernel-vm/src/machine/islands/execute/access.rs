@@ -1,6 +1,8 @@
 //! Typed member reads admit their complete source charge before committing.
 
-use super::super::compiled::{AccessShape, AccessSite, ElementRead, OperatorSite, Read, WriteSite};
+use super::super::compiled::{
+    AccessShape, AccessSite, MemberAccess, OperatorSite, Read, WriteSite,
+};
 use super::*;
 
 struct ReadAnswer {
@@ -78,11 +80,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(values)
     }
 
-    pub(super) fn element_value(
+    pub(super) fn member_value(
         &mut self,
         site: &super::super::compiled::HeapSite,
         values: &[Value; 2],
-        charge: ElementRead,
+        charge: MemberAccess,
     ) -> Option<Answer> {
         if OBSERVING
             || !self.swift
@@ -93,14 +95,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return None;
         }
-        let (value, units) = match (charge, *values) {
-            (ElementRead::Map(charge), [Value::Map(map), Value::Text(key)]) => (
+        let (value, units, append) = match (charge, *values) {
+            (MemberAccess::Map(charge), [Value::Map(map), Value::Text(key)]) => (
                 self.arena.table_get_text(map, &key).ok()??,
                 charge.units(key.as_bytes().len() as u64),
+                None,
             ),
+            (MemberAccess::Append { units, values }, [Value::List(list), value])
+                if values & (1 << value.kind() as u32) != 0 =>
+            {
+                (
+                    Value::Null,
+                    units,
+                    Some((list, self.arena.len(list).ok()?, value)),
+                )
+            }
             (charge, [Value::List(list), key]) => {
                 let (at, units, holes) = match (charge, key) {
-                    (ElementRead::Float(units), Value::Float(key)) => {
+                    (MemberAccess::Float(units), Value::Float(key)) => {
                         let key = key.get();
                         if !(0.0..lash_kernel_doc::plan::ELEMENT_POSITIONS as f64).contains(&key) {
                             return None;
@@ -111,7 +123,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         }
                         (at, units, true)
                     }
-                    (ElementRead::Int { zero, nonzero }, Value::Int(key)) => (
+                    (MemberAccess::Int { zero, nonzero }, Value::Int(key)) => (
                         u64::try_from(key).ok()?,
                         if key == 0 { zero } else { nonzero },
                         false,
@@ -125,7 +137,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     value => value,
                 };
-                (value, units)
+                (value, units, None)
             }
             _ => return None,
         };
@@ -144,6 +156,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .checked_add(site.close.map_or(0, |close| u64::from(close.total)))?;
         if end > self.bound || end >= self.slice_end {
             return None;
+        }
+        if let Some((list, at, value)) = append {
+            self.arena.list_set(list, at, value).ok()?;
         }
         if let Some(at) = counted
             && let Err(stop) = self.count(at)

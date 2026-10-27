@@ -6,6 +6,26 @@ use crate::compile::{Cx, Meter};
 
 mod answer;
 
+struct MapEntries<I>(I);
+
+impl<I: ExactSizeIterator<Item = Value>> Iterator for MapEntries<I> {
+    type Item = (Value, Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some((self.0.next()?, self.0.next()?))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
+}
+
+impl<I: ExactSizeIterator<Item = Value>> ExactSizeIterator for MapEntries<I> {
+    fn len(&self) -> usize {
+        self.0.len() / 2
+    }
+}
+
 /// An accepted operation retains its ordered charges until the caller commits
 /// its counted action. A scalar native has one formula; a helper has its body
 /// events, which must never be collapsed into that formula's total.
@@ -357,9 +377,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn make(
         &mut self,
         make: crate::compile::expr::Make,
-        values: impl ExactSizeIterator<Item = Value>,
+        values: impl ExactSizeIterator<Item = Value> + Clone,
     ) -> Option<Value> {
         use crate::compile::expr::Make;
+        if make == Make::Map
+            && values.len().is_multiple_of(2)
+            && self.resident_room(self.arena.table_bound(values.len() / 2))
+        {
+            for (key, _) in MapEntries(values.clone()) {
+                self.arena.key(&key).ok()?;
+            }
+            return self.arena.create_map(MapEntries(values)).ok();
+        }
         // Small argument lists already fit the register executor's operand
         // allowance. Build their inline arena sequence without a temporary Vec.
         if make == Make::List

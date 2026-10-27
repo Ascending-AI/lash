@@ -329,7 +329,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         | Op::Binary { .. }
                         | Op::Accumulation { .. }
                         | Op::Heap { .. }
-                        | Op::ElementRead { .. }
+                        | Op::MemberAccess { .. }
                         | Op::MemberStore { .. }
                 )
             {
@@ -1059,16 +1059,28 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return self.finish_statement(frame, *leaves, None);
                     }
                 }
-                Op::ElementRead { site, args, units } => {
-                    let values = [regs[args[0] as usize], regs[args[1] as usize]];
-                    let answer = self
-                        .element_value(site, &values, *units)
-                        .unwrap_or_else(|| {
-                            self.retaining(&mut frame.transient, |island| {
-                                island.heap_call(site, &values)
-                            })
-                        });
-                    regs[site.reg as usize] = answer?;
+                Op::MemberAccess {
+                    site,
+                    args,
+                    units,
+                    reads,
+                } => {
+                    let values = match reads {
+                        Some(reads) => self.inputs::<2>(&frame.slots, reads.as_slice())?,
+                        None => [regs[args[0] as usize], regs[args[1] as usize]],
+                    };
+                    let answer = self.member_value(site, &values, *units).unwrap_or_else(|| {
+                        self.retaining(&mut frame.transient, |island| {
+                            island.heap_call(site, &values)
+                        })
+                    });
+                    regs[site.reg as usize] = answer.inspect_err(|_| {
+                        for (source, value) in args.iter().zip(values) {
+                            if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
+                                self.scratch.exit.regs.push((*source, value));
+                            }
+                        }
+                    })?;
                 }
                 Op::Heap { site, args } => {
                     let mut values = [Value::Absent; MAX_ARGS];
@@ -1148,16 +1160,43 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     value,
                     field,
                     pc,
+                    inputs,
+                    finish,
                 } => {
-                    self.retaining(&mut frame.transient, |island| {
-                        island.store(
-                            *field,
+                    let values = match inputs {
+                        Some(inputs) => self.inputs::<3>(&frame.slots, &inputs.reads)?,
+                        None => [
                             regs[*target as usize],
                             index.map_or(Value::Absent, |reg| regs[reg as usize]),
                             regs[*value as usize],
-                        )
-                    })
-                    .ok_or_else(|| self.at(*pc))?;
+                        ],
+                    };
+                    let ordered = inputs
+                        .as_ref()
+                        .map_or(values, |inputs| inputs.roles.map(|at| values[at]));
+                    let stored = self.retaining(&mut frame.transient, |island| {
+                        island.store(*field, ordered[0], ordered[1], ordered[2])
+                    });
+                    if stored.is_none() {
+                        let stop = self.at(*pc);
+                        if let Some(inputs) = inputs {
+                            for (read, value) in inputs.reads.iter().zip(values) {
+                                if !self
+                                    .scratch
+                                    .exit
+                                    .regs
+                                    .iter()
+                                    .any(|(reg, _)| *reg == read.reg())
+                                {
+                                    self.scratch.exit.regs.push((read.reg(), value));
+                                }
+                            }
+                        }
+                        return Err(stop);
+                    }
+                    if let Some(leaves) = finish {
+                        return self.finish_statement(frame, *leaves, None);
+                    }
                 }
                 Op::Unit { site, src } => {
                     regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {

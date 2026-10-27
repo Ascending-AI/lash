@@ -32030,7 +32030,7 @@ const PY_METHOD_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_append,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_append_heap, depth: 1, writes: true, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_append_heap, depth: 1, writes: true, element: Some(p::Element::Append(5693)), record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `py.method.append`.

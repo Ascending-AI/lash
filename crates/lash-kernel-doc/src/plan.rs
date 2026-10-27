@@ -178,6 +178,9 @@ pub enum Element {
     ReadInt,
     /// Return a map entry under an inline text key when the map holds it.
     ReadMap,
+    /// Append the second argument to a list and return Null. Bits select
+    /// the source-certified kinds of the appended value.
+    Append(u32),
     /// Write the third argument and return it. The key is an integral
     /// nonnegative Float below [`ELEMENT_POSITIONS`] and may equal length.
     Write,

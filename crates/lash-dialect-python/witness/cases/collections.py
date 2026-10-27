@@ -40,6 +40,16 @@ del d["z"]
 e = dict(d)
 e["new"] = True
 print(d, e, d == {"y": 1, "c": 3, "b": 0}, {1: "int"}[1.0], {} == dict(), dict([("k", "v")]))
+seen = []
+def mark(label, value):
+    seen.append(label)
+    return value
+duplicates = {mark('first key', 1): mark('first value', 'one'), mark('second key', 1.0): mark('second value', 'float')}
+print(duplicates, seen)
+try:
+    invalid = {mark('valid key', 'a'): mark('valid value', 1), mark('invalid key', []): mark('invalid value', 2)}
+except TypeError:
+    print('unhashable key', seen)
 s = {3, 1, 2, 3}
 s.add(4)
 s.discard(1)

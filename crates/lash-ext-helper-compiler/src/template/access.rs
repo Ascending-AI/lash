@@ -1,13 +1,13 @@
-//! Member reads certified from their source guards and registered scalar kernels.
+//! Member operations certified from source guards and registered scalar kernels.
 
 use super::*;
 
 impl Evaluator<'_> {
-    pub(super) fn member_read(
+    pub(super) fn member_access(
         &self,
         definition: &FunctionDefinition,
         kinds: &[&str],
-        steps: &[Step],
+        state: &State,
         value: &Symbol,
     ) -> Option<lash_kernel_doc::plan::Element> {
         use lash_kernel_doc::plan::Element;
@@ -15,22 +15,29 @@ impl Evaluator<'_> {
         let [target, index] = definition.signature.params.as_slice() else {
             return None;
         };
-        if definition.signature.result != Type::Any {
-            return None;
-        }
-        match (&target.ty, &index.ty) {
-            (Type::List(item), Type::Int)
+        let steps = &state.steps;
+        match (&target.ty, &index.ty, &definition.signature.result) {
+            (Type::List(item), Type::Int, Type::Any)
                 if **item == Type::Any && self.integer_read(kinds, steps, value) =>
             {
                 Some(Element::ReadInt)
             }
-            (Type::Map(map), Type::Text)
+            (Type::Map(map), Type::Text, Type::Any)
                 if map.key == Type::Any
                     && map.value == Type::Any
                     && kinds == ["Map(_)", "Text(_)"]
                     && map_read(steps, value) =>
             {
                 Some(Element::ReadMap)
+            }
+            (Type::Any, Type::Any, Type::Null)
+                if kinds.first() == Some(&"List(_)")
+                    && matches!(value.constant, Some(Value::Null))
+                    && state.vars.get(&index.name)?.kind != Some(ValueKind::Absent)
+                    && append(steps) =>
+            {
+                let kind = state.vars.get(&index.name)?.kind?;
+                Some(Element::Append(1 << kind as u32))
             }
             _ => None,
         }
@@ -99,6 +106,28 @@ impl Evaluator<'_> {
             && kernel(*le) == Some(lash_kernel_doc::scalar::ScalarOp::Le)
             && kernel(*lt) == Some(lash_kernel_doc::scalar::ScalarOp::Lt)
     }
+}
+
+fn append(steps: &[Step]) -> bool {
+    let [
+        Step::Heap {
+            name,
+            form:
+                Form::Len {
+                    collection: "List",
+                    target,
+                },
+        },
+        Step::SetIndex {
+            target: written,
+            index,
+            value,
+        },
+    ] = steps
+    else {
+        return false;
+    };
+    target == "args[0]" && written == "args[0]" && index == name && value == "args[1]"
 }
 
 fn map_read(steps: &[Step], value: &Symbol) -> bool {

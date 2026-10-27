@@ -905,7 +905,6 @@ pub(super) struct ExecutionObservation {
     pub(super) lines: Vec<String>,
     requests: Vec<String>,
     charged: u64,
-    held: u64,
     carry: Option<Checkpoint>,
 }
 
@@ -958,7 +957,6 @@ fn execution_observation_with_layout(
                 lines: host.lines,
                 requests,
                 charged: machine.meters().charged.expect("exact charge"),
-                held: machine.meters().memory,
                 carry,
             };
         }

@@ -27,10 +27,10 @@ use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::library::Library;
 
+mod access;
 mod bulk;
 mod forwarding;
 mod metering;
-mod reads;
 use metering::tree;
 
 /// The most native calls and arena forms one path's answer takes.
@@ -1177,7 +1177,7 @@ struct Pass {
     /// Whether a path of an arm writes an arena object.
     writes: bool,
     record_writes: BTreeMap<(String, u8, bool), u32>,
-    member_read: Option<lash_kernel_doc::plan::Element>,
+    member_access: Option<lash_kernel_doc::plan::Element>,
 }
 
 impl Evaluator<'_> {
@@ -1214,7 +1214,7 @@ impl Evaluator<'_> {
             depth: 1,
             writes: false,
             record_writes: BTreeMap::new(),
-            member_read: None,
+            member_access: None,
         };
         for mask in 0..combinations {
             let mut state = State {
@@ -1312,9 +1312,15 @@ impl Evaluator<'_> {
             if self.heap
                 && let Some((state, Some(value))) = results.first()
                 && state.charging.is_none()
-                && let Some(read) = self.member_read(definition, &names, &state.steps, value)
+                && let Some(read) = self.member_access(definition, &names, state, value)
             {
-                pass.member_read = Some(read);
+                pass.member_access = Some(match (pass.member_access, read) {
+                    (
+                        Some(lash_kernel_doc::plan::Element::Append(left)),
+                        lash_kernel_doc::plan::Element::Append(right),
+                    ) => lash_kernel_doc::plan::Element::Append(left | right),
+                    (_, read) => read,
+                });
             }
             let mut code = String::new();
             if !self.heap {
@@ -1592,7 +1598,7 @@ pub(crate) fn emit(
         Some(heap) => {
             let element = if heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str()) {
                 "Some(p::Element::Write)".to_owned()
-            } else if let Some(read) = heap.member_read {
+            } else if let Some(read) = heap.member_access {
                 format!("Some(p::Element::{read:?})")
             } else if ELEMENT_READS.contains(&definition.name.as_str()) {
                 "Some(p::Element::Read)".to_owned()

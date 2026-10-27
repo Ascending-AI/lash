@@ -174,10 +174,11 @@ pub(super) struct OperatorSite {
 
 /// A source-certified member read and its formula's scalar prices.
 #[derive(Clone, Copy)]
-pub(super) enum ElementRead {
+pub(super) enum MemberAccess {
     Float(u64),
     Int { zero: u64, nonzero: u64 },
     Map(crate::compile::LengthCharge),
+    Append { units: u64, values: u32 },
 }
 
 /// A prepared heap operation keeps the same semantic call coordinates.
