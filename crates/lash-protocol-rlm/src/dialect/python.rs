@@ -37,7 +37,9 @@ impl DialectPrompts for PythonPrompts {
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
         let ExecutionSectionRequest {
-            tools, catalogue, ..
+            tools,
+            tool_catalog,
+            catalogue,
         } = request;
         let label = catalogue.map(|catalogue| {
             super::catalogue_label(
@@ -60,16 +62,17 @@ impl DialectPrompts for PythonPrompts {
         } else {
             format!("### Tools\n\n{}", tools.join("\n\n"))
         };
-        let example_program = "total = 1 + 2\nprint(total)";
+        let example_program =
+            super::example::program(tool_catalog, lash_kernel_dialect::Spelling::Python);
         let action = "the `execute_code` program";
-        let response_shape = "### Tool transport\n\nFor action or computation, make one `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools, including `control.finish`, inside the program.\n";
+        let response_shape = "### Tool transport\n\nRun one cell per `execute_code` call with `{\"code\": \"<complete program>\"}`. Call tools inside the program. Tool results and `print` output are read in the next step: look things up in one cell, inspect the output, then act or finish in a later cell.\n";
         let example = format!(
             "### Example execute_code call\n\nexecute_code({})",
             serde_json::json!({"code": example_program})
         );
         ExecutionSection {
             prose: format!(
-                r#"Use prose for conversation; use {action} for action or computation. Call tools by their dotted path, as `await package.tool_name({{ ... }})`, with one dict of arguments, only those listed under **Tools**.
+                r#"Use prose for conversation; use {action} for action or computation. Use only tools listed under **Tools**; copy their exact dotted paths and argument shapes, pass one dict of arguments, and await each call.
 
 {response_shape}
 {example}
