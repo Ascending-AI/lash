@@ -309,7 +309,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// may have committed its first operation), then add the live outer
     /// operands. Neither scratch positions nor this physical cursor persist.
     pub(super) fn spill(&mut self, frame: &Frame<'_>, instruction: &Instruction) {
-        if frame.waiting.is_none() {
+        if frame.waiting.is_none() && frame.callee.compiled.has_restarts {
             for restart in
                 frame
                     .callee

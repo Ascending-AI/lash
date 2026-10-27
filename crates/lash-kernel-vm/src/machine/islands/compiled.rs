@@ -37,6 +37,7 @@ pub(crate) struct Compiled {
     actions: Box<[(u32, usize)]>,
     pub(super) cell_parameters: usize,
     pub(super) cleanups: bool,
+    pub(super) has_restarts: bool,
     room: u32,
     observes: bool,
 }
@@ -352,6 +353,10 @@ impl Compiled {
                     }
                 )
             }),
+            has_restarts: cx
+                .ops
+                .iter()
+                .any(|instruction| matches!(instruction.op, Op::Keep(_))),
             ops: cx.ops,
             registers: cx.registers,
             headers: headers.into(),
