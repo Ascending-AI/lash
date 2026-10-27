@@ -15,10 +15,10 @@
 //! carried by the document rewrite alone, as a function value a host holds
 //! is ([`function_value`]).
 //!
-//! [`adopt`] is a rewrite within one version: a document relinked by name
-//! from the releases of the packages it calls to their successors
-//! ([`relink`], `K-LIB-009`), refused when that would move it onto a
-//! changed operation contract.
+//! [`adopt`] plans an explicit rewrite within one kernel version, refused
+//! when it changes an operation contract. Build helpers keep exact FunctionIds;
+//! ADR 0149 reserves their upgrade pairing for the permanent HelperId ledger.
+//! A helper release alone never rewrites an existing publication or run.
 //!
 //! [`carry_checkpoint`] rewrites parked page records copy-on-write over a
 //! correspondence. The embedding validates the foreign continuation and

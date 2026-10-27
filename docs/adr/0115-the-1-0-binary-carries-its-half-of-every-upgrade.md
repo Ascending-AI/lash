@@ -441,14 +441,15 @@ then finish backfills and contract. The current `lashctl` supplies `migrate`,
 `kernel-migration list`, `kernel-migration run` and `version`. A build that
 retires the previous kernel version's formats does not start while a process
 or session is still in them (`DurableError::Unmigrated`, naming
-`lashctl kernel-migration run`; `docs/kernel/design.md` §6). Build helpers come from `lash-kernel-releases` as one immutable exact-FunctionId
-image. A checkpoint records its `HelperLibraryId`; an equal image resumes
-without compatibility work, while a mismatch checks the exact live helper
-reach and refuses `KernelRestoreRefusal::MissingHelper` before executable
-assembly. Ordinary package publications remain separately retained artifacts.
-The 1.0 helper release is unsealed until the cut: the build generates it,
-and changing a helper requires neither re-freezing nor checked-in release
-files. The cut owns the one-time seal (FIG-5847).
+`lashctl kernel-migration run`; `docs/kernel/design.md` §6). Build helpers retain exact FunctionIds. [ADR 0149](0149-released-helpers-keep-exact-code-and-upgrade-explicitly.md)
+governs helper retention: every released definition remains in a checked-in archive,
+with native versions retained in Rust and contracts in a permanent HelperId
+ledger. Publications stay pinned by content; upgrades are explicit. The
+HelperLibraryId remains the availability fast path. Phase 1 records and checks
+the archive without changing runtime restore; phase 2 replaces MissingHelper
+for archived definitions with exact loading. Interpreter support and migration
+obligations still apply. The archive starts before 1.0 and resets at the 1.0
+cut, after which it is append-only.
 Its exit codes are 0 done, 1 failure, 2 usage, 3 refused precondition and
 4 incompatible store (`crates/lashctl/src/main.rs`). Node draining is exposed
 through `LashCore::drain` (`crates/lash/src/core/node.rs`), not operator drain

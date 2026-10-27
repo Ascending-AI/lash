@@ -1,5 +1,7 @@
 //! Immutable build-owned helper code and native declarations, addressed by exact FunctionId.
 
+pub mod archive;
+
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{BuildHelpers, FunctionRegistry};
@@ -25,7 +27,7 @@ pub struct BuiltPackage {
     /// Its code, validated against the packages it requires.
     pub image: &'static [u8],
     /// This build's native implementations, sorted by function identity.
-    pub natives: &'static [(lash_kernel_value::names::FunctionId, &'static str)],
+    pub natives: &'static [(lash_kernel_value::names::FunctionId, &'static str, u32)],
 }
 
 impl BuiltPackage {
@@ -161,4 +163,29 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
                 .collect(),
         }))
     })
+}
+
+/// Authenticated checked-in history, separate from the current runtime release.
+pub fn helper_archive() -> Result<archive::Archive, LibraryError> {
+    let archive = archive::Archive {
+        releases: (include!("archive_releases.rs") as &[&str])
+            .iter()
+            .map(|source| serde_json::from_str(source))
+            .collect::<Result<_, _>>()
+            .map_err(LibraryError::new)?,
+        ledger: serde_json::from_str(include_str!("../archive/ledger.json"))
+            .map_err(LibraryError::new)?,
+    };
+    let _ = archive.validate().map_err(LibraryError::new)?;
+    Ok(archive)
+}
+
+/// Deterministic candidate produced by this build. Only the explicit recorder
+/// writes it back to the repository.
+pub fn archive_candidate() -> Result<archive::Archive, LibraryError> {
+    serde_json::from_str(include_str!(concat!(
+        env!("OUT_DIR"),
+        "/archive.candidate.json"
+    )))
+    .map_err(LibraryError::new)
 }

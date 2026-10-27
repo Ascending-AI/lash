@@ -11,6 +11,10 @@
     )
 )]
 
+#[allow(dead_code, reason = "archive readers are shared with release checks")]
+#[path = "src/archive.rs"]
+mod archive;
+
 #[path = "src/library.rs"]
 mod library;
 #[path = "src/build/sets.rs"]
@@ -48,7 +52,8 @@ fn main() -> Result<(), BuildError> {
     let kernel = package("kernel", None, &[], &mut |registry| {
         library::define_kernel(registry)
     })?;
-    write_package(&out, &kernel, &[])?;
+    let mut release_natives = write_package(&out, &kernel, &[])?;
+    let mut release_packages = vec![(kernel.path.clone(), kernel.roots.clone())];
     let mut release_definitions = kernel.definitions.clone();
     let mut release_roots = kernel.roots.clone();
     std::fs::write(
@@ -80,10 +85,11 @@ fn main() -> Result<(), BuildError> {
             Ok(lash_ext_ts_helpers::package::define_helpers(library)?)
         })?;
         for package in [&regex, &date, &url] {
-            write_package(&out, package, &[&kernel])?;
+            release_natives.extend(write_package(&out, package, &[&kernel])?);
         }
-        write_package(&out, &typescript, &requires)?;
+        release_natives.extend(write_package(&out, &typescript, &requires)?);
         for unit in [&regex, &date, &url, &typescript] {
+            release_packages.push((unit.path.clone(), unit.roots.clone()));
             release_definitions.extend(unit.definitions.clone());
             release_roots.extend(&unit.roots);
         }
@@ -93,11 +99,19 @@ fn main() -> Result<(), BuildError> {
         let python = helpers("python", "py", &[&kernel], |library| {
             Ok(lash_ext_py_helpers::package::define_helpers(library)?)
         })?;
-        write_package(&out, &python, &[&kernel])?;
+        release_natives.extend(write_package(&out, &python, &[&kernel])?);
+        release_packages.push((python.path.clone(), python.roots.clone()));
         release_definitions.extend(python.definitions.clone());
         release_roots.extend(&python.roots);
     }
-    write_helper_library(&out, release_definitions, release_roots)?;
+    write_helper_library(
+        &out,
+        release_definitions,
+        release_roots,
+        release_packages,
+        release_natives,
+    )?;
+    println!("cargo:rerun-if-changed=archive");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())
@@ -229,7 +243,7 @@ fn write_package(
     out: &std::path::Path,
     package: &ReleaseUnit,
     requires: &[&ReleaseUnit],
-) -> Result<(), BuildError> {
+) -> Result<BTreeMap<FunctionId, archive::NativeIdentity>, BuildError> {
     let stem = package.path.to_string().replace('.', "_");
     let mut checked = registry_of(requires)?;
     let validated = checked.validate_functions(package.definitions.clone())?;
@@ -253,23 +267,37 @@ fn write_package(
         .iter()
         .filter_map(|function| {
             let registered = checked.get(function)?;
-            registered
-                .native()
-                .map(|_| (*function, registered.name().to_owned()))
+            registered.native().map(|_| {
+                (
+                    *function,
+                    registered.name().to_owned(),
+                    registered.definition().native_version,
+                )
+            })
         })
         .collect();
-    rows.sort_by_key(|(function, _)| *function);
+    rows.sort_by_key(|(function, _, _)| *function);
+    let mut natives = BTreeMap::new();
     let mut source = String::from("&[\n");
-    for (function, name) in rows {
+    for (function, name, version) in rows {
+        natives.insert(
+            function,
+            archive::NativeIdentity {
+                package: package.path.clone(),
+                name: name.clone(),
+                native_version: version,
+            },
+        );
         source.push_str(&format!(
-            "(lash_kernel_value::names::FunctionId::from_bytes({:?}), {:?}),\n",
+            "(lash_kernel_value::names::FunctionId::from_bytes({:?}), {:?}, {:?}),\n",
             function.as_bytes(),
-            name
+            name,
+            version
         ));
     }
     source.push_str("]\n");
     std::fs::write(out.join(format!("{stem}.natives.rs")), source)?;
-    Ok(())
+    Ok(natives)
 }
 
 /// Helpers share one self-contained Document. Pure natives remain declarations
@@ -279,6 +307,8 @@ fn write_helper_library(
     out: &std::path::Path,
     definitions: Vec<FunctionDefinition>,
     roots: BTreeSet<FunctionId>,
+    packages: Vec<(String, BTreeSet<FunctionId>)>,
+    natives: BTreeMap<FunctionId, archive::NativeIdentity>,
 ) -> Result<(), BuildError> {
     let mut registry = FunctionRegistry::declarations();
     let mut pending: BTreeMap<_, _> = definitions
@@ -340,5 +370,101 @@ fn write_helper_library(
         out.join("helpers.labels.json"),
         serde_json::to_vec(&labels)?,
     )?;
+    write_archive_candidate(out, &helpers, packages, labels, natives)?;
+    Ok(())
+}
+
+/// Read only checked-in inputs and append to an explicit build-local candidate.
+#[expect(clippy::disallowed_methods, reason = "build outputs stay in OUT_DIR")]
+fn write_archive_candidate(
+    out: &std::path::Path,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    packages: Vec<(String, BTreeSet<FunctionId>)>,
+    labels: BTreeMap<FunctionId, serde_json::Value>,
+    natives: BTreeMap<FunctionId, archive::NativeIdentity>,
+) -> Result<(), BuildError> {
+    let started = std::time::Instant::now();
+    let archive = archive::Archive {
+        releases: (include!("src/archive_releases.rs") as &[&str])
+            .iter()
+            .map(|source| serde_json::from_str(source))
+            .collect::<Result<_, _>>()?,
+        ledger: serde_json::from_str(include_str!("archive/ledger.json"))?,
+    };
+    let _ = archive.validate()?;
+    let definitions: BTreeMap<_, _> = helpers
+        .functions()
+        .iter()
+        .map(|(id, registered)| (*id, FunctionDefinition::clone(registered.definition())))
+        .collect();
+    let representations = serde_json::from_str(include_str!("archive/representations.json"))?;
+    // Feature-disabled packages retain their last recorded release. A full-feature
+    // recorder is the release-cut authority, never a feature subset or synthetic run.
+    let mut release = archive.releases.last().cloned().unwrap_or_default();
+    release.definitions = definitions.clone();
+    release.labels.extend(labels);
+    release.representations = representations;
+    for (package, roots) in packages {
+        release
+            .natives
+            .retain(|_, identity| identity.package != package);
+        release
+            .bindings
+            .retain(|helper, _| !helper.0.starts_with(&format!("{package}:")));
+        let library =
+            lash_kernel_doc::BuildHelpers::new(helpers.functions().clone(), roots.iter().copied())?;
+        release.libraries.insert(
+            package.clone(),
+            archive::Library {
+                identity: library.identity(),
+                members: library.members().copied().collect(),
+                roots: roots.clone(),
+            },
+        );
+        for id in roots {
+            let definition = &definitions[&id];
+            if definition.name.as_str() == "kernel.anonymous" {
+                continue;
+            }
+            let contract = archive::contract(id, &definitions, &release.representations)
+                .ok_or("contract reach is not closed")?;
+            release.bindings.insert(
+                archive::HelperId(format!("{package}:{}", definition.name)),
+                archive::Binding {
+                    revision: contract.revision(),
+                    function: id,
+                },
+            );
+        }
+    }
+    release.natives.extend(natives);
+    release.library = archive::Library {
+        members: release
+            .libraries
+            .values()
+            .flat_map(|library| library.members.iter().copied())
+            .collect(),
+        roots: release
+            .libraries
+            .values()
+            .flat_map(|library| library.roots.iter().copied())
+            .collect(),
+        identity: lash_kernel_value::HelperLibraryId::of_members(
+            release
+                .libraries
+                .values()
+                .flat_map(|library| library.members.iter().copied()),
+        ),
+    };
+    let candidate = archive.append(release)?;
+    std::fs::write(
+        out.join("archive.candidate.json"),
+        serde_json::to_vec(&candidate)?,
+    )?;
+    // Timing is diagnostic output, never an input to a compiled helper image.
+    eprintln!(
+        "helper archive assembly and validation: {} us",
+        started.elapsed().as_micros()
+    );
     Ok(())
 }

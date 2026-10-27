@@ -1,0 +1,12 @@
+{
+  "stamp": "Helper-created branded records carry __lash_brand as (package, type) and __lash_built as exact constructor FunctionId bytes. Authored TypeScript template records carry only __lash_brand and have no constructor stamp. No representation compatibility across changed constructors is implied. Sources: docs/kernel/design.md section 3; lash-kernel-lib/src/brand.rs; lash-dialect-typescript/src/lower/expressions.rs.",
+  "date.ecma:invalid_date": "Valid dates are Timestamp. Invalid dates are records with __lash_brand=(date.ecma,invalid_date) and __lash_built. Source: lash-ext-date-ecma/src/lib.rs timestamp native and date_value.",
+  "regex.ecma:reg_exp": "Record with pattern Text, canonical flags Text, lastIndex Number and exact brand stamp. Native exec returns match data and next lastIndex without mutating its input. Sources: lash-ext-regex-ecma/src/functions.rs reg_exp; docs/kernel/design.md section 3.",
+  "url.whatwg:url": "Record with state as a Text-valued record of href, origin, protocol, username, password, host, hostname, port, pathname, search and hash; searchParams is a branded url_search_params record with pairs and owner sharing that state. Source: lash-ext-url-whatwg/src/lib.rs url_type and record.",
+  "url.whatwg:url_search_params": "Record with pairs as ordered two-element Text lists and owner as absent or the owning URL state record. Sources: lash-ext-url-whatwg/src/lib.rs record; lash-ext-ts-helpers/src/helpers/url_search_params.kernel construct and refresh.",
+  "typescript:promise": "Record initially with state pending and task absent, then a worker task handle. Await joins that task for its outcome. Source: lash-ext-ts-helpers/src/helpers/promise.kernel pending and await.",
+  "typescript:iterator": "Record with next as a ts.function token retaining the exact lifted closure and its captures. Source: lash-ext-ts-helpers/src/helpers/array.kernel iterator constructors.",
+  "typescript:arguments": "Record with properties and hidden set containing length. Source: lash-ext-ts-helpers/src/helpers/core.kernel arguments constructor.",
+  "typescript:regex_match": "Record with items, index, input, groups; optional indices contains items and groups. Source: lash-ext-ts-helpers/src/helpers/regexp.kernel match_record.",
+  "typescript:template": "Record with items and raw source string lists, constructed once per tagged-template site. Sources: lash-dialect-typescript/src/lower/expressions.rs tagged templates; lash-ext-ts-helpers/src/helpers/core.kernel template consumers."
+}

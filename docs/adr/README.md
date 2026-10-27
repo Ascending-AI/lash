@@ -180,6 +180,7 @@ The generated region below is checked against the live filenames and headings.
 | 0146 | [SQL stores depend on execution contracts](0146-sql-stores-depend-on-execution-contracts.md) |
 | 0147 | [An RLM cell sees its frame and its variables](0147-an-rlm-cell-sees-its-frame-and-its-variables.md) |
 | 0148 | [RLM uses one provider-native code channel](0148-rlm-uses-one-provider-native-code-channel.md) |
+| 0149 | [Released helpers keep exact code and upgrade explicitly](0149-released-helpers-keep-exact-code-and-upgrade-explicitly.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

@@ -28,6 +28,7 @@ lash_rust_build_script(
         "synthetic-next",
     ],
     data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
         "labels/*.json",
     ]),
     manifest_dir = "crates/lash-kernel-releases",
@@ -50,6 +51,7 @@ lash_rust_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -101,6 +103,7 @@ lash_rust_binary(
         "synthetic-next",
     ],
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "record_helper_data"),
@@ -162,6 +165,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -190,6 +194,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -219,6 +224,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -244,6 +250,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -271,6 +278,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -298,6 +306,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -323,6 +332,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -351,6 +361,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -378,6 +389,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -403,6 +415,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],
@@ -431,6 +444,7 @@ lash_rust_feature_library(
     ],
     exec_properties = sized_exec_properties("lash-kernel-releases", "lash_kernel_releases"),
     compile_data_patterns = [
+        "archive/*.json",
         "labels/*.json",
     ],
     extra_compile_data = [],

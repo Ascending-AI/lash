@@ -3531,6 +3531,7 @@ dependencies = [
  "lash-ext-url-whatwg",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-engine",
  "lash-kernel-lib",
  "lash-kernel-value",
  "lash-kernel-vm",

@@ -3,7 +3,8 @@
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
 Status: Accepted. Design: [the kernel design](../kernel/design.md); rules:
-[the kernel semantics](../kernel/semantics.md).
+[the kernel semantics](../kernel/semantics.md). Helper retention and explicit
+upgrade policy follow [ADR 0149](0149-released-helpers-keep-exact-code-and-upgrade-explicitly.md).
 
 ## Context
 
@@ -59,7 +60,7 @@ cost table and parked-run schema are written down rule by rule in
 
 ### Dialects lower to the kernel
 
-A dialect lowers source to kernel Documents and prints supported Documents as equivalent standalone source, refusing unrepresentable content with a typed reason. Build helpers remain exact FunctionId dependencies outside package Documents and Links. Source print/import does not grant helper authority; fresh publication checks the installed environment, while parked restore retains its existing compatibility proof. A definition can be printed in a selected dialect only when the printer proves that representation faithful.
+A dialect lowers source to kernel Documents and prints supported Documents as equivalent standalone source, refusing unrepresentable content with a typed reason. Build helpers remain exact FunctionId dependencies outside package Documents and Links. Source print/import does not grant helper authority. Publications pin exact helper content. ADR 0149 retains released definitions and permits upgrades only by explicit owner action. A definition can be printed in a selected dialect only when the printer proves that representation faithful.
 
 Packages remain the distribution mechanism for user- and host-installed code.
 A Package Publication supplies scoped provenance and members; its presence does
@@ -70,8 +71,9 @@ restore. `OperationUse` preserves that identity, while a process permits one
 provider and tool per operation (ADR 0141 §5).
 
 A parked root records its HelperLibraryId. An equal installed identity requires
-no compatibility walk; a changed identity checks the saved live helper reach
-and refuses a missing FunctionId before execution resumes.
+no compatibility walk; a changed identity checks exact saved helper reach.
+ADR 0149 replaces missing-current-helper refusal with archive availability once
+phase 2 installs archive loading. Phase 1 retains the existing runtime refusal.
 
 For each construct a front end picks the first tier that applies: a kernel form or
 library function with the same meaning, the difference compiled in as kernel

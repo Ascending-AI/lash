@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             writeln!(source, "#[cfg(feature = {feature:?})]")?;
         }
         source.push_str("&[\n");
-        for (function, name) in package.natives {
+        for (function, name, native_version) in package.natives {
             let mut callees = String::from("&[");
             for (callee, label) in package.native_callees(function)? {
                 write!(
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             callees.push(']');
             writeln!(
                 source,
-                "(lash_kernel_value::names::FunctionId::from_bytes({:?}), |registry| crate::native::native({:?}, {:?}, lash_kernel_value::names::FunctionId::from_bytes({:?}), {callees}, registry)),",
+                "(lash_kernel_value::names::FunctionId::from_bytes({:?}), |registry| crate::native::native({:?}, {:?}, {native_version}, lash_kernel_value::names::FunctionId::from_bytes({:?}), {callees}, registry)),",
                 function.as_bytes(),
                 package.path,
                 name,

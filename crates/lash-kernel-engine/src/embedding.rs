@@ -89,3 +89,16 @@ pub(crate) fn standard() -> Result<Installed, InstallError> {
         &BTreeMap::new(),
     )
 }
+
+/// Constructs one exact native version with the archived definition's callee
+/// environment. Unsupported package/name/version combinations return None.
+pub fn native_implementation(
+    identity: (&str, &str, u32),
+    function: FunctionId,
+    callees: &[(FunctionId, &str)],
+    registry: &FunctionRegistry,
+) -> Option<Arc<dyn NativeFunction>> {
+    crate::native::implementation(
+        identity.0, identity.1, identity.2, function, callees, registry,
+    )
+}

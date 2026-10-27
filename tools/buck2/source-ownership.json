@@ -1155,6 +1155,7 @@
   },
   "crates/lash-kernel-releases": {
     "compile_data": [
+      "archive/*.json",
       "labels/*.json"
     ]
   },

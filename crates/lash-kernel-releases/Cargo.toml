@@ -73,3 +73,4 @@ lash-ext-regex-ecma = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
 lash-kernel-lib = { workspace = true }
+lash-kernel-engine = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
