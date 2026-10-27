@@ -117,7 +117,9 @@ just perf-gate-startup
 ```
 
 `just perf-history-record` captures the instruction gate's complete kernel and
-replay populations once on the clean current main head. It appends qualified
+replay populations once on a clean commit landed on main. It fetches main and
+requires HEAD to be an ancestor of origin/main, so a newer landing during the
+gates does not refuse the sample. It appends qualified
 instructions per operation, SQL statements/writes, and host/worker allocation
 counts to `.benchmarks/perf-guard/runtime-duration-history-full.jsonl`, using the existing JSONL
 history store and level-shift detector. Set `LASH_PERF_HISTORY_FILE` to retain

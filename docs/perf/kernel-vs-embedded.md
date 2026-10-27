@@ -1,5 +1,12 @@
 # Kernel versus embedded interpreters
 
+> FIG-7466: the workflow rows below are historical local identity calls. Current
+> workflow cells await real host operations and are measured separately by
+> `scripts/perf/kernel/workflows.py`. Their old peer ratios and instruction
+> counts are not comparable with the current workflow workload. See
+> [the guest-program audit](guest-program-audit.md).
+
+
 FIG-6719 · measured 2026-10-17.
 
 Morning baseline: `4bc83a775f711b66e41be9814350c273ad5c594c`. Cutover head: `46f26e8ab27f1ad4d3f58e73eec0f853021a50bf` (origin/main when this experiment started, after FIG-6709; before the arena and instruction-set cutovers).

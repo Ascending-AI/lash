@@ -74,7 +74,7 @@ just perf-gate-startup
 just perf-history-record
 ```
 
-The history recipe requires the clean current main head, appends counted values
+The history recipe requires the clean commit landed on main, appends counted values
 with full producer identity to the existing runtime JSONL store, and runs its
 existing change detector. It records no wall/latency fields. Override
 LASH_PERF_HISTORY_FILE to retain that same store outside a disposable fork.

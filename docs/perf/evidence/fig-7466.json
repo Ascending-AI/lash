@@ -1,0 +1,1329 @@
+{
+  "base": "a1eddaf26abdf2a1f789b23b5fdad7e53bc0ae34",
+  "host": "turbo2-sam",
+  "artifact_sha256": "561a636574b473e2ccdb82c779f382bcee92ba379668c74576495843b3fb577e",
+  "metric": "hardware instructions:u",
+  "cold_window": "one complete process invocation, including preparation and teardown",
+  "array_window": "(cold instructions at 100000 trips - at 1000 trips) / (99000 * 10 reads)",
+  "samples": [
+    {
+      "instructions": 933593488,
+      "peak_rss_kib": 73908,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_iteration.ts"
+      ],
+      "program": "workflow_iteration/ts",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "e93b58e43a2d47cccce6f57947178ed3af656512fcd44b38a0c69062ba69fd3e",
+      "charged": 28996
+    },
+    {
+      "instructions": 1006797450,
+      "peak_rss_kib": 74096,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.ts"
+      ],
+      "program": "workflow_iteration/ts",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "75698ea00bf86184e5aca64b42c7e47c3c6ff2821ba6ab9ddd5e0d4d6190b1eb",
+      "charged": 32684
+    },
+    {
+      "instructions": 1006796708,
+      "peak_rss_kib": 73884,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.ts"
+      ],
+      "program": "workflow_iteration/ts",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "75698ea00bf86184e5aca64b42c7e47c3c6ff2821ba6ab9ddd5e0d4d6190b1eb",
+      "charged": 32684
+    },
+    {
+      "instructions": 933591442,
+      "peak_rss_kib": 73904,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_iteration.ts"
+      ],
+      "program": "workflow_iteration/ts",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "e93b58e43a2d47cccce6f57947178ed3af656512fcd44b38a0c69062ba69fd3e",
+      "charged": 28996
+    },
+    {
+      "instructions": 880160231,
+      "peak_rss_kib": 72628,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_iteration.py"
+      ],
+      "program": "workflow_iteration/py",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "8718e2e76efdc91e4f3c57c832eeb7ae8fcb7faec296661cd252861a4dfbeb32",
+      "charged": 11661
+    },
+    {
+      "instructions": 939169024,
+      "peak_rss_kib": 72628,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.py"
+      ],
+      "program": "workflow_iteration/py",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "58f5f70b88549c8446955178ff760498c743ec45e374994b22b612258a33b737",
+      "charged": 19569
+    },
+    {
+      "instructions": 939184004,
+      "peak_rss_kib": 72628,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.py"
+      ],
+      "program": "workflow_iteration/py",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "58f5f70b88549c8446955178ff760498c743ec45e374994b22b612258a33b737",
+      "charged": 19569
+    },
+    {
+      "instructions": 880157810,
+      "peak_rss_kib": 72620,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_iteration.py"
+      ],
+      "program": "workflow_iteration/py",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+      "source_sha256": "8718e2e76efdc91e4f3c57c832eeb7ae8fcb7faec296661cd252861a4dfbeb32",
+      "charged": 11661
+    },
+    {
+      "instructions": 930398201,
+      "peak_rss_kib": 73648,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_early_return.ts"
+      ],
+      "program": "workflow_early_return/ts",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "60928ca0d045efa2be26d7b82db2ff4996e08d14aa078acb90cd3458f9030735",
+      "charged": 9538
+    },
+    {
+      "instructions": 1125641126,
+      "peak_rss_kib": 76468,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.ts"
+      ],
+      "program": "workflow_early_return/ts",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "2a7c35b27530b0918c34858c9282a688ec4c8845b36707e6de6e638b4fd9de11",
+      "charged": 19116
+    },
+    {
+      "instructions": 1125513706,
+      "peak_rss_kib": 76464,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.ts"
+      ],
+      "program": "workflow_early_return/ts",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "2a7c35b27530b0918c34858c9282a688ec4c8845b36707e6de6e638b4fd9de11",
+      "charged": 19116
+    },
+    {
+      "instructions": 930413176,
+      "peak_rss_kib": 73652,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_early_return.ts"
+      ],
+      "program": "workflow_early_return/ts",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "60928ca0d045efa2be26d7b82db2ff4996e08d14aa078acb90cd3458f9030735",
+      "charged": 9538
+    },
+    {
+      "instructions": 875893947,
+      "peak_rss_kib": 72116,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_early_return.py"
+      ],
+      "program": "workflow_early_return/py",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "e4897e82f5e8bef34f231e561b6dd356bcbec9e33e2024443b1dacf8ba823785",
+      "charged": 9136
+    },
+    {
+      "instructions": 917294319,
+      "peak_rss_kib": 72372,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.py"
+      ],
+      "program": "workflow_early_return/py",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "7f3cefbc9cbaa9c1ef980bcdfc54d7ebc305c07e40f2c01d99152c83102b6b70",
+      "charged": 38667
+    },
+    {
+      "instructions": 917298109,
+      "peak_rss_kib": 72628,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.py"
+      ],
+      "program": "workflow_early_return/py",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "7f3cefbc9cbaa9c1ef980bcdfc54d7ebc305c07e40f2c01d99152c83102b6b70",
+      "charged": 38667
+    },
+    {
+      "instructions": 875897636,
+      "peak_rss_kib": 72628,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/workflow_early_return.py"
+      ],
+      "program": "workflow_early_return/py",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+      "source_sha256": "e4897e82f5e8bef34f231e561b6dd356bcbec9e33e2024443b1dacf8ba823785",
+      "charged": 9136
+    },
+    {
+      "instructions": 947228049,
+      "peak_rss_kib": 73908,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/heap_variable_concat.ts"
+      ],
+      "program": "heap_variable_concat/ts",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "0799dd94e5f1a9e8c692d1ae76fd9373761fe398e6ffbc86e22af0f03c7b03b3",
+      "source_sha256": "c218968a2ba247b6f447997b61e4787393495b51ef801803d4a3f20424dd3ab9",
+      "charged": 109022
+    },
+    {
+      "instructions": 3215971396,
+      "peak_rss_kib": 74676,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/heap_variable_concat-after.ts"
+      ],
+      "program": "heap_variable_concat/ts",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "0799dd94e5f1a9e8c692d1ae76fd9373761fe398e6ffbc86e22af0f03c7b03b3",
+      "source_sha256": "83463c677217d7ca1c888fdc38166b7cc4c3d4fc1fa449d14c1e7cd97bd2eeb7",
+      "charged": 6070322
+    },
+    {
+      "instructions": 3215969336,
+      "peak_rss_kib": 74676,
+      "load1": 3.986328125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/heap_variable_concat-after.ts"
+      ],
+      "program": "heap_variable_concat/ts",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "0799dd94e5f1a9e8c692d1ae76fd9373761fe398e6ffbc86e22af0f03c7b03b3",
+      "source_sha256": "83463c677217d7ca1c888fdc38166b7cc4c3d4fc1fa449d14c1e7cd97bd2eeb7",
+      "charged": 6070322
+    },
+    {
+      "instructions": 947235969,
+      "peak_rss_kib": 73904,
+      "load1": 3.8271484375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/heap_variable_concat.ts"
+      ],
+      "program": "heap_variable_concat/ts",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "0799dd94e5f1a9e8c692d1ae76fd9373761fe398e6ffbc86e22af0f03c7b03b3",
+      "source_sha256": "c218968a2ba247b6f447997b61e4787393495b51ef801803d4a3f20424dd3ab9",
+      "charged": 109022
+    },
+    {
+      "instructions": 1115771896,
+      "peak_rss_kib": 92092,
+      "load1": 3.33251953125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/language_host_environment.ts"
+      ],
+      "program": "language_host_environment/ts",
+      "version": "before",
+      "pair": 1,
+      "result_sha256": "8301948478c5d2c9d8995a925b81a2d72ae51691bbce82e58a081a85ad6ed117",
+      "source_sha256": "80026da25dd3834b95d29de63114a6ba96d24b713b61dae79f8e06b2ef80743e",
+      "charged": 16241
+    },
+    {
+      "instructions": 1115752137,
+      "peak_rss_kib": 92604,
+      "load1": 3.33251953125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/language_host_environment-after.ts"
+      ],
+      "program": "language_host_environment/ts",
+      "version": "after",
+      "pair": 1,
+      "result_sha256": "8301948478c5d2c9d8995a925b81a2d72ae51691bbce82e58a081a85ad6ed117",
+      "source_sha256": "9eae49a7114637cfb60f241e95a74c5666d2007d1321862b87f795bf3215bcfd",
+      "charged": 16327
+    },
+    {
+      "instructions": 1115723902,
+      "peak_rss_kib": 92084,
+      "load1": 3.33251953125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/language_host_environment-after.ts"
+      ],
+      "program": "language_host_environment/ts",
+      "version": "after",
+      "pair": 2,
+      "result_sha256": "8301948478c5d2c9d8995a925b81a2d72ae51691bbce82e58a081a85ad6ed117",
+      "source_sha256": "9eae49a7114637cfb60f241e95a74c5666d2007d1321862b87f795bf3215bcfd",
+      "charged": 16327
+    },
+    {
+      "instructions": 1115727539,
+      "peak_rss_kib": 92084,
+      "load1": 3.33251953125,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/before/language_host_environment.ts"
+      ],
+      "program": "language_host_environment/ts",
+      "version": "before",
+      "pair": 2,
+      "result_sha256": "8301948478c5d2c9d8995a925b81a2d72ae51691bbce82e58a081a85ad6ed117",
+      "source_sha256": "80026da25dd3834b95d29de63114a6ba96d24b713b61dae79f8e06b2ef80743e",
+      "charged": 16241
+    }
+  ],
+  "array_samples": [
+    {
+      "instructions": 899396892,
+      "wall_ns": 149829095,
+      "cold_first_line_ns": 143646262,
+      "peak_rss_kib": 72624,
+      "load1": 3.146484375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-before-1000.py"
+      ],
+      "version": "before",
+      "pair": 1,
+      "n": 1000,
+      "operations": 10000,
+      "result": 55000,
+      "result_sha256": "4520eeb3ad812cd23d834f7475ada6c20c749523575ee1ebbc79f4b8199e8930",
+      "source_sha256": "038c2fa7e5d0791c62f0e97034550c99d90bbca559d273f235959155b68dfa54"
+    },
+    {
+      "instructions": 2858706572,
+      "wall_ns": 313732480,
+      "cold_first_line_ns": 307105041,
+      "peak_rss_kib": 72624,
+      "load1": 3.146484375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-before-100000.py"
+      ],
+      "version": "before",
+      "pair": 1,
+      "n": 100000,
+      "operations": 1000000,
+      "result": 5500000,
+      "result_sha256": "c59b9dcb06ac6479d1afe9058d3773f7b0612ac80c5131e5863df4929ad8d5a2",
+      "source_sha256": "9ca04dd4ab895a12a4cec723836556029556ead21f3afffd2cc72694d73a5950"
+    },
+    {
+      "instructions": 903087243,
+      "wall_ns": 128936534,
+      "cold_first_line_ns": 122547604,
+      "peak_rss_kib": 72888,
+      "load1": 3.146484375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-after-1000.py"
+      ],
+      "version": "after",
+      "pair": 1,
+      "n": 1000,
+      "operations": 10000,
+      "result": 45000,
+      "result_sha256": "5872238ba9244bfd95e26d12c0379591819f6d023ea18eba14d7ceeae26d25af",
+      "source_sha256": "b77d0a46de6b26768c32ae9623523d08be31fa2ea25dbf4992ca22e21e24387b"
+    },
+    {
+      "instructions": 3056241129,
+      "wall_ns": 354591266,
+      "cold_first_line_ns": 347014208,
+      "peak_rss_kib": 72376,
+      "load1": 3.146484375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-after-100000.py"
+      ],
+      "version": "after",
+      "pair": 1,
+      "n": 100000,
+      "operations": 1000000,
+      "result": 4500000,
+      "result_sha256": "415e90d9e30d50997751b49a2fbe5e9e418ddd3c9195d04376076ce5af2d35aa",
+      "source_sha256": "8bdf5efb5fad28bcc7c0ff05e227a5ae4986ebff1552fde419a8836d7b088ca5"
+    },
+    {
+      "instructions": 903089256,
+      "wall_ns": 132769822,
+      "cold_first_line_ns": 126327542,
+      "peak_rss_kib": 72628,
+      "load1": 3.13427734375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-after-1000.py"
+      ],
+      "version": "after",
+      "pair": 2,
+      "n": 1000,
+      "operations": 10000,
+      "result": 45000,
+      "result_sha256": "5872238ba9244bfd95e26d12c0379591819f6d023ea18eba14d7ceeae26d25af",
+      "source_sha256": "b77d0a46de6b26768c32ae9623523d08be31fa2ea25dbf4992ca22e21e24387b"
+    },
+    {
+      "instructions": 3056240301,
+      "wall_ns": 340099097,
+      "cold_first_line_ns": 332215573,
+      "peak_rss_kib": 72628,
+      "load1": 3.13427734375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-after-100000.py"
+      ],
+      "version": "after",
+      "pair": 2,
+      "n": 100000,
+      "operations": 1000000,
+      "result": 4500000,
+      "result_sha256": "415e90d9e30d50997751b49a2fbe5e9e418ddd3c9195d04376076ce5af2d35aa",
+      "source_sha256": "8bdf5efb5fad28bcc7c0ff05e227a5ae4986ebff1552fde419a8836d7b088ca5"
+    },
+    {
+      "instructions": 899399985,
+      "wall_ns": 135746256,
+      "cold_first_line_ns": 129545330,
+      "peak_rss_kib": 72884,
+      "load1": 3.13427734375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-before-1000.py"
+      ],
+      "version": "before",
+      "pair": 2,
+      "n": 1000,
+      "operations": 10000,
+      "result": 55000,
+      "result_sha256": "4520eeb3ad812cd23d834f7475ada6c20c749523575ee1ebbc79f4b8199e8930",
+      "source_sha256": "038c2fa7e5d0791c62f0e97034550c99d90bbca559d273f235959155b68dfa54"
+    },
+    {
+      "instructions": 2858709245,
+      "wall_ns": 313904203,
+      "cold_first_line_ns": 306433075,
+      "peak_rss_kib": 72680,
+      "load1": 3.13427734375,
+      "command": [
+        "/tmp/benchreal-evidence/kernel_perf",
+        "embedded",
+        "/tmp/benchreal-evidence/array_read-before-100000.py"
+      ],
+      "version": "before",
+      "pair": 2,
+      "n": 100000,
+      "operations": 1000000,
+      "result": 5500000,
+      "result_sha256": "c59b9dcb06ac6479d1afe9058d3773f7b0612ac80c5131e5863df4929ad8d5a2",
+      "source_sha256": "9ca04dd4ab895a12a4cec723836556029556ead21f3afffd2cc72694d73a5950"
+    }
+  ],
+  "summary": [
+    {
+      "program": "workflow_iteration/ts",
+      "before": 933592465,
+      "after": 1006797079,
+      "ratio": 1.0784117446791948,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c"
+    },
+    {
+      "program": "workflow_iteration/py",
+      "before": 880159020.5,
+      "after": 939176514,
+      "ratio": 1.0670532166635904,
+      "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c"
+    },
+    {
+      "program": "workflow_early_return/ts",
+      "before": 930405688.5,
+      "after": 1125577416,
+      "ratio": 1.2097705655848427,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2"
+    },
+    {
+      "program": "workflow_early_return/py",
+      "before": 875895791.5,
+      "after": 917296214,
+      "ratio": 1.047266379062172,
+      "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2"
+    },
+    {
+      "program": "heap_variable_concat/ts",
+      "before": 947232009,
+      "after": 3215970366,
+      "ratio": 3.3951242519719367,
+      "result_sha256": "0799dd94e5f1a9e8c692d1ae76fd9373761fe398e6ffbc86e22af0f03c7b03b3"
+    },
+    {
+      "program": "language_host_environment/ts",
+      "before": 1115749717.5,
+      "after": 1115738019.5,
+      "ratio": 0.9999895155698303,
+      "result_sha256": "8301948478c5d2c9d8995a925b81a2d72ae51691bbce82e58a081a85ad6ed117"
+    },
+    {
+      "program": "array_read/py",
+      "before": 1979.1004747474747,
+      "after": 2174.9014803030304,
+      "ratio": 1.0989343431795897,
+      "result_before": [
+        55000,
+        5500000
+      ],
+      "result_after": [
+        45000,
+        4500000
+      ]
+    }
+  ],
+  "workflow_runner_proof": {
+    "revision": "a1eddaf26abdf2a1f789b23b5fdad7e53bc0ae34",
+    "artifact_sha256": "561a636574b473e2ccdb82c779f382bcee92ba379668c74576495843b3fb577e",
+    "window": "cold process: preparation, one workflow, finish, receipt, teardown",
+    "samples": [
+      {
+        "instructions": 1006798617,
+        "peak_rss_kib": 74164,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.ts"
+        ],
+        "program": "workflow_iteration",
+        "dialect": "ts",
+        "pair": 1,
+        "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+        "source_sha256": "75698ea00bf86184e5aca64b42c7e47c3c6ff2821ba6ab9ddd5e0d4d6190b1eb"
+      },
+      {
+        "instructions": 939183783,
+        "peak_rss_kib": 72880,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.py"
+        ],
+        "program": "workflow_iteration",
+        "dialect": "py",
+        "pair": 1,
+        "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+        "source_sha256": "58f5f70b88549c8446955178ff760498c743ec45e374994b22b612258a33b737"
+      },
+      {
+        "instructions": 939185212,
+        "peak_rss_kib": 72624,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.py"
+        ],
+        "program": "workflow_iteration",
+        "dialect": "py",
+        "pair": 2,
+        "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+        "source_sha256": "58f5f70b88549c8446955178ff760498c743ec45e374994b22b612258a33b737"
+      },
+      {
+        "instructions": 1006794019,
+        "peak_rss_kib": 74160,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_iteration.ts"
+        ],
+        "program": "workflow_iteration",
+        "dialect": "ts",
+        "pair": 2,
+        "result_sha256": "c30e37234ccdb695b9b154926aa22a0be1f6b2d7198aa4751800e57df555796c",
+        "source_sha256": "75698ea00bf86184e5aca64b42c7e47c3c6ff2821ba6ab9ddd5e0d4d6190b1eb"
+      },
+      {
+        "instructions": 1125666073,
+        "peak_rss_kib": 76460,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.ts"
+        ],
+        "program": "workflow_early_return",
+        "dialect": "ts",
+        "pair": 1,
+        "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+        "source_sha256": "2a7c35b27530b0918c34858c9282a688ec4c8845b36707e6de6e638b4fd9de11"
+      },
+      {
+        "instructions": 917295793,
+        "peak_rss_kib": 72624,
+        "load1": 3.02490234375,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.py"
+        ],
+        "program": "workflow_early_return",
+        "dialect": "py",
+        "pair": 1,
+        "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+        "source_sha256": "7f3cefbc9cbaa9c1ef980bcdfc54d7ebc305c07e40f2c01d99152c83102b6b70"
+      },
+      {
+        "instructions": 917295906,
+        "peak_rss_kib": 72368,
+        "load1": 3.50341796875,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.py"
+        ],
+        "program": "workflow_early_return",
+        "dialect": "py",
+        "pair": 2,
+        "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+        "source_sha256": "7f3cefbc9cbaa9c1ef980bcdfc54d7ebc305c07e40f2c01d99152c83102b6b70"
+      },
+      {
+        "instructions": 1125597094,
+        "peak_rss_kib": 76468,
+        "load1": 3.50341796875,
+        "command": [
+          "/tmp/benchreal-evidence/kernel_perf",
+          "embedded",
+          "/workspace/kiln/lash/forks/r36-benchreal/scripts/perf/kernel/workflows/workflow_early_return.ts"
+        ],
+        "program": "workflow_early_return",
+        "dialect": "ts",
+        "pair": 2,
+        "result_sha256": "f605b24ea25de6b7bbe704c146d39224630cb493ab6b2bd03ebd65bc43b0fbb2",
+        "source_sha256": "2a7c35b27530b0918c34858c9282a688ec4c8845b36707e6de6e638b4fd9de11"
+      }
+    ]
+  },
+  "cpu": "AMD Ryzen 9 5950X 16-Core Processor",
+  "kernel_receipt_metadata": {
+    "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values())\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer",
+    "compiler": "rustc 1.98.1 (48a229cea 2026-09-01);binary: rustc;commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985;commit-date: 2026-09-01;host: x86_64-unknown-linux-gnu;release: 1.98.1;LLVM version: 22.1.8;"
+  },
+  "array_compare_before": {
+    "commit": "a1eddaf26abdf2a1f789b23b5fdad7e53bc0ae34",
+    "cpu": "pinned:0",
+    "geometry": {
+      "charge": "exact",
+      "charge_limit": 10000000000,
+      "diagnostic": "separate fresh machine; first checkpoint before run; preparation inclusive",
+      "factor": 100,
+      "instructions": "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded",
+      "lash": "fresh cell start+run; lower/link/drop/result validation excluded",
+      "median": "two-point fit of per-count medians",
+      "memory_bytes": 536870912,
+      "memory_meter": "on",
+      "minimum": "two-point fit of per-count minima",
+      "observation": "off",
+      "reference": "resident interpreter; function call; process startup/JSON transport excluded",
+      "runs": 2,
+      "state": "fresh in-memory cell; no persisted history or state input",
+      "version": 2,
+      "warmups": 1
+    },
+    "rows": [
+      {
+        "engine": "lash",
+        "dialect": "typescript",
+        "workload": "array_read",
+        "source_hash": "c9dbaaf2aa2f45e4aafe73ac2de9477e23818f0c20ade6c26540c981be75b9c9",
+        "engine_identity": "1a74da4150bbee3bd24dd14bbe3191b78188735a705a31408e4d165f2ee9eff2",
+        "trips": [
+          1000,
+          100000
+        ],
+        "operations": [
+          10000,
+          1000000
+        ],
+        "samples": [
+          [
+            {
+              "ns": 1398384.0,
+              "result": 45000,
+              "instructions": 11813928,
+              "instruction_window": {
+                "instructions": 11813928,
+                "time_enabled": 1425292,
+                "time_running": 1425292
+              }
+            },
+            {
+              "ns": 102492401.0,
+              "result": 4500000,
+              "instructions": 1051611573,
+              "instruction_window": {
+                "instructions": 1051611573,
+                "time_enabled": 102541295,
+                "time_running": 102541295
+              }
+            }
+          ],
+          [
+            {
+              "ns": 1396280.0,
+              "result": 45000,
+              "instructions": 11815275,
+              "instruction_window": {
+                "instructions": 11815275,
+                "time_enabled": 1424511,
+                "time_running": 1424511
+              }
+            },
+            {
+              "ns": 104008055.0,
+              "result": 4500000,
+              "instructions": 1051613032,
+              "instruction_window": {
+                "instructions": 1051613032,
+                "time_enabled": 104036909,
+                "time_running": 104036909
+              }
+            }
+          ]
+        ],
+        "minimum_ns": [
+          1396280.0,
+          102492401.0
+        ],
+        "median_ns": [
+          1397332.0,
+          103250228.0
+        ],
+        "minimum": {
+          "slope_ns": 102.11729393939395,
+          "intercept_ns": 375107.06060606055
+        },
+        "median": {
+          "slope_ns": 102.88171313131313,
+          "intercept_ns": 368514.8686868687
+        },
+        "instructions": {
+          "minimum_per_operation": 1050.3006515151515,
+          "median_per_operation": 1050.3007080808081
+        },
+        "fixed_scopes_ns": {
+          "admission_lowering": 1750646.0,
+          "embedding_process_once": 68645809.0,
+          "first_checkpoint": 57158.0,
+          "library_preparation_inclusive": 898445.0,
+          "linking": 607294.0,
+          "machine_construction": 5769967.0
+        },
+        "ratios": {},
+        "execution_census": {
+          "statements": {
+            "register_program": 72129
+          },
+          "transitions": {
+            "register_program": {
+              "source_evaluator": 28
+            },
+            "source_evaluator": {
+              "register_program": 28
+            }
+          },
+          "register_entries": 3,
+          "slow_exits": {
+            "register_program": {
+              "source_continuation": 2,
+              "native": 10,
+              "cold_branch": 3
+            }
+          },
+          "operation_exits": {
+            "native": {
+              "ts.set": 10
+            }
+          },
+          "accumulated": 0
+        }
+      },
+      {
+        "engine": "lash",
+        "dialect": "python",
+        "workload": "array_read",
+        "source_hash": "d96a89641050cf1215695373978eb67f14019ae1d6ea65b49d12b0153990ddd6",
+        "engine_identity": "1a74da4150bbee3bd24dd14bbe3191b78188735a705a31408e4d165f2ee9eff2",
+        "trips": [
+          1000,
+          100000
+        ],
+        "operations": [
+          10000,
+          1000000
+        ],
+        "samples": [
+          [
+            {
+              "ns": 2217416.0,
+              "result": 55000,
+              "instructions": 20769530,
+              "instruction_window": {
+                "instructions": 20769530,
+                "time_enabled": 2243978,
+                "time_running": 2243978
+              }
+            },
+            {
+              "ns": 198403847.0,
+              "result": 5500000,
+              "instructions": 1999880498,
+              "instruction_window": {
+                "instructions": 1999880498,
+                "time_enabled": 198423865,
+                "time_running": 198423865
+              }
+            }
+          ],
+          [
+            {
+              "ns": 2237043.0,
+              "result": 55000,
+              "instructions": 20772190,
+              "instruction_window": {
+                "instructions": 20772190,
+                "time_enabled": 2263794,
+                "time_running": 2263794
+              }
+            },
+            {
+              "ns": 196142348.0,
+              "result": 5500000,
+              "instructions": 1999881268,
+              "instruction_window": {
+                "instructions": 1999881268,
+                "time_enabled": 196170741,
+                "time_running": 196170741
+              }
+            }
+          ]
+        ],
+        "minimum_ns": [
+          2217416.0,
+          196142348.0
+        ],
+        "median_ns": [
+          2227229.5,
+          197273097.5
+        ],
+        "minimum": {
+          "slope_ns": 195.8837696969697,
+          "intercept_ns": 258578.30303030298
+        },
+        "median": {
+          "slope_ns": 197.01602828282827,
+          "intercept_ns": 257069.2171717172
+        },
+        "instructions": {
+          "minimum_per_operation": 1999.101987878788,
+          "median_per_operation": 1999.1010333333334
+        },
+        "fixed_scopes_ns": {
+          "admission_lowering": 905977.0,
+          "embedding_process_once": 68645809.0,
+          "first_checkpoint": 37881.0,
+          "library_preparation_inclusive": 96010.0,
+          "linking": 330011.0,
+          "machine_construction": 4055005.9999999995
+        },
+        "ratios": {},
+        "execution_census": {
+          "statements": {
+            "register_program": 3034
+          },
+          "transitions": {
+            "register_program": {
+              "source_evaluator": 5
+            },
+            "source_evaluator": {
+              "register_program": 5
+            }
+          },
+          "register_entries": 1,
+          "slow_exits": {
+            "register_program": {
+              "source_continuation": 1,
+              "cold_branch": 3
+            }
+          },
+          "operation_exits": {},
+          "accumulated": 0
+        }
+      }
+    ],
+    "errors": []
+  },
+  "kernel_harness_proof": {
+    "before": [
+      {
+        "program": "language_host_environment",
+        "artifact_sha256": "561a636574b473e2ccdb82c779f382bcee92ba379668c74576495843b3fb577e",
+        "workload_sha256": "d46f488cc823a0ad6044ec6f45929bd36a6cc7bc2997dd428ac7315209474cb1",
+        "result_sha256": "afc073a4f8c7059419eb979b7b228ff259c5fef2251346691c26284b7c6b5233",
+        "iterations": 1,
+        "samples": [
+          {
+            "allocations_run": 8848,
+            "allocations_start_and_run": 9620,
+            "charged": 16239,
+            "iteration": 0,
+            "ns_run": 8784234,
+            "ns_start_and_run": 9755573,
+            "reallocations_run": 3012,
+            "reallocations_start_and_run": 3034
+          }
+        ]
+      },
+      {
+        "program": "heap_variable_concat",
+        "artifact_sha256": "561a636574b473e2ccdb82c779f382bcee92ba379668c74576495843b3fb577e",
+        "workload_sha256": "d9e446cf1dfe2e27e1d6783bac81d48023046f3c1e55e59ae961d85f91271f82",
+        "result_sha256": "ad45cf7f5d04a762ca2534891e2b388f71b9e63460243879a991ba4dd5f7bb29",
+        "iterations": 1,
+        "samples": [
+          {
+            "allocations_run": 5932,
+            "allocations_start_and_run": 6050,
+            "charged": 109020,
+            "iteration": 0,
+            "ns_run": 1666959,
+            "ns_start_and_run": 1710121,
+            "reallocations_run": 938,
+            "reallocations_start_and_run": 954
+          }
+        ]
+      }
+    ],
+    "after": [
+      {
+        "program": "language_host_environment",
+        "artifact_sha256": "63e6abd054a72eef151ad164b59ee3dd58b0383cc208a1ec66931bb50e3ff015",
+        "workload_sha256": "8024f01deb6fda7f1346cb052c3853113fcf139cfa1596533d3c722db9c57263",
+        "result_sha256": "afc073a4f8c7059419eb979b7b228ff259c5fef2251346691c26284b7c6b5233",
+        "iterations": 1,
+        "samples": [
+          {
+            "allocations_run": 8874,
+            "allocations_start_and_run": 9646,
+            "charged": 16325,
+            "iteration": 0,
+            "ns_run": 11891206,
+            "ns_start_and_run": 13210851,
+            "reallocations_run": 3016,
+            "reallocations_start_and_run": 3038
+          }
+        ]
+      },
+      {
+        "program": "heap_variable_concat",
+        "artifact_sha256": "63e6abd054a72eef151ad164b59ee3dd58b0383cc208a1ec66931bb50e3ff015",
+        "workload_sha256": "84b489086751c98f06c6de962d967bc9d97ecb0fdadcc503b12941d0b4b02af6",
+        "result_sha256": "ad45cf7f5d04a762ca2534891e2b388f71b9e63460243879a991ba4dd5f7bb29",
+        "iterations": 1,
+        "samples": [
+          {
+            "allocations_run": 368389,
+            "allocations_start_and_run": 368504,
+            "charged": 6070320,
+            "iteration": 0,
+            "ns_run": 372996099,
+            "ns_start_and_run": 373100145,
+            "reallocations_run": 3213,
+            "reallocations_start_and_run": 3229
+          }
+        ]
+      }
+    ]
+  },
+  "array_compare_after": {
+    "commit": "a1eddaf26abdf2a1f789b23b5fdad7e53bc0ae34",
+    "cpu": "pinned:0",
+    "geometry": {
+      "charge": "exact",
+      "charge_limit": 10000000000,
+      "diagnostic": "separate fresh machine; first checkpoint before run; preparation inclusive",
+      "factor": 100,
+      "instructions": "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded",
+      "lash": "fresh cell start+run; lower/link/drop/result validation excluded",
+      "median": "two-point fit of per-count medians",
+      "memory_bytes": 536870912,
+      "memory_meter": "on",
+      "minimum": "two-point fit of per-count minima",
+      "observation": "off",
+      "reference": "resident interpreter; function call; process startup/JSON transport excluded",
+      "runs": 2,
+      "state": "fresh in-memory cell; no persisted history or state input",
+      "version": 2,
+      "warmups": 1
+    },
+    "rows": [
+      {
+        "engine": "lash",
+        "dialect": "typescript",
+        "workload": "array_read",
+        "source_hash": "c9dbaaf2aa2f45e4aafe73ac2de9477e23818f0c20ade6c26540c981be75b9c9",
+        "engine_identity": "80277d04a16e5282bea8fb3922b89434827b818905c09f0d7035c830b886eead",
+        "trips": [
+          1000,
+          100000
+        ],
+        "operations": [
+          10000,
+          1000000
+        ],
+        "samples": [
+          [
+            {
+              "ns": 2114111.0,
+              "result": 45000,
+              "instructions": 11816662,
+              "instruction_window": {
+                "instructions": 11816662,
+                "time_enabled": 2143499,
+                "time_running": 2143499
+              }
+            },
+            {
+              "ns": 143136167.0,
+              "result": 4500000,
+              "instructions": 1051613394,
+              "instruction_window": {
+                "instructions": 1051613394,
+                "time_enabled": 143180694,
+                "time_running": 143180694
+              }
+            }
+          ],
+          [
+            {
+              "ns": 2123610.0,
+              "result": 45000,
+              "instructions": 11815195,
+              "instruction_window": {
+                "instructions": 11815195,
+                "time_enabled": 2179908,
+                "time_running": 2179908
+              }
+            },
+            {
+              "ns": 142321904.0,
+              "result": 4500000,
+              "instructions": 1051614869,
+              "instruction_window": {
+                "instructions": 1051614869,
+                "time_enabled": 142351239,
+                "time_running": 142351239
+              }
+            }
+          ]
+        ],
+        "minimum_ns": [
+          2114111.0,
+          142321904.0
+        ],
+        "median_ns": [
+          2118860.5,
+          142729035.5
+        ],
+        "minimum": {
+          "slope_ns": 141.62403333333333,
+          "intercept_ns": 697870.6666666667
+        },
+        "median": {
+          "slope_ns": 142.0304797979798,
+          "intercept_ns": 698555.7020202018
+        },
+        "instructions": {
+          "minimum_per_operation": 1050.3012111111111,
+          "median_per_operation": 1050.3012151515152
+        },
+        "fixed_scopes_ns": {
+          "admission_lowering": 1909146.0,
+          "embedding_process_once": 92749882.0,
+          "first_checkpoint": 71985.0,
+          "library_preparation_inclusive": 1176424.0,
+          "linking": 642149.0,
+          "machine_construction": 6491677.0
+        },
+        "ratios": {},
+        "execution_census": {
+          "statements": {
+            "register_program": 72129
+          },
+          "transitions": {
+            "register_program": {
+              "source_evaluator": 28
+            },
+            "source_evaluator": {
+              "register_program": 28
+            }
+          },
+          "register_entries": 3,
+          "slow_exits": {
+            "register_program": {
+              "source_continuation": 2,
+              "native": 10,
+              "cold_branch": 3
+            }
+          },
+          "operation_exits": {
+            "native": {
+              "ts.set": 10
+            }
+          },
+          "accumulated": 0
+        }
+      },
+      {
+        "engine": "lash",
+        "dialect": "python",
+        "workload": "array_read",
+        "source_hash": "aefc32a93c8bbee248a88ce26810667d93e6bb2650c50926bed4c8ecc74429f6",
+        "engine_identity": "80277d04a16e5282bea8fb3922b89434827b818905c09f0d7035c830b886eead",
+        "trips": [
+          1000,
+          100000
+        ],
+        "operations": [
+          10000,
+          1000000
+        ],
+        "samples": [
+          [
+            {
+              "ns": 2530997.0,
+              "result": 45000,
+              "instructions": 22738789,
+              "instruction_window": {
+                "instructions": 22738789,
+                "time_enabled": 2564087,
+                "time_running": 2564087
+              }
+            },
+            {
+              "ns": 218701916.0,
+              "result": 4500000,
+              "instructions": 2195690385,
+              "instruction_window": {
+                "instructions": 2195690385,
+                "time_enabled": 218596859,
+                "time_running": 218596859
+              }
+            }
+          ],
+          [
+            {
+              "ns": 2363922.0,
+              "result": 45000,
+              "instructions": 22737328,
+              "instruction_window": {
+                "instructions": 22737328,
+                "time_enabled": 2392466,
+                "time_running": 2392466
+              }
+            },
+            {
+              "ns": 226804717.0,
+              "result": 4500000,
+              "instructions": 2195688863,
+              "instruction_window": {
+                "instructions": 2195688863,
+                "time_enabled": 226842058,
+                "time_running": 226842058
+              }
+            }
+          ]
+        ],
+        "minimum_ns": [
+          2363922.0,
+          218701916.0
+        ],
+        "median_ns": [
+          2447459.5,
+          222753316.5
+        ],
+        "minimum": {
+          "slope_ns": 218.52322626262625,
+          "intercept_ns": 178689.73737373762
+        },
+        "median": {
+          "slope_ns": 222.53116868686868,
+          "intercept_ns": 222147.8131313133
+        },
+        "instructions": {
+          "minimum_per_operation": 2194.9005404040404,
+          "median_per_operation": 2194.900571212121
+        },
+        "fixed_scopes_ns": {
+          "admission_lowering": 1294679.0,
+          "embedding_process_once": 92749882.0,
+          "first_checkpoint": 65012.0,
+          "library_preparation_inclusive": 143051.0,
+          "linking": 508387.99999999994,
+          "machine_construction": 5661914.0
+        },
+        "ratios": {},
+        "execution_census": {
+          "statements": {
+            "register_program": 12071
+          },
+          "transitions": {
+            "register_program": {
+              "source_evaluator": 5
+            },
+            "source_evaluator": {
+              "register_program": 5
+            }
+          },
+          "register_entries": 1,
+          "slow_exits": {
+            "register_program": {
+              "source_continuation": 1,
+              "cold_branch": 3
+            }
+          },
+          "operation_exits": {},
+          "accumulated": 0
+        }
+      }
+    ],
+    "errors": []
+  },
+  "array_compare_ratio": 1.0979437930419698
+}

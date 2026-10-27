@@ -187,12 +187,13 @@ def main() -> int:
     samples = []
     try:
         if args.mode == "history":
+            subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, check=True)
             head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-            main = subprocess.check_output(["git", "ls-remote", "origin", "refs/heads/main"], cwd=ROOT, text=True).split()[0]
+            on_main = subprocess.run(["git", "merge-base", "--is-ancestor", head, "origin/main"], cwd=ROOT).returncode == 0
             dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True).strip()
             env["GITHUB_SHA"] = head
-            if head != main or dirty:
-                raise ValueError("history recording requires the clean current main head")
+            if not on_main or dirty:
+                raise ValueError("history recording requires a clean commit landed on main")
         for index in range(5 if args.calibrate and args.mode == "startup" else 1):
             directory = args.out / f"run-{index}"
             directory.mkdir(exist_ok=False)

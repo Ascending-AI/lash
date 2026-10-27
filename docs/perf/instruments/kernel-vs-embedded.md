@@ -127,15 +127,23 @@ window. That boundary's fixed cost remains in Lash's run and cold counts.
 | dict_record_plus | dict_record with keys built by `"key_" + (n % 64)` (TS) / `"key_" + str(n % 64)` |
 | dict_record_template | dict_record with keys built by a template / f-string |
 | list_map_filter | Materialize 800 inputs, 800 doubled values, then multiples of three |
-| workflow_iteration | `examples/workflows/iteration-untyped`, 128 strings through pure echo |
-| workflow_early_return | `examples/workflows/early-return`, 128 calls spanning both branches |
 
-The workflow bodies retain their loops, branches, calls and results, with
-`corpus.echo` replaced by the same pure identity function and `async`/`await`
-removed in both languages. The entry wrappers supply equal deterministic input.
-They measure workflow computation, without I/O, promise scheduling, effects,
-parking or durable engine latency. Python list comprehensions and JS map/filter
-are the natural supported spellings; both materialize the same intermediates.
+The workflow programs live in `scripts/perf/kernel/workflows/` and retain real
+`async`/`await` calls to the instrument's host `perf.echo` operation. Run them with
+`python3 scripts/perf/kernel/workflows.py --out <fresh-directory>`, optionally
+passing `--kernel <optimized-kernel_perf>`. The runner uses the production worker
+registry, reverses dialect order in two pairs, and checks each complete result
+against an independent expected value. It records hardware `instructions:u` for
+one cold process per workflow invocation. The echo body is a scripted host
+fixture; the kernel executes and parks for the operation. This does not measure
+a durable session or an external service.
+
+The six-engine CLI comparison covers the pure programs above. Its reference
+CLIs have no Lash host-operation adapter. FIG-7466 removed their local identity
+function substitutes. Old `workflow_iteration` and `workflow_early_return` rows
+in the six-engine report measured different work and cannot be compared with
+the host-operation rows. Python list comprehensions and JS map/filter are the
+natural supported spellings; both materialize the same intermediates.
 Python dictionary access and JS record access retain their language semantics.
 No engine substitutes a precomputed answer or removes requested work.
 

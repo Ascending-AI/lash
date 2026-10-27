@@ -318,7 +318,7 @@ perf-gate-instructions *args:
 perf-gate-startup *args:
   bash "{{repo}}/scripts/perf-gate-local.sh" startup {{args}}
 
-# One main-head population, counted history only, then the existing change detector.
+# One clean landed population, counted history only, then the existing change detector.
 perf-history-record:
   bash "{{repo}}/scripts/perf-gate-local.sh" history --history "${LASH_PERF_HISTORY_FILE:-{{repo}}/.benchmarks/perf-guard/runtime-duration-history-full.jsonl}"
 

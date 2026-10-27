@@ -57,7 +57,7 @@ const numeric = { neg: -ctx.attempt, sum: ctx.attempt + count, diff: count - 1, 
 const logic = !false && (count > 2 || emptyTail);
 const comparisons = [count === 3, count !== 4, count < 4, count <= 3, count > 2, count >= 3];
 const choice = logic ? "yes" : "no";
-const jsonText = "{\"attempt\":" + String(ctx.attempt) + ",\"ok\":true}";
+const jsonText = JSON.stringify({ attempt: ctx.attempt, ok: true });
 const parsed = JSON.parse(jsonText);
 const positionalResults = await Promise.all([perf.echo(`left:${tokens[0]}`), perf.echo(tokens[1]), perf.echo(tokens.length)]);
 const positional = [positionalResults[0], positionalResults[1], positionalResults[2]];
@@ -291,8 +291,8 @@ await perf.finish({ doubled: doubled.length, tagged: tagged.length, last: double
 "#.to_string()),
         ("heap_variable_concat", r#"
 const other = [1, 2];
-const acc: number[] = [];
-for (let n = 0; n < 300; n++) { for (const x of other) { acc.push(x); } }
+let acc: number[] = [];
+for (let n = 0; n < 300; n++) { acc = acc.concat(other); }
 await perf.finish({ total: acc.length, head: acc[0] });
 "#.to_string()),
         // The costliest model-written cell the code mode standard instruction
