@@ -708,20 +708,11 @@ macro_rules! identity {
         #[serde(try_from = "String", into = "String")]
         pub struct $name([u8; 32]);
 
-        // Byte order, compared a word at a time rather than through a
-        // library call: registries and indexes compare identities often.
+        // Identity order is lexicographic byte order. Slice comparison uses
+        // the byte comparison primitive without constructing word arrays.
         impl Ord for $name {
             fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                let words = |digest: &[u8; 32]| {
-                    let (words, _) = digest.as_chunks::<8>();
-                    [
-                        u64::from_be_bytes(words[0]),
-                        u64::from_be_bytes(words[1]),
-                        u64::from_be_bytes(words[2]),
-                        u64::from_be_bytes(words[3]),
-                    ]
-                };
-                words(&self.0).cmp(&words(&other.0))
+                self.0.as_slice().cmp(other.0.as_slice())
             }
         }
 

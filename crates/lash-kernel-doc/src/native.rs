@@ -502,9 +502,8 @@ pub struct FunctionRegistry {
     /// hold.
     dangling: BTreeSet<FunctionId>,
     /// Where each identity bucket ([`bucket`]) starts in `functions`, and
-    /// where the last ends: a lookup compares within one bucket. Made when
-    /// a release image is registered; a function registered one by one
-    /// drops it, and lookups search the whole vector until the next image.
+    /// where the last ends: a lookup compares within one bucket. Insertion
+    /// advances the later boundaries without discarding the index.
     buckets: Option<Box<[u32]>>,
     /// The registry holds definitions alone ([`FunctionRegistry::declarations`]).
     declarations: bool,
@@ -676,7 +675,13 @@ impl FunctionRegistry {
             }
         }
         Arc::make_mut(&mut self.functions).insert(at, registered);
-        self.buckets = None;
+        if let Some(buckets) = &mut self.buckets {
+            for boundary in &mut buckets[bucket(&function) + 1..] {
+                *boundary += 1;
+            }
+        } else {
+            self.index_buckets();
+        }
         let named = Named {
             name: NameRef::Defined(definition),
             function,
