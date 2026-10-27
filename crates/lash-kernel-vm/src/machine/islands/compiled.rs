@@ -16,8 +16,8 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    CallInputs, Destination, GuardedField, GuardedIndex, GuardedPath, Instruction, Merge, Op,
-    Operand, Read, WriteSite,
+    AccessShape, AccessSite, CallInputs, Destination, Instruction, Merge, Op, Operand, Read,
+    WriteSite,
 };
 
 /// A literal return's value and source-derived statement/close price.
@@ -223,6 +223,7 @@ pub(super) struct UnitSite {
 pub(super) struct CallSite {
     pub(super) checked: bool,
     pub(super) inputs: Option<Box<CallInputs>>,
+    pub(super) property: Option<Box<PropertyWrite>>,
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
     /// The call depth its library's prepared answer needs beyond the
@@ -239,6 +240,23 @@ pub(super) struct CallSite {
     pub(super) site: u32,
     /// The most the segment from its return charges; 0 where none follows.
     pub(super) after: u64,
+}
+
+/// A helper's record branch compiled for a literal short property key.
+pub(super) struct PropertyWrite {
+    pub(super) guard: lash_kernel_state::arena::Key,
+    pub(super) accepts: [bool; 2],
+    pub(super) values: u32,
+    pub(super) lookup: Option<lash_kernel_state::arena::Key>,
+    pub(super) charge: PropertyCharge,
+    pub(super) before: u64,
+    pub(super) occurrence: Option<usize>,
+    pub(super) depth: u32,
+}
+
+pub(super) enum PropertyCharge {
+    Known(u64),
+    Text(crate::compile::LengthCharge),
 }
 
 /// Where library `lib`'s body call may answer immediately: an uncharged
@@ -284,6 +302,7 @@ impl Compiled {
             measure.registers as u32,
         );
         cx.block(&plan.body)?;
+        cx.access_edges();
         cx.numeric();
         if !plan.charged && stream.layout.0.is_multiple_of(2) {
             cx.merges(&plan.body);

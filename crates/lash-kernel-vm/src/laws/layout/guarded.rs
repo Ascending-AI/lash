@@ -5,6 +5,8 @@ use super::*;
 /// Loops read a plain record's field and a list's item behind
 /// TypeScript's guards: a kind test, then a unary test of the record's
 /// membership of the brand key or a bounds test of the list's length.
+/// Installing/removing a brand, changing record layouts and changing list
+/// lengths revoke the access proofs. Holes retain their source conversion.
 /// Branded, short, non-collection and refreshed operands fail a guard;
 /// finite slices and charge limits end inside the guarded path; a park
 /// separates the calls. Earlier fused scalar writes and distinct field names
@@ -19,15 +21,25 @@ main {
   let first = call read(plain, 9)
   set plain.a = 4
   let second = call read(plain, 5)
+  set plain.__lash_brand = "installed"
+  let installed = call read(plain, 2)
+  remove plain.__lash_brand
+  let restored = call read(plain, 2)
+  let shifted = call read({b: 90, a: 7}, 2)
   let marked = call read(branded, 4)
   let other = call read(7, 3)
   let items = call item(xs, 6)
   let short = call item([3], 3)
   let text = call item("ab", 2)
   do perform 0("park") as Any
+  set xs[1] = ()
+  let hole = call item(xs, 2)
   set xs[1] = 6
+  set xs[2] = 9
+  let grown = call item(xs, 2)
+  remove xs[2]
   let again = (call read(plain, 3), call item(xs, 3))
-  return (first, second, marked, other, items, short, text, again)
+  return (first, second, installed, restored, shifted, marked, other, items, short, text, hole, grown, again)
 }
 "#;
 
@@ -159,11 +171,16 @@ fn guarded_reads_agree() {
             Datum::Tuple(vec![
                 int(9),
                 int(20),
+                int(200),
+                int(8),
+                int(14),
                 int(400),
                 int(600),
                 int(24),
                 int(300),
                 int(400),
+                int(0),
+                int(12),
                 Datum::Tuple(vec![int(12), int(18)]),
             ])
         )
@@ -227,13 +244,9 @@ main {
   return (first, branded, wrong, again)
 }
 "#;
-    let reads = || crate::machine::islands::GUARDED_READS.with(|n| n.replace(0));
-    reads();
     let reference = guarded_run(WRITES, true, u64::MAX, super::super::embedder::ROOMY);
-    assert_eq!(reads(), 0, "a taped run takes no guarded write");
     assert!(reference.0.starts_with("finished"), "{}", reference.0);
     let natural = guarded_run(WRITES, false, u64::MAX, super::super::embedder::ROOMY);
-    assert!(reads() > 0, "the plain run takes guarded writes");
     assert_eq!(natural, reference);
     for slice in [1, 2, 3, 5, 7, 11, 13, 17, 23, 31] {
         assert_eq!(

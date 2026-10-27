@@ -4,7 +4,7 @@ use super::*;
 
 impl Build<'_> {
     /// Makes the kind test at `head`, an `if`'s first instruction, a
-    /// guarded read ([`GuardedPath`]) where its true arms have that shape.
+    /// compact read where its true arms have a certified member shape.
     pub(super) fn guard(&mut self, head: usize) {
         if !matches!(
             self.ops.get(head).map(|op| &op.op),
@@ -78,23 +78,128 @@ impl Build<'_> {
         let Op::DirectKind { site, reads } = op else {
             unreachable!("a guarded read's head is a kind test");
         };
-        let field = self.field_path(&path, &site, &reads);
-        let index = self.index_path(&path, &site, &reads);
-        self.ops[head].op = Op::Guarded(Box::new(GuardedPath {
-            field,
-            index,
-            kind: site,
-            reads,
-            write,
-            path: path.into(),
-            fixed,
-            statements,
-            arms: arms.into(),
-        }));
+        if let Some(shape) = self
+            .field_path(head, &path, &site, &reads)
+            .or_else(|| self.index_path(&path, &site, &reads))
+            .or_else(|| self.length_path(&path, &site, &reads))
+        {
+            let Op::Write { site: written } = &self.ops[write].op else {
+                unreachable!()
+            };
+            let at = written.at;
+            let leaves = written.leaves;
+            let Some(target) = reads.into_vec().pop() else {
+                unreachable!()
+            };
+            self.ops[head].op = Op::Access(Box::new(AccessSite {
+                kind: site,
+                target,
+                shape,
+                hole: None,
+                consumer: None,
+                short: None,
+                at,
+                after: write + 1,
+                leaves,
+                fixed,
+                statements,
+                arms: arms.into(),
+                source: path.into(),
+            }));
+            return;
+        }
+        self.ops[head].op = Op::DirectKind { site, reads };
+    }
+
+    fn length_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<AccessShape> {
+        let [branch, length, convert, write] = path else {
+            return None;
+        };
+        let Op::DirectNative {
+            site: native,
+            reads: target,
+        } = &self.ops[*length].op
+        else {
+            return None;
+        };
+        let Some(Direct::Length(charge)) = native.direct else {
+            return None;
+        };
+        let Op::Operator {
+            site: conversion,
+            args,
+            ..
+        } = &self.ops[*convert].op
+        else {
+            return None;
+        };
+        let (
+            [Read::Local { at, shared, .. }],
+            [
+                Read::Local {
+                    at: other,
+                    shared: sharing,
+                    ..
+                },
+            ],
+        ) = (reads, &**target)
+        else {
+            return None;
+        };
+        if at != other
+            || shared != sharing
+            || args.as_ref() != [native.reg]
+            || !matches!(&self.ops[*branch].op, Op::Branch { reg, .. } if *reg == kind.same.reg)
+            || !matches!(&self.ops[*write].op, Op::Write { site } if site.reg == conversion.reg && site.reads.is_none())
+        {
+            return None;
+        }
+        Some(AccessShape::Length {
+            native: charge,
+            convert: *convert,
+        })
     }
 
     /// The same source facts for a length-guarded resident item read.
-    fn index_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<GuardedIndex> {
+    fn index_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<AccessShape> {
+        let (path, validation) = match path {
+            [first, left, right, compare, branch, rest @ ..] if path.len() == 13 => {
+                let Op::DirectOperator {
+                    site: a, reads: x, ..
+                } = &self.ops[*left].op
+                else {
+                    return None;
+                };
+                let Op::DirectOperator {
+                    site: b, reads: y, ..
+                } = &self.ops[*right].op
+                else {
+                    return None;
+                };
+                let Op::Operator {
+                    site: predicate,
+                    args,
+                    ..
+                } = &self.ops[*compare].op
+                else {
+                    return None;
+                };
+                if x.len() != 1
+                    || y.len() != 1
+                    || args.as_ref() != [a.reg, b.reg]
+                    || !matches!(&self.ops[*branch].op, Op::Branch { reg, .. } if *reg == predicate.reg)
+                {
+                    return None;
+                }
+                (
+                    std::iter::once(*first)
+                        .chain(rest.iter().copied())
+                        .collect::<Vec<_>>(),
+                    Some([*left, *right, *compare]),
+                )
+            }
+            _ => (path.to_vec(), None),
+        };
         let [
             first,
             before,
@@ -105,7 +210,7 @@ impl Build<'_> {
             after,
             item,
             write,
-        ] = path
+        ] = path.as_slice()
         else {
             return None;
         };
@@ -155,6 +260,27 @@ impl Build<'_> {
         };
         let index = leaf(*before)?;
         let later = leaf(*after)?;
+        if let Some([left, right, _]) = validation {
+            let same_operand = |read: &Read| match (read, &index) {
+                (
+                    Read::Local {
+                        at: a, shared: x, ..
+                    },
+                    Read::Local {
+                        at: b, shared: y, ..
+                    },
+                ) => a == b && x == y,
+                _ => false,
+            };
+            for at in [left, right] {
+                let Op::DirectOperator { reads, .. } = &self.ops[at].op else {
+                    unreachable!()
+                };
+                if !same_operand(&reads[0]) {
+                    return None;
+                }
+            }
+        }
         let same = match (&index, &later) {
             (
                 Read::Literal {
@@ -221,16 +347,28 @@ impl Build<'_> {
         {
             return None;
         }
-        Some(GuardedIndex {
-            length: *length,
-            test: *test,
+        let Some(Direct::Length(native)) = len.direct else {
+            return None;
+        };
+        let literal = matches!(index, Read::Literal { .. });
+        Some(AccessShape::Index {
             index,
+            test: *test,
+            native,
+            validation,
+            memo: literal.then(std::sync::OnceLock::new),
         })
     }
 
     /// Project the common field-read shape once. The source instructions
     /// remain the authority for every operand, formula and miss.
-    fn field_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<GuardedField> {
+    fn field_path(
+        &self,
+        head: usize,
+        path: &[usize],
+        kind: &KindTest,
+        reads: &[Read],
+    ) -> Option<AccessShape> {
         let [first, member, negate, second, local, field, write] = path else {
             return None;
         };
@@ -261,7 +399,13 @@ impl Build<'_> {
         else {
             return None;
         };
-        if at != other || shared != sharing || !matches!(contains.direct, Some(Direct::Member(_))) {
+        if at != other
+            || shared != sharing
+            || !matches!(
+                contains.direct,
+                Some(Direct::Member(lash_kernel_doc::plan::Table::Record))
+            )
+        {
             return None;
         }
         let Op::Operator {
@@ -306,11 +450,27 @@ impl Build<'_> {
         if written.reg != *result || written.reads.is_some() {
             return None;
         }
-        Some(GuardedField {
-            member: *member,
-            negate: *negate,
+        let Value::Text(key) = key else { return None };
+        let (no, no_units) = super::super::unary(test, Value::Bool(false), self.exe)?;
+        let (yes, yes_units) = super::super::unary(test, Value::Bool(true), self.exe)?;
+        let (Value::Bool(no), Value::Bool(yes)) = (no, yes) else {
+            return None;
+        };
+        let formula = &self.exe.lib(contains.lib).charge;
+        let charge = |present| {
+            formula.length_charge(
+                0,
+                &[None, Some(Value::Text(*key))],
+                Some(Value::Bool(present)),
+            )
+        };
+        Some(AccessShape::Field {
+            statement: self.ops[head].begin.as_ref()?.id,
+            key: lash_kernel_state::arena::Key::of_text(key.as_str()),
+            accepts: [no, yes],
+            charges: [charge(false)?, charge(true)?],
+            negated: [no_units?, yes_units?],
             name: *field,
-            key: *key,
         })
     }
 }

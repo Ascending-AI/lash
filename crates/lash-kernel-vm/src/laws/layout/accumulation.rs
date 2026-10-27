@@ -38,6 +38,7 @@ fn probes(
                 depth: 1,
                 writes: false,
                 element_write: false,
+                record_write: None,
                 callees: Box::leak(Box::new([concat])),
             }),
             forwards: p::Forwards {

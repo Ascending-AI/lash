@@ -39,6 +39,23 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
+    /// Resolve the certificate's predicate against the actual registered native.
+    pub(crate) fn record_write(&self) -> Option<(&'static str, [bool; 2], u32)> {
+        let Self::Template {
+            template, natives, ..
+        } = self
+        else {
+            return None;
+        };
+        let path = template.heap.as_ref()?.record_write.as_ref()?;
+        let entry = natives.get(usize::from(path.test))?;
+        let accepted = |present| match (entry.entry)(&[Value::Bool(present)])? {
+            Value::Bool(answer) => Some(answer == path.holds),
+            _ => None,
+        };
+        Some((path.key, [accepted(false)?, accepted(true)?], path.values))
+    }
+
     pub(super) fn template(
         registry: &FunctionRegistry,
         template: &'static HelperTemplate,

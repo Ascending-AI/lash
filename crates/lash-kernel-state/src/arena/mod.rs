@@ -498,6 +498,20 @@ impl Arena {
         self.insert(body, facts)
     }
 
+    /// The already resident empty tuple, without constructing or warming one.
+    /// A caller that elides a construction must still admit its memory bound.
+    pub fn resident_empty_tuple(&self) -> Option<Value> {
+        let handle = self.empty_tuple?;
+        match self.objects.get(handle) {
+            Some(Body::Tuple(sequence))
+                if sequence.len == 0 && !self.facts[handle.index() as usize].cold =>
+            {
+                Some(Value::Tuple(handle))
+            }
+            _ => None,
+        }
+    }
+
     /// The live empty tuple, made with `facts` when none is.
     fn empty_tuple(&mut self, facts: Facts) -> ArenaHandle {
         if let Some(handle) = self.empty_tuple

@@ -846,6 +846,7 @@ pub(super) fn allocation_probes(
                     depth: 1,
                     writes,
                     element_write: false,
+                    record_write: None,
                     callees: &[],
                     entry: if writes {
                         |heap, args, _| {

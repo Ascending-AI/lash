@@ -162,6 +162,7 @@ fn run_at_depth<const L: u64>(
         charge,
         call_depth,
         lash_kernel_vm::MemoryMeter::On,
+        true,
     )
 }
 
@@ -172,7 +173,7 @@ fn run_with_memory<const L: u64>(
     charge: u64,
     memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
-    run_with_options::<L>(case, program, projector, charge, 200, memory_meter)
+    run_with_options::<L>(case, program, projector, charge, 200, memory_meter, true)
 }
 
 fn run_with_options<const L: u64>(
@@ -182,6 +183,7 @@ fn run_with_options<const L: u64>(
     charge: u64,
     call_depth: u32,
     memory_meter: lash_kernel_vm::MemoryMeter,
+    record: bool,
 ) -> Observed {
     let bounds = Bounds {
         memory_meter,
@@ -213,7 +215,9 @@ fn run_with_options<const L: u64>(
     )
     .unwrap();
     let tape = lash_kernel_vm::ChargeTape::new();
-    machine.record_charges(tape.clone());
+    if record {
+        machine.record_charges(tape.clone());
+    }
     if case
         .id
         .ends_with("comparator sort coercion and callback failure")
@@ -234,7 +238,9 @@ fn run_with_options<const L: u64>(
                 projector
                     .at(&mut machine, program, bounds, &source)
                     .unwrap();
-                machine.record_charges(tape.clone());
+                if record {
+                    machine.record_charges(tape.clone());
+                }
                 for request in park.requests {
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
@@ -1090,6 +1096,25 @@ fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
         ),
     ];
     let typescript = [
+        // K-CHG-001 / K-MACH-008: cached writes retain aliases and revoke
+        // their positions after structural edits, including a missing key.
+        (
+            "compact access invalidation",
+            r#"function overwrite(row, value) { row.a = value; row.b = value + 1; return row.a + row.b; }
+function build() {
+  const row = {a: 1, b: 2}; const alias = row; let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += overwrite(alias, i);
+    row["k" + i] = i;
+    if (i === 3) { delete row.a; }
+    if (i === 5) { row.extra = 99; }
+  }
+  const xs = [0, 1, 2];
+  for (let i = 0; i < 6; i++) { sum += xs[1]; if (i === 2) { xs[1] = 7; xs.push(9); } }
+  return [sum, row.a, row.b, alias.extra, xs.length, row["k8"]];
+}
+await host.observe(JSON.stringify(build()));"#,
+        ),
         // FIG-7441: SortCompare coerces each result, excludes undefined
         // and holes from callbacks, and publishes only a completed sort.
         (
@@ -1249,8 +1274,24 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
             ..program.clone()
         };
         let planned = run::<0>(&case, &program, &mut Projector::default());
-        let reference = run::<3>(&case, &bodies, &mut Projector::default());
+        let mut reference = run::<3>(&case, &bodies, &mut Projector::default());
         assert_eq!(planned, reference, "{}", case.id);
+        let quiet = run_with_options::<0>(
+            &case,
+            &program,
+            &mut Projector::default(),
+            50_000_000,
+            200,
+            lash_kernel_vm::MemoryMeter::On,
+            false,
+        );
+        let recorded = std::mem::take(&mut reference.tape);
+        assert_eq!(quiet, reference, "{} without a charge observer", case.id);
+        reference.tape = recorded;
+        if case.id.ends_with("compact access invalidation") {
+            let Request::Effect(effect) = &planned.requests[0];
+            assert_eq!(effect.args, vec![Datum::Text("[105,8,9,99,4,8]".into())]);
+        }
         if case
             .id
             .ends_with("comparator sort coercion and callback failure")

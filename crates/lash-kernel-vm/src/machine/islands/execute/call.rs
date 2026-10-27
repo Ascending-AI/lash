@@ -13,6 +13,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         callers: &mut Vec<Frame<'e>>,
         slots: &mut usize,
     ) -> Result<Next, Stop> {
+        if let Some(property) = &site.property
+            && let Some(inputs) = &site.inputs
+            && let [target, key, value] = &*inputs.args
+            && let Some(values) = self.pure_call_values(frame, [target, key, value])
+            && let Some(answer) =
+                self.property_value(frame.statement, property, site.close, &values)
+        {
+            frame.regs[site.reg as usize] = answer?;
+            if site.after != 0 {
+                self.admit(site.after);
+            }
+            return Ok(Next::Continue);
+        }
         // Borrow the source-sized window through admission and binding.
         // Only a wide call initializes a maximum-arity window; an ordinary
         // positional call carries its receiver and argument directly.

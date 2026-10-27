@@ -164,6 +164,23 @@ pub struct HeapTemplate {
     /// `set target[key] = value` answering `value`, which a caller may
     /// make itself ([`TemplateHeap::set_index`]) in place of the paths.
     pub element_write: bool,
+    /// A source-certified record membership guard followed by the write
+    /// `target[key] = value`, returning `value`, over three unchanged
+    /// arguments. Other operand kinds retain the ordinary template.
+    pub record_write: Option<RecordWrite>,
+}
+
+/// The symbolic record-write path retained by a helper template.
+#[derive(Clone, Copy, Debug)]
+pub struct RecordWrite {
+    /// The constant key whose membership the path tests.
+    pub key: &'static str,
+    /// The membership predicate in [`HelperTemplate::callees`].
+    pub test: u8,
+    /// The boolean answer that selects the write branch.
+    pub holds: bool,
+    /// The accepted written-value kinds, one bit per [`crate::ValueKind`].
+    pub values: u32,
 }
 
 /// The positions an element-writing template writes at lie below

@@ -8,6 +8,9 @@ mod accumulation;
 #[path = "program/numeric.rs"]
 mod numeric;
 pub(in crate::machine::islands) use numeric::{CallInputs, Destination, Operand};
+#[path = "program/access.rs"]
+mod access;
+pub(in crate::machine::islands) use access::{AccessShape, AccessSite};
 #[path = "program/guarded.rs"]
 mod guarded;
 #[path = "program/merge.rs"]
@@ -26,6 +29,7 @@ pub(in crate::machine::islands) struct Instruction {
 
 /// A pure source operand, read once in its original argument order.
 /// Failure retains the operand's source PC and the completed prefix.
+#[derive(Clone, Copy)]
 pub(in crate::machine::islands) enum Read {
     Literal {
         reg: u32,
@@ -170,6 +174,12 @@ pub(in crate::machine::islands) enum Op {
         site: HeapSite,
         args: Box<[u32]>,
     },
+    PropertyStore {
+        site: HeapSite,
+        args: Box<[u32]>,
+        reads: Option<Box<[Read]>>,
+        property: Box<super::PropertyWrite>,
+    },
     Reserve {
         kind: lash_kernel_doc::ValueKind,
         members: usize,
@@ -280,8 +290,13 @@ pub(in crate::machine::islands) enum Op {
     Wait(u32),
     Cancel(u32),
     Cold(u32),
-    /// A kind test that heads a guarded read ([`GuardedPath`]).
-    Guarded(Box<GuardedPath>),
+    /// A resident member read with its complete source guard and completion edge.
+    Access(Box<AccessSite>),
+    /// A source initialization immediately followed by its compact read.
+    AccessInit {
+        head: usize,
+        original: Box<WriteSite>,
+    },
     /// A local's binary update and its write share one instruction.
     Accumulation {
         site: Box<OperatorSite>,
@@ -290,49 +305,6 @@ pub(in crate::machine::islands) enum Op {
         covered: bool,
         write: Box<WriteSite>,
     },
-}
-
-/// A proved field-read shape, retaining its source sites.
-pub(in crate::machine::islands) struct GuardedField {
-    pub(in crate::machine::islands) member: usize,
-    pub(in crate::machine::islands) negate: usize,
-    /// Field-name table index, independent of physical instruction addresses.
-    pub(in crate::machine::islands) name: usize,
-    pub(in crate::machine::islands) key: Value,
-}
-
-/// A proved length-guarded index-read shape.
-pub(in crate::machine::islands) struct GuardedIndex {
-    pub(in crate::machine::islands) length: usize,
-    pub(in crate::machine::islands) test: usize,
-    pub(in crate::machine::islands) index: Read,
-}
-
-/// A guarded read (FIG-7372): an `if` headed by a kind test whose true
-/// arms run only pure instructions (constants, locals, kind tests, length
-/// and membership natives, scalar operators, field and index reads,
-/// closes and branches into each arm's first statement) up to the write
-/// or member store that ends the path. Those instructions own every coordinate and charge;
-/// the path runs them whole where each of their checks is proven first,
-/// and otherwise its kind test runs alone, having committed nothing.
-pub(in crate::machine::islands) struct GuardedPath {
-    pub(in crate::machine::islands) index: Option<GuardedIndex>,
-    pub(in crate::machine::islands) field: Option<GuardedField>,
-    /// The head's kind test and its operand, as its `DirectKind` held them.
-    pub(in crate::machine::islands) kind: Box<KindTest>,
-    pub(in crate::machine::islands) reads: Box<[Read]>,
-    /// The instructions after the head whose values or answers the path
-    /// takes, the write last.
-    pub(in crate::machine::islands) path: Box<[usize]>,
-    /// The coordinate of its write, the path's last.
-    pub(in crate::machine::islands) write: usize,
-    /// What the path charges whatever it reads: each statement's unit
-    /// after the head's and every close.
-    pub(in crate::machine::islands) fixed: u64,
-    /// The statements it begins after the head's.
-    pub(in crate::machine::islands) statements: u64,
-    /// The arms it enters, outermost first.
-    pub(in crate::machine::islands) arms: Box<[usize]>,
 }
 
 /// The most arms a guarded read enters.
@@ -1277,6 +1249,7 @@ impl<'e> Build<'e> {
                     site: CallSite {
                         checked: invoke.checked || self.root_checked(),
                         inputs: None,
+                        property: None,
                         root: self.root,
                         library,
                         answers: library.and_then(|lib| super::answer_depth(self.exe, lib)),

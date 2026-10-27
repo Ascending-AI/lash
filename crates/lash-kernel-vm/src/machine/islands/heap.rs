@@ -13,16 +13,6 @@ pub(super) struct HeapAnswer {
     events: Option<Vec<Weight>>,
 }
 
-impl HeapAnswer {
-    pub(super) fn resident(value: Value, units: u64) -> Self {
-        Self {
-            value,
-            units,
-            events: None,
-        }
-    }
-}
-
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Keep the ordered event owner out of the scalar operator's live frame.
     #[inline(never)]
@@ -213,12 +203,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }) || self.arena.any_cold())
         {
             return None;
-        }
-        if operator
-            && matches!(args.first(), Some(Value::Record(_)))
-            && let Some(answer) = self.resident_write(function, args, before, checked)
-        {
-            return Some(answer);
         }
         let answer = self.heap(before, strict, |cx| {
             let value = if operator && function.prepared.is_some() {

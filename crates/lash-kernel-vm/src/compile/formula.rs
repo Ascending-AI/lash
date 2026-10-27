@@ -47,6 +47,19 @@ pub(crate) struct TextCharge {
     right: u64,
 }
 
+/// A sum whose only changing measurement is a collection's member count.
+pub(crate) struct LengthCharge {
+    fixed: u64,
+    members: u64,
+}
+
+impl LengthCharge {
+    #[inline(always)]
+    pub(crate) fn units(&self, len: u64) -> u64 {
+        self.fixed.saturating_add(self.members.saturating_mul(len))
+    }
+}
+
 impl TextCharge {
     #[inline(always)]
     pub(crate) fn units(self, left: u64, right: u64) -> u64 {
@@ -88,6 +101,83 @@ enum Fold {
 }
 
 impl Plan {
+    /// Evaluate only when every measurement is an already known immediate.
+    pub(crate) fn known_charge(
+        &self,
+        args: &[Option<Value>],
+        result: Option<Value>,
+    ) -> Option<u64> {
+        let mut complete = true;
+        let units = self.evaluate(|source, measure| {
+            let value = match source {
+                Source::Arg(at) => args.get(at).copied().flatten(),
+                Source::Result => result,
+                Source::Nothing => return 0,
+            };
+            match value.and_then(|value| immediate_measure(&value, measure)) {
+                Some(units) => units,
+                None => {
+                    complete = false;
+                    0
+                }
+            }
+        });
+        complete.then_some(units)
+    }
+
+    /// Specialize a shallow collection argument and known immediate operands.
+    /// Deep measurements retain the ordinary formula evaluator.
+    pub(crate) fn length_charge(
+        &self,
+        collection: usize,
+        args: &[Option<Value>],
+        result: Option<Value>,
+    ) -> Option<LengthCharge> {
+        self.measured_length_charge(collection, args, result, false)
+    }
+
+    /// A short text's size and deep size are its byte length plus one.
+    pub(crate) fn short_text_charge(&self, argument: usize) -> Option<LengthCharge> {
+        self.measured_length_charge(argument, &[], None, true)
+    }
+
+    fn measured_length_charge(
+        &self,
+        collection: usize,
+        args: &[Option<Value>],
+        result: Option<Value>,
+        deep_is_length: bool,
+    ) -> Option<LengthCharge> {
+        let Linear::Sum(fixed) = self.linear.as_ref()? else {
+            return None;
+        };
+        let mut charge = LengthCharge {
+            fixed: *fixed,
+            members: 0,
+        };
+        for (source, measure) in &self.measurements {
+            let amount = match source {
+                Source::Arg(at) if *at == collection => match measure {
+                    doc::Measure::Size => {
+                        charge.members += 1;
+                        1
+                    }
+                    doc::Measure::DeepSize if deep_is_length => {
+                        charge.members += 1;
+                        1
+                    }
+                    doc::Measure::NestedSize | doc::Measure::Magnitude => 0,
+                    doc::Measure::DeepSize => return None,
+                },
+                Source::Arg(at) => immediate_measure(&args.get(*at).copied().flatten()?, *measure)?,
+                Source::Result => immediate_measure(&result?, *measure)?,
+                Source::Nothing => 0,
+            };
+            charge.fixed = charge.fixed.saturating_add(amount);
+        }
+        Some(charge)
+    }
+
     pub(crate) fn new(formula: &doc::Formula, params: &[lash_kernel_value::types::Param]) -> Self {
         Self::prepare(formula, params, false)
     }

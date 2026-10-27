@@ -520,7 +520,7 @@ const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, element_write: false, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.declining`.
@@ -613,7 +613,7 @@ const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_budget,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("1c50cd669ab12c8c1448a422ad8da57414f9cecb204e2761bf3ed6de239dc2f0"), p::function("441f22272281cd52922bb45a3a15263886a53bf171839ffa257ec0e0a9601fe8"), p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element_write: false, record_write: None, callees: &[p::function("94621ce821ee886636f7d33907340b7290c9e71c2137bd762b6c70bb464566f9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.budget`.

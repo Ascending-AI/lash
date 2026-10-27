@@ -144,6 +144,7 @@ enum Form {
         table: &'static str,
         target: String,
         key: String,
+        literal: Option<Value>,
     },
     /// The general call of a native, with what it answers: an object it
     /// may build, and one only the arena holds.
@@ -273,7 +274,9 @@ impl std::fmt::Display for Form {
             Self::Len { collection, target } => {
                 write!(f, "heap.len(p::Collection::{collection}, {target})")
             }
-            Self::Lookup { table, target, key } => {
+            Self::Lookup {
+                table, target, key, ..
+            } => {
                 write!(f, "heap.lookup(p::Table::{table}, {target}, {key})")
             }
             Self::Call { callee, args, .. } => write!(f, "heap.call({callee}, &[{args}])"),
@@ -503,6 +506,7 @@ fn read(name: &str, args: &[Symbol]) -> Option<Form> {
             },
             target: target.code.clone(),
             key: key.code.clone(),
+            literal: key.constant,
         }),
         _ => None,
     }
@@ -1170,6 +1174,7 @@ struct Pass {
     text_forwards: BTreeMap<Vec<&'static str>, u8>,
     /// Whether a path of an arm writes an arena object.
     writes: bool,
+    record_writes: BTreeMap<(String, u8, bool), u32>,
 }
 
 impl Evaluator<'_> {
@@ -1205,6 +1210,7 @@ impl Evaluator<'_> {
             text_forwards: BTreeMap::new(),
             depth: 1,
             writes: false,
+            record_writes: BTreeMap::new(),
         };
         for mask in 0..combinations {
             let mut state = State {
@@ -1288,6 +1294,16 @@ impl Evaluator<'_> {
                 && let Some(native) = forwarding::text(&state.steps, value)
             {
                 pass.text_forwards.insert(names.clone(), native);
+            }
+            if self.heap
+                && names.len() == 3
+                && names[0] == "Record(_)"
+                && names[1] == "Text(_)"
+                && let [(state, Some(value))] = results.as_slice()
+                && let Some(proof) = record_write(&state.steps, value)
+            {
+                let kind = state.vars.get(&definition.signature.params[2].name)?.kind?;
+                *pass.record_writes.entry(proof).or_default() |= 1 << kind as u32;
             }
             let mut code = String::new();
             if !self.heap {
@@ -1422,6 +1438,46 @@ fn arms(arms: BTreeMap<String, Vec<Vec<&'static str>>>) -> String {
         .join("\n")
 }
 
+/// A record path whose only heap effects are a constant membership guard
+/// and the final write of its unchanged arguments. The runtime resolves the
+/// guard's native, so the certificate does not assume its implementation.
+fn record_write(steps: &[Step], value: &Symbol) -> Option<(String, u8, bool)> {
+    let [
+        Step::Heap {
+            name: member,
+            form:
+                Form::Lookup {
+                    table: "Record",
+                    target,
+                    literal: Some(Value::Text(key)),
+                    ..
+                },
+        },
+        Step::Entry {
+            name: answer,
+            native,
+            args,
+        },
+        Step::Guard { test, holds },
+        Step::SetIndex {
+            target: written,
+            index,
+            value: assigned,
+        },
+    ] = steps
+    else {
+        return None;
+    };
+    (target == "args[0]"
+        && args == member
+        && test == answer
+        && written == "args[0]"
+        && index == "args[1]"
+        && assigned == "args[2]"
+        && value.code == "args[2]")
+        .then(|| Some((key.as_str().to_owned(), u8::try_from(*native).ok()?, *holds)))?
+}
+
 /// The helpers whose body, on a list, a float that is a whole number at
 /// least zero and below both the list's length and 2³² − 1, and any
 /// value, makes the element write `set target[key] = value` and answers
@@ -1516,9 +1572,13 @@ pub(crate) fn emit(
         None => descriptor.push_str("None"),
         Some(heap) => {
             let element_write = heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str());
+            let record_write = heap.record_writes.iter().max_by_key(|(_, kinds)| kinds.count_ones())
+                .map_or_else(|| "None".to_owned(), |((key, test, holds), kinds)| {
+                    format!("Some(p::RecordWrite {{ key: {key:?}, test: {test}, holds: {holds}, values: {kinds} }})")
+                });
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element_write: {element_write}, callees: &[",
+                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element_write: {element_write}, record_write: {record_write}, callees: &[",
                 heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {

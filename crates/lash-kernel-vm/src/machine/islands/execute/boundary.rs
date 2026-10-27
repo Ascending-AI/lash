@@ -219,8 +219,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     | Op::Unit { .. }
                     | Op::Kind { .. }
                     | Op::DirectKind { .. }
-                    | Op::Guarded(_) => Reason::Operator,
-                    Op::Native { .. } | Op::DirectNative { .. } | Op::Heap { .. } => Reason::Native,
+                    | Op::Access(_) => Reason::Operator,
+                    Op::Native { .. }
+                    | Op::DirectNative { .. }
+                    | Op::Heap { .. }
+                    | Op::PropertyStore { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
                         Reason::Binding
@@ -244,7 +247,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 | Op::DirectOperator { site, .. }
                 | Op::Unary { site, .. }
                 | Op::Binary { site, .. } => Some(site.lib),
-                Op::Heap { site, .. } => Some(site.lib),
+                Op::Heap { site, .. } | Op::PropertyStore { site, .. } => Some(site.lib),
                 Op::Call { site, .. } => site.library,
                 _ => None,
             };

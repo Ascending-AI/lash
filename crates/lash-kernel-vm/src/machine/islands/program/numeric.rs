@@ -14,15 +14,16 @@ impl Build<'_> {
             instruction.op.addresses(|at| {
                 targets.insert(*at);
             });
-            if let Op::Guarded(path) = &instruction.op {
-                protected.extend(path.path.iter().copied());
+            if let Op::Access(site) = &instruction.op {
+                protected.extend(site.source.iter().copied());
             }
         }
         for block in &self.blocks {
             targets.extend(block.starts.iter().copied());
             targets.extend([block.end, block.after]);
         }
-        let removed = self.call_inputs(&targets);
+        let mut removed = self.property_inputs(&targets);
+        removed.extend(self.call_inputs(&targets));
         let mut relocation = vec![0; self.ops.len() + 1];
         let source = std::mem::take(&mut self.ops);
         self.ops = Vec::with_capacity(source.len());
@@ -152,11 +153,17 @@ impl Build<'_> {
             } else {
                 None
             };
+            let property = if callee.is_none() && held.is_none() {
+                self.property_write(site, &reads)
+            } else {
+                None
+            };
             let begin = self.ops[start].begin.take();
             let live = self.ops[start].live.clone();
             let Op::Call { site, .. } = &mut self.ops[call].op else {
                 unreachable!()
             };
+            site.property = property;
             site.inputs = Some(Box::new(CallInputs {
                 held,
                 callee: callee.map(Operand::from),
@@ -267,18 +274,31 @@ impl Op {
             | Self::Cond { otherwise, .. }
             | Self::Branch { otherwise, .. } => visit(otherwise),
             Self::Jump(to) => visit(to),
-            Self::Guarded(path) => {
-                visit(&mut path.write);
-                for at in &mut path.path {
+            Self::AccessInit { head, .. } => visit(head),
+            Self::Access(site) => {
+                visit(&mut site.after);
+                if let Some(short) = &mut site.short {
+                    visit(&mut short.after);
+                }
+                for at in &mut site.source {
                     visit(at);
                 }
-                if let Some(field) = &mut path.field {
-                    visit(&mut field.member);
-                    visit(&mut field.negate);
+                if let AccessShape::Length { convert, .. } = &mut site.shape {
+                    visit(convert);
                 }
-                if let Some(index) = &mut path.index {
-                    visit(&mut index.length);
-                    visit(&mut index.test);
+                if let AccessShape::Index {
+                    test, validation, ..
+                } = &mut site.shape
+                {
+                    visit(test);
+                    if let Some(checks) = validation {
+                        for at in checks {
+                            visit(at);
+                        }
+                    }
+                }
+                if let Some(consumer) = &mut site.consumer {
+                    visit(&mut consumer.operator);
                 }
             }
             _ => {}

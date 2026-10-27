@@ -10,10 +10,10 @@ use super::*;
 use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
 
+mod access;
 mod accumulate;
 mod boundary;
 mod call;
-mod guarded;
 mod merge;
 mod numeric;
 
@@ -329,6 +329,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         | Op::Binary { .. }
                         | Op::Accumulation { .. }
                         | Op::Heap { .. }
+                        | Op::PropertyStore { .. }
                 )
             {
                 let mut loops = Vec::new();
@@ -1022,6 +1023,31 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     island.native(site, &values, reads.len())
                 })?;
             }
+            Op::PropertyStore {
+                site,
+                args,
+                reads,
+                property,
+            } => {
+                let values = match reads {
+                    Some(reads) => self.inputs::<3>(&frame.slots, reads)?,
+                    None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
+                };
+                let answer = self
+                    .property_value(frame.statement, property, site.close, &values)
+                    .unwrap_or_else(|| {
+                        self.retaining(&mut frame.transient, |island| {
+                            island.heap_call(site, &values)
+                        })
+                    });
+                frame.regs[site.reg as usize] = answer.inspect_err(|_| {
+                    for (source, value) in args.iter().zip(values) {
+                        if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
+                            self.scratch.exit.regs.push((*source, value));
+                        }
+                    }
+                })?;
+            }
             Op::Heap { site, args } => {
                 let mut values = [Value::Absent; MAX_ARGS];
                 for (to, reg) in values.iter_mut().zip(args.iter()) {
@@ -1120,6 +1146,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     island.kind_test(site, regs[*src as usize])
                 })?
             }
+            Op::Access(site) => return self.access(frame, site),
+            Op::AccessInit { head, original } => return self.access_init(frame, *head, original),
             Op::DirectKind { site, reads } => {
                 let [value] = self.inputs::<1>(&frame.slots, reads)?;
                 regs[site.same.reg as usize] =
@@ -1248,7 +1276,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 return Err(self.at(*pc));
             }
             Op::Cold(pc) => return Err(self.at(*pc)),
-            Op::Guarded(site) => return self.guarded(frame, site),
         }
         Ok(Next::Continue)
     }
