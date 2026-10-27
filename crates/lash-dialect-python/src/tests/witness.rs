@@ -91,4 +91,6 @@ witness!(
     bare_raise,
     cancel_result,
     raise_cause,
+    range_register_boundaries,
+    proven_subscripts,
 );

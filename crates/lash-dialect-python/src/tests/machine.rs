@@ -1235,7 +1235,10 @@ except TypeError:
 fn paged_integer_loop_keeps_facts_across_await() {
     let source = r#"
 s = 9223372036854775807
-for i in range(3):
+start = 0
+stop = 3
+step = 1
+for i in range(start, stop, step):
     s += i
     if i == 1:
         await host.echo(s)
@@ -1815,6 +1818,10 @@ async def build():
         text += part
         parts.append(part)
     parts.append(await host.echo(text))
+    d = {'a': 1}
+    d['a'] += 2
+    print(d['a'], parts[0])
+    parts[0] = text
     print(parts)
 await build()
 "#;

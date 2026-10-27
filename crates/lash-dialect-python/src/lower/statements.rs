@@ -495,9 +495,9 @@ impl Lowerer<'_> {
                 }
                 // The value is evaluated before the target's parts.
                 let value = self.pin(value);
-                let mut operands = self.operands(&[&subscript.value, &subscript.slice])?;
-                operands.push(value);
-                self.invoke_do("py.setitem", &operands)
+                let kind = self.subscript_kind(&subscript.value);
+                let operands = self.operands(&[&subscript.value, &subscript.slice])?;
+                self.setitem(kind, operands[0].clone(), operands[1].clone(), value)
             }
             PyExpr::Tuple(ast::ExprTuple { elts, .. })
             | PyExpr::List(ast::ExprList { elts, .. }) => {
@@ -590,14 +590,11 @@ impl Lowerer<'_> {
             PyExpr::Subscript(subscript)
                 if !matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) =>
             {
+                let kind = self.subscript_kind(&subscript.value);
                 let place = self.operands(&[&subscript.value, &subscript.slice])?;
                 let container = self.pin(place[0].clone());
                 let index = self.pin(place[1].clone());
-                let current = self.invoke(
-                    "py.getitem",
-                    &[container.clone(), index.clone()],
-                    Ty::Unknown,
-                )?;
+                let current = self.getitem(kind, container.clone(), index.clone())?;
                 let (aside, operand) = self.aside(|this| this.expr(&assign.value))?;
                 let current = if aside.is_empty() {
                     current
@@ -606,7 +603,7 @@ impl Lowerer<'_> {
                 };
                 self.append(aside);
                 let result = self.in_place(assign, current, operand)?;
-                self.invoke_do("py.setitem", &[container, index, result])
+                self.setitem(kind, container, index, result)
             }
             other => Err(diagnostics::with_repair(
                 Code::TargetUnsupported,

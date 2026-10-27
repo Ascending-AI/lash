@@ -101,6 +101,7 @@ use py.fail
 use py.is_number
 use py.operand_error
 use py.index
+use py.getitem
 use py.slice_bounds
 use py.to_list
 use py.add
@@ -1342,6 +1343,46 @@ body {
     set out = tuple.concat(out, (item,))
   }
   return out
+}
+
+# Proven collection receivers retain the generic access fee and Python errors.
+function py.dict_getitem(target: Map(Any, Any), index: Text) -> Any
+kernel 1
+charge sum(6, deep(index))
+body {
+  if map.contains(target, index) { return target[index] }
+  let shown = invoke py.repr(index)
+  throw error.new("KeyError", shown, ((index,), null))
+}
+
+function py.list_getitem(target: List(Any), index: Int) -> Any
+kernel 1
+charge sum(6, deep(index))
+body {
+  if le(0, index) {
+    if lt(index, list.len(target)) { return target[index] }
+  }
+  return invoke py.getitem(target, index)
+}
+
+function py.tuple_getitem(target: Any, index: Int) -> Any
+kernel 1
+charge sum(6, deep(index))
+body {
+  if le(0, index) {
+    if lt(index, tuple.len(target)) { return target[index] }
+  }
+  return invoke py.getitem(target, index)
+}
+
+function py.list_setitem(target: List(Any), index: Int, value: Any) -> Null
+kernel 1
+charge sum(6, deep(index))
+body {
+  let length = list.len(target)
+  let position = invoke py.index(index, length, "list", " assignment")
+  set target[position] = value
+  return null
 }
 
 function py.getitem(target: Any, index: Any) -> Any

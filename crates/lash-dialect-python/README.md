@@ -72,7 +72,14 @@ as the `python` package. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the
 check that a dict or set did not change size under a `for` or a
 comprehension, `str`, `repr`
-and f-string formatting are helpers.
+and f-string formatting are helpers. Direct builtin `range` loops retain validated
+integer bounds and step once before entering the counter loop. Closed local
+dictionary, list and tuple definitions select typed access helpers for proven
+keys and indices. Their generated plans use kernel heap access and retain the
+generic access fee, negative-index normalization and Python errors. Captures, restored bindings and incompatible definitions
+keep dynamic access. This lowering reduces host-visible exact charges for the
+same Python source; reference and register execution of each document retain
+identical charges and checkpoint behavior.
 
 A source is a cell of a session: the names its top level binds are session
 bindings, which the next cell sees, and a cell may `await` at its top

@@ -55,6 +55,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SLICE_START_PLAN,
     &PY_METHOD_ISALNUM_PLAN,
     &PY_DELSLICE_PLAN,
+    &PY_LIST_GETITEM_PLAN,
     &PY_INDEX_PLAN,
     &PY_EXC_MATCHES_PLAN,
     &PY_SUB_PLAN,
@@ -111,6 +112,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_VALUES_PLAN,
     &PY_SUM_PLAN,
     &PY_REPLY_PLAN,
+    &PY_DICT_GETITEM_PLAN,
     &PY_METHOD_SORT_PLAN,
     &PY_ORD_PLAN,
     &PY_METHOD_ISIDENTIFIER_PLAN,
@@ -145,6 +147,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_IGNORABLE_PLAN,
     &PY_MATH_SQRT_PLAN,
     &PY_MATH_RADIANS_PLAN,
+    &PY_TUPLE_GETITEM_PLAN,
     &PY_POW_MOD_PLAN,
     &PY_METHOD_RFIND_PLAN,
     &PY_TOKEN_PLAN,
@@ -219,6 +222,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_BOUNDS_PLAN,
     &PY_GETATTR_PLAN,
     &PY_METHOD_FROMKEYS_PLAN,
+    &PY_LIST_SETITEM_PLAN,
     &PY_POW_PLAN,
     &PY_JSON_QUOTE_PLAN,
     &PY_STR_PLAN,
@@ -9549,6 +9553,81 @@ fn py_slice_bounds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     Ok(ctx.take(0))
 }
 
+const PY_LIST_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.list_setitem",
+    function: p::function("9cb44beaf43b9d39853ec5ad462aa58f37b3084f46bb8a23a13d95325a5ef117"),
+    callees: &[
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("list"),
+        p::PlanLiteral::Text(" assignment"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "index", path: &[] },
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "length", path: &[0] },
+        p::PlanLocal { name: "position", path: &[1] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_list_setitem,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_list_setitem_heap, depth: 2, writes: true, element_write: false, record_write: None, callees: &[p::function("18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `py.list_setitem`.
+fn py_list_setitem(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.adopt(2, 2)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(3, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.local(3, 1)?;
+    ctx.literal(0, 2)?;
+    ctx.literal(1, 3)?;
+    ctx.call(1, 0, 4)?;
+    ctx.bind(4, 0)?;
+    ctx.begin()?;
+    ctx.local(2, 0)?;
+    ctx.pin(0)?;
+    ctx.local(0, 1)?;
+    ctx.local(4, 2)?;
+    ctx.set_index(1, 0)?;
+    ctx.begin()?;
+    ctx.literal(2, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_list_setitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::List(_), Value::Int(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = heap.call(0, &[args[1], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(" assignment") }?)])?; let _ = v1;
+                heap.bind(v1, None)?;
+                heap.set_index(args[0], v1, args[2])?;
+                Some(Value::Null)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
+}
+
 const PY_FOR_IN_CHECK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.check",
     function: p::function("66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62"),
@@ -12386,6 +12465,100 @@ fn py_delitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     }
     ctx.begin()?;
     Ok(Value::Null)
+}
+
+const PY_DICT_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.dict_getitem",
+    function: p::function("3de8fd0c2eb9b586f6a53abb8763deb009ab1fa320ddf324486aae3a1f321b38"),
+    callees: &[
+        p::function("d934d34968ad85193c362f12551af1b92c09f82923630d73cedf6383afefa55b"),
+        p::function("2d0f12a0ca1f3c1f20578d7217ebf2aa3236d4a1396f4d974d852c66c48a21b1"),
+        p::function("e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("KeyError"),
+        p::PlanLiteral::Null,
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "index", path: &[] },
+        p::PlanLocal { name: "shown", path: &[1] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(1),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_dict_getitem,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_dict_getitem_heap, depth: 1, writes: false, element_write: false, record_write: None, callees: &[p::function("2d0f12a0ca1f3c1f20578d7217ebf2aa3236d4a1396f4d974d852c66c48a21b1"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `py.dict_getitem`.
+fn py_dict_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.local(1, 1)?;
+            ctx.index(0)?;
+            return Ok(ctx.take(0));
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(1, 0)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 1, 0, 1)?; }
+        if r == 0 { ctx.bind(2, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(2, 1)?;
+        ctx.local(1, 2)?;
+        ctx.tuple(2, 1)?;
+        ctx.literal(1, 3)?;
+        ctx.tuple(2, 2)?;
+        ctx.call(2, 0, 3)?;
+        return Err(p::PlanExit::Raise(ctx.take(0)));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn py_dict_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Map(_), Value::Text(_) | Value::LongText(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                Some(v0_found)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
 }
 
 const PY_SEALED_PLAN: p::HelperPlan = p::HelperPlan {
@@ -15302,6 +15475,240 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
                 let v3_entry = heap.lookup(p::Table::Map, args[0], args[1])?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
                 if !matches!(v3, Value::Bool(true)) { return None; }
                 Some(v3_found)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_LIST_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.list_getitem",
+    function: p::function("180cdb7fef073c37acb35f516ec8a707885c9283ed7d723259b21eba163dfc14"),
+    callees: &[
+        p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
+        p::function("40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "index", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_list_getitem,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_list_getitem_heap, depth: 2, writes: false, element_write: false, record_write: None, callees: &[p::function("6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `py.list_getitem`.
+fn py_list_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(1, 1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.index(0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+        }
+        if r == 0 {
+            ctx.local(1, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn py_list_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::List(_), Value::Int(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.len(p::Collection::List, args[0])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[args[1], v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                let v3 = heap.index(args[0], args[1])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.len(p::Collection::List, args[0])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[args[1], v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = heap.call(0, &[args[0], args[1]])?; let _ = v4;
+                Some(v4)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v5 = heap.call(0, &[args[0], args[1]])?; let _ = v5;
+                Some(v5)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_TUPLE_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.tuple_getitem",
+    function: p::function("5c108faef4fb00730f30416309024edabce7cdef3cc4497637ca10f897adb379"),
+    callees: &[
+        p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"),
+        p::function("35bb1ffe986ce56141c6044b8e744f28ea47970fd2d2797355e58ae8872948a7"),
+        p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"),
+        p::function("6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "index", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1],
+            loops: &[],
+        },
+    ],
+    run: py_tuple_getitem,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7464f40415ab39f42bd4bb13217f4e6db03e0915ac877b93f2740a1fc73a0b62"), p::function("3374b97252e165c3889c839da71c79d7b5f5fb292271dcf61fcea73a89676de1"), ], heap: Some(p::HeapTemplate { entry: py_tuple_getitem_heap, depth: 2, writes: false, element_write: false, record_write: None, callees: &[p::function("6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `py.tuple_getitem`.
+fn py_tuple_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(0, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.local(0, 1)?;
+            ctx.call(1, 1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.index(0)?;
+                return Ok(ctx.take(0));
+            }
+        }
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 {
+            ctx.local(0, 0)?;
+        }
+        if r == 0 {
+            ctx.local(1, 1)?;
+        }
+        if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 2)?; }
+        if r == 0 { return Ok(ctx.take(0)); }
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+fn py_tuple_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Int(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.len(p::Collection::Tuple, args[0])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[args[1], v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                let v3 = heap.index(args[0], args[1])?; let _ = v3;
+                Some(v3)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(true)) { return None; }
+                let v1 = heap.len(p::Collection::Tuple, args[0])?; let _ = v1;
+                let v2 = (natives[1].entry)(&[args[1], v1])?; let _ = v2;
+                if !matches!(v2, Value::Bool(false)) { return None; }
+                let v4 = heap.call(0, &[args[0], args[1]])?; let _ = v4;
+                Some(v4)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v5 = heap.call(0, &[args[0], args[1]])?; let _ = v5;
+                Some(v5)
             })() { return Some(value); }
             heap.rewind(charge_mark);
             None

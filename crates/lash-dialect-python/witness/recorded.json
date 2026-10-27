@@ -531,6 +531,64 @@
    "end": "ok"
   },
   {
+   "name": "proven_subscripts",
+   "source": "d = {'a': 1, 'b': 2}\nprint(d['a'])\nd['a'] = 3\nprint(d['a'])\nd['a'] += 4\nprint(d['a'])\nalias = d\ndel alias['a']\ntry:\n    print(d['a'])\nexcept KeyError as error:\n    print(type(error).__name__, error.args)\nd['a'] = await host.echo(8)\nprint(d['a'])\n\nxs = [10, 20]\nprint(xs[0], xs[-1])\nxs[0] = await host.echo(30)\nxs[0] += 1\nprint(xs)\nxs.clear()\nfor action in [0, 1]:\n    try:\n        if action == 0:\n            print(xs[0])\n        else:\n            xs[0] = 99\n    except IndexError:\n        print('bounds')\ntry:\n    print(xs[9223372036854775808])\nexcept IndexError:\n    print('huge bounds')\n\nprint((1, 2)[0])\ntry:\n    print((1, 2)[3])\nexcept IndexError:\n    print('tuple bounds')\n\ndef annotated(xs: dict):\n    return xs[0]\nprint(annotated([42]))\n\nprint({'x': 5}[await host.echo('x')])\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "host.echo:8"
+     ],
+     "logged": [
+      "1",
+      "3",
+      "7",
+      "KeyError ('a',)"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:8"
+     ],
+     "asked": [
+      "host.echo:30"
+     ],
+     "logged": [
+      "8",
+      "10 20"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:30"
+     ],
+     "asked": [
+      "host.echo:x"
+     ],
+     "logged": [
+      "[31, 20]",
+      "bounds",
+      "bounds",
+      "huge bounds",
+      "1",
+      "tuple bounds",
+      "42"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:x"
+     ],
+     "asked": [],
+     "logged": [
+      "5"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "raise_cause",
    "source": "try:\n    raise ValueError(\"x\") from 1\nexcept TypeError as error:\n    print(\"TypeError\", error)\nexcept ValueError as error:\n    print(\"ValueError\", error.__cause__)\nmade = KeyError(\"k\")\ntry:\n    raise made from \"text\"\nexcept TypeError as error:\n    print(\"TypeError\", error)\ntry:\n    raise ValueError(\"y\") from None\nexcept ValueError as error:\n    print(\"ValueError\", error, error.__cause__)\n",
    "deliveries": [],
@@ -542,6 +600,87 @@
       "TypeError exception causes must derive from BaseException",
       "TypeError exception causes must derive from BaseException",
       "ValueError y None"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "range_register_boundaries",
+   "source": "def walk(start, stop, step):\n    values = []\n    i = 'empty'\n    for i in range(start, stop, step):\n        values.append(i)\n        i = 'changed'\n    else:\n        values.append('else')\n    print(values, i)\n\nwalk(5, -2, -2)\nwalk(0, 5, -1)\nwalk(5, 0, 1)\nwalk(9223372036854775806, 9223372036854775810, 1)\nwalk(-9223372036854775807, -9223372036854775811, -1)\n\nstep = -2\nfor i in range(5, -2, step):\n    step = 0\n    try:\n        if i == 3:\n            continue\n        print(await host.echo(i))\n        if i == 1:\n            break\n    finally:\n        print('finally', i)\nelse:\n    print('never')\n\nfor i in range(9223372036854775807, 9223372036854775810):\n    print(await host.echo(i))\nelse:\n    print('exhausted', i)\n\ni = 0\nwhile i < 3:\n    i += 1\n    if i == 2:\n        continue\n    print(i)\nelse:\n    print('while', i)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "host.echo:5"
+     ],
+     "logged": [
+      "[5, 3, 1, -1, 'else'] changed",
+      "['else'] empty",
+      "['else'] empty",
+      "[9223372036854775806, 9223372036854775807, 9223372036854775808, 9223372036854775809, 'else'] changed",
+      "[-9223372036854775807, -9223372036854775808, -9223372036854775809, -9223372036854775810, 'else'] changed"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:5"
+     ],
+     "asked": [
+      "host.echo:1"
+     ],
+     "logged": [
+      "5",
+      "finally 5",
+      "finally 3"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:1"
+     ],
+     "asked": [
+      "host.echo:9223372036854775807"
+     ],
+     "logged": [
+      "1",
+      "finally 1"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:9223372036854775807"
+     ],
+     "asked": [
+      "host.echo:9223372036854775808"
+     ],
+     "logged": [
+      "9223372036854775807"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:9223372036854775808"
+     ],
+     "asked": [
+      "host.echo:9223372036854775809"
+     ],
+     "logged": [
+      "9223372036854775808"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:9223372036854775809"
+     ],
+     "asked": [],
+     "logged": [
+      "9223372036854775809",
+      "exhausted 9223372036854775809",
+      "1",
+      "3",
+      "while 3"
      ]
     }
    ],

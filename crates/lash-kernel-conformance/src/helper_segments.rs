@@ -126,6 +126,20 @@ await host.observe([caught, log]);"#,
 /// standing in a `try` of their own.
 const PYTHON: &[(&str, &str)] = &[
     (
+        "range through a bignum park",
+        r#"async def walk(start, stop, step):
+    out = []
+    for i in range(start, stop, step):
+        out.append(i)
+        await host.observe(i)
+        i = 'changed'
+    else:
+        out.append(i)
+    return out
+print(await walk(9223372036854775807, 9223372036854775810, 1))
+"#,
+    ),
+    (
         "sort",
         "def key(x):\n    print(\"key\", x)\n    return -x\nxs = [3, 1, 2]\nxs.sort(key=key)\nprint(xs)\nys = sorted(xs, key=lambda x: x % 3)\nawait host.observe([xs, ys])\n",
     ),

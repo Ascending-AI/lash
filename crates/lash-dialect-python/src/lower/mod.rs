@@ -24,6 +24,7 @@ mod range;
 mod repairs;
 mod saved;
 mod statements;
+mod subscripts;
 mod targets;
 mod typed_dicts;
 

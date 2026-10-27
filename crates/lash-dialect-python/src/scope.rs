@@ -591,7 +591,7 @@ pub(crate) fn integer_locals(
     typed_locals(body, bindings, excluded, Ty::Int, range_builtin, false)
 }
 
-/// Closed list and text definitions use the same scope-wide fixpoint as
+/// Closed list, text, dict and tuple definitions use the same scope-wide fixpoint as
 /// integers. A shadowed `str` establishes no text fact, even if its name
 /// happens to match the builtin. Parameters, captures and restored cells
 /// are excluded by the caller, and reads still require definite boundness.
@@ -601,7 +601,7 @@ pub(crate) fn sequence_locals(
     excluded: &BTreeSet<String>,
     str_builtin: bool,
 ) -> BTreeMap<String, Ty> {
-    [Ty::List, Ty::Str]
+    [Ty::List, Ty::Str, Ty::Dict, Ty::Tuple]
         .into_iter()
         .flat_map(|ty| {
             typed_locals(body, bindings, excluded, ty, false, str_builtin)
@@ -683,7 +683,9 @@ impl LocalProof<'_> {
                         && matches!(expr, Expr::Call(call)
                     if matches!(call.func.as_ref(), Expr::Name(name) if name.id.as_str() == "str")))
             }
-            _ => unreachable!("only closed integer, list and text definitions are inferred"),
+            Ty::Dict => matches!(expr, Expr::Dict(_) | Expr::DictComp(_)),
+            Ty::Tuple => matches!(expr, Expr::Tuple(_)),
+            _ => unreachable!("only closed scalar and collection definitions are inferred"),
         }
     }
 

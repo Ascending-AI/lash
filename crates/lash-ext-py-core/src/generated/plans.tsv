@@ -35,6 +35,7 @@ py.set_op	60b295414f78c3317d9cdb9dcd6cf226f649d73c066954cd4e7a6735514d5ba8	close
 py.index	18c337614090082a862c5c4f5161bd23bf97356f4718ebeb0072a2a94a97220f	closed	-	true	0	false	6	generated
 py.setitem	09275f619da9b68c9f5508a3794551958cb4f5b98642732b1c9c06324e90c8ee	closed	-	true	0	false	sum(6, deep_size(index))	generated
 py.slice_bounds	ee9c38a4acf41b0d7155bb745a45ba4e752cd4982b14a536c5d6791e77b7489b	closed	-	false	0	false	statements	generated
+py.list_setitem	9cb44beaf43b9d39853ec5ad462aa58f37b3084f46bb8a23a13d95325a5ef117	closed	-	true	0	false	sum(6, deep_size(index))	generated
 py.for_in.check	66d29710b29958b3fa96c199658114c5da6212a81d8a3a1cac7eabccd85b2b62	closed	-	false	0	false	4	generated
 py.time	73c58ff15cfb58f9591e28dea8f6d4c542088ae3b5b8795933f593373bada794	host	perform import 0	false	0	false	6	segment of 1 sites
 py.operation_input	4f965b8219f615155a1afecbae1365e55ec89dec17f499586b411f6b443bb22a	closed	-	true	0	false	statements	generated
@@ -50,11 +51,14 @@ py.repr	2d0f12a0ca1f3c1f20578d7217ebf2aa3236d4a1396f4d974d852c66c48a21b1	callbac
 py.str	a0515d6939a86fc666eb06d9848dddca495b5c162f7a69ab551838951d3e21a3	callback	invoke py.repr	false	0	false	sum(8, deep_size(value), size(result))	segment of 1 sites
 py.exc.new	f93b93482927b1a46b12264236c62dca019afcce0c05b2a79cc56dd686d46d30	callback	invoke py.repr; invoke py.str	false	0	false	sum(8, deep_size(args))	segment of 3 sites
 py.delitem	502e1897624db52919a0c2ed6f8fee6ec30f6682f1932ea83e856f162bfec71f	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.dict_getitem	3de8fd0c2eb9b586f6a53abb8763deb009ab1fa320ddf324486aae3a1f321b38	callback	invoke py.repr	false	0	false	sum(6, deep_size(index))	segment of 1 sites
 py.sealed	5829bba685e419fbb4f6dbc54fb1fec2dc656048b6bb24607ec3229e99b4b0ea	closed	-	false	0	false	4	generated
 py.to_list	49e45f1748520d620ee3f1a93000f2fde17eadad70bc76c6c14065707a4c55cf	callback	apply next	true	0	true	sum(4, size(value), size(result))	segment of 1 sites
 py.iadd	2342975ece121b5a129c746ba596c9fe85013b0695c3925446219842fecf9363	callback	invoke py.to_list	true	0	false	sum(4, size(left), size(right))	segment of 1 sites
 py.contains	86e32a4b9617053191f3f88a95d7137adf608170d7ab4e437c6507c00dfb50c9	callback	apply next	true	0	true	statements	segment of 1 sites
 py.getitem	6ec2ae911154a6a501f570eba7ed720b1e56b7e08d4da3481e20a092c4a8a719	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.list_getitem	180cdb7fef073c37acb35f516ec8a707885c9283ed7d723259b21eba163dfc14	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.tuple_getitem	5c108faef4fb00730f30416309024edabce7cdef3cc4497637ca10f897adb379	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
 py.length	b582818fd406598106d1da97627a56137bca4308eafd86015db4e876ad051df8	closed	-	true	0	false	4	generated
 py.for_in.open	9abde0421bd51d40883e4b033928cbd5fa12ce7eb1be8fd9a6d655a1c5020f2f	closed	-	true	0	false	4	generated
 py.to_tuple	0aaf8e909420f0992cb01220957cce4693c55ada1841230a3ac265fcbb7581b1	callback	invoke py.to_list	true	0	false	sum(4, product(size(value), size(value)))	segment of 1 sites

@@ -1511,6 +1511,10 @@ pub(crate) fn import_result_check(ty: &lash_kernel_value::Type) -> Option<fn(doc
         Type::Int => |v| matches!(v, Value::Int(_)),
         Type::Float => |v| matches!(v, Value::Float(_)),
         Type::Number => |v| matches!(v, Value::Int(_) | Value::Float(_)),
+        Type::List(item) if matches!(item.as_ref(), Type::Any) => |v| matches!(v, Value::List(_)),
+        Type::Map(map) if matches!(map.key, Type::Any) && matches!(map.value, Type::Any) => {
+            |v| matches!(v, Value::Map(_))
+        }
         _ => return None,
     })
 }

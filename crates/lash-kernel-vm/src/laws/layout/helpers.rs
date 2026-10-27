@@ -164,54 +164,75 @@ pub(in crate::laws) fn helper_probes(
     ));
     // A heap-only partial helper models computed-key access: the record
     // arm is prepared; lists must retain their ordinary body in the loop.
-    let definition = lash_kernel_doc::parse_definition(
-        "function helper.element(xs: Any, index: Any) -> Any\nkernel 1\ncharge 4\nbody { try { return xs[index] } catch failed { return absent } }",
-    ).unwrap();
-    let element = registry.register(definition, None).unwrap();
-    let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
-        name: "helper.element",
-        function: element,
-        callees: &[],
-        literals: &[],
-        fields: &[],
-        records: &[],
-        registers: 2,
-        slots: &[],
-        closures: &[],
-        sites: &[],
-        run: |ctx, _| {
-            ctx.begin()?;
-            ctx.param(0, 0)?;
-            ctx.param(1, 1)?;
-            match ctx.index(0) {
-                Ok(()) => Ok(ctx.take(0)),
-                Err(lash_kernel_doc::plan::PlanExit::Raise(_)) => {
-                    Ok(lash_kernel_doc::Value::Absent)
-                }
-                Err(stop) => Err(stop),
-            }
-        },
-        template: Some(lash_kernel_doc::plan::HelperTemplate {
-            entry: None,
-            metered: None,
-            depth: 1,
+    for (name, receiver) in [
+        ("helper.element", "Any"),
+        ("helper.element_list_any", "List(Any)"),
+        ("helper.element_list_int", "List(Int)"),
+        ("helper.element_map_any", "Map(Any, Any)"),
+        ("helper.element_map_int", "Map(Text, Int)"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}(xs: {receiver}, index: Any) -> Any\nkernel 1\ncharge 4\nbody {{ try {{ return xs[index] }} catch failed {{ return absent }} }}",
+        )).unwrap();
+        let element = registry.register(definition, None).unwrap();
+        let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
+            name,
+            function: element,
             callees: &[],
-            heap: Some(lash_kernel_doc::plan::HeapTemplate {
-                entry: |heap, args, _| match args {
-                    [record @ lash_kernel_doc::Value::Record(_), key] => heap.index(*record, *key),
-                    _ => None,
-                },
-                callees: &[],
+            literals: &[],
+            fields: &[],
+            records: &[],
+            registers: 2,
+            slots: &[],
+            closures: &[],
+            sites: &[],
+            run: |ctx, _| {
+                ctx.begin()?;
+                ctx.param(0, 0)?;
+                ctx.param(1, 1)?;
+                match ctx.index(0) {
+                    Ok(()) => Ok(ctx.take(0)),
+                    Err(lash_kernel_doc::plan::PlanExit::Raise(_)) => {
+                        Ok(lash_kernel_doc::Value::Absent)
+                    }
+                    Err(stop) => Err(stop),
+                }
+            },
+            template: Some(lash_kernel_doc::plan::HelperTemplate {
+                entry: None,
+                metered: None,
                 depth: 1,
-                writes: false,
-                element_write: false,
-                record_write: None,
+                callees: &[],
+                heap: Some(lash_kernel_doc::plan::HeapTemplate {
+                    entry: if receiver == "Any" {
+                        |heap, args, _| match args {
+                            [record @ lash_kernel_doc::Value::Record(_), key] => {
+                                heap.index(*record, *key)
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        |heap, args, _| match args {
+                            [
+                                target @ (lash_kernel_doc::Value::List(_)
+                                | lash_kernel_doc::Value::Map(_)),
+                                key,
+                            ] => heap.index(*target, *key),
+                            _ => None,
+                        }
+                    },
+                    callees: &[],
+                    depth: 1,
+                    writes: false,
+                    element_write: false,
+                    record_write: None,
+                }),
+                forwards: Default::default(),
             }),
-            forwards: Default::default(),
-        }),
-    }));
-    registry.install_plans(&[plan]).unwrap();
-    out.push(("helper.element", element));
+        }));
+        registry.install_plans(&[plan]).unwrap();
+        out.push((name, element));
+    }
     for (name, signature) in [
         ("text.utf16_compare", "(text: Text, other: Text) -> Int"),
         ("text.to_utf16_units", "(text: Text) -> List(Int)"),

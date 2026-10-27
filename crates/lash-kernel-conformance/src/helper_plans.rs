@@ -1010,6 +1010,69 @@ fn memory_off_15_helper_plans_keep_the_corpus_without_census_work() {
 fn dialect_loop_programs() -> Vec<(runner::Case, Program)> {
     let python = [
         (
+            "proven subscript bounds and aliased mutation",
+            r#"def build():
+    out = []
+    d = {'a': 1}
+    d['a'] += 2
+    out.append(d['a'])
+    alias = d
+    del alias['a']
+    try:
+        out.append(d['a'])
+    except KeyError as error:
+        out.append(error.args)
+    d['b'] = 5
+    out.append(d['b'])
+    xs = [10, 20]
+    xs[0] += 1
+    out.append(xs[0])
+    xs.clear()
+    try:
+        xs[0] = 2
+    except IndexError:
+        out.append('write bounds')
+    try:
+        out.append(xs[0])
+    except IndexError:
+        out.append('read bounds')
+    out.append((1, 2)[0])
+    return out
+result = build()
+"#,
+        ),
+        (
+            "range bounds, target rebinding and loop exits",
+            r#"def walk(start, stop, step):
+    out = []
+    target = 'empty'
+    for target in range(start, stop, step):
+        out.append(target)
+        target = 'changed'
+    else:
+        out.append(target)
+    return out
+
+def build():
+    out = [walk(5, -2, -2), walk(0, 5, -1), walk(5, 0, 1),
+           walk(9223372036854775806, 9223372036854775810, 1),
+           walk(-9223372036854775807, -9223372036854775811, -1)]
+    for i in range(5):
+        try:
+            if i == 1:
+                continue
+            if i == 3:
+                break
+            out.append(i)
+        finally:
+            out.append(-i)
+    else:
+        out.append('never')
+    return out
+result = build()
+"#,
+        ),
+        (
             "branch",
             "def branch():\n    result = 0\n    i = 0\n    while i < 14:\n        if i % 2 == 0:\n            result = result + i\n        else:\n            result = result - i\n        i = i + 1\n    return result\nresult = branch()\n",
         ),

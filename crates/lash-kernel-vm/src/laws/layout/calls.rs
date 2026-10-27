@@ -113,6 +113,10 @@ fn direct_call_entry_agrees() {
     let mut comparisons = 0;
     for body in [
         "return invoke helper.element([7], 0)",
+        "return invoke helper.element_list_any([7, \"text\"], 1)",
+        "return invoke helper.element_list_int([\"wrong element type\"], 0)",
+        "return invoke helper.element_map_any(map{\"value\": [7]}, \"value\")",
+        "return invoke helper.element_map_int(map{\"value\": \"wrong value type\"}, \"value\")",
         "return invoke helper.element({value: 7}, \"value\")",
         "return invoke helper.element([7], 2)",
         "let f = fn(x) { return 1 } return apply f(7)",

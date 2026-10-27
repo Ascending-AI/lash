@@ -72,11 +72,14 @@ impl Lowerer<'_> {
         // Admission does not refine a value's type from kind checks. On the
         // successful path these calls are identities, and expose Int results
         // without rejecting a statically non-int argument before py.fail runs.
-        let mut integer = |bound: Operand| {
+        // Retain each converted bound once: an inline stop/step conversion
+        // would be called again on every test or increment.
+        let mut integer = |bound: Operand| -> Lowering<Operand> {
             if matches!(bound.expr, Expr::Literal(Literal::Int(_))) {
                 Ok(bound)
             } else {
-                self.invoke("py.int", &[bound], Ty::Int)
+                let bound = self.invoke("py.int", &[bound], Ty::Int)?;
+                Ok(self.pin(bound))
             }
         };
         let start = integer(start)?;
@@ -107,22 +110,13 @@ impl Lowerer<'_> {
             (None, Some(positive)) => {
                 let ascending =
                     this.native("int.lt", vec![counter.expr.clone(), stop.expr.clone()])?;
-                let more = this.let_rhs(Rhs::Expr(ascending), Ty::Bool);
-                let Expr::Variable(more_name) = &more.expr else {
-                    unreachable!("a temporary is a variable");
-                };
                 let descending =
                     this.native("int.gt", vec![counter.expr.clone(), stop.expr.clone()])?;
-                let descends = this.block(|this| {
-                    this.store(
-                        Place::Variable(more_name.clone()),
-                        Operand::inline(descending, Ty::Bool),
-                    );
-                    Ok(())
-                })?;
-                let negative = this.not(positive.expr.clone())?;
-                this.emit_if(negative, descends, Buf::default());
-                Ok(more.expr)
+                Ok(Expr::If {
+                    cond: Box::new(positive.expr.clone()),
+                    then: Box::new(ascending),
+                    r#else: Box::new(descending),
+                })
             }
             (None, None) => unreachable!("a dynamic step has its direction"),
         };
