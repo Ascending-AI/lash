@@ -47,9 +47,14 @@ lash_store_sql::statements! {
 
         /// Sever the local stores' complete share, returning the affected
         /// identities for the existing checked reclamation pass.
-        delete_namespace_edges = "DELETE FROM artifact_referrer_edges
+        delete_local_edges = "DELETE FROM artifact_referrer_edges
              WHERE referrer_kind = ?1 AND referrer_id = ?2
-               AND namespace IN (SELECT value FROM json_each(?3))
+               AND {{local_artifact_namespace(namespace)}}
+             RETURNING namespace, artifact_ref, referrer_kind, referrer_id";
+
+        /// Release one independent store's share of the same referrer.
+        delete_namespace_edges = "DELETE FROM artifact_referrer_edges
+             WHERE referrer_kind = ?1 AND referrer_id = ?2 AND namespace = ?3
              RETURNING namespace, artifact_ref, referrer_kind, referrer_id";
 
         /// Point `?1`/`?2` at blob `?3`. An artifact is immutable, so a
@@ -111,7 +116,7 @@ static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
     ArtifactSql {
         edges: ReferrerEdgeStatements::render(dialect),
         fences: ReferrerFenceStatements::render(dialect),
-        refs: RefSqliteStatements::render(dialect),
+        refs: RefSqliteStatements::render(dialect.with_vocabulary(LOCAL_ARTIFACT_NAMESPACES)),
         blobs: BlobStatements::render(dialect),
         blobs_sqlite: crate::blobs::BlobSqliteStatements::render(dialect),
     }
@@ -133,6 +138,22 @@ pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
+
+const LOCAL_ARTIFACT_NAMESPACES: lash_store_sql::Vocabulary =
+    lash_store_sql::Vocabulary::new(&[lash_store_sql::VocabularyTerm::new(
+        "local_artifact_namespace",
+        |column| {
+            let names = [
+                MODULE_ARTIFACT_NAMESPACE,
+                PROCESS_ENV_NAMESPACE,
+                PROCESS_DEFINITION_NAMESPACE,
+                TURN_PRELUDE_NAMESPACE,
+            ]
+            .map(|namespace| format!("'{namespace}'"))
+            .join(", ");
+            format!("{column} IN ({names})")
+        },
+    )]);
 
 mod held;
 #[path = "artifact_store/packages.rs"]
@@ -613,21 +634,11 @@ impl SqliteStore {
         referrer: &ArtifactReferrer,
         now_ms: u64,
     ) -> rusqlite::Result<()> {
-        let namespaces = [
-            MODULE_ARTIFACT_NAMESPACE,
-            PROCESS_ENV_NAMESPACE,
-            PROCESS_DEFINITION_NAMESPACE,
-            TURN_PRELUDE_NAMESPACE,
-        ];
         fence_artifact_referrer_tx(tx, referrer, now_ms)?;
         let mut released = std::collections::BTreeMap::<String, Vec<String>>::new();
-        let mut statement = tx.prepare_cached(artifact_sql().refs.delete_namespace_edges.sql())?;
-        let mut rows = statement.query(params![
-            referrer.kind().as_str(),
-            referrer.canonical_id(),
-            serde_json::to_string(&namespaces)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-        ])?;
+        let mut statement = tx.prepare_cached(artifact_sql().refs.delete_local_edges.sql())?;
+        let mut rows =
+            statement.query(params![referrer.kind().as_str(), referrer.canonical_id(),])?;
         while let Some(row) = rows.next()? {
             let namespace = row.get(0)?;
             let reference = row.get(1)?;

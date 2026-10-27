@@ -58,9 +58,12 @@ lash_store_sql::statements! {
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Mixed closure and node-only holds from one owner commit.
-        hold_set = "INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
-             SELECT blobs.hash, wanted.value ->> 1, ?2 FROM json_each(?1) AS wanted
-             JOIN blobs ON blobs.hash = unhex(wanted.value ->> 0) WHERE true
+        hold_set = "WITH retired AS (
+             SELECT unhex(value) AS hash, 1 AS closure FROM json_each(?1)
+             UNION ALL SELECT unhex(value), 0 FROM json_each(?2))
+             INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
+             SELECT blobs.hash, retired.closure, ?3 FROM retired
+             JOIN blobs ON blobs.hash = retired.hash WHERE true
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Release the complete owner handoff, returning roots for holds.
@@ -197,19 +200,25 @@ pub(super) fn hold_retired(
     now: DurableInstant,
 ) -> rusqlite::Result<()> {
     let (closures, phase_ends) = retired.into_parts();
-    let mut roots = closures
-        .into_iter()
-        .map(|root| (root, true))
-        .chain(phase_ends.into_iter().map(|root| (root, false)));
+    let mut closures = closures.into_iter();
+    let mut phase_ends = phase_ends.into_iter();
     loop {
-        let chunk: Vec<_> = roots.by_ref().take(HOLD_BATCH).collect();
-        if chunk.is_empty() {
+        let closures: Vec<_> = closures.by_ref().take(HOLD_BATCH).collect();
+        let phases: Vec<_> = phase_ends
+            .by_ref()
+            .take(HOLD_BATCH - closures.len())
+            .collect();
+        if closures.is_empty() && phases.is_empty() {
             return Ok(());
         }
         cached_execute(
             tx,
             SQL.sqlite.hold_set.sql(),
-            rusqlite::params![graph::json_array(&chunk), now.0],
+            rusqlite::params![
+                graph::json_array(&closures),
+                graph::json_array(&phases),
+                now.0
+            ],
         )?;
     }
 }

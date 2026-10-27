@@ -273,8 +273,7 @@ pub(crate) fn release_material_tx(
             params![
                 referrer.kind().as_str(),
                 referrer.canonical_id(),
-                serde_json::to_string(&[TOOL_MATERIAL_NAMESPACE])
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                TOOL_MATERIAL_NAMESPACE,
             ],
             |row| row.get(1),
         )?
