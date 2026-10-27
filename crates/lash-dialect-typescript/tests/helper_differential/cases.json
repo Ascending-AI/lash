@@ -8199,5 +8199,20 @@
     "id": "typescript/bitwise/register-boundaries-and-index-writes",
     "dialect": "typescript",
     "source": "const values = [NaN, Infinity, -Infinity, -0, 2147483647, 2147483648, 4294967295, 4294967296, 4294967297, -2147483649, -4294967297, 3.9, -3.9, 1e100, {valueOf() { return 4294967297; }}];\nconst counts = [-1, 0, 1, 31, 32, 33, 63, NaN, Infinity, 4294967297, -33, 2, -2, 32, 33];\nfunction bits(x, n) { return [x >> n, x >>> n, x << n, x & n, x | n, x ^ n, ~x]; }\nconst rows = [];\nfor (let i = 0; i < values.length; i++) { rows[i] = bits(values[i], counts[i]); }\nconst xs = [, 9]; const alias = xs;\nfor (let i = 0; i < 4; i++) { xs[i] = i ^ 3; if (i === 2) { await host.observe(JSON.stringify(alias)); } }\nxs[6] = 42; xs[1] = {v: 7}; xs[2] = alias;\nawait host.observe(JSON.stringify([rows, xs.length, xs[0], xs[1].v, xs[2] === xs, 4 in xs, 5 in xs, xs[4] === undefined, xs[-1] === undefined, xs[0.5] === undefined, xs[NaN] === undefined, xs[6]]));"
+  },
+  {
+    "id": "typescript/sortbench2/string-relations",
+    "dialect": "typescript",
+    "source": "const ss=['','a','aa','\\ud83d\\ude00','\\ue000','abcdefghijklmnopqrstuvwxyz\ud83d\ude00']; let out=[]; for(let i=0;i<ss.length;i++){for(let j=0;j<ss.length;j++){out.push([ss[i]<ss[j],ss[i]<=ss[j],ss[i]>ss[j],ss[i]>=ss[j]]);}} await host.observe(out);"
+  },
+  {
+    "id": "typescript/sortbench2/undefined-holes",
+    "dialect": "typescript",
+    "source": "let a=['\\ue000',undefined,, '', '\\ud83d\\ude00','a',undefined,, 'a']; let alias=a; a.sort(); await host.observe(a.length); await host.observe(alias===a); for(let i=0;i<a.length;i++){await host.observe(a[i]); await host.observe(i in a); await host.observe(a[i]===undefined);} "
+  },
+  {
+    "id": "typescript/sortbench2/register-reads",
+    "dialect": "typescript",
+    "source": "let a=['','a','\ud83d\ude00','\\ue000',undefined,, 'abcdefghijklmnopqrstuvwxyz\ud83d\ude00']; let out=[]; for(let i=1;i<a.length;i++){out.push([a[i]!==undefined,a[i-1]>a[i]]); await host.observe(out[out.length-1]);} await host.observe(out); await host.observe(a[-1]); await host.observe(a[1.5]); await host.observe(a[100]);"
   }
 ]

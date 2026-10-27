@@ -846,6 +846,14 @@ pub trait NativeFunction: Send + Sync {
     fn prepare(&self) -> Option<PreparedNative> {
         None
     }
+
+    /// Certifies a UTF-16 relation over two texts for the register machine.
+    /// It must equal `call` on every text pair, including heap text, and
+    /// allocate nothing. Only comparison operators qualify. The machine
+    /// borrows resident text and charges the native's actual formula.
+    fn prepare_text_relation(&self) -> Option<crate::scalar::ScalarOp> {
+        None
+    }
 }
 
 type ChargedEntry = fn(&[Value]) -> Option<PreparedAnswer>;

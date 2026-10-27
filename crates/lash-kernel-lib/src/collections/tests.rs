@@ -14,6 +14,7 @@ fn registry() -> FunctionRegistry {
     let mut registry = FunctionRegistry::new();
     register_machine_functions(&mut registry).unwrap();
     crate::register_numbers(&mut registry).unwrap();
+    crate::register_text_json(&mut registry).unwrap();
     register_collections(&mut registry).unwrap();
     registry
 }
@@ -636,12 +637,22 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                     _ => 0,
                 })
                 .collect();
-            for representation in 0..3 {
+            for representation in 0..4 {
+                let utf16 = representation == 3;
+                let sort = if utf16 {
+                    "list.sort_by_utf16_keys"
+                } else {
+                    "list.sort_by_keys"
+                };
                 let keys: Vec<String> = ranks
                     .iter()
                     .map(|rank| match representation {
                         1 => format!("({}, {rank})", rank % 3),
                         2 => format!("[{}, {rank}]", rank % 3),
+                        3 => serde_json::to_string(
+                            &["", "a", "😀", "\u{e000}", "abcdefghijklmnopqrstuvwxyz😀"][rank % 5],
+                        )
+                        .unwrap(),
                         _ => rank.to_string(),
                     })
                     .collect();
@@ -656,16 +667,25 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                 for descending in [false, true] {
                     let (sorted, native) = charged(&format!(
                         "main {{ let items = [{items}] let keys = [{keys}] \
-                         return list.sort_by_keys(items, keys, {descending}) }}"
+                         return {sort}(items, keys, {descending}) }}"
                     ));
                     let (_, unsorted) = charged(&format!(
                         "main {{ let items = [{items}] let keys = [{keys}] return items }}"
                     ));
+                    let lt = |first: &str, second: &str| {
+                        if utf16 {
+                            format!("num.lt(text.utf16_compare({first}[0], {second}[0]), 0)")
+                        } else {
+                            format!("lt({first}[0], {second}[0])")
+                        }
+                    };
+                    let forward = lt("second", "first");
+                    let reverse = lt("first", "second");
                     let (expected, _) = charged(&format!(
                         "main {{ let pairs = [{pairs}] let calls = 0 \
                          let order = fn(first, second) {{ set calls = num.add(calls, 1) \
-                         if {descending} {{ if lt(first[0], second[0]) {{ return 1 }} return 0 }} \
-                         if lt(second[0], first[0]) {{ return 1 }} return 0 }} \
+                         if {descending} {{ if {reverse} {{ return 1 }} return 0 }} \
+                         if {forward} {{ return 1 }} return 0 }} \
                          do invoke list.sort(pairs, order) let out = [] \
                          for pair in pairs {{ set out[list.len(out)] = pair[1] }} \
                          return (out, calls) }}"
@@ -1143,6 +1163,11 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
             "list.sort_by_keys".into(),
             "[7, 9, 3], [2, 1, 2], false".into(),
             Ok(list(&[9, 7, 3])),
+        ),
+        (
+            "list.sort_by_utf16_keys".into(),
+            "[7, 9, 3], [\"\u{e000}\", \"😀\", \"\"], false".into(),
+            Ok(list(&[3, 9, 7])),
         ),
         ("bool.not".into(), "true".into(), Ok(Datum::Bool(false))),
         (

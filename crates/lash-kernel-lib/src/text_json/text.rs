@@ -667,9 +667,14 @@ fn compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     ))
 }
 fn utf16_compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let text = materialized_text(&call.args, call.new, 0)?;
-    let other = materialized_text(&call.args, call.new, 1)?;
-    Ok(ordering(text.encode_utf16().cmp(other.encode_utf16())))
+    let [text, other] = call.args.values() else {
+        return Err(NativeError::Malformed(
+            "UTF-16 comparison needs two operands",
+        ));
+    };
+    Ok(ordering(crate::comparison::utf16_compare(
+        text, other, &call.args,
+    )?))
 }
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let (text, other) = (text_arg(&call.args, 0)?, text_arg(&call.args, 1)?);

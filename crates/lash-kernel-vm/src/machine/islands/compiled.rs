@@ -151,6 +151,7 @@ pub(super) struct OperatorSite {
     pub(super) entry: Entry,
     pub(super) table: ScalarTable,
     pub(super) pair: Option<lash_kernel_doc::scalar::Pair>,
+    pub(super) texts: Option<lash_kernel_doc::scalar::ScalarOp>,
     /// What its typed path's answer on two floats charges: its table's
     /// units for sizes of 1, as a float kernel answers a float or a
     /// boolean.
@@ -448,6 +449,54 @@ pub(super) fn typed(
         .then_some(answer)
 }
 
+/// A native's certified text relation. Keep arena reads and variable-length
+/// charging out of the numeric operator's instruction path.
+#[inline(never)]
+pub(super) fn text_relation(
+    site: &OperatorSite,
+    x: Value,
+    y: Value,
+    exe: &Executable,
+    arena: &lash_kernel_state::arena::Arena,
+    charging: bool,
+) -> Option<(Value, Option<u64>)> {
+    let op = site.texts?;
+    if !matches!(
+        (x, y),
+        (
+            Value::Text(_) | Value::LongText(_),
+            Value::Text(_) | Value::LongText(_)
+        )
+    ) {
+        return None;
+    }
+    let signature = site.checked.then(|| &exe.lib(site.lib).header.signature);
+    if signature.is_some_and(|signature| {
+        !signature.params.iter().zip([x, y]).all(|(param, value)| {
+            (param.optional && matches!(value, Value::Absent))
+                || crate::compile::import_result_fits(&param.ty, value)
+        })
+    }) {
+        return None;
+    }
+    let semantics = arena.semantics();
+    let value =
+        lash_kernel_doc::scalar::texts(op, semantics.text(&x).ok()?, semantics.text(&y).ok()?)?;
+    if signature
+        .is_some_and(|signature| !crate::compile::import_result_fits(&signature.result, value))
+    {
+        return None;
+    }
+    Some((
+        value,
+        if charging {
+            super::cx::measured_formula(arena, &exe.lib(site.lib).charge, &[x, y], Some(&value))
+        } else {
+            Some(0)
+        },
+    ))
+}
+
 /// An immediate unary answer uses the same prepared entry and scalar
 /// table as the general operator path, without an arena measurement.
 #[inline(always)]
@@ -520,6 +569,10 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         lib: *lib,
         entry: entry.clone(),
         pair: entry.pair(),
+        texts: match &function.run {
+            LibRun::Native { native, .. } => native.prepare_text_relation(),
+            _ => None,
+        },
         floats: table.units(0),
         table,
         close,

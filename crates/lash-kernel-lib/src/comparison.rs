@@ -244,3 +244,44 @@ pub fn compare(
     }
     Ok(Some(Ordering::Equal))
 }
+
+/// UTF-16 order reads resident text chunks without materializing either text.
+pub(crate) fn utf16_compare(
+    a: &Value,
+    b: &Value,
+    args: &Args<'_>,
+) -> Result<Ordering, NativeError> {
+    let (Some(a), Some(b)) = (args.text(a)?, args.text(b)?) else {
+        return Err(raised("type_error", "expected text keys"));
+    };
+    if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
+        return Ok(if a.is_ascii() && b.is_ascii() {
+            a.cmp(b)
+        } else {
+            a.encode_utf16().cmp(b.encode_utf16())
+        });
+    }
+    fn next<'a>(
+        chunks: &mut impl Iterator<Item = Result<&'a str, NativeError>>,
+        units: &mut std::str::EncodeUtf16<'a>,
+    ) -> Result<Option<u16>, NativeError> {
+        loop {
+            if let Some(unit) = units.next() {
+                return Ok(Some(unit));
+            }
+            let Some(chunk) = chunks.next() else {
+                return Ok(None);
+            };
+            *units = chunk?.encode_utf16();
+        }
+    }
+    let (mut a, mut b) = (a.chunks(), b.chunks());
+    let (mut x, mut y) = ("".encode_utf16(), "".encode_utf16());
+    loop {
+        let (a, b) = (next(&mut a, &mut x)?, next(&mut b, &mut y)?);
+        let order = a.cmp(&b);
+        if order != Ordering::Equal || a.is_none() {
+            return Ok(order);
+        }
+    }
+}

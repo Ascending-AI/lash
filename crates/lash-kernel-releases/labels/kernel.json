@@ -192,6 +192,7 @@
     "list.slice": "list slice",
     "list.sort": "list sort",
     "list.sort_by_keys": "list sort by keys",
+    "list.sort_by_utf16_keys": "list sort by utf16 keys",
     "list.values": "list values",
     "lt": {
       "title": "lt",

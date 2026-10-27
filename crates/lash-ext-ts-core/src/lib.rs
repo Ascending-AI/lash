@@ -197,6 +197,16 @@ struct Relate {
 }
 
 impl NativeFunction for Relate {
+    fn prepare_text_relation(&self) -> Option<lash_kernel_doc::scalar::ScalarOp> {
+        use lash_kernel_doc::scalar::ScalarOp;
+        Some(match self.relation {
+            Relation::Lt => ScalarOp::Lt,
+            Relation::Le => ScalarOp::Le,
+            Relation::Gt => ScalarOp::Gt,
+            Relation::Ge => ScalarOp::Ge,
+        })
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match pair(&call) {
             (Value::Float(a), Value::Float(b)) => {
@@ -244,18 +254,13 @@ fn relate(relation: Relation, args: &[Value]) -> Option<Value> {
     let truth = match args {
         [Value::Float(a), Value::Float(b)] => relation.floats(a.get(), b.get()),
         [Value::Text(a), Value::Text(b)] => {
-            let (a, b) = (a.as_str(), b.as_str());
-            let order = if a.is_ascii() && b.is_ascii() {
-                a.cmp(b)
-            } else {
-                a.encode_utf16().cmp(b.encode_utf16())
+            let op = match relation {
+                Relation::Lt => lash_kernel_doc::scalar::ScalarOp::Lt,
+                Relation::Le => lash_kernel_doc::scalar::ScalarOp::Le,
+                Relation::Gt => lash_kernel_doc::scalar::ScalarOp::Gt,
+                Relation::Ge => lash_kernel_doc::scalar::ScalarOp::Ge,
             };
-            match relation {
-                Relation::Lt => order.is_lt(),
-                Relation::Le => !order.is_gt(),
-                Relation::Gt => order.is_gt(),
-                Relation::Ge => !order.is_lt(),
-            }
+            return lash_kernel_doc::scalar::texts(op, a.as_str(), b.as_str());
         }
         _ => return None,
     };

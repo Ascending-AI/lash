@@ -221,3 +221,24 @@ pub fn words(op: WordOp, a: Float, b: Float) -> Value {
     };
     Value::Float(Float::new(value))
 }
+
+/// A text relation in UTF-16 code-unit order, without allocating code units.
+#[inline]
+pub fn texts(op: ScalarOp, a: &str, b: &str) -> Option<Value> {
+    if !op.compares() {
+        return None;
+    }
+    let order = if a.is_ascii() && b.is_ascii() {
+        a.cmp(b)
+    } else {
+        a.encode_utf16().cmp(b.encode_utf16())
+    };
+    Some(Value::Bool(match op {
+        ScalarOp::Eq => order.is_eq(),
+        ScalarOp::Lt => order.is_lt(),
+        ScalarOp::Le => !order.is_gt(),
+        ScalarOp::Gt => order.is_gt(),
+        ScalarOp::Ge => !order.is_lt(),
+        _ => return None,
+    }))
+}

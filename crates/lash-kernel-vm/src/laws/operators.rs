@@ -561,11 +561,24 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
     static PREPARED: AtomicUsize = AtomicUsize::new(0);
     struct PairProbe<const PAIRED: bool>;
     impl<const PAIRED: bool> NativeFunction for PairProbe<PAIRED> {
+        fn prepare_text_relation(&self) -> Option<ScalarOp> {
+            PAIRED.then_some(ScalarOp::Lt)
+        }
         fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-            let [Value::Int(a), Value::Int(b)] = call.args.values() else {
-                return Err(NativeError::Decline);
-            };
-            lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b).ok_or(NativeError::Decline)
+            match call.args.values() {
+                [Value::Int(a), Value::Int(b)] => {
+                    lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b).ok_or(NativeError::Decline)
+                }
+                [
+                    a @ (Value::Text(_) | Value::LongText(_)),
+                    b @ (Value::Text(_) | Value::LongText(_)),
+                ] => {
+                    let a = call.args.text(a)?.ok_or(NativeError::Decline)?.whole()?;
+                    let b = call.args.text(b)?.ok_or(NativeError::Decline)?.whole()?;
+                    Ok(Value::Bool(a.encode_utf16().cmp(b.encode_utf16()).is_lt()))
+                }
+                _ => Err(NativeError::Decline),
+            }
         }
         fn prepare(&self) -> Option<PreparedNative> {
             Some(PreparedNative {
@@ -575,13 +588,39 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
                 }),
                 entry: |args| {
                     PREPARED.fetch_add(1, Ordering::Relaxed);
-                    let [Value::Int(a), Value::Int(b)] = args else {
-                        return None;
-                    };
-                    lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b)
+                    match args {
+                        [Value::Int(a), Value::Int(b)] => {
+                            lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b)
+                        }
+                        [Value::Text(a), Value::Text(b)] => Some(Value::Bool(
+                            a.as_str()
+                                .encode_utf16()
+                                .cmp(b.as_str().encode_utf16())
+                                .is_lt(),
+                        )),
+                        _ => None,
+                    }
                 },
                 charged_entry: None,
                 operation: "law.pair",
+            })
+        }
+    }
+    struct Identity;
+    impl NativeFunction for Identity {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            call.args
+                .values()
+                .first()
+                .copied()
+                .ok_or(NativeError::Decline)
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                pair: None,
+                entry: |args| args.first().copied(),
+                charged_entry: None,
+                operation: "law.identity",
             })
         }
     }
@@ -590,12 +629,16 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         _: &BTreeMap<&'static str, FunctionId>,
     ) -> Vec<(&'static str, FunctionId)> {
         let definition = parse_definition("function law.pair(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(5, size(a), size(b), size(result))\nnative\n").unwrap();
-        vec![(
-            "law.pair",
-            registry
-                .register(definition, Some(Arc::new(PairProbe::<PAIRED>)))
-                .unwrap(),
-        )]
+        let pair = registry
+            .register(definition, Some(Arc::new(PairProbe::<PAIRED>)))
+            .unwrap();
+        let identity =
+            parse_definition("function law.identity(a: Any) -> Any\nkernel 1\ncharge 1\nnative\n")
+                .unwrap();
+        let identity = registry
+            .register(identity, Some(Arc::new(Identity)))
+            .unwrap();
+        vec![("law.pair", pair), ("law.identity", identity)]
     }
     fn run_pair<const PAIRED: bool>(
         source: &str,
@@ -653,6 +696,10 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         "main { let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set i = num.add(i, 1) } let answer = perform 0(s) as Any return answer }",
         "main { let out = [] let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set out[list.len(out)] = s set i = num.add(i, 1) } let answer = perform 0(s) as Any return answer }",
         "definition \"function sum(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let s = law.pair(a, b) return s  }\"\n main { let s = call sum(3, 7) let answer = perform 0(s) as Any return answer }",
+        "definition \"function compare(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let s = law.pair(a, b) return s }\"\nmain { let a = \"a\" let b = \"abcdefghijklmn\" let s = call compare(a, b) let answer = perform 0(s) as Any return answer }",
+        "definition \"function compare(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let s = law.pair(a, b) return s }\"\nmain { let a = \"abcdefghijklmnopqrstuvwxyz😀\" let b = \"abcdefghijklmnopqrstuvwxyz\" let s = call compare(a, b) let answer = perform 0(s) as Any return answer }",
+        "definition \"function compare(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let s = law.identity(law.pair(a, b)) return s }\"\nmain { let a = \"a\" let b = \"abcdefghijklmn\" let s = call compare(a, b) let answer = perform 0(s) as Any return answer }",
+        "definition \"function compare(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { let s = law.pair(a, b) return s }\"\nmain { let s = call compare(\"😀\", \"\\u{e000}\") let answer = perform 0(s) as Any return answer }",
     ] {
         for charge in [crate::Charge::Exact, crate::Charge::Off] {
             let bounds = Bounds { charge, ..ROOMY };
@@ -671,7 +718,7 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
                     0,
                     "statement-root invokes bypass the fused node: {source}"
                 );
-                if record && charge == crate::Charge::Exact {
+                if charge == crate::Charge::Exact {
                     let charged = expected.1.unwrap();
                     for charge_limit in 0..=charged {
                         let bounds = Bounds {

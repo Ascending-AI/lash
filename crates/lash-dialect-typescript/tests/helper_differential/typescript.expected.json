@@ -19066,6 +19066,1073 @@
           ]
         }
       ]
+    },
+    "typescript/sortbench2/string-relations": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/sortbench2/undefined-holes": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4022000000000000"
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "str",
+          "value": []
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "str",
+          "value": [
+            97
+          ]
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "str",
+          "value": [
+            97
+          ]
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "str",
+          "value": [
+            55357,
+            56832
+          ]
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "str",
+          "value": [
+            57344
+          ]
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "bool",
+          "value": true
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "bool",
+          "value": true
+        }
+      ]
+    },
+    "typescript/sortbench2/register-reads": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": true
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": true
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": true
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": false
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": false
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "bool",
+              "value": true
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": false
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "bool",
+                  "value": true
+                },
+                {
+                  "type": "bool",
+                  "value": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "undefined"
+        }
+      ]
     }
   }
 }

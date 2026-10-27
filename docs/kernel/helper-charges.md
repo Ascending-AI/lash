@@ -377,8 +377,11 @@ and detailed observers run the source instructions at the same coordinate. A def
 elements are all primitives takes each string once, in element order and
 only when two or more elements remain. A primitive's string is pure, so no
 comparison observes the difference. It then applies one ordinary closure
-that calls `list.sort_by_keys` over the strings' UTF-16 code units, so the
-native bills its own formula over the actual keys, as `py.sorted` does. A
+that calls `list.sort_by_utf16_keys` over the strings themselves. The native
+compares borrowed text by UTF-16 code units without constructing integer lists
+or materializing text per comparison. It bills the same merge formula over the
+text keys, as `py.sorted` bills its actual keys. This reduces the charge because
+a text's deep size counts its bytes rather than a list of integer values. A
 default sort with any other element keeps SortCompare's two `ts.to_string`
 calls and a `text.utf16_compare` per comparison, charged as the closure's
 code (FIG-6948).

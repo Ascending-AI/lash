@@ -24,14 +24,13 @@ use num.is_nan
 use num.to_float
 use text.join
 use text.join_or_index
-use text.to_utf16_units
 use text.utf16_compare
 use list.len
 use list.get
 use list.copy
 use list.slice
 use list.sort
-use list.sort_by_keys
+use list.sort_by_utf16_keys
 use list.index_of_range
 use ts.require_object_coercible
 use ts.get
@@ -1578,7 +1577,7 @@ body {
     # string is pure, so where every element is one, each is taken once,
     # before any comparison and only when there is one to make. Its UTF-16
     # code units order it as the default comparison does, and the native
-    # merge takes the keys stably. An ordinary frame bills its formula over
+    # merge compares the text keys directly and stably. An ordinary frame bills its formula over
     # the actual keys (K-CHG-007, FIG-6904). Any other element's ToString
     # may be observed, so such a sort takes both strings per comparison
     # (FIG-6948).
@@ -1589,11 +1588,11 @@ body {
         set primitive = invoke ts.is_primitive(value)
         if primitive {} else { break }
         let spelled = invoke ts.primitive_to_string(value)
-        set keys[list.len(keys)] = text.to_utf16_units(spelled)
+        set keys[list.len(keys)] = spelled
       }
       if primitive {
         let sort = fn(items, ranks) {
-          return list.sort_by_keys(items, ranks, false)
+          return list.sort_by_utf16_keys(items, ranks, false)
         }
         let ordered = apply sort(values, keys)
         set values = ordered

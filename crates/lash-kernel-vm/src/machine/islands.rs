@@ -778,6 +778,13 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             // A statement root's operator runs the typed kernel nested
             // operators run, charged its table's units as its entry is.
             Some((value, units))
+        } else if let [x, y] = args
+            && matches!(x, Value::Text(_) | Value::LongText(_))
+            && site.texts.is_some()
+            && let Some((value, Some(units))) =
+                compiled::text_relation(site, *x, *y, self.exe, self.arena, self.charging)
+        {
+            Some((value, units))
         } else if !self.charging {
             site.entry.call(args).map(|value| (value, 0))
         } else if args.iter().all(scalar) {

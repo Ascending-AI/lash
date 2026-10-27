@@ -1237,7 +1237,6 @@ impl<'e> Build<'e> {
                 };
                 let args = self.args(args)?;
                 self.open = None;
-                let after = self.start();
                 let library = self
                     .root
                     .and_then(|id| match &self.exe.stmt(id).form {
@@ -1252,6 +1251,33 @@ impl<'e> Build<'e> {
                             .act
                             .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
                     });
+                if !read
+                    && args.len() == 2
+                    && let Some(lib) = library
+                    && let Some(extra) = super::answer_depth(self.exe, lib)
+                    && let Some(units) = self.element_read_charge(lib)
+                {
+                    let depth = Depth::Template(extra);
+                    self.site(depth, true);
+                    self.emit(Op::ElementRead {
+                        site: HeapSite {
+                            lib,
+                            close: closes.first().copied(),
+                            pc,
+                            reg,
+                            depth,
+                            checked: invoke.checked || self.root_checked(),
+                            counted: invoke.counted(),
+                            act: invoke.act,
+                            root: self.root,
+                        },
+                        args: args.clone(),
+                        units,
+                    });
+                    self.result(reg, &args);
+                    return Some(());
+                }
+                let after = self.start();
                 self.emit(Op::Call {
                     site: CallSite {
                         checked: invoke.checked || self.root_checked(),

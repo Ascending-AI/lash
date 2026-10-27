@@ -67,6 +67,16 @@ pub(in crate::machine::islands) enum AccessShape {
 }
 
 impl Build<'_> {
+    pub(super) fn element_read_charge(&self, lib: LibId) -> Option<u64> {
+        let function = self.exe.lib(lib);
+        let (entry, _) = function.prepared.as_ref()?;
+        (entry.element() == Some(lash_kernel_doc::plan::Element::Read)).then_some(())?;
+        function.charge.known_charge(
+            &[None, Some(Value::Float(lash_kernel_doc::Float::new(0.0)))],
+            None,
+        )
+    }
+
     pub(super) fn member_write(
         &self,
         site: &CallSite,
@@ -167,13 +177,7 @@ impl Build<'_> {
                 continue;
             };
             if args.len() == 2 {
-                let function = self.exe.lib(site.lib);
-                if function.prepared.as_ref().is_some_and(|(entry, _)| {
-                    entry.element() == Some(lash_kernel_doc::plan::Element::Read)
-                }) && let Some(units) = function.charge.known_charge(
-                    &[None, Some(Value::Float(lash_kernel_doc::Float::new(0.0)))],
-                    None,
-                ) {
+                if let Some(units) = self.element_read_charge(site.lib) {
                     let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
                     let Op::Heap { site, args } = original else {
                         unreachable!()

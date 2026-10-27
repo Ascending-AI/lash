@@ -347,14 +347,18 @@ pub(super) fn functions<T>(
     }
     // Each merge pass compares a pair at most once per element it places,
     // and a comparison reads no further than the shallower of its keys.
-    let name = "list.sort_by_keys";
-    if accepts(name) {
-        let definition = define(name, &|| {
-            String::from(
-                "function list.sort_by_keys(items: List(Any), keys: List(Any), descending: Bool) -> List(Any)\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(items), product(2, sum(size(keys), deep(keys)), sum(1, ceil_log2(size(keys)))), size(result))\nnative\n",
-            )
-        })?;
-        functions.push((definition, Arc::new(SortByKeys) as _));
+    for (name, keys, utf16) in [
+        ("list.sort_by_keys", "Any", false),
+        ("list.sort_by_utf16_keys", "Text", true),
+    ] {
+        if accepts(name) {
+            let definition = define(name, &|| {
+                format!(
+                    "function {name}(items: List(Any), keys: List({keys}), descending: Bool) -> List(Any)\nkernel 1\nerrors \"type_error\"\ncharge sum(1, size(items), product(2, sum(size(keys), deep(keys)), sum(1, ceil_log2(size(keys)))), size(result))\nnative\n",
+                )
+            })?;
+            functions.push((definition, Arc::new(SortByKeys { utf16 }) as _));
+        }
     }
     fn prepared(
         function: fn(&[Value]) -> Result<Value, NativeError>,
@@ -991,8 +995,10 @@ fn lookup(args: &Args<'_>, xs: &Value, key: &Value) -> Result<Option<Value>, Nat
 /// comparator `fn(a, b) { if lt(key(b), key(a)) { return 1 } return 0 }`
 /// (`lt(key(a), key(b))` when descending): the same keys compared in the
 /// same order, so keys with no shared ordering raise exactly where that
-/// sort raises (FIG-6886).
-struct SortByKeys;
+/// sort raises (FIG-6886). Text keys optionally use UTF-16 code-unit order.
+struct SortByKeys {
+    utf16: bool,
+}
 impl NativeFunction for SortByKeys {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
@@ -1027,8 +1033,15 @@ impl NativeFunction for SortByKeys {
                     } else {
                         (after, before)
                     };
-                    let order =
-                        crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)?;
+                    let order = if self.utf16 {
+                        Some(crate::comparison::utf16_compare(
+                            &ranks[first],
+                            &ranks[second],
+                            &args,
+                        )?)
+                    } else {
+                        crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)?
+                    };
                     if order == Some(std::cmp::Ordering::Less) {
                         out[dest] = after;
                         right += 1;
