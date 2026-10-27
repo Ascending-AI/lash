@@ -152,6 +152,7 @@ def main():
         run("git", "fetch", "origin", "main")
         main_sha = git("rev-parse", "origin/main")
         rebase()
+        run("python3", "scripts/perf-gates.py", "check-sources")
         run("kiln", "clippy")
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))

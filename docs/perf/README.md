@@ -92,7 +92,16 @@ The gate never substitutes guest charge or scaled wall durations. Successful
 clean main runs atomically advance `/workspace/kiln/lash/perf-gates/` baselines;
 a failure cannot replace its reference. A committed measured baseline bootstraps
 the first run. Workload source, geometry, host, compiler, build and allocator
-must match. A baseline from another history is refused. Kernel fits use 1,000
+must match. Instructions compare geometry per row. A changed row uses its
+measured reference from the baseline committed in the candidate tree and is
+reported as `rebaselined: geometry changed`; unchanged rows keep their previous
+references. Identity and CPU mismatches still refuse the whole instruction
+gate. `scripts/land` checks workload sources and row membership without a build.
+After a workload edit, run `just perf-gate-instructions --calibrate` and commit
+the baseline with it. Calibration checks unchanged rows against their existing
+references and exits with failure if any regress; it updates only changed rows
+and preserves the failing references too.
+A baseline from another history is refused. Kernel fits use 1,000
 to 100,000 trips for the small loops; the large object workloads retain their
 10,000 to 100,000 object population. The CPU reference contains all 40 rows from the first complete population,
 with five paired trip samples per kernel row. Its independent reverted control

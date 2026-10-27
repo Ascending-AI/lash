@@ -14,6 +14,9 @@ import subprocess
 import tempfile
 import uuid
 
+from perf_gate_baseline import (calibrate_changed, check_sources, geometry_key,
+                                kernel_workloads, references)
+
 ROOT = Path(__file__).resolve().parents[1]
 IDENTITY = ("host", "compiler", "allocator", "build", "build_profile")
 
@@ -30,9 +33,12 @@ def read(path: Path) -> dict:
 
 
 def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
-    small = "empty_loop,prop_read,prop_write,array_read,func_call,func_closure_call,int_arith,float_arith,map_set_string,string_build1,int_to_string,sort_bench,json_transform,records,templating"
+    workloads_by_name = kernel_workloads(ROOT)
     captures = []
-    for group, workloads, factor in (("ordinary", small, "100"), ("large-objects", "object_build,object_sort", "10")):
+    for group, large, factor in (("ordinary", False, "100"), ("large-objects", True, "10")):
+        workloads = ",".join(name for name, (low, _, _) in workloads_by_name.items() if (low >= 10000) == large)
+        if not workloads:
+            continue
         compare = directory / f"compare-{group}.json"
         execute([binary, "compare", "--out", str(compare), "--instructions", "--workload", workloads,
                  "--runs", "5", "--warmups", "1", "--factor", factor], directory / f"compare-{group}.log", env)
@@ -68,9 +74,7 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
         geometry[name].update({k: kernel["geometry"][k] for k in ("runs", "warmups")})
         artifacts["kernel"] = row["engine_identity"]
     expected_kernel = {f"kernel/{dialect}/{name}" for dialect in ("typescript", "python")
-        for name in ("empty_loop", "prop_read", "prop_write", "array_read", "func_call", "func_closure_call",
-            "int_arith", "float_arith", "map_set_string", "string_build1", "int_to_string", "sort_bench",
-            "json_transform", "records", "templating", "object_build", "object_sort")}
+                       for name in workloads_by_name}
     if set(rows) != expected_kernel:
         raise ValueError("kernel comparison did not execute the complete row population")
     # Match the counted replay subset and lengths. Each producer is a separate
@@ -149,15 +153,20 @@ def startup(binary: str, directory: Path, env: dict[str, str]) -> dict:
 
 
 def regressions(baseline: dict, candidate: dict, mode: str) -> list[tuple]:
+    """Judge comparable rows. Instructions resolve changed references before calling."""
     if any(not isinstance(candidate.get("identity", {}).get(k), str) or not candidate["identity"][k].strip() for k in IDENTITY):
         raise ValueError("missing performance identity")
-    for key in ("identity", "geometry") + (("cpu",) if mode == "instructions" else ()):
+    for key in ("identity", "cpu") if mode == "instructions" else ("identity", "geometry"):
         if not candidate.get(key) or candidate[key] != baseline.get(key):
             raise ValueError(f"incomparable {mode} baseline: {key}")
-    if not candidate.get("rows") or set(candidate["rows"]) != set(baseline.get("rows", {})):
+    if not candidate.get("rows") or (mode != "instructions" and set(candidate["rows"]) != set(baseline.get("rows", {}))):
         raise ValueError("incomplete performance row population")
     failures = []
     for name, actual in candidate["rows"].items():
+        if mode == "instructions":
+            key = geometry_key(name)
+            if name not in baseline["rows"] or candidate["geometry"].get(key) != baseline["geometry"].get(key):
+                continue
         base = baseline["rows"][name]
         if not all(isinstance(v, (int, float)) and math.isfinite(v) and v >= 0 for v in (base, actual)):
             raise ValueError(f"invalid metric {name}")
@@ -169,15 +178,25 @@ def regressions(baseline: dict, candidate: dict, mode: str) -> list[tuple]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("instructions", "startup", "history"))
-    parser.add_argument("--binary", required=True)
-    parser.add_argument("--worker", required=True)
-    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("mode", choices=("instructions", "startup", "history", "check-sources"))
+    parser.add_argument("--binary")
+    parser.add_argument("--worker")
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--calibrate", action="store_true")
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--history", type=Path, default=ROOT / ".benchmarks/perf-guard/runtime-duration-history-full.jsonl")
     args = parser.parse_args()
+    if args.mode == "check-sources":
+        try:
+            check_sources(ROOT)
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            print(f"instructions: REFUSED: {error}")
+            return 2
+        print("instructions: workload sources match committed baseline")
+        return 0
+    if not args.binary or not args.worker or args.out is None:
+        parser.error("--binary, --worker and --out are required for measurements")
     args.out.mkdir(parents=True, exist_ok=True)
     committed = ROOT / f"docs/perf/baselines/{args.mode}.json"
     previous_main = Path("/workspace/kiln/lash/perf-gates") / f"{args.mode}-baseline.json"
@@ -224,22 +243,47 @@ def main() -> int:
             candidate["rows"] = {k: max(s["rows"][k] for s in samples) for k in candidate["rows"]}
             candidate["noise"] = {k: max(s["rows"][k] for s in samples) - min(s["rows"][k] for s in samples) for k in candidate["rows"]}
             candidate["ceilings"] = {k: v + candidate["noise"][k] for k, v in candidate["rows"].items()}
+            if args.mode == "instructions":
+                baseline = read(baseline_path)
+                failures = regressions(baseline, candidate, args.mode)
+                changed = [name for name in candidate["rows"]
+                           if name not in baseline["rows"] or baseline["geometry"].get(geometry_key(name)) != candidate["geometry"].get(geometry_key(name))]
+                (args.out / "decision.json").write_text(json.dumps({
+                    "mode": args.mode, "baseline": baseline, "candidate": candidate,
+                    "regressed_rows": failures, "changed_rows": changed,
+                    "outcome": "fail" if failures else "calibrated",
+                }, indent=2) + "\n")
+                for name, base, actual, ceiling in failures:
+                    print(f"{name}: FAIL baseline={base:.3f} observed={actual:.3f} ceiling={ceiling:.3f}")
+                if failures:
+                    print("instructions: FAIL; calibration preserves the unchanged row references")
+                candidate = calibrate_changed(baseline, candidate)
+                print(f"instructions: recalibrated {len(changed)} changed rows; unchanged references retained")
             baseline_path.write_text(json.dumps(candidate, indent=2) + "\n")
             print(f"{args.mode}: calibrated {baseline_path}")
-            return 0
+            return 1 if args.mode == "instructions" and failures else 0
         baseline = read(baseline_path)
         if baseline.get("commit"):
             subprocess.run(["git", "merge-base", "--is-ancestor", baseline["commit"], "HEAD"], cwd=ROOT, check=True)
-        failures = regressions(baseline, candidate, args.mode)
+        selected = references(baseline, candidate, read(committed)) if args.mode == "instructions" else baseline
+        failures = regressions(selected, candidate, args.mode)
         (args.out / "decision.json").write_text(json.dumps({
             "mode": args.mode, "baseline_path": str(baseline_path),
             "baseline": baseline, "candidate": candidate,
+            "row_verdicts": selected.get("row_verdicts", {}),
+            "selected_baseline": selected,
             "instruction_relative_threshold": 0.01 if args.mode == "instructions" else None,
             "regressed_rows": failures, "outcome": "fail" if failures else "pass",
         }, indent=2) + "\n")
-        print("| Row | Baseline | Observed | Ceiling |\n|---|---:|---:|---:|")
-        for name, base, actual, ceiling in failures:
-            print(f"| {name} | {base:.3f} | {actual:.3f} | {ceiling:.3f} |")
+        print("| Row | Verdict | Baseline | Observed | Ceiling |\n|---|---|---:|---:|---:|")
+        failed_names = {row[0] for row in failures}
+        for name, actual in candidate["rows"].items():
+            base = selected["rows"][name]
+            ceiling = base * 1.01 if args.mode == "instructions" else selected["ceilings"][name]
+            verdict = selected.get("row_verdicts", {}).get(name, "gated")
+            print(f"| {name} | {'FAIL' if name in failed_names else 'PASS'}; {verdict} | {base:.3f} | {actual:.3f} | {ceiling:.3f} |")
+        for name in baseline["rows"].keys() - candidate["rows"].keys():
+            print(f"| {name} | {selected['row_verdicts'][name]} | {baseline['rows'][name]:.3f} | - | - |")
         if failures:
             print(f"{args.mode}: FAIL ({len(failures)} regressed rows)")
             return 1
