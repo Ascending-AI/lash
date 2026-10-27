@@ -117,10 +117,7 @@ pub(in crate::machine::islands) enum Op {
         covered: bool,
         reg: u32,
     },
-    Keep {
-        src: u32,
-        saved: u32,
-    },
+    Keep(super::Restart),
     Constant {
         dst: u32,
         value: Value,
@@ -345,8 +342,8 @@ pub(super) struct Build<'e> {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
-    pub(super) restarts: Vec<super::Restart>,
-    captures: Vec<(u32, u32, u32, bool)>,
+    restarts: usize,
+    captures: Vec<(u32, super::Restart, bool)>,
     source_registers: u32,
     live: Vec<u32>,
     statement: Option<StmtId>,
@@ -376,7 +373,7 @@ impl<'e> Build<'e> {
             blocks: Vec::new(),
             ops: Vec::new(),
             registers: 0,
-            restarts: Vec::new(),
+            restarts: 0,
             captures: Vec::new(),
             source_registers,
             live: Vec::new(),
@@ -482,7 +479,7 @@ impl<'e> Build<'e> {
                 self.segments.len(),
                 self.blocks.len(),
                 self.texts.len(),
-                self.restarts.len(),
+                self.restarts,
             );
             if self.statement(statement, index).is_none() {
                 // A straight-line statement the register cannot build runs
@@ -497,7 +494,7 @@ impl<'e> Build<'e> {
                 self.segments.truncate(mark.1);
                 self.blocks.truncate(mark.2);
                 self.texts.truncate(mark.3);
-                self.restarts.truncate(mark.4);
+                self.restarts = mark.4;
                 (self.root, self.begin, self.open) = (None, None, None);
                 let cold = Statement {
                     id: statement.id,
@@ -921,7 +918,7 @@ impl<'e> Build<'e> {
         }
         self.open = None;
         self.live.clear();
-        self.captures.iter().all(|capture| capture.3).then_some(())
+        self.captures.iter().all(|capture| capture.2).then_some(())
     }
 
     /// The branch instruction enters a nonempty arm's source block itself.
@@ -989,15 +986,16 @@ impl<'e> Build<'e> {
                 if let Some((made, input)) =
                     crate::compile::islands::collection_restart(self.stream, close.head, pc)
                 {
-                    let saved = self.source_registers + 2 * self.restarts.len() as u32;
+                    let saved = self.source_registers + 2 * self.restarts as u32;
                     self.registers = self.registers.max(saved as usize + 2);
-                    self.restarts.push(super::Restart {
+                    let restart = super::Restart {
                         statement: self.statement?,
                         head: close.head,
                         reg: input,
                         saved,
-                    });
-                    self.captures.push((made, input, saved, false));
+                    };
+                    self.restarts += 1;
+                    self.captures.push((made, restart, false));
                     self.emit(Op::Constant {
                         dst: saved + 1,
                         value: Value::Bool(false),
@@ -1249,7 +1247,6 @@ impl<'e> Build<'e> {
                     site: CallSite {
                         checked: invoke.checked || self.root_checked(),
                         inputs: None,
-                        property: None,
                         root: self.root,
                         library,
                         answers: library.and_then(|lib| super::answer_depth(self.exe, lib)),
@@ -1339,12 +1336,12 @@ impl<'e> Build<'e> {
                     .iter_mut()
                     .filter(|capture| capture.0 == pc)
                     .map(|capture| {
-                        capture.3 = true;
-                        (capture.1, capture.2)
+                        capture.2 = true;
+                        capture.1
                     })
                     .collect();
-                for (src, saved) in keeps {
-                    self.emit(Op::Keep { src, saved });
+                for restart in keeps {
+                    self.emit(Op::Keep(restart));
                 }
                 self.emit(Op::Make {
                     ahead: *ahead,

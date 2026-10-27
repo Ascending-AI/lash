@@ -309,23 +309,34 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// may have committed its first operation), then add the live outer
     /// operands. Neither scratch positions nor this physical cursor persist.
     pub(super) fn spill(&mut self, frame: &Frame<'_>, instruction: &Instruction) {
-        for restart in &frame.callee.compiled.restarts {
-            if frame.waiting.is_none()
-                && frame.statement == Some(restart.statement)
-                && self.scratch.exit.at == Some(restart.head)
-                && matches!(frame.regs[restart.saved as usize + 1], Value::Bool(true))
+        if frame.waiting.is_none() {
+            for restart in
+                frame
+                    .callee
+                    .compiled
+                    .ops
+                    .iter()
+                    .filter_map(|instruction| match &instruction.op {
+                        Op::Keep(restart) => Some(restart),
+                        _ => None,
+                    })
             {
-                let value = frame.regs[restart.saved as usize];
-                if let Some((_, held)) = self
-                    .scratch
-                    .exit
-                    .regs
-                    .iter_mut()
-                    .find(|(reg, _)| *reg == restart.reg)
+                if frame.statement == Some(restart.statement)
+                    && self.scratch.exit.at == Some(restart.head)
+                    && matches!(frame.regs[restart.saved as usize + 1], Value::Bool(true))
                 {
-                    *held = value;
-                } else {
-                    self.scratch.exit.regs.push((restart.reg, value));
+                    let value = frame.regs[restart.saved as usize];
+                    if let Some((_, held)) = self
+                        .scratch
+                        .exit
+                        .regs
+                        .iter_mut()
+                        .find(|(reg, _)| *reg == restart.reg)
+                    {
+                        *held = value;
+                    } else {
+                        self.scratch.exit.regs.push((restart.reg, value));
+                    }
                 }
             }
         }

@@ -13,8 +13,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         callers: &mut Vec<Frame<'e>>,
         slots: &mut usize,
     ) -> Result<Next, Stop> {
-        if let Some(property) = &site.property
-            && let Some(inputs) = &site.inputs
+        if let Some(inputs) = &site.inputs
+            && let Some(property) = inputs.property()
             && let [target, key, value] = &*inputs.args
             && let Some(values) = self.pure_call_values(frame, [target, key, value])
             && let Some(answer) =
@@ -32,7 +32,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let small;
         let mut wide;
         let inputs = if let Some(inputs) = &site.inputs {
-            if let Some(held) = &inputs.held {
+            if let Some(held) = inputs.held() {
                 frame.regs[held.reg() as usize] = self.operand(frame, held)?;
             }
             let callee = if let Some(callee) = &inputs.callee {
@@ -218,7 +218,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if answer.is_err()
             && let (Some(inputs), Some((callee, values))) = (&site.inputs, inputs)
         {
-            if let Some(held) = &inputs.held {
+            if let Some(held) = inputs.held() {
                 self.scratch
                     .exit
                     .regs
@@ -239,7 +239,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let Some(callee) = callee {
             self.scratch.exit.regs.insert(0, (site.reg, callee));
         }
-        if let Some(held) = site.inputs.as_ref().and_then(|inputs| inputs.held.as_ref()) {
+        if let Some(held) = site.inputs.as_ref().and_then(|inputs| inputs.held()) {
             self.scratch
                 .exit
                 .regs

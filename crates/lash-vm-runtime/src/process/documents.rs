@@ -386,7 +386,9 @@ impl KernelDocuments {
         &self,
         document: &IdentifiedDocument,
     ) -> Result<(), EnginePortError> {
-        let slot = Self::document_slot(&self.prepared, &document.id(), document.body());
+        let slot = Self::document_slot(&self.prepared, &document.id(), document.body(), || {
+            Arc::clone(document.shared_body())
+        });
         slot.derived
             .get_or_init(|| {
                 lash_kernel_check::derive_shared(
@@ -409,10 +411,8 @@ impl KernelDocuments {
                     refusal_kind = "admission_refused"
                 );
             })?;
-        // Derivation includes structural validation. This immutable value can
-        // serve later reads only when their fetched bytes match in full.
-        slot.decoded.get_or_init(|| Ok(document.clone()));
-        slot.checked.get_or_init(|| Ok(document.clone()));
+        // The activation's CellCode already holds supplied decoded documents.
+        // Independent cold reads populate the decoded cache only when needed.
         Ok(())
     }
 
@@ -440,7 +440,7 @@ impl KernelDocuments {
         id: &DocumentId,
         bytes: &[u8],
     ) -> Result<IdentifiedDocument, EnginePortError> {
-        let slot = Self::document_slot(prepared, id, bytes);
+        let slot = Self::document_slot(prepared, id, bytes, || bytes.into());
         // The slot is pure content, not a read or retention fact. Every caller
         // fetched current bytes before lookup; equality checks them all.
         let checked = slot
@@ -467,11 +467,12 @@ impl KernelDocuments {
         prepared: &Mutex<DocumentPreparations>,
         id: &DocumentId,
         bytes: &[u8],
+        retain: impl FnOnce() -> Arc<[u8]>,
     ) -> Arc<PreparedDocument> {
         if bytes.len() > DOCUMENT_BYTES / 2 {
             return Arc::new(PreparedDocument {
                 id: *id,
-                bytes: bytes.into(),
+                bytes: retain(),
                 checked: OnceLock::new(),
                 decoded: OnceLock::new(),
                 derived: OnceLock::new(),
@@ -488,7 +489,7 @@ impl KernelDocuments {
                 // same owner: concurrent first readers share one preparation.
                 let candidate = Arc::new(PreparedDocument {
                     id: *id,
-                    bytes: bytes.into(),
+                    bytes: retain(),
                     checked: OnceLock::new(),
                     decoded: OnceLock::new(),
                     derived: OnceLock::new(),
@@ -521,7 +522,7 @@ impl KernelDocuments {
         bytes: &[u8],
     ) -> Result<IdentifiedDocument, EnginePortError> {
         let artifact = document_artifact(id);
-        let slot = Self::document_slot(prepared, id, bytes);
+        let slot = Self::document_slot(prepared, id, bytes, || bytes.into());
         let document = slot
             .decoded
             .get_or_init(|| IdentifiedDocument::decode_standard(bytes))

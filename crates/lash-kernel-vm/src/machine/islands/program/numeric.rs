@@ -26,7 +26,7 @@ impl Build<'_> {
         removed.extend(self.call_inputs(&targets));
         let mut relocation = vec![0; self.ops.len() + 1];
         let source = std::mem::take(&mut self.ops);
-        self.ops = Vec::with_capacity(source.len());
+        self.ops = Vec::with_capacity(source.len() - removed.len());
         let mut old = source.into_iter().enumerate().peekable();
         while let Some((at, mut instruction)) = old.next() {
             relocation[at] = self.ops.len();
@@ -163,9 +163,13 @@ impl Build<'_> {
             let Op::Call { site, .. } = &mut self.ops[call].op else {
                 unreachable!()
             };
-            site.property = property;
             site.inputs = Some(Box::new(CallInputs {
-                held,
+                prefix: match (held, property) {
+                    (Some(held), None) => CallPrefix::Held(held),
+                    (None, Some(property)) => CallPrefix::Property(property),
+                    (None, None) => CallPrefix::None,
+                    (Some(_), Some(_)) => unreachable!("a property call has no held input"),
+                },
                 callee: callee.map(Operand::from),
                 args: reads.into_iter().map(Operand::from).collect(),
             }));
@@ -354,15 +358,35 @@ pub(in crate::machine::islands) enum Destination {
 /// Reads evaluated inside a call, before its close and admission. Their
 /// values become caller roots only when the call suspends that caller.
 pub(in crate::machine::islands) struct CallInputs {
-    pub(in crate::machine::islands) held: Option<Operand>,
+    prefix: CallPrefix,
     pub(in crate::machine::islands) callee: Option<Operand>,
     pub(in crate::machine::islands) args: Box<[Operand]>,
 }
 
+enum CallPrefix {
+    None,
+    Held(Operand),
+    Property(Box<super::super::PropertyWrite>),
+}
+
 impl CallInputs {
+    pub(in crate::machine::islands) fn held(&self) -> Option<&Operand> {
+        match &self.prefix {
+            CallPrefix::Held(held) => Some(held),
+            _ => None,
+        }
+    }
+
+    pub(in crate::machine::islands) fn property(&self) -> Option<&super::super::PropertyWrite> {
+        match &self.prefix {
+            CallPrefix::Property(property) => Some(property),
+            _ => None,
+        }
+    }
+
     pub(in crate::machine::islands) fn reads(&self) -> impl Iterator<Item = &Operand> {
-        self.held
-            .iter()
+        self.held()
+            .into_iter()
             .chain(self.callee.iter())
             .chain(self.args.iter())
     }

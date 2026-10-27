@@ -33,7 +33,6 @@ pub(crate) struct Compiled {
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
     pub(super) registers: usize,
-    pub(super) restarts: Vec<Restart>,
     headers: Box<[(u32, usize)]>,
     actions: Box<[(u32, usize)]>,
     pub(super) cell_parameters: usize,
@@ -43,6 +42,7 @@ pub(crate) struct Compiled {
 }
 
 /// Private copies used only when a source region's charge close refuses.
+#[derive(Clone, Copy)]
 pub(super) struct Restart {
     pub(super) statement: StmtId,
     pub(super) head: u32,
@@ -223,7 +223,6 @@ pub(super) struct UnitSite {
 pub(super) struct CallSite {
     pub(super) checked: bool,
     pub(super) inputs: Option<Box<CallInputs>>,
-    pub(super) property: Option<Box<PropertyWrite>>,
     /// The source library call and root action, retained on materialization.
     pub(super) library: Option<LibId>,
     /// The call depth its library's prepared answer needs beyond the
@@ -355,7 +354,6 @@ impl Compiled {
             }),
             ops: cx.ops,
             registers: cx.registers,
-            restarts: cx.restarts,
             headers: headers.into(),
             actions: actions.into(),
             cell_parameters: plan
