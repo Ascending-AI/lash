@@ -81,6 +81,56 @@ unsafe fn expanded_sql(statement: *mut ffi::sqlite3_stmt) -> *mut std::ffi::c_ch
     unsafe { ffi::sqlite3_expanded_sql(statement) }
 }
 
+#[derive(Clone, Copy)]
+struct BlobBindings {
+    sql: &'static str,
+    #[cfg(feature = "perf-witness")]
+    value_bytes: u64,
+    literal_bytes: u64,
+    #[cfg(feature = "perf-witness")]
+    expanded_bytes: usize,
+}
+
+thread_local! {
+    static BLOB_BINDINGS: std::cell::Cell<Option<BlobBindings>> = const { std::cell::Cell::new(None) };
+}
+
+fn blob_bindings(sql: &str) -> Option<BlobBindings> {
+    BLOB_BINDINGS
+        .with(std::cell::Cell::get)
+        .filter(|bindings| bindings.sql == sql)
+}
+
+/// Supply the lengths of one-use blob parameters while their statement runs.
+/// SQLite spells each as `x'...'`, two hex digits per byte plus three delimiters.
+pub(crate) fn with_blob_bindings<R>(
+    sql: &'static str,
+    lengths: impl IntoIterator<Item = usize>,
+    work: impl FnOnce() -> R,
+) -> R {
+    let (_value_bytes, literal_bytes) = lengths
+        .into_iter()
+        .fold((0_u64, 0_u64), |(value, literal), len| {
+            (value + len as u64, literal + 2 * len as u64 + 3)
+        });
+    let bindings = BlobBindings {
+        sql,
+        #[cfg(feature = "perf-witness")]
+        value_bytes: _value_bytes,
+        literal_bytes,
+        #[cfg(feature = "perf-witness")]
+        expanded_bytes: sql.len() - placeholder_bytes(sql) + literal_bytes as usize,
+    };
+    struct Restore(Option<BlobBindings>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BLOB_BINDINGS.with(|current| current.set(self.0));
+        }
+    }
+    let _restore = Restore(BLOB_BINDINGS.with(|current| current.replace(Some(bindings))));
+    work()
+}
+
 /// What one connection call wrote, for the performance witness: the rows its
 /// statements changed and the pages its transactions wrote to the WAL.
 #[cfg(feature = "perf-witness")]
@@ -198,29 +248,40 @@ unsafe extern "C" fn trace(
                     #[cfg(feature = "perf-witness")]
                     let mut binding = None;
                     window.statement(&sql);
-                    let expanded = expanded_sql(statement);
-                    if !expanded.is_null() {
-                        let expanded_bytes = CStr::from_ptr(expanded).to_bytes();
-                        let bytes = expanded_bytes.len();
+                    if let Some(known) = blob_bindings(&sql) {
+                        window.payload(&sql, 0, known.literal_bytes, 0);
                         #[cfg(feature = "perf-witness")]
-                        if lash_core_ids::perf_witness::collecting() {
-                            let value = (ffi::sqlite3_stmt_readonly(statement) == 0
-                                && ffi::sqlite3_bind_parameter_count(statement) > 0)
-                                .then(|| bound_value_bytes(&sql, expanded_bytes));
+                        {
                             binding = Some(BindingBytes {
-                                expanded: bytes,
-                                value,
+                                expanded: known.expanded_bytes,
+                                value: Some(known.value_bytes),
                             });
                         }
-                        window.payload(
-                            &sql,
-                            0,
-                            (bytes + placeholder_bytes(&sql)).saturating_sub(sql.len()) as u64,
-                            0,
-                        );
-                        ffi::sqlite3_free(expanded.cast());
                     } else {
-                        window.unmeasured_bound(&sql);
+                        let expanded = expanded_sql(statement);
+                        if !expanded.is_null() {
+                            let expanded_bytes = CStr::from_ptr(expanded).to_bytes();
+                            let bytes = expanded_bytes.len();
+                            #[cfg(feature = "perf-witness")]
+                            if lash_core_ids::perf_witness::collecting() {
+                                let value = (ffi::sqlite3_stmt_readonly(statement) == 0
+                                    && ffi::sqlite3_bind_parameter_count(statement) > 0)
+                                    .then(|| bound_value_bytes(&sql, expanded_bytes));
+                                binding = Some(BindingBytes {
+                                    expanded: bytes,
+                                    value,
+                                });
+                            }
+                            window.payload(
+                                &sql,
+                                0,
+                                (bytes + placeholder_bytes(&sql)).saturating_sub(sql.len()) as u64,
+                                0,
+                            );
+                            ffi::sqlite3_free(expanded.cast());
+                        } else {
+                            window.unmeasured_bound(&sql);
+                        }
                     }
                     BEFORE.with(|before| {
                         before.borrow_mut().insert(
@@ -282,7 +343,12 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, affected.max(0) as u64, 0, 0);
                 }
                 #[cfg(feature = "perf-witness")]
-                let mut binding = before.and_then(|before| before.binding);
+                let mut binding = before.and_then(|before| before.binding).or_else(|| {
+                    blob_bindings(&sql).map(|known| BindingBytes {
+                        expanded: known.expanded_bytes,
+                        value: Some(known.value_bytes),
+                    })
+                });
                 #[cfg(feature = "perf-witness")]
                 if lash_core_ids::perf_witness::collecting()
                     && ffi::sqlite3_stmt_readonly(statement) == 0
@@ -509,7 +575,8 @@ mod tests {
     use super::*;
 
     /// SQL-PAYLOAD-ONCE: the physical window and write witness share one
-    /// expansion while retaining their distinct spelling/value byte counters.
+    /// expansion for unknown bindings; known graph blob lengths need none
+    /// (FIG-7506). Both retain their distinct spelling/value byte counters.
     #[cfg(feature = "perf-witness")]
     #[expect(
         clippy::disallowed_methods,
@@ -543,6 +610,9 @@ mod tests {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
             .execute("CREATE TABLE payload(text TEXT)", [])
+            .unwrap();
+        connection
+            .execute("CREATE TABLE blob_payload(a BLOB,b BLOB)", [])
             .unwrap();
         enable(&connection);
         let value = "é'a".repeat(4096);
@@ -580,6 +650,36 @@ mod tests {
                     EXPANSIONS.with(std::cell::Cell::get) - before,
                     1,
                     "one write must share its immutable expansion: receipts={receipts}, window={observed}"
+                );
+                const BLOB_SQL: &str = "INSERT INTO blob_payload VALUES (?1,?2)";
+                let blob_window = Window::new("known-blob-payload", "sqlite");
+                let before = EXPANSIONS.with(std::cell::Cell::get);
+                Window::on_worker(observed.then(|| blob_window.clone()), || {
+                    with_blob_bindings(BLOB_SQL, [3, 5], || {
+                        connection
+                            .execute(
+                                BLOB_SQL,
+                                rusqlite::params![&[0_u8, 39, 255][..], &[1_u8, 2, 3, 4, 5][..]],
+                            )
+                            .unwrap();
+                    });
+                });
+                let snapshot = collector.snapshot();
+                assert_eq!(snapshot.sql_bytes_written, value.len() as u64 + 8);
+                if observed {
+                    assert_eq!(blob_window.snapshot().bound_bytes, 22);
+                }
+                if receipts {
+                    assert_eq!(snapshot.sql_receipts.len(), 2);
+                    assert_eq!(
+                        snapshot.sql_receipts[1].expanded_bytes,
+                        "INSERT INTO blob_payload VALUES (,)".len() + 22
+                    );
+                }
+                assert_eq!(
+                    EXPANSIONS.with(std::cell::Cell::get),
+                    before,
+                    "known blobs need no expansion: receipts={receipts}, window={observed}"
                 );
             }
         }

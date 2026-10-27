@@ -1337,7 +1337,13 @@ pub(super) fn install(
                 installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
             }
         }
-        insert.raw_execute()?;
+        crate::observed_sql::with_blob_bindings(
+            &SQL.blob_batches[chunk.len() - 1],
+            chunk
+                .iter()
+                .flat_map(|node| [node.id.0.len(), node.bytes.len()]),
+            || insert.raw_execute(),
+        )?;
         chunk.clear();
     }
     if edges.len() > 1 {

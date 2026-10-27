@@ -311,6 +311,99 @@ impl LoweredUnit for RetainedHistory {
     }
 }
 
+struct RetainedConfiguration {
+    source: LlmRequest,
+    prototype: RecordedRequestTemplate,
+}
+
+impl LoweredUnit for RetainedConfiguration {
+    fn retained_bytes(&self) -> usize {
+        self.prototype.literal_len
+    }
+}
+
+impl RetainedConfiguration {
+    fn compose(
+        &self,
+        route: ProviderRouteIdentity,
+        stream: bool,
+        items: super::RequestItems,
+        scope: &crate::llm::types::LlmRequestScope,
+    ) -> Result<RecordedRequestTemplate, TemplateError> {
+        let after = scope_closing(scope)?;
+        let mut template = self.prototype.clone();
+        template.route = route;
+        template.response_mode = super::ResponseMode::Transport(stream);
+        template.literal_len = template.segments.before[0].literal_len()
+            + items.bytes
+            + items.len().saturating_sub(1)
+            + after.literal_len();
+        // The prototype proved this configuration's array position. Items
+        // are already validated JSON values; a serialized scope closes it.
+        template.segments.items = items;
+        template.segments.after = vec![after].into();
+        template.segments.flat = Arc::default();
+        Ok(template)
+    }
+}
+
+fn scope_closing(
+    scope: &crate::llm::types::LlmRequestScope,
+) -> Result<RequestSegment, TemplateError> {
+    RequestSegment::text(format!(
+        "],\"scope\":{}}}",
+        serde_json::to_string(scope).map_err(|error| not_canonical(error.to_string()))?
+    ))
+}
+
+fn same_configuration(before: &LlmRequest, now: &LlmRequest) -> bool {
+    let LlmRequest {
+        instructions,
+        model,
+        messages: _,
+        tools,
+        tool_choice,
+        attachment_acceptance,
+        generation,
+        scope: _,
+        output_spec,
+        stream_events: _,
+        provider_trace: _,
+        attempt_control: _,
+    } = before;
+    instructions == &now.instructions
+        && model == &now.model
+        && tools == &now.tools
+        && tool_choice == &now.tool_choice
+        && attachment_acceptance == &now.attachment_acceptance
+        && generation == &now.generation
+        && output_spec == &now.output_spec
+}
+
+fn configuration_opening(request: &LlmRequest) -> Result<RequestSegment, TemplateError> {
+    let value = serde_json::to_value(request).map_err(|error| not_canonical(error.to_string()))?;
+    let serde_json::Value::Object(fields) = value else {
+        return Err(not_canonical("request envelope is not an object"));
+    };
+    let fields: std::collections::BTreeMap<_, _> = fields.into_iter().collect();
+    let mut opening = String::from("{");
+    for (key, value) in fields
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "messages" | "scope"))
+    {
+        if opening.len() != 1 {
+            opening.push(',');
+        }
+        opening.push_str(
+            &serde_json::to_string(key).map_err(|error| not_canonical(error.to_string()))?,
+        );
+        opening.push(':');
+        opening.push_str(&value.to_string());
+    }
+    opening.push_str(",\"messages\":[");
+    RequestSegment::text(opening)
+}
+
 impl RecordedRequestTemplate {
     /// Canonical lowering from the owner's immutable request tree.
     pub fn of_retained_request(
@@ -375,39 +468,37 @@ impl RecordedRequestTemplate {
             )?,
             None => Arc::new(RetainedHistory::default()),
         };
-        let value =
-            serde_json::to_value(envelope).map_err(|error| not_canonical(error.to_string()))?;
-        let serde_json::Value::Object(fields) = value else {
-            return Err(not_canonical("request envelope is not an object"));
-        };
-        let fields: std::collections::BTreeMap<_, _> = fields.into_iter().collect();
-        let mut before = String::from("{");
-        let mut after = String::new();
-        let mut output = &mut before;
-        for (index, (key, value)) in fields.iter().enumerate() {
-            if index != 0 {
-                output.push(',');
-            }
-            output.push_str(
-                &serde_json::to_string(key).map_err(|error| not_canonical(error.to_string()))?,
-            );
-            output.push(':');
-            if key == "messages" {
-                output.push('[');
-                after.push(']');
-                output = &mut after;
-            } else {
-                output.push_str(&value.to_string());
-            }
-        }
-        after.push('}');
-        Self::from_item_run(
+        let configuration = cache.carried(
+            SegmentKey::new(&context).str("configuration"),
+            |prior: Option<Arc<RetainedConfiguration>>| {
+                if let Some(prior) = prior
+                    && same_configuration(&prior.source, envelope)
+                {
+                    return Ok(prior);
+                }
+                let mut source = envelope.clone();
+                source.stream_events = None;
+                source.provider_trace = None;
+                source.attempt_control = Default::default();
+                source.scope.trace_carrier = None;
+                Ok::<_, TemplateError>(Arc::new(RetainedConfiguration {
+                    source,
+                    prototype: Self::from_shared_item_run(
+                        route.clone(),
+                        envelope.stream_events.is_some(),
+                        None,
+                        configuration_opening(envelope)?,
+                        super::RequestItems::default(),
+                        scope_closing(&envelope.scope)?,
+                    )?,
+                }))
+            },
+        )?;
+        configuration.compose(
             route,
             envelope.stream_events.is_some(),
-            None,
-            before,
             history.items.clone(),
-            after,
+            &envelope.scope,
         )
     }
 
@@ -548,11 +639,41 @@ impl RecordedRequestTemplate {
                 return Ok(None);
             }
         }
-        if !messages_array_at(&envelope, splice) {
+        let shared_configuration = first == 1
+            && end + 1 == self.segments.len()
+            && envelope[splice..].starts_with("],\"scope\":");
+        let positioned = if shared_configuration {
+            self.segments[0]
+                .derived(|_| CanonicalArrayPosition(messages_array_at(&envelope, splice)))
+                .0
+        } else {
+            messages_array_at(&envelope, splice)
+        };
+        if !positioned {
             return Ok(None);
         }
-        let mut request: LlmRequest =
-            serde_json::from_str(&envelope).map_err(|error| not_canonical(error.to_string()))?;
+        let mut request: LlmRequest = if first == 1
+            && end + 1 == self.segments.len()
+            && let Some(tail) = envelope[splice..].strip_prefix("],\"scope\":")
+            && let Some(scope) = tail.strip_suffix('}')
+            && let Ok(scope) = serde_json::from_str::<crate::llm::types::LlmRequestScope>(scope)
+        {
+            let parsed = self.segments[0].derived(|_| {
+                CanonicalConfiguration(
+                    serde_json::from_str::<LlmRequest>(&envelope)
+                        .map_err(|error| error.to_string()),
+                )
+            });
+            let mut request = parsed
+                .0
+                .as_ref()
+                .map_err(|reason| not_canonical(reason.clone()))?
+                .clone();
+            request.scope = scope;
+            request
+        } else {
+            serde_json::from_str(&envelope).map_err(|error| not_canonical(error.to_string()))?
+        };
         request.messages.reserve_exact(end - first);
         for item in &self.segments[first..end] {
             let decoded = item.derived(|item| CanonicalMessage(decode_item(item)));
@@ -567,6 +688,10 @@ impl RecordedRequestTemplate {
 
 /// The message an item says, kept with the item.
 struct CanonicalMessage(Result<LlmMessage, String>);
+
+struct CanonicalConfiguration(Result<LlmRequest, String>);
+
+struct CanonicalArrayPosition(bool);
 
 fn decode_item(item: &RequestSegment) -> Result<LlmMessage, String> {
     let mut text = String::with_capacity(item.literal_len());

@@ -12,6 +12,20 @@ fn max(members: usize) -> NonZeroUsize {
     NonZeroUsize::new(members).expect("a non-zero maximum")
 }
 
+/// FIG-7506: successive preambles must not regenerate their batch schema.
+#[test]
+fn a_batch_definition_builds_its_schema_once() {
+    let first = batch_tool_definition(max(37));
+    let built = SCHEMA_BUILDS.with(std::cell::Cell::get);
+    let second = batch_tool_definition(max(37));
+    assert_eq!(SCHEMA_BUILDS.with(std::cell::Cell::get), built);
+    assert_eq!(first, second);
+    assert_eq!(
+        second.contract().input_schema.canonical()["properties"]["tool_calls"]["maxItems"],
+        37
+    );
+}
+
 fn call(call_id: &str, tool_name: &str, args: Value) -> PendingToolCall {
     PendingToolCall {
         call_id: lash_core::ToolCallId::fixture(call_id),

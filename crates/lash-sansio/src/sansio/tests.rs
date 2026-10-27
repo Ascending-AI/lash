@@ -1909,12 +1909,18 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     });
 
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+    let environment_ref = encoded["checkpoint"]["environment"]
+        .as_str()
+        .expect("environment content reference");
+    let environment: serde_json::Value = serde_json::from_str(
+        encoded["content"][environment_ref]
+            .as_str()
+            .expect("recorded environment content"),
+    )
+    .expect("recorded environment");
+    assert_eq!(environment["protocol_iteration"], 0);
     assert_eq!(
-        encoded["checkpoint"]["environment"]["protocol_iteration"],
-        0
-    );
-    assert_eq!(
-        encoded["checkpoint"]["environment"]["sync"]["tool_specs"][0]["name"],
+        environment["sync"]["tool_specs"][0]["name"],
         "recorded_tool"
     );
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");

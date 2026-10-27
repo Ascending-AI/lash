@@ -40,6 +40,77 @@ fn marked_text(role: LlmRole, text: &str, starts_user_segment: bool) -> LlmMessa
     message
 }
 
+/// FIG-7506: changing call scope must not rebuild the immutable tool schema suffix.
+#[test]
+fn retained_canonical_calls_share_configuration_and_read_each_calls_scope() {
+    let route = route("canonical", "https://canonical.example", "model-a");
+    let cache = SegmentCache::new();
+    let mut request = replay_request(Vec::new());
+    request.tools = std::sync::Arc::new(vec![crate::llm::wire_corpus::corpus_tool()]);
+    let first = RecordedRequestTemplate::of_retained_request(
+        route.clone(),
+        &RetainedLlmRequest::from_request(request.clone()),
+        &cache,
+    )
+    .expect("first canonical call");
+    let read = first.canonical_request().expect("first request");
+    assert_eq!(read.scope, request.scope);
+    request.scope.request_id = "second-call".into();
+    let second = RecordedRequestTemplate::of_retained_request(
+        route.clone(),
+        &RetainedLlmRequest::from_request(request.clone()),
+        &cache,
+    )
+    .expect("second canonical call");
+    assert_eq!(
+        second.canonical_request().expect("second request").scope,
+        request.scope
+    );
+    let extended = second
+        .clone()
+        .edit_segments(|segments| {
+            let last = segments.last_mut().expect("scope suffix");
+            let mut text = last.text_lossy();
+            assert_eq!(text.pop(), Some('}'));
+            text.push_str(",\"retained_extension\":true}");
+            *last = RequestSegment::text(text).expect("extended suffix");
+        })
+        .expect("a valid extended recorded body");
+    assert_eq!(
+        extended
+            .canonical_request()
+            .expect("extended request")
+            .scope,
+        request.scope,
+        "a recorded body with fields after scope still uses the complete decoder"
+    );
+    assert!(
+        RequestSegment::same(
+            first.retained_items().expect("first item run").0,
+            second.retained_items().expect("second item run").0,
+        ),
+        "the same configuration keeps its lowered owner across calls"
+    );
+    std::sync::Arc::make_mut(&mut request.tools)[0].description = "a changed tool".into();
+    let changed = RecordedRequestTemplate::of_retained_request(
+        route,
+        &RetainedLlmRequest::from_request(request.clone()),
+        &cache,
+    )
+    .expect("changed canonical call");
+    assert_eq!(
+        changed.canonical_request().expect("changed request").tools,
+        request.tools
+    );
+    assert_eq!(
+        first
+            .canonical_request()
+            .expect("retained first request")
+            .tools,
+        read.tools
+    );
+}
+
 #[test]
 fn fig1123_client_side_retention_cuts_only_at_genuine_user_segments() {
     let serving = route("openai-compatible", "https://gateway.example/v1", "model-a");

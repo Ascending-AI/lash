@@ -443,6 +443,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) {
         let mut content = TurnCheckpointContent::default();
         let mut encoded = 0;
+        let environment = self.environment.as_ref().map(|environment| {
+            StoredEnvironment::record(
+                environment,
+                base.and_then(|base| base.environment.as_ref()),
+                &mut content,
+                &mut encoded,
+            )
+        });
         let window = self.window.as_ref();
         let window_events = window.map_or(0, |window| window.events().len());
         let (state, request) = CheckpointState::record(
@@ -529,7 +537,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
-            environment: self.environment.clone(),
+            environment: environment
+                .as_ref()
+                .map(|environment| environment.reference.clone()),
             decided_completions: completions.head().clone(),
         };
         let chains = StoredChains {
@@ -537,6 +547,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             prompt: stored_prompt,
             events,
             completions,
+            environment,
             // A turn between model calls keeps its last request stored: the
             // next one builds on it.
             request: request.or_else(|| base.and_then(|base| base.request.clone())),
@@ -573,6 +584,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
         CheckpointWindow::check(checkpoint.window.as_ref(), window.as_ref())?;
+        let environment = checkpoint
+            .environment
+            .as_ref()
+            .map(|reference| StoredEnvironment::restore(reference, &content))
+            .transpose()?;
+        let synced = environment
+            .as_ref()
+            .map(|environment| Arc::clone(&environment.source));
         let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
@@ -603,6 +622,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             prompt: stored_prompt,
             events: stored_events,
             completions: stored_completions,
+            environment,
             request,
         });
         let machine = Self {
@@ -621,7 +641,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
             last_call_usage: checkpoint.last_call_usage,
-            environment: checkpoint.environment,
+            environment: synced,
             decided_completions,
             observed_cancellation: None,
             resume_work: None,
@@ -1079,10 +1099,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) {
         match result {
             Ok(sync) => {
-                self.environment = Some(SyncedEnvironment {
+                self.environment = Some(Arc::new(SyncedEnvironment {
                     protocol_iteration: self.protocol_iteration,
                     sync,
-                });
+                }));
                 self.state = MachineState::PrepareIteration;
             }
             Err(failure) => {

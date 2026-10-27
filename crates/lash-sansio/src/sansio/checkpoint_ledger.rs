@@ -27,7 +27,7 @@ use super::checkpoint_content::{
     Chain, CheckpointContentPin, CheckpointContentRef, TurnCheckpointContent,
 };
 use super::machine_state::outside_window;
-use super::{SavedTurn, TurnCheckpointRestoreError, TurnProtocol, TurnWindow};
+use super::{SavedTurn, SyncedEnvironment, TurnCheckpointRestoreError, TurnProtocol, TurnWindow};
 use lash_protocol_types::session_model::message::message_content_equal;
 use lash_protocol_types::{
     llm::types::LlmMessage, llm::types::LlmRequest, llm::types::RetainedLlmRequest,
@@ -349,6 +349,42 @@ fn leading<E: Clone>(
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct StoredEnvironment {
+    pub(super) source: Arc<SyncedEnvironment>,
+    pub(super) reference: CheckpointContentRef,
+}
+
+impl StoredEnvironment {
+    pub(super) fn record(
+        source: &Arc<SyncedEnvironment>,
+        base: Option<&Self>,
+        content: &mut TurnCheckpointContent,
+        encoded: &mut usize,
+    ) -> Self {
+        if let Some(base) = base
+            && Arc::ptr_eq(&base.source, source)
+        {
+            return base.clone();
+        }
+        *encoded += 1;
+        Self {
+            source: Arc::clone(source),
+            reference: content.put_value(source.as_ref()),
+        }
+    }
+
+    pub(super) fn restore(
+        reference: &CheckpointContentRef,
+        content: &TurnCheckpointContent,
+    ) -> Result<Self, TurnCheckpointRestoreError> {
+        Ok(Self {
+            source: Arc::new(content.value(reference)?),
+            reference: reference.clone(),
+        })
+    }
+}
+
 /// Every chain and value a checkpoint was stored as.
 #[derive(Clone, Debug)]
 pub(super) struct StoredChains {
@@ -356,6 +392,7 @@ pub(super) struct StoredChains {
     pub(super) prompt: StoredMessages,
     pub(super) events: Chain,
     pub(super) completions: Chain,
+    pub(super) environment: Option<StoredEnvironment>,
     /// The pending model request, or the turn's last one after its call
     /// ended: the next request builds on it.
     pub(super) request: Option<StoredRequest>,
@@ -384,6 +421,11 @@ impl StoredChains {
             .chain(self.prompt.1.blobs())
             .chain(self.events.blobs())
             .chain(self.completions.blobs())
+            .chain(
+                self.environment
+                    .iter()
+                    .map(|environment| &environment.reference),
+            )
             .chain(self.request.iter().flat_map(StoredRequest::blobs))
             .collect()
     }

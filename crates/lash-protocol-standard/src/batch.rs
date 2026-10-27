@@ -28,11 +28,25 @@ pub(crate) const BATCH_TOOL_NAME: &str = "batch";
 /// the sugar by [`BATCH_TOOL_NAME`] and the round expands it.
 const BATCH_OPERATION: &str = "standard.batch";
 
+pub(crate) fn batch_tool_definition(
+    max_members: NonZeroUsize,
+) -> lash_vocabulary::tool_contract::ToolDraft {
+    static DEFINITIONS: [std::sync::OnceLock<lash_vocabulary::tool_contract::ToolDraft>;
+        crate::BATCH_MEMBER_CEILING] =
+        [const { std::sync::OnceLock::new() }; crate::BATCH_MEMBER_CEILING];
+    match DEFINITIONS.get(max_members.get() - 1) {
+        Some(definition) => definition
+            .get_or_init(|| build_batch_tool_definition(max_members))
+            .clone(),
+        None => build_batch_tool_definition(max_members),
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(crate) fn batch_tool_definition(
+fn build_batch_tool_definition(
     max_members: NonZeroUsize,
 ) -> lash_vocabulary::tool_contract::ToolDraft {
     ToolDefinition::raw(
@@ -72,7 +86,14 @@ struct BatchResult {
 }
 
 fn batch_output_schema() -> Value {
+    #[cfg(test)]
+    SCHEMA_BUILDS.with(|count| count.set(count.get() + 1));
     schemars::schema_for!(BatchResult).to_value()
+}
+
+#[cfg(test)]
+thread_local! {
+    static SCHEMA_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) struct Member {

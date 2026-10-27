@@ -565,6 +565,54 @@ struct PhaseStore {
     blobs: std::collections::BTreeMap<super::checkpoint_content::CheckpointContentRef, Vec<u8>>,
 }
 
+/// FIG-7506: growing a tool's schema must not copy it into every phase body.
+#[test]
+fn a_synced_environment_is_encoded_once_outside_the_phase_body() {
+    let mut body_sizes = Vec::new();
+    for size in [1, 8192] {
+        let mut machine = TurnMachine::new(
+            test_config(Arc::new(ProseDriver)),
+            vec![user_message("hello")],
+            lash_protocol_types::AppendVec::new(),
+            0,
+        );
+        let effects = drain_unsynced_effects(&mut machine);
+        let sync_id = find_execution_environment_sync(&effects).expect("environment sync");
+        let mut store = PhaseStore::default();
+        store.phase(&mut machine, "before the environment sync");
+        let mut environment = recorded_environment("recorded_tool");
+        Arc::make_mut(&mut environment.tool_specs)[0].output_schema =
+            lash_vocabulary::schema_contract::SchemaContract::admit(serde_json::json!({
+                "type": "object",
+                "description": "metadata".repeat(size),
+            }))
+            .expect("declared output schema");
+        machine.handle_response(Response::ExecutionEnvironmentSynced {
+            id: sync_id,
+            result: Ok(environment),
+        });
+        assert_eq!(
+            store.phase(&mut machine, "the accepted environment"),
+            1,
+            "an accepted sync enters checkpoint content exactly once"
+        );
+        assert_eq!(
+            store.phase(&mut machine, "the same environment"),
+            0,
+            "a committed environment is not encoded again"
+        );
+        body_sizes.push(
+            serde_json::to_vec(&machine.checkpoint().checkpoint)
+                .expect("checkpoint body")
+                .len(),
+        );
+    }
+    assert_eq!(
+        body_sizes[0], body_sizes[1],
+        "the phase body names its environment instead of holding its schema"
+    );
+}
+
 impl PhaseStore {
     /// The host's pin of `digest`: its first 32 bytes.
     fn pin(digest: &super::checkpoint_content::CheckpointContentRef) -> CheckpointContentPin {

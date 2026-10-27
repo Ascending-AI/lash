@@ -56,7 +56,7 @@ mod checkpoint_ledger;
 pub use checkpoint_ledger::CheckpointDelta;
 use checkpoint_ledger::{
     CheckpointMessages, CheckpointPrompt, ContentLedger, Floors, Sequence, StoredChains,
-    StoredRequest,
+    StoredEnvironment, StoredRequest,
 };
 mod turn_window;
 pub use turn_window::{TurnWindow, TurnWindowPin};

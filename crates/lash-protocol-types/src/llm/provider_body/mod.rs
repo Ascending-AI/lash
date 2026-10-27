@@ -764,6 +764,17 @@ impl RecordedRequestTemplate {
     ) -> Result<Self, TemplateError> {
         let before = RequestSegment::text(before)?;
         let after = RequestSegment::text(after)?;
+        Self::from_shared_item_run(route, stream, generation, before, items, after)
+    }
+
+    fn from_shared_item_run(
+        route: ProviderRouteIdentity,
+        stream: bool,
+        generation: Option<GenerationReceipt>,
+        before: RequestSegment,
+        items: RequestItems,
+        after: RequestSegment,
+    ) -> Result<Self, TemplateError> {
         let mut skeleton = vec![before.clone()];
         skeleton.extend(items.iter().take(2).cloned());
         skeleton.push(after.clone());
