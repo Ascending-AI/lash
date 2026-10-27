@@ -158,6 +158,8 @@ pub(super) struct Lifter<'a> {
     /// Original names retained in lowered function tokens, keyed by binding identity.
     pub(super) bindings: BTreeMap<Name, String>,
     pub(super) module_helpers: BTreeSet<Name>,
+    /// Bindings consumed by the conditional process-handle await adapter.
+    pub(super) process_awaits: BTreeSet<Name>,
 }
 
 impl<'a> Lifter<'a> {
@@ -226,7 +228,7 @@ impl<'a> Lifter<'a> {
                 pending.extend(node.children());
             }
         }
-        Self {
+        let mut lifter = Self {
             document,
             library,
             imports,
@@ -237,7 +239,20 @@ impl<'a> Lifter<'a> {
             assigned,
             bindings,
             module_helpers: BTreeSet::new(),
+            process_awaits: BTreeSet::new(),
+        };
+        if let Some(body) = body {
+            let mut pending = vec![k::Node::Block(body)];
+            while let Some(node) = pending.pop() {
+                if let k::Node::Expr(k::Expr::If { then, r#else, .. }) = node
+                    && let Some(name) = lifter.process_await_name(then, r#else).cloned()
+                {
+                    lifter.process_awaits.insert(name);
+                }
+                pending.extend(node.children());
+            }
         }
+        lifter
     }
 
     pub(super) fn library<R: Reference>(&self, id: &R) -> Option<String> {
@@ -577,6 +592,22 @@ impl<'a> Lifter<'a> {
                 .cloned()
         };
         let caption = caption_at(0);
+        if let k::Stmt::Let { name, value } = &block[0]
+            && self.process_awaits.contains(name)
+            && match value {
+                k::Rhs::Expr(value) => self.process_await_binding(name, value),
+                k::Rhs::Action(k::Action::Await { policy, .. }) => self.is(policy, "ts.await"),
+                _ => false,
+            }
+        {
+            let value = self.rhs(value)?;
+            self.pending.push(Pending {
+                name: name.clone(),
+                value,
+                caption,
+            });
+            return Ok(1);
+        }
         // A primitive text method's receiver check, and its slice bounds:
         // the method call they precede writes and lowers them again.
         if self.receiver_check(&block[0]) {

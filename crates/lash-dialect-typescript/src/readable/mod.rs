@@ -239,6 +239,8 @@ mod tests {
             #[serde(default)]
             cell: bool,
             #[serde(default)]
+            processes: bool,
+            #[serde(default)]
             names: Vec<String>,
         }
         let library = crate::tests::library();
@@ -248,6 +250,7 @@ mod tests {
             ("inbox", "send_item"),
             ("workflows", "create"),
             ("corpus", "echo"),
+            ("processes", "await"),
         ] {
             packages
                 .entry(lash_kernel_value::PackagePath::parse(package).unwrap())
@@ -273,9 +276,12 @@ mod tests {
                     },
                 );
         }
+        let process_namespaces =
+            lash_kernel_dialect::Namespaces::new(packages.clone(), Default::default(), &|_| false)
+                .unwrap();
+        packages.remove(&lash_kernel_value::PackagePath::parse("processes").unwrap());
         let namespaces =
             lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
-        let environment = Environment::new(library, &namespaces);
         let mut cases: Vec<Case> = serde_json::from_str(include_str!("corpus.json")).unwrap();
         let captions: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lash-kernel-conformance/captions/typescript.json"
@@ -284,6 +290,14 @@ mod tests {
         cases.extend(serde_json::from_value::<Vec<Case>>(captions["readback"].clone()).unwrap());
         let mut failures = Vec::new();
         for case in &cases {
+            let environment = Environment::new(
+                library,
+                if case.processes {
+                    &process_namespaces
+                } else {
+                    &namespaces
+                },
+            );
             let mode = if case.cell {
                 lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
             } else {

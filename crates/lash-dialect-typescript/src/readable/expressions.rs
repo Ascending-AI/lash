@@ -14,6 +14,11 @@ impl Lifter<'_> {
             k::Expr::Literal(literal) => literal_of(literal),
             k::Expr::Variable(name) => self.variable(name),
             k::Expr::If { cond, then, r#else } => {
+                if let Some(name) = self.process_await_name(then, r#else)
+                    && let Some(awaited) = self.take_pending(name)
+                {
+                    return Ok(awaited);
+                }
                 let test = self.condition(cond)?;
                 let then = self.expr(then)?;
                 let otherwise = self.expr(r#else)?;
@@ -96,6 +101,55 @@ impl Lifter<'_> {
             return Ok(value);
         }
         Ok(Expr::Ident(self.binding(name)?))
+    }
+
+    /// `await_process` holds the ordinary await before checking for a process
+    /// handle. Keep it pending until that check reads it, in either scope form.
+    pub(super) fn process_await_binding(&self, name: &Name, value: &k::Expr) -> bool {
+        self.process_awaits.contains(name)
+            && matches!(value, k::Expr::Act(act)
+            if matches!(&act.kind, k::ActKind::Await(policy) if self.is(policy, "ts.await")))
+    }
+
+    /// The process branch is implicit in the original `await`. Full read-back
+    /// verification also checks the guard and the boundary's forwarding factory.
+    pub(super) fn process_await_name<'a>(
+        &self,
+        then: &'a k::Expr,
+        otherwise: &'a k::Expr,
+    ) -> Option<&'a Name> {
+        let (k::Expr::Act(act), k::Expr::Variable(name)) = (then, otherwise) else {
+            return None;
+        };
+        let k::ActKind::Perform {
+            slot,
+            then_yield: true,
+            ..
+        } = &act.kind
+        else {
+            return None;
+        };
+        if self.imports.get(slot)?.name != lash_kernel_dialect::service_name("processes", "await") {
+            return None;
+        }
+        let [k::Expr::Act(boundary)] = act.args.as_slice() else {
+            return None;
+        };
+        if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id))
+            if self.is(id, "ts.copy_boundary"))
+        {
+            return None;
+        }
+        let [k::Expr::Record(fields), _factory] = boundary.args.as_slice() else {
+            return None;
+        };
+        let [field] = fields.as_slice() else {
+            return None;
+        };
+        if field.field != "handle" || field.value != k::Expr::Variable(name.clone()) {
+            return None;
+        }
+        Some(name)
     }
 
     fn native(&mut self, function: &lash_kernel_value::FunctionId, args: &[k::Expr]) -> Lift<Expr> {
@@ -236,6 +290,9 @@ impl Lifter<'_> {
 
     /// `let name = value in body`: the scoped forms the front end writes.
     fn scoped(&mut self, name: &Name, value: &k::Expr, body: &k::Expr) -> Lift<Expr> {
+        if self.process_await_binding(name, value) {
+            return self.scoped_temporary(name, value, body);
+        }
         if let Some(method) = self.array_callback_expression(name, value, body)? {
             return Ok(method);
         }
