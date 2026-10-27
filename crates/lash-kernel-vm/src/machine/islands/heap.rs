@@ -374,6 +374,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         true
     }
 
+    #[inline(never)]
     pub(super) fn make(
         &mut self,
         make: crate::compile::expr::Make,
@@ -483,6 +484,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         .map(|answer| answer.value)
     }
 
+    #[inline(never)]
     pub(super) fn store(
         &mut self,
         field: Option<usize>,
