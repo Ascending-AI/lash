@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "int.parse: K-VAL-032 edge",
-      "function": "0c329b152ab5afde2944d22707f0c0f54388529207c09f27a9132e803ac8c969",
+      "function": "8596b982287c5b699e243d13e4d676ca2bbcb55701827c2d702480272fa67083",
       "args": [
         {
           "text": "+00FF"
@@ -24,7 +24,7 @@
     },
     {
       "name": "int.to_text: K-VAL-032 edge",
-      "function": "7735511b4878f4db5d2b8060da40d4ffdf8b3e71b66bee72b3c5501b073de1c7",
+      "function": "f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e",
       "args": [
         {
           "int": "-255"
@@ -45,7 +45,7 @@
     },
     {
       "name": "num.to_text: K-VAL-032 edge",
-      "function": "69d81324a1baa8cc7c02011d8a84288b8c813bd2a8373a8c234d3f9e4e48ae8c",
+      "function": "f48b1c540d09da2aeae76af889ee1db8754e61388cd906811b33a3c66bd9af21",
       "args": [
         {
           "int": "-123"

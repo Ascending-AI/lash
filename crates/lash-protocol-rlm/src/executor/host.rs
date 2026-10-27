@@ -720,6 +720,9 @@ impl KernelEffects for CellHost<'_> {
         {
             trace.call_ended(at, &effect.call, &reply.output.outcome);
         }
+        let closing = matches!(&reply.output.outcome,
+            lash_core::ToolCallOutcome::Cancelled(cancelled)
+                if cancelled.origin == Some(lash_core::CancelOrigin::RunClosing));
         let mut outcome = match &reply.output.outcome {
             lash_core::ToolCallOutcome::Success(_) => {
                 let value = reply.output.value_for_projection().to_string();
@@ -786,7 +789,19 @@ impl KernelEffects for CellHost<'_> {
                 };
             }
         }
-        Some(outcome)
+        // Closing settles leftovers after guest execution ended. A restored
+        // checkpoint may precede that end, so these records still belong in
+        // its host ledger but must not race the original winner in guest code.
+        if closing {
+            tracing::debug!(
+                call_id = %effect.call,
+                operation = ?effect.operation,
+                origin = ?lash_core::CancelOrigin::RunClosing,
+                delivery = "host_ledger_only",
+                "restored run closing cancellation"
+            );
+        }
+        (!closing).then_some(outcome)
     }
 
     fn stop_requested(&self) -> bool {

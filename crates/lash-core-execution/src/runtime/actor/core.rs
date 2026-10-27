@@ -1153,7 +1153,9 @@ impl ActorContext {
             match opened {
                 Ok(tx) => break tx,
                 Err(error) => {
-                    let displaced_here = lash_durable::fenced_read::retained_displaced(
+                    // Revision recovery is cold. Keep its state out of every
+                    // successful retained-read future's allocation.
+                    let displaced_here = Box::pin(lash_durable::fenced_read::retained_displaced(
                         self.actor(),
                         self.epoch(),
                         revision,
@@ -1167,7 +1169,7 @@ impl ActorContext {
                                 .map(super::owner_state::OwnerState::revision)
                                 .transpose()
                         },
-                    )
+                    ))
                     .await?;
                     if !displaced_here {
                         return Err(error);

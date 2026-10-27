@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "kind null",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         "null"
       ],
@@ -19,7 +19,7 @@
     },
     {
       "name": "kind absent",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         "absent"
       ],
@@ -35,7 +35,7 @@
     },
     {
       "name": "kind bool",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "bool": false
@@ -53,7 +53,7 @@
     },
     {
       "name": "kind integer",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "int": "1"
@@ -71,7 +71,7 @@
     },
     {
       "name": "kind float",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "float": "1.0"
@@ -89,7 +89,7 @@
     },
     {
       "name": "kind text",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "text": "x"
@@ -107,7 +107,7 @@
     },
     {
       "name": "kind bytes",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "bytes": "00ff"
@@ -125,7 +125,7 @@
     },
     {
       "name": "kind timestamp",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "timestamp": "0"
@@ -143,7 +143,7 @@
     },
     {
       "name": "kind tuple",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "tuple": [
@@ -165,7 +165,7 @@
     },
     {
       "name": "kind list",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "list": [
@@ -187,7 +187,7 @@
     },
     {
       "name": "kind map",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "map": [
@@ -214,7 +214,7 @@
     },
     {
       "name": "kind set",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "set": [
@@ -236,7 +236,7 @@
     },
     {
       "name": "kind record",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "record": [
@@ -261,7 +261,7 @@
     },
     {
       "name": "kind error",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "error": {
@@ -283,7 +283,7 @@
     },
     {
       "name": "kind function",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "function": {"link":"1111111111111111111111111111111111111111111111111111111111111111","function":"ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5"}
@@ -301,7 +301,7 @@
     },
     {
       "name": "kind handle",
-      "function": "ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5",
+      "function": "e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795",
       "args": [
         {
           "handle": {

@@ -288,6 +288,8 @@ pub struct ExpressionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ActionView {
+    /// The exact action issue ordinal, including actions folded into authored nodes.
+    pub ordinal: u32,
     pub site: Site,
     pub kind: SiteKind,
     /// Whose code or which outside party the action reaches: what a host
@@ -557,8 +559,10 @@ pub fn derive_callable(
             .map(|f| f.signature.result.clone()),
         _ => None,
     };
+    let ordinals = document.ordinals();
     let mut walk = Walk {
-        ordinals: document.site_ordinals(),
+        ordinals: ordinals.sites,
+        action_ordinals: ordinals.actions,
         document,
         graph,
         context,
@@ -644,9 +648,13 @@ pub fn derive_callable(
         .collect();
     view.dataflow.bindings = bindings;
     view.entry = entry::entry(document, entry, &view.dataflow.parameters, &view, callable);
+    // Authored nodes fold lowering statements. The statement inventory still
+    // addresses every execution count and replay coordinate in the document.
+    let statements = view.statements.clone();
     let folded = folding::prepare(document, &mut view, context);
     coarse::project(document, graph, functions, &mut view, context);
     folded.attach(&mut view);
+    view.statements = statements;
     Ok(view)
 }
 
@@ -699,6 +707,7 @@ struct Context {
 struct Walk<'a> {
     context: &'a ViewContext,
     ordinals: BTreeMap<Site, u32>,
+    action_ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
     entry: Callable,
@@ -1225,6 +1234,7 @@ impl<'a> Walk<'a> {
             self.context,
         ));
         self.view.dataflow.actions.push(ActionView {
+            ordinal: self.action_ordinals[&node.site],
             site: node.site.clone(),
             kind,
             role,

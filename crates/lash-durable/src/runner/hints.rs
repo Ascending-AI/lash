@@ -79,6 +79,21 @@ impl WakeSink {
         })
     }
 
+    /// Whether every attached local node has no busy activation of `actor`.
+    /// This is a fixture observation, not evidence that a turn committed.
+    #[cfg(feature = "testing")]
+    pub fn actor_is_idle_for_testing(&self, actor: &ActorKey) -> bool {
+        let nodes = self.nodes();
+        !nodes.is_empty()
+            && nodes.iter().all(|(_, hints)| {
+                hints
+                    .slots()
+                    .by_actor
+                    .get(actor)
+                    .is_none_or(|slot| slot.idle.is_some())
+            })
+    }
+
     /// Hand `hints` what this sink is handed, until the answer drops.
     #[must_use = "the node hears the sink's wakes only while the attachment lives"]
     pub fn attach(&self, hints: &Hints) -> WakeAttachment {

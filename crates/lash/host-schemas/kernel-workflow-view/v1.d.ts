@@ -191,6 +191,10 @@ export type ActionView = {
   "destination"?: (Place | null);
   "kind": SiteKind;
   /**
+   * The exact action issue ordinal, including actions folded into authored nodes.
+   */
+  "ordinal": number;
+  /**
    * Every canonical effect this action reaches, including calls through
    * library bodies and statically known declared callees. Derived from the
    * checker's effect derivation, in canonical order with duplicates removed.

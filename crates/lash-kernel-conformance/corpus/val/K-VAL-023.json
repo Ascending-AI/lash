@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "tuple equality compares length order and every member",
-      "document": "kernel 1\nnumbers by_spelling\nnative @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = (nan,)\n  finish [eq((1, \"x\"), (1.0, \"x\")), eq((1,), (1, 2)), eq((1, 2), (2, 1)), eq(x, x)]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = (nan,)\n  finish [eq((1, \"x\"), (1.0, \"x\")), eq((1,), (1, 2)), eq((1, 2), (2, 1)), eq(x, x)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

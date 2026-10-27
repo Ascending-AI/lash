@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @b93d1d34db3b20cd8781bd45de3d855c00df25a5cb1ff5aee6751eca59e91d51\ndefinition \"function json.stringify(value: Any) -> Text\\nkernel 1\\nerrors \\\"json_depth\\\", \\\"json_key\\\", \\\"json_number\\\"\\ncharge sum(1, deep(value), deep(result))\\nnative\\n\"\nmain {\n  let xs = [null]\n  let wrapped = (xs,)\n  set xs[0] = wrapped\n  try {\n    print json.stringify(wrapped)\n  } catch e {\n    print e.kind\n  }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @698a62a488c7d83a20891af5f1d0a021c068724c582226395933e10411bde9d3\ndefinition \"function json.stringify(value: Any) -> Text\\nkernel 1\\nerrors \\\"json_depth\\\", \\\"json_key\\\", \\\"json_number\\\"\\ncharge sum(1, deep(value), deep(result))\\nnative\\n\"\nmain {\n  let xs = [null]\n  let wrapped = (xs,)\n  set xs[0] = wrapped\n  try {\n    print json.stringify(wrapped)\n  } catch e {\n    print e.kind\n  }\n}\n",
       "expected": {
         "end": {
           "finished": "null"

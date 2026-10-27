@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "eq: K-VAL-023 edge",
-      "function": "04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
       "args": [
         {
           "tuple": [

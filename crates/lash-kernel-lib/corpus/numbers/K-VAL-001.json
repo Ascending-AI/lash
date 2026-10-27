@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "kind closure",
-      "document": "kernel 1\nnumbers by_spelling\nnative @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let f = fn kernel.anonymous \n  finish kind(f)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let f = fn kernel.anonymous \n  finish kind(f)\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -16,7 +16,7 @@
     },
     {
       "name": "kind ref",
-      "document": "kernel 1\nnumbers by_spelling\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\nnative @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let a = []\n  finish kind(ref(a))\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e42a28ffccf81eb1a458b73e21610ba5fd13393aab81d4bd08d968b17ff3db79\nnative @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let a = []\n  finish kind(ref(a))\n}\n",
       "expected": {
         "end": {
           "finished": {
@@ -29,7 +29,7 @@
     },
     {
       "name": "kind task",
-      "document": "kernel 1\nnumbers by_spelling\nnative @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse kind = @ddff8c89e40d063d3dbad23a37e7963387874d6664a73899f77b96d3477d51b5\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let task = spawn invoke f()\n  do join(task)\n  finish kind(task)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function kind(arg0: Any) -> Text\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, 0, deep(result))\\nnative\\n\"\nmain {\n  let task = spawn invoke f()\n  do join(task)\n  finish kind(task)\n}\n",
       "expected": {
         "end": {
           "finished": {

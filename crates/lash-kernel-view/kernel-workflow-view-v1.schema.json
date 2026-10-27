@@ -471,6 +471,12 @@
         "kind": {
           "$ref": "#/$defs/SiteKind"
         },
+        "ordinal": {
+          "description": "The exact action issue ordinal, including actions folded into authored nodes.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "performs": {
           "description": "Every canonical effect this action reaches, including calls through\nlibrary bodies and statically known declared callees. Derived from the\nchecker's effect derivation, in canonical order with duplicates removed.",
           "items": {
@@ -505,6 +511,7 @@
         }
       },
       "required": [
+        "ordinal",
         "site",
         "kind",
         "role",

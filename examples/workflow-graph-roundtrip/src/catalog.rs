@@ -348,7 +348,7 @@ mod tests {
             .iter()
             .map(|action| StatementCoverage {
                 site: action.site.clone(),
-                runs: count(view.action_node(&action.site.position()).unwrap().ordinal),
+                runs: count(action.ordinal),
             })
             .collect();
         actions.sort_by_key(|action| action.site.clone());

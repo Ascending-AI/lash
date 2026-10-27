@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "order is exact lexicographic and prefix first",
-      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let a = perform 0() as Timestamp\n  let b = perform 0() as Timestamp\n  finish [compare(9007199254740993, 9007199254740992.0), compare(b\"ff\", b\"ff00\"), compare(false, true), compare((1, 2), (1, 3)), compare([1], [1, 0]), compare(a, b)]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let a = perform 0() as Timestamp\n  let b = perform 0() as Timestamp\n  finish [compare(9007199254740993, 9007199254740992.0), compare(b\"ff\", b\"ff00\"), compare(false, true), compare((1, 2), (1, 3)), compare([1], [1, 0]), compare(a, b)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -64,7 +64,7 @@
     },
     {
       "name": "unordered kind null",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = null\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = null\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -77,7 +77,7 @@
     },
     {
       "name": "unordered kind absent",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = absent\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = absent\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -90,7 +90,7 @@
     },
     {
       "name": "unordered kind map{}",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = map{}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = map{}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -103,7 +103,7 @@
     },
     {
       "name": "unordered kind set{}",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = set{}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = set{}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -116,7 +116,7 @@
     },
     {
       "name": "unordered kind {}",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = {}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let x = {}\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -129,7 +129,7 @@
     },
     {
       "name": "unordered kind fn() { return null }",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = fn kernel.anonymous \n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = fn kernel.anonymous \n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -142,7 +142,7 @@
     },
     {
       "name": "unordered kind error.new(\"k\", \"m\")",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"k\", \"m\")\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\nnative @6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"k\", \"m\")\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -155,7 +155,7 @@
     },
     {
       "name": "unordered kind ref([])",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let x = ref([])\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\nnative @e42a28ffccf81eb1a458b73e21610ba5fd13393aab81d4bd08d968b17ff3db79\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let x = ref([])\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -168,7 +168,7 @@
     },
     {
       "name": "unordered kind &f",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  try {\n    print compare(x, x)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -181,7 +181,7 @@
     },
     {
       "name": "order refuses mixed sequence kinds",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print compare((1,), [1])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print compare((1,), [1])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -194,7 +194,7 @@
     },
     {
       "name": "task handles have no order",
-      "document": "kernel 1\nnumbers by_spelling\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let t = spawn invoke f()\n  try {\n    print compare(t, t)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse compare = @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let t = spawn invoke f()\n  try {\n    print compare(t, t)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -207,7 +207,7 @@
     },
     {
       "name": "host handles have no order",
-      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.resource() -> Handle(\"db\")\nnative @06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let h = perform 0() as Handle(\"db\")\n  try {\n    print compare(h, h)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.resource() -> Handle(\"db\")\nnative @9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990\ndefinition \"function compare(arg0: Any, arg1: Any) -> Int\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\", \\\"unordered\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let h = perform 0() as Handle(\"db\")\n  try {\n    print compare(h, h)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [

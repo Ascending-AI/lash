@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = (1, 2)\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = (1, 2)\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -18,7 +18,7 @@
       "name": "deep of (1, 2) is 7"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = [1, 2]\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = [1, 2]\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -35,7 +35,7 @@
       "name": "deep of [1, 2] is 7"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = map{1: 2}\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = map{1: 2}\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -52,7 +52,7 @@
       "name": "deep of map{1:2} is 7"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = {a: [1]}\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.deep = @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = {a: [1]}\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -69,7 +69,7 @@
       "name": "deep of {a:[1]} is 6"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let a = [1]\n  let x = [a, a]\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let a = [1]\n  let x = [a, a]\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -86,7 +86,7 @@
       "name": "deep of shared list is 7"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @981f9d3fc02ed2a960715d6fa159b273c9f5f3c8b670e1a79ae14e1742f690bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = []\n  set x[0] = x\n  finish probe.deep(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0af1d898b80792a0fb621d9b05d5be97f794469d3f4249b4b89ca0ff9048f4bb\ndefinition \"function probe.deep(x: Any) -> Any\\nkernel 1\\ncharge deep(x)\\nnative\\n\"\nmain {\n  let x = []\n  set x[0] = x\n  finish probe.deep(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615

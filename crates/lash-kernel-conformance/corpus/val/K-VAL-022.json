@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "immutable equality compares contents",
-      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let a = perform 0() as Timestamp\n  let b = perform 0() as Timestamp\n  let c = perform 0() as Timestamp\n  finish [eq(null, null), eq(absent, absent), eq(true, true), eq(true, false), eq(\"😀\", \"😀\"), eq(\"a\", \"b\"), eq(b\"00ff\", b\"00ff\"), eq(b\"00ff\", b\"00fe\"), eq(a, b), eq(a, c)]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153\ndefinition \"function eq(arg0: Any, arg1: Any) -> Bool\\nkernel 1\\nerrors \\\"arity\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  let a = perform 0() as Timestamp\n  let b = perform 0() as Timestamp\n  let c = perform 0() as Timestamp\n  finish [eq(null, null), eq(absent, absent), eq(true, true), eq(true, false), eq(\"😀\", \"😀\"), eq(\"a\", \"b\"), eq(b\"00ff\", b\"00ff\"), eq(b\"00ff\", b\"00fe\"), eq(a, b), eq(a, c)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

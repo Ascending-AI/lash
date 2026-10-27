@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "integer quotient rounds once before float division rules apply",
-      "document": "kernel 1\nnumbers by_spelling\nnative @fd5f2d08b3f838ee342e7a86f9125313b8d7b935ce69224393971ad403247399\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  finish [div(9007199254740993, 3), div(1.0, 0.0), div(0.0, 0.0), div(-1.0, 0.0)]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  finish [div(9007199254740993, 3), div(1.0, 0.0), div(0.0, 0.0), div(-1.0, 0.0)]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "integer zero divisor raises division by zero",
-      "document": "kernel 1\nnumbers by_spelling\nnative @fd5f2d08b3f838ee342e7a86f9125313b8d7b935ce69224393971ad403247399\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div(1, 0)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "integer quotient overflow raises number range",
-      "document": "kernel 1\nnumbers by_spelling\nnative @fd5f2d08b3f838ee342e7a86f9125313b8d7b935ce69224393971ad403247399\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba\ndefinition \"function div(arg0: Number, arg1: Number) -> Float\\nkernel 1\\nerrors \\\"arity\\\", \\\"division_by_zero\\\", \\\"number_range\\\", \\\"type_error\\\"\\ncharge sum(1, product(sum(deep(arg0), deep(arg1)), sum(deep(arg0), deep(arg1))), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print div(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 1)\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

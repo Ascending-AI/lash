@@ -36,6 +36,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(2).as_deref() == Some("--regex") {
         return regex(std::path::Path::new(&root), &registry);
     }
+    if std::env::args().nth(2).as_deref() == Some("--document-identities") {
+        return document_identities(std::path::Path::new(&root));
+    }
     if std::env::args().nth(2).as_deref() == Some("--charges") {
         return charges(std::path::Path::new(&root), registry);
     }
@@ -270,6 +273,154 @@ fn native_identities(
         }
     }
     println!("refreshed {changed} numeric identity shards across {cases} cases");
+    Ok(())
+}
+
+/// Re-identify fixtures written before projection entered canonical definitions.
+/// This recorder never decodes or migrates stored execution state.
+fn document_identities(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    use lash_kernel_value::tokens::{TokenCodec as _, TokenWriter, logical_digest};
+    fn previous(definition: &lash_kernel_doc::FunctionDefinition) -> lash_kernel_value::FunctionId {
+        let mut out = TokenWriter::new();
+        out.seq(7);
+        out.unsigned(u64::from(definition.kernel));
+        definition.name.encode(&mut out);
+        definition.signature.encode(&mut out);
+        definition.errors.encode(&mut out);
+        definition.guard.encode(&mut out);
+        definition.implementation.encode(&mut out);
+        out.unsigned(u64::from(definition.native_version));
+        lash_kernel_value::FunctionId::from_bytes(logical_digest(&out.into_bytes()))
+    }
+    fn definitions(
+        source: &str,
+    ) -> Result<Vec<lash_kernel_doc::FunctionDefinition>, Box<dyn std::error::Error>> {
+        source
+            .lines()
+            .filter_map(|line| line.strip_prefix("definition "))
+            .map(|text| {
+                Ok(lash_kernel_doc::parse_definition(&serde_json::from_str::<
+                    String,
+                >(text)?)?)
+            })
+            .collect()
+    }
+    fn callable_links(value: &serde_json::Value, links: &mut std::collections::BTreeSet<String>) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                if fields
+                    .get("function")
+                    .is_some_and(serde_json::Value::is_string)
+                    && let Some(link) = fields.get("link").and_then(serde_json::Value::as_str)
+                {
+                    links.insert(link.to_owned());
+                }
+                for child in fields.values() {
+                    callable_links(child, links);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    callable_links(child, links);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                files(&path, out)?;
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut paths = Vec::new();
+    for dir in [
+        "crates/lash-kernel-conformance/corpus",
+        "crates/lash-kernel-conformance/protocol",
+        "crates/lash-kernel-conformance/supplements",
+        "crates/lash-kernel-lib/corpus/numbers",
+    ] {
+        files(&root.join(dir), &mut paths)?;
+    }
+    paths.sort();
+    let mut changed = 0;
+    for path in paths {
+        let original = std::fs::read_to_string(&path)?;
+        let shard: serde_json::Value = serde_json::from_str(&original)?;
+        let Some(cases) = shard["cases"].as_array() else {
+            continue;
+        };
+        let mut updated = original.clone();
+        for case in cases {
+            if case["expected"]["end"] == "refused" {
+                continue;
+            }
+            let Some(before) = case["document"].as_str() else {
+                continue;
+            };
+            let old = definitions(before)?;
+            let mut ids: std::collections::BTreeMap<_, _> = old
+                .iter()
+                .map(|definition| (previous(definition), definition.identity()))
+                .collect();
+            let mut source;
+            loop {
+                source = before.to_owned();
+                for (old, new) in &ids {
+                    source = source.replace(&old.to_string(), &new.to_string());
+                }
+                let current = definitions(&source)?;
+                let next = old
+                    .iter()
+                    .zip(&current)
+                    .map(|(old, new)| (previous(old), new.identity()))
+                    .collect();
+                if next == ids {
+                    break;
+                }
+                ids = next;
+            }
+            // Reparse only as validation; preserve the written source's
+            // ordering and all observations instead of recording execution.
+            let document = parse_document(&source)?;
+            let mut links = std::collections::BTreeSet::new();
+            callable_links(&case["expected"], &mut links);
+            if !links.is_empty() {
+                if !document.imports.is_empty() {
+                    return Err(
+                        "a callable origin with Imports needs its explicit fixture fills".into(),
+                    );
+                }
+                let link = lash_kernel_value::Link {
+                    document: document.identity(),
+                    fills: Default::default(),
+                }
+                .identity()
+                .to_string();
+                for old in links {
+                    updated = updated.replace(&old, &link);
+                }
+            }
+            for (old, new) in &ids {
+                // Exact coordinates and guard identities in observations
+                // follow the same declarations; value and charge oracles stay.
+                updated = updated.replace(&old.to_string(), &new.to_string());
+            }
+        }
+        if updated != original {
+            std::fs::write(path, updated)?;
+            changed += 1;
+        }
+    }
+    println!("refreshed {changed} document identity shards");
     Ok(())
 }
 

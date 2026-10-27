@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a host starts the declared entry with its signature",
-      "document": "kernel 1\nnumbers by_spelling\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"b35ec3b49ba9fed551c372a18f2ef1e3fdf488484b9c725ac42e5c39b6bd3dbb\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"x\\\",\\\"ty\\\":\\\"int\\\"}],\\\"result\\\":\\\"int\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(x: Int) -> Int\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nmain {\n  finish 99\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nexport start \"{\\\"kind\\\":\\\"function\\\",\\\"value\\\":{\\\"function\\\":\\\"25d127498bae29eacd13fb49fd0ac73ae2b2bc18917138449e308a7003907cf4\\\",\\\"signature\\\":{\\\"params\\\":[{\\\"name\\\":\\\"x\\\",\\\"ty\\\":\\\"int\\\"}],\\\"result\\\":\\\"int\\\"},\\\"convention\\\":{\\\"kind\\\":\\\"direct\\\"},\\\"asynchronous\\\":false,\\\"rest\\\":false}}\"\ndefinition \"function start(x: Int) -> Int\\nkernel 1\\nmetering statements\\nbody {\\n  return x\\n}\\n\"\nmain {\n  finish 99\n}\n",
       "expected": {
         "end": {
           "finished": {

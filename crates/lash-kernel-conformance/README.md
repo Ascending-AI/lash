@@ -48,6 +48,10 @@ expected observations. Numeric native identities are refreshed with the same
 recorder and `--native-identities`; it preserves arguments, results, charges
 and work bounds. `--regex` refreshes regex guard identities without changing
 their limits or cleanup oracles.
+`--document-identities` refreshes declarations and their exact references after
+projection entered canonical function encoding. It also refreshes identity-based
+coordinates and guard names. It preserves source order, refusal cases, values,
+charges and work bounds. Review the identity-only diff before committing.
 
 `environment` defaults to no host reads or deliveries, a charge bound of
 1,000,000, 16 MiB of memory, call depth 64, and 128 live tasks, requests per

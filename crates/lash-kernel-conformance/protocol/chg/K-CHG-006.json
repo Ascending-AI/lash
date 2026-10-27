@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 0\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 0\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -18,7 +18,7 @@
       "name": "magnitude of 0 is 0"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 3.9\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 3.9\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -35,7 +35,7 @@
       "name": "magnitude of 3.9 is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = -1\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = -1\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -52,7 +52,7 @@
       "name": "magnitude of -1 is 0"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = nan\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = nan\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -69,7 +69,7 @@
       "name": "magnitude of nan is 0"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = inf\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = inf\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -86,7 +86,7 @@
       "name": "magnitude of inf is 0"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = -inf\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = -inf\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -103,7 +103,7 @@
       "name": "magnitude of -inf is 0"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 18446744073709551616\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = 18446744073709551616\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -120,7 +120,7 @@
       "name": "magnitude of 18446744073709551616 is 18446744073709551615"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @e8845a22aa5b77f8a8126530f2453cb345c41cb4df4e2941eaaf34eed041ca59\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = \"3\"\n  finish probe.magnitude(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.magnitude = @5f0a315384c2ea4488a8ff3a9ff87ea52d8c8a4897ec3f1b84f4bd8e20848319\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function probe.magnitude(x: Any) -> Any\\nkernel 1\\ncharge magnitude(x)\\nnative\\n\"\nmain {\n  let x = \"3\"\n  finish probe.magnitude(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615

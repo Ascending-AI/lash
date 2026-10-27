@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "machine functions are recognised by identity inside expressions",
-      "document": "kernel 1\nnumbers by_spelling\nnative @128407c53bdfd565fbbdeba91c153db7af4babaf691b82948f320faffec64632\ndefinition \"function tasks.unfinished() -> List(Task(Any))\\nkernel 1\\ncharge size(result)\\nnative\\n\"\nmain {\n  finish tasks.unfinished()\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @de0ae3c95e1748a1a13e604c2bd975e4fbd331388e20903190110b0587f54344\ndefinition \"function tasks.unfinished() -> List(Task(Any))\\nkernel 1\\ncharge size(result)\\nnative\\n\"\nmain {\n  finish tasks.unfinished()\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,7 +16,7 @@
     },
     {
       "name": "deref is an expression and returns the same mutable object",
-      "document": "kernel 1\nnumbers by_spelling\nnative @1f19e940ec199769e419707cc9592a2fe52b58b70b37efec416fcd5d4a1855c1\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\ndefinition \"function deref(r: Any) -> Any\\nkernel 1\\ncharge 1\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let a = [1]\n  let b = deref(ref(a))\n  set b[0] = 7\n  finish a[0]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @4c49befb4a3eb6687dbfa7eccc57c2be848c99db5949221adaffde21338be358\nnative @e42a28ffccf81eb1a458b73e21610ba5fd13393aab81d4bd08d968b17ff3db79\ndefinition \"function deref(r: Any) -> Any\\nkernel 1\\ncharge 1\\nnative\\n\"\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  let a = [1]\n  let b = deref(ref(a))\n  set b[0] = 7\n  finish a[0]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

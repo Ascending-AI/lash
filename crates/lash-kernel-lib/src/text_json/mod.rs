@@ -29,7 +29,7 @@ pub(super) enum Selection<'a> {
     Native(&'a str),
 }
 pub(super) struct Function {
-    definition: Option<FunctionDefinition>,
+    definition: Option<Box<FunctionDefinition>>,
     native: Option<Arc<dyn NativeFunction>>,
 }
 impl Function {
@@ -122,7 +122,7 @@ pub fn text_json() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
     catalogue(&Selection::Definitions)
         .into_iter()
         .map(|function| match (function.definition, function.native) {
-            (Some(definition), Some(native)) => (definition, native),
+            (Some(definition), Some(native)) => (*definition, native),
             _ => unreachable!("definition selection builds each definition and native"),
         })
         .collect()
@@ -223,7 +223,7 @@ fn prepared_definition(
     );
     let arity = params.iter().filter(|param| !param.optional).count()..=params.len();
     Function {
-        definition: Some(FunctionDefinition {
+        definition: Some(Box::new(FunctionDefinition {
             projection: Default::default(),
             kernel: KERNEL_VERSION,
             name,
@@ -232,7 +232,7 @@ fn prepared_definition(
             guard: None,
             implementation: Implementation::Native { charge },
             native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
-        }),
+        })),
         native: Some(Arc::new(Native {
             function: native,
             arity,

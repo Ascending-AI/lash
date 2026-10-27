@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "text holds scalars and empty text",
-      "document": "kernel 1\nnumbers by_spelling\nnative @17992aea1494ff51aa55686611024c00e6b9f8010009bde2b3af3c190553827c\nnative @7482cfd6b4c420a9c241554beaea7b98eb0406fc157fbca927237ed49928ed92\nnative @7538fc2b40de7725ab0be113b2ee3f24a45910d360de8bbf00b0024e62488a1f\ndefinition \"function text.from_code_points(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\ndefinition \"function text.len(text: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(result))\\nnative\\n\"\ndefinition \"function text.from_utf16_units(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  finish [text.len(\"\"), text.from_code_points([128512]), text.from_utf16_units([55357, 56832])]\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @4da82f05b0d8218057fed5368ac897fd42bd09f8ea5d7712d9c7da1ab503f08d\nnative @244ba3de95bbfe0f666391e3f5fda0efcc507d12f62777e35b10a9daa080ae0e\nnative @ad2912531724add472f6e75095103de68a5eeb62f409bb89d8578218ce2bd108\ndefinition \"function text.from_code_points(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\ndefinition \"function text.len(text: Text) -> Int\\nkernel 1\\ncharge sum(1, deep(text), deep(result))\\nnative\\n\"\ndefinition \"function text.from_utf16_units(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  finish [text.len(\"\"), text.from_code_points([128512]), text.from_utf16_units([55357, 56832])]\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -26,7 +26,7 @@
     },
     {
       "name": "scalar construction refuses a surrogate",
-      "document": "kernel 1\nnumbers by_spelling\nnative @17992aea1494ff51aa55686611024c00e6b9f8010009bde2b3af3c190553827c\ndefinition \"function text.from_code_points(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print text.from_code_points([55296])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @4da82f05b0d8218057fed5368ac897fd42bd09f8ea5d7712d9c7da1ab503f08d\ndefinition \"function text.from_code_points(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print text.from_code_points([55296])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -39,7 +39,7 @@
     },
     {
       "name": "UTF16 construction refuses an unpaired surrogate",
-      "document": "kernel 1\nnumbers by_spelling\nnative @7538fc2b40de7725ab0be113b2ee3f24a45910d360de8bbf00b0024e62488a1f\ndefinition \"function text.from_utf16_units(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print text.from_utf16_units([55296])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @ad2912531724add472f6e75095103de68a5eeb62f409bb89d8578218ce2bd108\ndefinition \"function text.from_utf16_units(items: List(Int)) -> Text\\nkernel 1\\nerrors \\\"invalid_scalar\\\", \\\"invalid_utf16\\\"\\ncharge sum(1, deep(items), deep(result))\\nnative\\n\"\nmain {\n  try {\n    print text.from_utf16_units([55296])\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],

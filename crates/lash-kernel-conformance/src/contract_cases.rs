@@ -680,7 +680,7 @@ fn identity_definition() {
     let original = definition(NATIVE);
     assert_eq!(
         original.identity().to_string(),
-        "081d3941dffce3df102fd8cd9cae4f8ffbe9f776be0286bbcfd40671dc087430"
+        "c5fa3169db03519a6c9ab76f0c2f387f0bfd4cacb4525c61f91f31c47a1c6838"
     );
     let first = original.identity();
     let json: serde_json::Value = serde_json::from_str(&original.to_json().unwrap()).unwrap();

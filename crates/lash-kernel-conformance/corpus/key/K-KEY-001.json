@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "all immutable key kinds and nested tuples are legal",
-      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @3536009c2e2586efd0959aaef06b545981e14eba3cf77a4446fa3ce79edb6981\nnative @d21d114a7a631d9f599332a33f6371422eb99c16a11fe9bb4e987316057eb5e6\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\ndefinition \"function map.len(xs: Map(Any, Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  let xs = []\n  let r = ref(xs)\n  let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, perform 0() as Timestamp: 6, r: 7, (null, (true, 2)): 8}\n  finish map.len(m)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation host.clock() -> Timestamp\nnative @e42a28ffccf81eb1a458b73e21610ba5fd13393aab81d4bd08d968b17ff3db79\nnative @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\ndefinition \"function ref(arg0: Any) -> Any\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\ndefinition \"function map.len(xs: Map(Any, Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  let xs = []\n  let r = ref(xs)\n  let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, perform 0() as Timestamp: 6, r: 7, (null, (true, 2)): 8}\n  finish map.len(m)\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -190,7 +190,7 @@
     },
     {
       "name": "map refuses key error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print map{x: 1}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print map{x: 1}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -203,7 +203,7 @@
     },
     {
       "name": "set refuses member error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nnative @e5f5e7081794f244d696377835fa16cadf6f6c49d53e947fc928b49494989ca3\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print set{x}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255\ndefinition \"function error.new(kind: Text, message: Text, data?: Any) -> Error\\nkernel 1\\nerrors \\\"type_error\\\"\\ncharge sum(1, size(kind), size(message), size(result))\\nnative\\n\"\nmain {\n  let x = error.new(\"x\", \"y\")\n  try {\n    print set{x}\n  } catch e {\n    finish e.kind\n  }\n  finish null\n}\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -226,8 +226,8 @@
               [
                 {
                   "function": {
-                    "link": "50d032c2ec21e14a8c788ae0fce06a7267e7027853abb842832f9acacabe9510",
-                    "function": "3a3fa83c0b17c0b051937e32fdfb794c36af6c0ebe001a46fb5d64311b375880"
+                    "link": "dc3ea8a6d1a964daf4420431dbe75dd4f278bb96c93157c5e0a0f82ca54ebae3",
+                    "function": "ecfe09eacfb99d3f5d104e38b7150e1c2da59374dcbcc156b8be99b1aeee1267"
                   }
                 },
                 {
@@ -237,8 +237,8 @@
               [
                 {
                   "function": {
-                    "link": "50d032c2ec21e14a8c788ae0fce06a7267e7027853abb842832f9acacabe9510",
-                    "function": "5f4b8367dc19ece12d7645266db3c3421033ce1659c617e6c5f16ae6f23bd948"
+                    "link": "dc3ea8a6d1a964daf4420431dbe75dd4f278bb96c93157c5e0a0f82ca54ebae3",
+                    "function": "c2a88171cad2cf155c1087118a710182014679ac25524b896e830fe00cbef2df"
                   }
                 },
                 {
@@ -261,8 +261,8 @@
             "set": [
               {
                 "function": {
-                  "link": "c073ee36cd1188e6a3f277b2db06dd5a027af54d3c256b873631154ad06690b9",
-                  "function": "3a3fa83c0b17c0b051937e32fdfb794c36af6c0ebe001a46fb5d64311b375880"
+                  "link": "6654530be3570ad30441a2c27f39dc48fe640a761c6438fcf70daf2a32d1c321",
+                  "function": "ecfe09eacfb99d3f5d104e38b7150e1c2da59374dcbcc156b8be99b1aeee1267"
                 }
               }
             ]

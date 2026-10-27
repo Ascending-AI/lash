@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "eq: K-VAL-021 edge",
-      "function": "04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "float.eq: K-VAL-021 edge",
-      "function": "a61df7c61657712c18de30305b78ade53a6d68c8f26a43997baaa96faaacccbc",
+      "function": "823838c0e69a96ae7297cfcca46acec036edc03cfcb052531b03bb0e96c99369",
       "args": [
         {
           "float": "2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "float.to_int: K-VAL-021 edge",
-      "function": "36aa71c777b08d863d82b98d25bafe3e5baaf5c7c07c3adfa7d8d6b9addb729a",
+      "function": "1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922",
       "args": [
         {
           "float": "1.0"
@@ -63,7 +63,7 @@
     },
     {
       "name": "int.eq: K-VAL-021 edge",
-      "function": "4e83e0501cda3797a82eb6dec5bd1d675b47827daf931e4529e879e68e5284ad",
+      "function": "a1afe073c3e1091ab29ed7ed3076dada16fe312e10576ce575dba962caa37d44",
       "args": [
         {
           "int": "2"
@@ -84,7 +84,7 @@
     },
     {
       "name": "num.eq: K-VAL-021 edge",
-      "function": "6802424c288d7e61a9d8630dd1f11388abc0002b533be27186bce867b5a6e39e",
+      "function": "ae6af52ff71a25eec0d601c57dc2477a80eca798c514b4bce7ee8fe7817f798b",
       "args": [
         {
           "int": "2"
@@ -105,7 +105,7 @@
     },
     {
       "name": "num.to_int: K-VAL-021 edge",
-      "function": "d5066b232a7387a16b8e55ea5faa4c80a8db3b67b6e2825ecb6181b76c76d7d1",
+      "function": "e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999",
       "args": [
         {
           "float": "1.0"
@@ -123,7 +123,7 @@
     },
     {
       "name": "eq: K-VAL-021 edge witness 2",
-      "function": "04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
       "args": [
         {
           "int": "9007199254740993"
@@ -144,7 +144,7 @@
     },
     {
       "name": "compare: K-VAL-021 edge",
-      "function": "06fafae84c379c4870606ae482072fe667a1ae7e07b766bd09a88a5cf75719eb",
+      "function": "9288da3e088c6e9084a8bb190b8e561cc2b7f0bfc88fa23bcc5f5c99614ff990",
       "args": [
         {
           "int": "13582985290493858492773514283592667786034938469317445497485196697278130927542418487205392083207560592298578262953847383475038725543234929971155548342800628721885763499406390331782864144164680730766837160526223176512798435772129956553355286032203080380775759732320198985094884004069116123084147875437183658467465148948790552744165376"
@@ -165,7 +165,7 @@
     },
     {
       "name": "eq: K-VAL-021 edge witness 3",
-      "function": "04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
       "args": [
         {
           "float": "-0.0"
@@ -186,7 +186,7 @@
     },
     {
       "name": "eq: K-VAL-021 edge witness 4",
-      "function": "04100a3772ec564e8bdc38f90d5678f50f6395ae42c373d3239143cfaadfc478",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
       "args": [
         {
           "float": "nan"

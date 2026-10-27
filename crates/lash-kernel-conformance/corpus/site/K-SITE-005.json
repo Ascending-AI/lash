@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "closure sites continue the writing unit path",
-      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function z() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 9\\n}\\n\"\ndefinition \"function a() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 1\\n}\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse a = @c3d2fa9411bd7136b82c6adda8da9fad6885bf49187efafa2806e126b4a0aca9\\nuse z = @519dbf6c0c183c113c7e9b0c6cf42440d9fef041af4ea7d72f40230db83c5191\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  let f = fn kernel.anonymous \n  let x = apply f()\n  finish x\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function z() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 9\\n}\\n\"\ndefinition \"function a() -> Any\\nkernel 1\\nmetering statements\\nbody {\\n  return 1\\n}\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse a = @989a2853a255343ad47ce8a5a442661d86566b9258331cad4f97e0e98740d759\\nuse z = @eef722e2501ced9ecfb7a7a5fa2214359de916baabce4c84155f668af037007f\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  let f = fn kernel.anonymous \n  let x = apply f()\n  finish x\n}\n",
       "expected": {
         "end": {
           "finished": {

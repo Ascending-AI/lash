@@ -60,6 +60,28 @@ fn sqlite_options(counted: bool) -> lash_sqlite_store::SqliteStoreSetOptions {
     options
 }
 
+// Terminal commits can precede owner cleanup and disposal of render captures.
+// The counted current-thread fixture cuts only after those owners wait idle.
+async fn finish_counted_work(options: &RunOptions, lanes: &[Lane]) -> Result<()> {
+    if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+        let deadline = Instant::now() + ROUND_WATCHDOG;
+        while lash_core::plugin::prompt::PromptRenderPool::renders_in_flight().0
+            || lanes.iter().any(|lane| {
+                lane.idle
+                    .as_ref()
+                    .is_some_and(|(sink, actor)| !sink.actor_is_idle_for_testing(actor))
+            })
+        {
+            ensure!(
+                Instant::now() < deadline,
+                "counted owners never became idle"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+    Ok(())
+}
+
 /// What a store set must outlive.
 type Keep = Vec<Box<dyn std::any::Any + Send>>;
 
@@ -282,6 +304,7 @@ struct Lane {
     inputs: Vec<(ScriptedTurn, String)>,
     counted: bool,
     completion: Option<lash_durable::runner::KeyWatch>,
+    idle: Option<(lash_durable::runner::WakeSink, lash_durable::ActorKey)>,
 }
 
 /// The node's settings with page retirement left to the rounds' gaps: the
@@ -568,16 +591,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             .open()
             .await
             .map_err(|error| anyhow::anyhow!("open {id}: {error}"))?;
-        let completion = if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
-            Some(
-                backend
-                    .stores()
-                    .wake_sink()
-                    .observe(lash_durable::ActorKey::session(id.as_str())?, None)
-                    .await,
-            )
+        let idle = if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+            Some((
+                backend.stores().wake_sink().clone(),
+                lash_durable::ActorKey::session(id.as_str())?,
+            ))
         } else {
             None
+        };
+        let completion = match &idle {
+            Some((sink, actor)) => Some(sink.observe(actor.clone(), None).await),
+            None => None,
         };
         lanes.push(Lane {
             index,
@@ -585,6 +609,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             inputs,
             counted: matches!(options.store, StoreChoice::CountedSqliteFile(_)),
             completion,
+            idle,
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
@@ -764,6 +789,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             }
             model_calls += calls.scripted as u64;
         }
+        finish_counted_work(options, &lanes).await?;
         let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
         if let Some(capture) = &mut phase_capture {
             capture.turn(turn + 1, phase_first, workload.sessions, result_digests);
@@ -881,6 +907,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             for lane in &lanes {
                 compact(lane, turn + 1).await?;
             }
+            finish_counted_work(options, &lanes).await?;
             let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
             let mut metrics = difference(&before, &after);
             if let Some(bodies) = metrics.get("tool_bodies").copied().filter(|n| *n > 0.0) {
@@ -920,6 +947,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         }
     }
     // Keep actual facade handles alive through the final retained-byte cut.
+    finish_counted_work(options, &lanes).await?;
     std::hint::black_box(&lanes);
     let live_after = crate::GLOBAL_ALLOCATOR.stats();
     let retained = (live_after.bytes_allocated as i128 - live_after.bytes_deallocated as i128)

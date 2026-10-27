@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "pow: K-BND-001 edge",
-      "function": "c9d0596f4f074156dbf91337bae10830f8594cb7ddb121c44e526c681d2d88f4",
+      "function": "6440623ff203092e2d2cb0220bf4905fcae72f359d75fa21bf042b5700365ea8",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "num.pow: K-BND-001 edge",
-      "function": "12416ecf773c1e3edea6399615e6a4f58cf6875a7eed65255e1c573da99166c4",
+      "function": "22ffe8cb2cc1820ece84313efc8e7fc850f4645e3894731a9634b093d215300e",
       "args": [
         {
           "int": "2"
@@ -45,7 +45,7 @@
     },
     {
       "name": "int.pow: K-BND-001 edge",
-      "function": "8df2b00381f9be8f972477ddd467132840d45523723de469d79a483f49adea84",
+      "function": "059950794130bfd51ec895289b249166890b7a6d75ccbbf647aba321aef30f13",
       "args": [
         {
           "int": "2"

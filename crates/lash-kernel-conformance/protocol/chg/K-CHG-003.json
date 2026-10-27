@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @9027a4ca904773cc2c54b2ba87f223a657acd608f09f69248274c280586ba499\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @28b614521d2fa4e2afa357da1aa53302a102459753aa041cbf26fef39a3e9618\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  return 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
         "charged": 17,
         "end": {
@@ -13,7 +13,7 @@
       "name": "return charges result size 2"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @2d93c8ed6915b9295d027da6b707591143a79652b8eaa7b002915878f4c22aeb\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @8726f93ad8a7af5010c4048cb93bf46b0b2e7d10667d54f606dc2f2f4d6bb5ac\ndefinition \"function probe.result() -> Any\\nkernel 1\\ncharge sum(9, size(result))\\nnative\\nbody {\\n  throw 7\\n}\\n\"\nmain {\n  try {\n    do invoke probe.result()\n  } catch e {}\n  finish null\n}\n",
       "expected": {
         "charged": 15,
         "end": {

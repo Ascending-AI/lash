@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = null\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = null\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -18,7 +18,7 @@
       "name": "size of null is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = absent\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = absent\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -35,7 +35,7 @@
       "name": "size of absent is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = true\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = true\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -52,7 +52,7 @@
       "name": "size of true is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 1.0\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 1.0\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -69,7 +69,7 @@
       "name": "size of 1.0 is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 0\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 0\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -86,7 +86,7 @@
       "name": "size of 0 is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 18446744073709551616\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = 18446744073709551616\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -103,7 +103,7 @@
       "name": "size of 18446744073709551616 is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = \"é\"\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = \"é\"\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -120,7 +120,7 @@
       "name": "size of \"é\" is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = b\"0001\"\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = b\"0001\"\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -137,7 +137,7 @@
       "name": "size of b\"0001\" is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = (1, 2)\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = (1, 2)\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -154,7 +154,7 @@
       "name": "size of (1, 2) is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = [1, 2]\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = [1, 2]\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -171,7 +171,7 @@
       "name": "size of [1, 2] is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = map{1: 2}\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = map{1: 2}\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -188,7 +188,7 @@
       "name": "size of map{1:2} is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = set{1, 2}\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = set{1, 2}\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -205,7 +205,7 @@
       "name": "size of set{1,2} is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = {a: 1, b: 2}\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = {a: 1, b: 2}\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -222,7 +222,7 @@
       "name": "size of {a:1,b:2} is 3"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse f = @ac53aa2c25df8a28017d8e7b8bfed9ff978e03b6fa30d9b1ac08be0271847fe2\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = fn kernel.anonymous \n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function kernel.anonymous() -> Any\\nkernel 1\\nmetering statements\\nuse f = @d80cf541adda8c596424b9d03669afbf6d42d0c240033a0a23da5850fd15229f\\nbody {\\n  return null\\n}\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = fn kernel.anonymous \n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615
@@ -239,7 +239,7 @@
       "name": "size of fn() { return null } is 1"
     },
     {
-      "document": "kernel 1\nnumbers by_spelling\nnative @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @577f10aafb8b77dac22523c78adaaa5fcd001e16555e45b2d0cbd16a1c552f8c\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  finish probe.size(x)\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\ndefinition \"function probe.size(x: Any) -> Any\\nkernel 1\\ncharge size(x)\\nnative\\n\"\ndefinition \"function f() -> Any\\nkernel 1\\nmetering statements\\nuse probe.size = @13a3218118bb5ea0a122777517915d03bbd7b62e30e49cbc3e41a136354fdde2\\nbody {\\n  return null\\n}\\n\"\nmain {\n  let x = &f\n  finish probe.size(x)\n}\n",
       "environment": {
         "bounds": {
           "charge": 18446744073709551615

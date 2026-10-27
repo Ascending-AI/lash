@@ -105,7 +105,7 @@ impl Drop for RenderInFlight {
 /// returns. Such a renderer holds its worker until it does.
 #[derive(Clone)]
 pub struct PromptRenderPool {
-    queue: SyncSender<RenderJob>,
+    queue: SyncSender<(RenderJob, RenderInFlight)>,
     capacity: usize,
 }
 
@@ -118,7 +118,8 @@ impl PromptRenderPool {
     /// worker the host cannot start is logged and left out. Every started
     /// worker has entered its thread before the pool returns.
     pub fn new(workers: NonZeroUsize, queue: NonZeroUsize) -> Self {
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<RenderJob>(queue.get());
+        let (sender, receiver) =
+            std::sync::mpsc::sync_channel::<(RenderJob, RenderInFlight)>(queue.get());
         let receiver = Arc::new(Mutex::new(receiver));
         for index in 0..workers.get() {
             let receiver = Arc::clone(&receiver);
@@ -164,27 +165,29 @@ impl PromptRenderPool {
     }
 
     fn submit(&self, job: RenderJob) -> Result<(), PromptCompositionError> {
-        let render = RenderInFlight::begin();
-        let job: RenderJob = Box::new(move || {
-            job();
-            drop(render);
-        });
-        self.queue.try_send(job).map_err(|error| match error {
-            TrySendError::Full(_) | TrySendError::Disconnected(_) => {
-                PromptCompositionError::RenderersBusy {
-                    capacity: u32::try_from(self.capacity).unwrap_or(u32::MAX),
+        self.queue
+            .try_send((job, RenderInFlight::begin()))
+            .map_err(|error| match error {
+                TrySendError::Full(_) | TrySendError::Disconnected(_) => {
+                    PromptCompositionError::RenderersBusy {
+                        capacity: u32::try_from(self.capacity).unwrap_or(u32::MAX),
+                    }
                 }
-            }
-        })
+            })
     }
 }
 
 /// A worker: run jobs until the pool is dropped.
-fn work(receiver: &Mutex<Receiver<RenderJob>>) {
+fn work(receiver: &Mutex<Receiver<(RenderJob, RenderInFlight)>>) {
     loop {
         let job = receiver.lock_recover().recv();
         match job {
-            Ok(job) => job(),
+            Ok((job, render)) => {
+                job();
+                // The completion witness follows disposal of the job and
+                // its captures, including the composition it was rendering.
+                drop(render);
+            }
             Err(_) => return,
         }
     }

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a protocol's open chooses what the loop walks",
-      "document": "kernel 1\nnumbers by_spelling\nnative @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\nnative @c3fb28f03761c4ba70c0af3d4d1985af9660a8f1ff7d494315fee5cf10242c3a\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\ndefinition \"function list.copy(xs: List(Any)) -> List(Any)\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge sum(1, size(xs), size(result))\\nnative\\n\"\nmain {\n  let xs = [1, 2]\n  for x in xs via (open list.copy) {\n    print x\n    set xs[list.len(xs)] = 3\n  }\n  finish xs\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nnative @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\ndefinition \"function list.copy(xs: List(Any)) -> List(Any)\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge sum(1, size(xs), size(result))\\nnative\\n\"\nmain {\n  let xs = [1, 2]\n  for x in xs via (open list.copy) {\n    print x\n    set xs[list.len(xs)] = 3\n  }\n  finish xs\n}\n",
       "expected": {
         "prints": [
           {
@@ -36,7 +36,7 @@
     },
     {
       "name": "an opened text is walked by code point",
-      "document": "kernel 1\nnumbers by_spelling\nnative @f6644f1ee14ded1f172a3be500ee8f24df35cd7eede2391f93ee643d3d0c2fa3\ndefinition \"function float.to_text(arg0: Float) -> Text\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  for c in 1.5 via (open float.to_text) {\n    print c\n  }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @823534ab63273c0204d59ffc8bbe6e8acdc4223f5b95b1e9b372b68341a2b13a\ndefinition \"function float.to_text(arg0: Float) -> Text\\nkernel 1\\nerrors \\\"arity\\\", \\\"type_error\\\"\\ncharge sum(1, sum(deep(arg0)), deep(result))\\nnative\\n\"\nmain {\n  for c in 1.5 via (open float.to_text) {\n    print c\n  }\n}\n",
       "expected": {
         "prints": [
           {
@@ -57,7 +57,7 @@
     },
     {
       "name": "an opened value no cursor walks and no next steps raises type_error",
-      "document": "kernel 1\nnumbers by_spelling\nnative @40590fcc56fe886746ecbc896b0342e86e0f5b80b06165b243b68224d4fea6d8\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  try {\n    for x in [7] via (open list.len) {\n      print x\n    }\n  } catch e {\n    print e.kind\n  }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\nnative @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\ndefinition \"function list.len(xs: List(Any)) -> Int\\nkernel 1\\nerrors \\\"cyclic_value\\\", \\\"index_out_of_range\\\", \\\"invalid_key\\\", \\\"key_missing\\\", \\\"too_deep\\\", \\\"type_error\\\"\\ncharge 1\\nnative\\n\"\nmain {\n  try {\n    for x in [7] via (open list.len) {\n      print x\n    }\n  } catch e {\n    print e.kind\n  }\n}\n",
       "expected": {
         "prints": [
           {

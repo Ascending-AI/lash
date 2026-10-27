@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "div: K-NUM-004 edge",
-      "function": "fd5f2d08b3f838ee342e7a86f9125313b8d7b935ce69224393971ad403247399",
+      "function": "b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "float.div: K-NUM-004 edge",
-      "function": "10688e0ffeea5429c3bfce439b1c0a6ae46a4ac0e2199bfad5335007c9f1821e",
+      "function": "5b5d5d8b3a8a39581456a70ef06f1a16532ec5aa3b9c19a4c164de7be9961e49",
       "args": [
         {
           "float": "2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "int.div: K-NUM-004 edge",
-      "function": "6298771a1b50c4560b473f982268bc491494b1773704a6823b502cf3e1b9c77f",
+      "function": "81fb67ef1ae496fc2352e8b47e73dbca0a8e03a7f87f7fb2457b7909d13ce1da",
       "args": [
         {
           "int": "2"
@@ -66,7 +66,7 @@
     },
     {
       "name": "num.div: K-NUM-004 edge",
-      "function": "3c5fb29c062dc4bd5960f318c0e6c0396a8910e64ee49e8d207802dc1e82517a",
+      "function": "d52d9072685d07716384325d7ae5a45f93402903f4675ee17412adf48c0d084d",
       "args": [
         {
           "int": "2"
