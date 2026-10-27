@@ -1,42 +1,171 @@
 //! The source-certified merge keeps its variables and callback in the
 //! common register frame. A cold read, tight boundary or detailed observer
 //! runs the original instructions at the same coordinate.
-use super::super::compiled::Merge;
+use super::super::compiled::{CollectionStep, Merge, Placement, ReadSlot, Visit};
 use super::*;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+    pub(super) fn collection_step(
+        &mut self,
+        frame: &mut Frame<'e>,
+        step: &CollectionStep,
+        tail: bool,
+    ) -> Option<Result<Next, Stop>> {
+        if !self.collection_ready() {
+            return None;
+        }
+        match step {
+            CollectionStep::Merge(merge) => self.merge_step(frame, merge, tail),
+            CollectionStep::Place(place) => self.place_step(frame, place),
+            CollectionStep::Visit(visit) => self.visit_step(frame, visit),
+            CollectionStep::ReadSlot(read) => self.read_slot_step(frame, read),
+        }
+    }
+
+    fn visit_step(&mut self, frame: &mut Frame<'e>, visit: &Visit) -> Option<Result<Next, Stop>> {
+        let value = |at| match frame.slots[at] {
+            SlotState::Value(value) => Some(value),
+            _ => None,
+        };
+        let (index, length, item) = (
+            value(visit.index)?,
+            value(visit.length)?,
+            value(visit.value)?,
+        );
+        if !matches!(index, Value::Int(_) | Value::Float(_))
+            || !matches!(length, Value::Int(_) | Value::Float(_))
+            || index.same(&length)
+        {
+            return None;
+        }
+        // Keep the source hole test's empty operand and its held bytes.
+        // Everything after it is infallible until the next source statement.
+        let hole = match item {
+            Value::Tuple(tuple) => self.arena.len(tuple).ok()? == 0,
+            _ => false,
+        };
+        if self.memory || self.projection().is_some() || matches!(item, Value::Tuple(_)) {
+            self.empty_tuple()?;
+        }
+        self.end_statement(frame);
+        frame.control.push(Position::Block(visit.body, 2));
+        let arm = usize::from(!hole);
+        if let Some(block) = visit.arms[arm] {
+            frame.control.push(Position::Block(block, 0));
+        }
+        frame.statement = None;
+        frame.pc = visit.after[arm];
+        if self.arena.boundary_due() {
+            Some(Err(Stop))
+        } else {
+            Some(Ok(Next::Continue))
+        }
+    }
+
+    fn read_slot_step(
+        &mut self,
+        frame: &mut Frame<'e>,
+        read: &ReadSlot,
+    ) -> Option<Result<Next, Stop>> {
+        let value = |at| match frame.slots[at] {
+            SlotState::Value(value) => Some(value),
+            _ => None,
+        };
+        let Value::Bool(true) = value(read.list)? else {
+            return None;
+        };
+        let Value::List(list) = value(read.target)? else {
+            return None;
+        };
+        let at = crate::compile::position(&value(read.index)?)?;
+        let item = self.arena.item(list, at).ok()??;
+        if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
+            return None;
+        }
+        let hole = match item {
+            Value::Tuple(tuple) => self.arena.len(tuple).ok()? == 0,
+            _ => false,
+        };
+        if self.memory || self.projection().is_some() || matches!(item, Value::Tuple(_)) {
+            self.empty_tuple()?;
+        }
+        self.end_statement(frame);
+        frame.slots[read.value] = SlotState::Value(item);
+        frame.slots[read.present] = SlotState::Value(Value::Bool(!hole));
+        frame.control.push(Position::Block(read.body, 3));
+        frame.statement = None;
+        frame.pc = frame.callee.compiled.blocks[read.body].starts[3];
+        if self.arena.boundary_due() {
+            Some(Err(Stop))
+        } else {
+            Some(Ok(Next::Continue))
+        }
+    }
+
+    fn collection_ready(&mut self) -> bool {
+        let ready = self.exe.charging()
+            && !self.accounting
+            && !self.spent()
+            && self.deferred_end.is_none()
+            && !self.arena.boundary_due()
+            && !self.arena.any_cold()
+            && !self.tight
+            && (!self.memory
+                || lash_kernel_state::arena::VALUE_BYTES
+                    <= self
+                        .ceiling
+                        .saturating_sub(self.register_bytes)
+                        .saturating_sub(self.arena.held())
+                        .saturating_sub(self.transient))
+            && self.projection().is_none();
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.scratch.counting {
+            return false;
+        }
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return false;
+        }
+        ready
+    }
+
+    fn place_step(
+        &mut self,
+        frame: &mut Frame<'e>,
+        place: &Placement,
+    ) -> Option<Result<Next, Stop>> {
+        let value = |at| match frame.slots[at] {
+            SlotState::Value(value) => Some(value),
+            _ => None,
+        };
+        let Value::Bool(true) = value(place.list)? else {
+            return None;
+        };
+        let Value::List(target) = value(place.target)? else {
+            return None;
+        };
+        let index = value(place.index)?;
+        let at = crate::compile::position(&index)?;
+        if at >= self.arena.len(target).ok()? {
+            return None;
+        }
+        let item = value(place.value)?;
+        if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
+            return None;
+        }
+        let next = place.advance.call(&[index, Value::Int(1)])?;
+        self.arena.list_set(target, at, item).ok()?;
+        frame.slots[place.index] = SlotState::Value(next);
+        frame.control.push(Position::Block(place.body, 4));
+        Some(self.finish_statement(frame, 1, None))
+    }
+
     pub(super) fn merge_step(
         &mut self,
         frame: &mut Frame<'e>,
         merge: &Merge,
         tail: bool,
     ) -> Option<Result<Next, Stop>> {
-        if !self.exe.charging()
-            || self.accounting
-            || self.spent()
-            || self.deferred_end.is_some()
-            || self.arena.boundary_due()
-            || self.arena.any_cold()
-            || self.tight
-            || (self.memory
-                && lash_kernel_state::arena::VALUE_BYTES
-                    > self
-                        .ceiling
-                        .saturating_sub(self.register_bytes)
-                        .saturating_sub(self.arena.held())
-                        .saturating_sub(self.transient))
-            || self.projection().is_some()
-        {
-            return None;
-        }
-        #[cfg(any(test, feature = "perf-witness"))]
-        if self.scratch.counting {
-            return None;
-        }
-        #[cfg(test)]
-        if self.scratch.chilled {
-            return None;
-        }
         let value = |at| match frame.slots[at] {
             SlotState::Value(value) => Some(value),
             _ => None,

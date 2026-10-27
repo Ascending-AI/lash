@@ -416,7 +416,7 @@ fn throwing_and_waiting_callbacks_match_their_replaced_definitions() {
 /// definition's does.
 #[test]
 fn a_callback_that_parks_inside_a_method_resumes_identically() {
-    for helper in HELPERS {
+    for helper in HELPERS.into_iter().chain(["flatMap"]) {
         let name = format!("ts.array.{helper}");
         // An answer that ends no method's loop early.
         let answer = helper == "every";

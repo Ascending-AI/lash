@@ -1115,6 +1115,10 @@ function build() {
 }
 await host.observe(JSON.stringify(build()));"#,
         ),
+        (
+            "callback mutation and holes",
+            crate::helper_segments::CALLBACK_MUTATION,
+        ),
         // FIG-7441: SortCompare coerces each result, excludes undefined
         // and holes from callbacks, and publishes only a completed sort.
         (
@@ -1317,6 +1321,10 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
                     case.id,
                 );
             }
+        }
+        if case.id.ends_with("callback mutation and holes") {
+            let Request::Effect(effect) = &planned.requests[0];
+            assert_eq!(effect.args, vec![Datum::Text(r#"[[10,20,null],false,[1],5,[1,null,null],null,0,true,false,[1,-1,2,3,-3],[1,2,3,4],"stop",[["map",1,0,true],["map",2,1,true],["filter",1,0],["filter",2,1],["reduce",2,3,2],["each",1,0],["find",1,0],["find",null,1],["find",null,2],["index",null,0],["some",1,0],["some",3,2],["every",1,0],["every",3,2],["flat",1,0],["flat",2,1],["flat",3,2],["throw",1,0],["throw",2,1]]]"#.into())]);
         }
         if case.id.ends_with("default sort UTF16 and holes") {
             let Request::Effect(effect) = &planned.requests[0];

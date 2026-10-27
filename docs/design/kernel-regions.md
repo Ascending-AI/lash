@@ -106,25 +106,25 @@ of region are built from one unit.
   Detailed work and site observers use the source instructions. A published
   sampling context and a charge tape keep the native pass. Cold or tight
   boundaries retain the source instruction at which execution continues.
-- **Slots walk.** A helper plan's loop region whose body is one step of an
-  array callback helper's walk over its slots (TypeScript's `map`, `filter`
-  and `forEach`, `ts.array.map_slots` and its siblings): stop where the
-  index reaches the length taken first, read each item live, so a callback
-  that shortens the list leaves holes behind it, skip a hole, apply the
-  callback to a present item, and write its answer, or keep the item where
-  the answer is `true`, coercing any other answer through `ts.to_boolean`.
-  The region's machine steps it natively (FIG-6978): it stands in every
-  statement the plan opens, in order, opening one only where something it
-  does needs it open, so an element whose callback returns a scalar and
-  whose answer is written in place opens none past its end test, and the
-  next test ends them together (FIG-7003). It compares the index with the length
-  and advances it as Rust, and runs the item read, the callback's
-  application at its steady site (entering the callback's island with its
-  arguments in place) and the writes as the region's own forms on the
-  plan's registers. A callback that does not return at once stands the
-  plan at its site exactly as the region would. A walk the recogniser does
-  not match runs as the region's pass. Only a charge tape may observe the
-  run.
+  The same collection-step mechanism recognizes a callback walk's initial
+  length and hole tests, a live list-slot read behind its length guard, and
+  sort's guarded write-back. Each shortcut derives its operands and next
+  source block from those statements. The ordinary loop header retains all
+  metered tests, and callbacks retain their source calls. Hole tests retain
+  their empty tuple, including its memory accounting. A callback statement
+  may end in a member store, so map writes its answer without leaving the
+  register executor. Canonical helper bodies remain the authority for
+  fallback execution and saved continuations.
+- **Callback walks.** Array helpers use the common register program for
+  iteration, live element reads, guest calls and result stores. Their
+  metered headers charge every continuation test, including the terminating
+  test. Source-derived visit and slot-read steps remove repeated bound and
+  hole dispatch without moving the guest callback. The helper compiler omits
+  the superseded standalone array callback-loop plans. Canonical bodies
+  remain the definitions used by fallback layouts and saved source frames.
+  A callback that parks or raises keeps its original call coordinate and
+  completed stores. Detailed observers use the original instructions.
+
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host

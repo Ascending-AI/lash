@@ -16,8 +16,8 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    AccessShape, AccessSite, CallInputs, Destination, Instruction, Merge, Op, Operand, Read,
-    WriteSite,
+    AccessShape, AccessSite, CallInputs, CollectionStep, Destination, Instruction, Merge, Op,
+    Operand, Placement, Read, ReadSlot, Visit, WriteSite,
 };
 
 /// A literal return's value and source-derived statement/close price.

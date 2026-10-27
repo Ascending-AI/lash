@@ -28,6 +28,40 @@ const BOUNDS: Bounds = Bounds {
     join_members: 100,
 };
 
+/// Array traversal captures the initial length, reads each slot live, skips
+/// holes except for find/findIndex, and retains a callback's writes on throw.
+/// The statement cut sweep below uses small per-method cases for the same rule.
+pub(crate) const CALLBACK_MUTATION: &str = r#"const log = [];
+const mappedSource = [1, , 3];
+const mapped = mappedSource.map((x, i, source) => {
+  log.push(["map", x, i, source === mappedSource]);
+  if (i === 0) { source[1] = 2; source.push(4); }
+  if (i === 1) { source.length = 2; }
+  return x * 10;
+});
+const filteredSource = [1, , 3];
+const filtered = filteredSource.filter((x, i, source) => {
+  log.push(["filter", x, i]);
+  if (i === 0) { source[1] = 2; delete source[2]; }
+  return x % 2;
+});
+const reduced = [ , 2, 3].reduce((a, x, i, source) => {
+  log.push(["reduce", a, x, i]); source.push(9); return a + x;
+});
+const visited = [1, , 3];
+visited.forEach((x, i, source) => { log.push(["each", x, i]); if (i === 0) { delete source[2]; } });
+const foundSource = [1, , 3];
+const found = foundSource.find((x, i, source) => { log.push(["find", x, i]); if (i === 0) { source.length = 1; } return i === 2; });
+const foundIndex = [ , 2].findIndex((x, i) => { log.push(["index", x, i]); return x === undefined; });
+const some = [1, , 3].some((x, i) => { log.push(["some", x, i]); return x === 1 ? "" : "yes"; });
+const every = [1, , 3].every((x, i) => { log.push(["every", x, i]); return x === 1 ? {} : 0; });
+const flattened = [1, , 3].flatMap((x, i, source) => { log.push(["flat", x, i]); if (i === 0) { source[1] = 2; } return x === 2 ? x : [x, , -x]; });
+let failure = "";
+const thrown = [1, 2, 3];
+try { thrown.map((x, i, source) => { log.push(["throw", x, i]); if (i === 1) { source.push(4); throw new Error("stop"); } return x; }); }
+catch (e) { failure = e.message; }
+await host.observe(JSON.stringify([mapped, 2 in mapped, filtered, reduced, visited, found, foundIndex, some, every, flattened, thrown, failure, log]));"#;
+
 /// Guest callbacks of several statements through segment helpers: each
 /// callback logs what it sees, so a callback run again shows in the result.
 const TYPESCRIPT: &[(&str, &str)] = &[
@@ -312,8 +346,8 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
             "{}: plans and bodies",
             case.id
         );
-        // Segments run natively: the helpers' own statements are no
-        // statements of the run.
+        // Native plans and register collection steps skip the helpers'
+        // internal statement boundaries, retaining their source coordinates.
         assert!(
             by_plan.points.len() < by_body.points.len(),
             "{}: {} cuts under plans, {} under bodies",
@@ -352,6 +386,49 @@ fn typescript_segments_cross_resume_after_every_statement() {
 #[test]
 fn typescript_nested_and_raising_segments_cross_resume_after_every_statement() {
     cross("typescript", &TYPESCRIPT[3..]);
+}
+
+fn callback_walk_cross_resume(method: &str) {
+    let (parameters, answer, initial) = match method {
+        "reduce" => ("acc, value, index, source", "acc + value", ", 0"),
+        "find" | "findIndex" | "some" => ("value, index, source", "index === 1", ""),
+        "every" => ("value, index, source", "index === 0", ""),
+        "flatMap" => ("value, index, source", "[value, , -value]", ""),
+        _ => ("value, index, source", "value", ""),
+    };
+    let source = format!(
+        r#"const xs = [1, , 3];
+const log = [];
+const out = xs.{method}(({parameters}) => {{
+  log.push(index);
+  if (index === 0) {{ source[1] = 2; delete source[2]; source.push(4); }}
+  return {answer};
+}}{initial});
+await host.observe([out, xs, log]);"#
+    );
+    cross("typescript", &[(method, source.as_str())]);
+}
+
+macro_rules! callback_walk_laws {
+    ($($name:ident => $method:literal),* $(,)?) => {$(
+        /// K-ITER-001, K-CHG-007, K-MACH-008: a live callback walk with
+        /// holes and mutation resumes after every callback statement.
+        #[test]
+        fn $name() { callback_walk_cross_resume($method); }
+    )*};
+}
+
+callback_walk_laws! {
+    map_walk_cross_resumes => "map",
+    filter_walk_cross_resumes => "filter",
+    reduce_walk_cross_resumes => "reduce",
+    for_each_walk_cross_resumes => "forEach",
+    find_walk_cross_resumes => "find",
+    find_index_walk_cross_resumes => "findIndex",
+    some_walk_cross_resumes => "some",
+    every_walk_cross_resumes => "every",
+    flat_map_walk_cross_resumes => "flatMap",
+
 }
 
 /// A nested callback keeps a session read when its lifted body also has a

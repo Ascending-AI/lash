@@ -634,650 +634,667 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         slots: &mut usize,
     ) -> Result<Next, Stop> {
         let mut op = &instruction.op;
-        if let Op::Merge {
-            merge,
-            tail,
-            original,
-        } = op
-        {
-            if let Some(answer) = self.merge_step(frame, merge, *tail) {
-                return answer;
-            }
-            op = original;
-        }
-        let regs = &mut frame.regs;
-        match op {
-            Op::Merge { .. } => unreachable!("a merge wraps an original source operation"),
-            Op::Try { .. } => {
-                frame.may_clean = true;
-                frame.control.push(Position::Try {
-                    instruction: frame.pc - 1,
-                    phase: TryPhase::Body,
-                });
-                frame.statement = None;
-            }
-            Op::Loop { id, header, texts } => {
-                frame.texts.retain(|(slot, _)| !texts.contains(slot));
-                frame.control.push(Position::Loop {
-                    id: *id,
-                    header: *header,
-                    started: 0,
-                    cursor: None,
-                    guard: None,
-                });
-                frame.statement = None;
-            }
-            Op::For {
-                id,
-                header,
-                reg,
-                pc,
-                via,
-                texts,
-            } => {
-                if *via {
-                    return Err(self.at(*pc));
+        loop {
+            let regs = &mut frame.regs;
+            match op {
+                Op::Collection {
+                    step,
+                    tail,
+                    original,
+                } => {
+                    if let Some(answer) = self.collection_step(frame, step, *tail) {
+                        return answer;
+                    }
+                    op = original;
+                    continue;
                 }
-                frame.texts.retain(|(slot, _)| !texts.contains(slot));
-                let cursor = Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
-                frame.control.push(Position::Loop {
-                    id: *id,
-                    header: *header,
-                    started: 0,
-                    cursor: Some(cursor),
-                    guard: None,
-                });
-                frame.statement = None;
-            }
-            Op::Header {
-                repeat,
-                id,
-                cost,
-                metered,
-                at,
-                hooked,
-                otherwise,
-                ..
-            } => {
-                if self.deferred_end.is_some() {
-                    self.progressed();
+                Op::Try { .. } => {
+                    frame.may_clean = true;
+                    frame.control.push(Position::Try {
+                        instruction: frame.pc - 1,
+                        phase: TryPhase::Body,
+                    });
+                    frame.statement = None;
                 }
-                // No header fact is committed until the complete charge
-                // prefix and (for a cursor) the resident next item fit.
-                // A refusal resumes next_iteration in this same step.
-                let next = if let Some(at) = at {
-                    if *hooked {
+                Op::Loop { id, header, texts } => {
+                    frame.texts.retain(|(slot, _)| !texts.contains(slot));
+                    frame.control.push(Position::Loop {
+                        id: *id,
+                        header: *header,
+                        started: 0,
+                        cursor: None,
+                        guard: None,
+                    });
+                    frame.statement = None;
+                }
+                Op::For {
+                    id,
+                    header,
+                    reg,
+                    pc,
+                    via,
+                    texts,
+                } => {
+                    if *via {
+                        return Err(self.at(*pc));
+                    }
+                    frame.texts.retain(|(slot, _)| !texts.contains(slot));
+                    let cursor =
+                        Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
+                    frame.control.push(Position::Loop {
+                        id: *id,
+                        header: *header,
+                        started: 0,
+                        cursor: Some(cursor),
+                        guard: None,
+                    });
+                    frame.statement = None;
+                }
+                Op::Header {
+                    repeat,
+                    id,
+                    cost,
+                    metered,
+                    at,
+                    hooked,
+                    otherwise,
+                    ..
+                } => {
+                    if self.deferred_end.is_some() {
+                        self.progressed();
+                    }
+                    // No header fact is committed until the complete charge
+                    // prefix and (for a cursor) the resident next item fit.
+                    // A refusal resumes next_iteration in this same step.
+                    let next = if let Some(at) = at {
+                        if *hooked {
+                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                            return Err(Stop);
+                        }
+                        let Some(Position::Loop {
+                            cursor: Some(cursor),
+                            ..
+                        }) = frame.control.last()
+                        else {
+                            return Err(self.halt(fault("a for header has no cursor")));
+                        };
+                        let mut cursor = cursor.clone();
+                        match cursor.step(self.arena) {
+                            Ok(value) => Some((*at, cursor, value)),
+                            _ => {
+                                self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                                #[cfg(any(test, feature = "perf-witness"))]
+                                {
+                                    self.scratch.exit.reason = Some(Reason::ResidentRead);
+                                }
+                                return Err(Stop);
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    if next.as_ref().is_some_and(|(at, _, value)| {
+                        value.is_some() && frame.callee.plan.shared[*at] && !self.cell_room(1)
+                    }) {
                         self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                         return Err(Stop);
                     }
-                    let Some(Position::Loop {
-                        cursor: Some(cursor),
-                        ..
-                    }) = frame.control.last()
-                    else {
-                        return Err(self.halt(fault("a for header has no cursor")));
-                    };
-                    let mut cursor = cursor.clone();
-                    match cursor.step(self.arena) {
-                        Ok(value) => Some((*at, cursor, value)),
-                        _ => {
-                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            {
-                                self.scratch.exit.reason = Some(Reason::ResidentRead);
-                            }
-                            return Err(Stop);
-                        }
-                    }
-                } else {
-                    None
-                };
-                if next.as_ref().is_some_and(|(at, _, value)| {
-                    value.is_some() && frame.callee.plan.shared[*at] && !self.cell_room(1)
-                }) {
-                    self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                    return Err(Stop);
-                }
-                if !self.fits((if self.accounting { *cost } else { 0 }).saturating_add(*metered)) {
-                    self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                    #[cfg(any(test, feature = "perf-witness"))]
+                    if !self
+                        .fits((if self.accounting { *cost } else { 0 }).saturating_add(*metered))
                     {
-                        self.scratch.exit.reason = Some(Reason::Charge);
+                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                        #[cfg(any(test, feature = "perf-witness"))]
+                        {
+                            self.scratch.exit.reason = Some(Reason::Charge);
+                        }
+                        return Err(Stop);
                     }
-                    return Err(Stop);
-                }
-                if at.is_none()
-                    && OBSERVING
-                    && let Some(watching) = &self.projection()
-                {
-                    watching.condition(self.exe, *id);
-                }
-                // The typed kernel executes every iteration and charges
-                // the next test last. Reserve the metered tail so a paid
-                // test never has to materialize without a source PC.
-                let mut repeated = 0;
-                if self.admitted
-                    && !OBSERVING
-                    && self.exe.charging()
-                    && let Some(site) = repeat
-                {
-                    let headroom = crate::compile::Headroom {
-                        charged: self.charged + cost,
-                        bound: self.bound.saturating_sub(*metered),
-                        slice_end: self.slice_end.saturating_sub(*metered),
-                        iteration_max: site.iteration_max,
-                        loop_test: *cost,
-                    };
-                    let mut pending = Vec::new();
-                    let (iterations, units, _) = match (self.tape.is_some(), self.scratch.counting)
+                    if at.is_none()
+                        && OBSERVING
+                        && let Some(watching) = &self.projection()
                     {
-                        (true, true) => site.run.repeat::<true, true>(
-                            self.exe,
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            &self.scratch.census,
-                            frame,
-                            &mut pending,
-                            headroom,
-                        ),
-                        (true, false) => site.run.repeat::<true, false>(
-                            self.exe,
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            &self.scratch.census,
-                            frame,
-                            &mut pending,
-                            headroom,
-                        ),
-                        (false, true) => site.run.repeat::<false, true>(
-                            self.exe,
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            &self.scratch.census,
-                            frame,
-                            &mut pending,
-                            headroom,
-                        ),
-                        (false, false) => site.run.repeat::<false, false>(
-                            self.exe,
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            &self.scratch.census,
-                            frame,
-                            &mut pending,
-                            headroom,
-                        ),
-                    };
-                    if iterations != 0 {
-                        self.formula(*cost);
-                        self.charged += units;
-                        if let Some(tape) = self.tape {
-                            for weight in pending {
-                                tape.push(weight);
-                            }
-                        }
-                        if let Some(recorder) = self.recorder {
-                            recorder.typed(iterations);
-                        }
-                        repeated = iterations;
-                        #[cfg(test)]
-                        super::TYPED_REPEATED.with(|n| n.set(n.get() + iterations));
+                        watching.condition(self.exe, *id);
                     }
-                }
-                if repeated == 0 {
-                    self.formula(*cost);
-                }
-                if *metered != 0 {
-                    self.scheduled(*metered);
-                }
-                if repeated != 0
-                    && let Some(Position::Loop { started, .. }) = frame.control.last_mut()
-                {
-                    *started += repeated;
-                }
-                self.covered = false;
-                if let Some((at, next_cursor, value)) = next {
-                    let Some(Position::Loop {
-                        cursor, started, ..
-                    }) = frame.control.last_mut()
-                    else {
-                        return Err(self.halt(fault("a for header left its loop")));
-                    };
-                    *cursor = Some(next_cursor);
-                    match value {
-                        Some(value) => {
-                            *started += 1;
-                            frame.slots[at] = if frame.callee.plan.shared[at] {
-                                SlotState::Cell(self.arena.new_cell(value))
-                            } else {
-                                SlotState::Value(value)
-                            };
-                        }
-                        None => frame.pc = *otherwise,
-                    }
-                } else {
-                    frame.statement = Some(*id);
-                }
-            }
-            Op::LoopBranch { reg, pc, otherwise } => {
-                self.transient = self
-                    .transient
-                    .saturating_sub(std::mem::take(&mut frame.transient));
-                match regs[*reg as usize] {
-                    Value::Bool(true) => {
-                        let Some(Position::Loop { started, .. }) = frame.control.last_mut() else {
-                            return Err(self.halt(fault("a while test left its loop")));
+                    // The typed kernel executes every iteration and charges
+                    // the next test last. Reserve the metered tail so a paid
+                    // test never has to materialize without a source PC.
+                    let mut repeated = 0;
+                    if self.admitted
+                        && !OBSERVING
+                        && self.exe.charging()
+                        && let Some(site) = repeat
+                    {
+                        let headroom = crate::compile::Headroom {
+                            charged: self.charged + cost,
+                            bound: self.bound.saturating_sub(*metered),
+                            slice_end: self.slice_end.saturating_sub(*metered),
+                            iteration_max: site.iteration_max,
+                            loop_test: *cost,
                         };
-                        *started += 1;
+                        let mut pending = Vec::new();
+                        let (iterations, units, _) =
+                            match (self.tape.is_some(), self.scratch.counting) {
+                                (true, true) => site.run.repeat::<true, true>(
+                                    self.exe,
+                                    #[cfg(any(test, feature = "perf-witness"))]
+                                    &self.scratch.census,
+                                    frame,
+                                    &mut pending,
+                                    headroom,
+                                ),
+                                (true, false) => site.run.repeat::<true, false>(
+                                    self.exe,
+                                    #[cfg(any(test, feature = "perf-witness"))]
+                                    &self.scratch.census,
+                                    frame,
+                                    &mut pending,
+                                    headroom,
+                                ),
+                                (false, true) => site.run.repeat::<false, true>(
+                                    self.exe,
+                                    #[cfg(any(test, feature = "perf-witness"))]
+                                    &self.scratch.census,
+                                    frame,
+                                    &mut pending,
+                                    headroom,
+                                ),
+                                (false, false) => site.run.repeat::<false, false>(
+                                    self.exe,
+                                    #[cfg(any(test, feature = "perf-witness"))]
+                                    &self.scratch.census,
+                                    frame,
+                                    &mut pending,
+                                    headroom,
+                                ),
+                            };
+                        if iterations != 0 {
+                            self.formula(*cost);
+                            self.charged += units;
+                            if let Some(tape) = self.tape {
+                                for weight in pending {
+                                    tape.push(weight);
+                                }
+                            }
+                            if let Some(recorder) = self.recorder {
+                                recorder.typed(iterations);
+                            }
+                            repeated = iterations;
+                            #[cfg(test)]
+                            super::TYPED_REPEATED.with(|n| n.set(n.get() + iterations));
+                        }
                     }
-                    Value::Bool(false) => frame.pc = *otherwise,
-                    _ => return Err(self.at(*pc)),
-                }
-                frame.statement = None;
-            }
-            Op::EndLoop => {
-                if !matches!(frame.control.pop(), Some(Position::Loop { .. })) {
-                    return Err(self.halt(fault("an exhausted loop has no control")));
-                }
-            }
-            Op::LoopDone(leaves) => {
-                let Some(Position::Loop { started, .. }) = frame.control.pop() else {
-                    return Err(self.halt(fault("an exhausted loop has no control")));
-                };
-                // Only the loop statement's own initial step takes its
-                // statement edge. A backedge completes its header step.
-                if started == 0 {
-                    for _ in 0..*leaves {
-                        Self::pop_block(frame);
+                    if repeated == 0 {
+                        self.formula(*cost);
                     }
-                }
-                if self.spent() {
-                    return Err(Stop);
-                }
-            }
-            Op::Depart { continuing } => {
-                return self.departure(
-                    frame,
-                    if *continuing {
-                        Completion::Continue
+                    if *metered != 0 {
+                        self.scheduled(*metered);
+                    }
+                    if repeated != 0
+                        && let Some(Position::Loop { started, .. }) = frame.control.last_mut()
+                    {
+                        *started += repeated;
+                    }
+                    self.covered = false;
+                    if let Some((at, next_cursor, value)) = next {
+                        let Some(Position::Loop {
+                            cursor, started, ..
+                        }) = frame.control.last_mut()
+                        else {
+                            return Err(self.halt(fault("a for header left its loop")));
+                        };
+                        *cursor = Some(next_cursor);
+                        match value {
+                            Some(value) => {
+                                *started += 1;
+                                frame.slots[at] = if frame.callee.plan.shared[at] {
+                                    SlotState::Cell(self.arena.new_cell(value))
+                                } else {
+                                    SlotState::Value(value)
+                                };
+                            }
+                            None => frame.pc = *otherwise,
+                        }
                     } else {
-                        Completion::Break
-                    },
-                );
-            }
-            Op::Open(block) => {
-                frame.control.push(Position::Block(*block, 0));
-                frame.statement = None;
-                if self.spent() || self.arena.boundary_due() {
-                    return Err(Stop);
+                        frame.statement = Some(*id);
+                    }
                 }
-            }
-            Op::ReturnLiteral {
-                id,
-                index,
-                ahead,
-                value,
-                close,
-                covered,
-                reg,
-                entry,
-            } => {
-                if let Some(block) = entry
-                    && frame.control.is_empty()
-                {
-                    frame.control.push(Position::Block(*block, 0));
+                Op::LoopBranch { reg, pc, otherwise } => {
+                    self.transient = self
+                        .transient
+                        .saturating_sub(std::mem::take(&mut frame.transient));
+                    match regs[*reg as usize] {
+                        Value::Bool(true) => {
+                            let Some(Position::Loop { started, .. }) = frame.control.last_mut()
+                            else {
+                                return Err(self.halt(fault("a while test left its loop")));
+                            };
+                            *started += 1;
+                        }
+                        Value::Bool(false) => frame.pc = *otherwise,
+                        _ => return Err(self.at(*pc)),
+                    }
                     frame.statement = None;
+                }
+                Op::EndLoop => {
+                    if !matches!(frame.control.pop(), Some(Position::Loop { .. })) {
+                        return Err(self.halt(fault("an exhausted loop has no control")));
+                    }
+                }
+                Op::LoopDone(leaves) => {
+                    let Some(Position::Loop { started, .. }) = frame.control.pop() else {
+                        return Err(self.halt(fault("an exhausted loop has no control")));
+                    };
+                    // Only the loop statement's own initial step takes its
+                    // statement edge. A backedge completes its header step.
+                    if started == 0 {
+                        for _ in 0..*leaves {
+                            Self::pop_block(frame);
+                        }
+                    }
                     if self.spent() {
                         return Err(Stop);
                     }
                 }
-                self.begin(frame, *id, *index, *ahead)?;
-                if let Some(close) = close
-                    && !self.close_in(close, *covered)
-                {
-                    return Err(self.at_held(close.head, *reg, *value));
+                Op::Depart { continuing } => {
+                    return self.departure(
+                        frame,
+                        if *continuing {
+                            Completion::Continue
+                        } else {
+                            Completion::Break
+                        },
+                    );
                 }
-                if frame.recovery || (self.public_return && self.depth == 1 && frame.may_clean) {
-                    return Err(self.at_held(self.exe.stmt(*id).ops.end() - 1, *reg, *value));
-                }
-                return self.returning(frame, *value);
-            }
-            Op::Keep { src, saved } => {
-                regs[*saved as usize] = regs[*src as usize];
-                regs[*saved as usize + 1] = Value::Bool(true);
-            }
-            Op::Constant { dst, value } => regs[*dst as usize] = *value,
-            Op::Local {
-                dst,
-                at,
-                shared,
-                miss,
-            } => {
-                regs[*dst as usize] = if *shared {
-                    let SlotState::Cell(cell) = frame.slots[*at] else {
-                        return Err(self.at(*miss));
-                    };
-                    self.arena.cell(cell).ok()
-                } else {
-                    match frame.slots[*at] {
-                        SlotState::Value(value) => Some(value),
-                        _ => None,
-                    }
-                }
-                .ok_or_else(|| self.at(*miss))?;
-            }
-            Op::Session { dst, name, miss } => {
-                regs[*dst as usize] = self.session(*name).ok_or_else(|| self.at(*miss))?;
-            }
-            Op::Operator {
-                site,
-                args,
-                covered,
-            } => {
-                let mut values = [Value::Absent; 3];
-                for (to, reg) in values.iter_mut().zip(args.iter()) {
-                    *to = regs[*reg as usize];
-                }
-                let values = &values[..args.len()];
-                regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                    island.operator_value(site, values, *covered)
-                })?;
-            }
-            Op::DirectOperator {
-                site,
-                reads,
-                covered,
-            } => {
-                let values = self.inputs::<3>(&frame.slots, reads)?;
-                regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                    island.operator_value(site, &values[..reads.len()], *covered)
-                })?;
-            }
-            Op::Unary {
-                site,
-                arg,
-                covered,
-                to,
-            } => {
-                return self.numeric_unary(frame, site, arg, *covered, to);
-            }
-            Op::Binary {
-                kernel,
-                site,
-                left,
-                right,
-                covered,
-                to,
-            } => {
-                return self.numeric_binary(frame, *kernel, site, (left, right), *covered, to);
-            }
-            Op::Native { site, args } => {
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (to, reg) in values.iter_mut().zip(args.iter()) {
-                    *to = regs[*reg as usize];
-                }
-                let answer = self.retaining(&mut frame.transient, |island| {
-                    island.native(site, &values, args.len())
-                });
-                regs[site.reg as usize] = answer?;
-            }
-            Op::DirectNative { site, reads } => {
-                let values = self.inputs::<MAX_ARGS>(&frame.slots, reads)?;
-                regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                    island.native(site, &values, reads.len())
-                })?;
-            }
-            Op::PropertyStore {
-                site,
-                args,
-                reads,
-                property,
-            } => {
-                let values = match reads {
-                    Some(reads) => self.inputs::<3>(&frame.slots, reads)?,
-                    None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
-                };
-                let answer = self
-                    .property_value(frame.statement, property, site.close, &values)
-                    .unwrap_or_else(|| {
-                        self.retaining(&mut frame.transient, |island| {
-                            island.heap_call(site, &values)
-                        })
-                    });
-                frame.regs[site.reg as usize] = answer.inspect_err(|_| {
-                    for (source, value) in args.iter().zip(values) {
-                        if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
-                            self.scratch.exit.regs.push((*source, value));
-                        }
-                    }
-                })?;
-            }
-            Op::Heap { site, args } => {
-                let mut values = [Value::Absent; MAX_ARGS];
-                for (to, reg) in values.iter_mut().zip(args.iter()) {
-                    *to = regs[*reg as usize];
-                }
-                let answer = self.retaining(&mut frame.transient, |island| {
-                    island.heap_call(site, &values[..args.len()])
-                });
-                regs[site.reg as usize] = answer?;
-            }
-            Op::Reserve {
-                kind,
-                members,
-                miss,
-            } => {
-                if !self.retaining(&mut frame.transient, |island| {
-                    island.reserve_construction(*kind, *members)
-                }) {
-                    return Err(self.at(*miss));
-                }
-            }
-            Op::Make {
-                ahead,
-                make,
-                items,
-                reg,
-                members,
-                miss,
-            } => {
-                // Construction destroys its source operands. Refuse before
-                // that overwrite when the unpaid source region cannot fit;
-                // otherwise a later close would replay it with its result.
-                if !self.fits(*ahead) {
-                    return Err(self.at(*miss));
-                }
-                let before = self.transient;
-                let kind = make.kind();
-                let floor = self.construction_floor(kind, *members);
-                self.transient = self.transient.saturating_sub(floor);
-                frame.transient = frame.transient.saturating_sub(floor);
-                let values = items.iter().map(|reg| regs[*reg as usize]);
-                let answer = self.make(*make, values);
-                frame.transient += self.transient.saturating_sub(before);
-                regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
-            }
-            Op::Record {
-                ahead,
-                names,
-                values,
-                reg,
-                members,
-                miss,
-            } => {
-                if !self.fits(*ahead) {
-                    return Err(self.at(*miss));
-                }
-                let before = self.transient;
-                let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
-                self.transient = self.transient.saturating_sub(floor);
-                frame.transient = frame.transient.saturating_sub(floor);
-                let values = values.iter().map(|reg| regs[*reg as usize]);
-                let answer = self.record(names, values);
-                frame.transient += self.transient.saturating_sub(before);
-                regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
-            }
-            Op::Closure { code, reg, miss } => {
-                let closure = self.retaining(&mut frame.transient, |island| {
-                    island.fresh_closure(frame.callee, &frame.slots, *code)
-                });
-                regs[*reg as usize] = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
-            }
-            Op::Store {
-                target,
-                index,
-                value,
-                field,
-                pc,
-            } => {
-                self.retaining(&mut frame.transient, |island| {
-                    island.store(
-                        *field,
-                        regs[*target as usize],
-                        index.map_or(Value::Absent, |reg| regs[reg as usize]),
-                        regs[*value as usize],
-                    )
-                })
-                .ok_or_else(|| self.at(*pc))?;
-            }
-            Op::Unit { site, src } => {
-                regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                    island.unit_test(site, regs[*src as usize])
-                })?
-            }
-            Op::Kind { site, src } => {
-                regs[site.same.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                    island.kind_test(site, regs[*src as usize])
-                })?
-            }
-            Op::Access(site) => return self.access(frame, site),
-            Op::AccessInit { head, original } => return self.access_init(frame, *head, original),
-            Op::DirectKind { site, reads } => {
-                let [value] = self.inputs::<1>(&frame.slots, reads)?;
-                regs[site.same.reg as usize] =
-                    self.retaining(&mut frame.transient, |island| island.kind_test(site, value))?;
-            }
-            Op::Field { dst, field, miss } => {
-                let x = regs[*dst as usize];
-                regs[*dst as usize] = self
-                    .field(x, *field)
-                    .ok_or_else(|| self.at_held(*miss, *dst, x))?;
-            }
-            Op::Index { dst, site, miss } => {
-                let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
-                regs[*dst as usize] = self
-                    .retaining(&mut frame.transient, |island| island.item(*site, x, at))
-                    .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
-            }
-            Op::Call { site, read, args } => {
-                return self.call(frame, site, (*read, args), callers, slots);
-            }
-            Op::Bind { at, src } => {
-                let value = regs[*src as usize];
-                frame.slots[*at] = SlotState::Value(value);
-            }
-            Op::Unbind(at) => frame.slots[*at] = SlotState::Empty,
-            Op::Cond {
-                reg,
-                close,
-                pc,
-                otherwise,
-            } => {
-                if let Some(close) = close
-                    && !self.close(close)
-                {
-                    return Err(self.at(close.head));
-                }
-                match regs[*reg as usize] {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => frame.pc = *otherwise,
-                    _ => return Err(self.at(*pc)),
-                }
-            }
-            Op::Jump(pc) => frame.pc = *pc,
-            Op::Close { close, covered, .. } => {
-                if !self.close_in(close, *covered) {
-                    return Err(self.at(close.head));
-                }
-            }
-            Op::Write { site } => {
-                if let Some(begin) = &site.begin {
-                    self.begin(frame, begin.id, begin.index, begin.ahead)?;
-                }
-                let value = if let Some(reads) = &site.reads {
-                    self.inputs::<1>(&frame.slots, reads)?[0]
-                } else {
-                    frame.regs[site.reg as usize]
-                };
-                return self.write_value(frame, site, value);
-            }
-            Op::Accumulate(at) => self.accumulate(frame, *at),
-            Op::Accumulation {
-                site,
-                append,
-                reads,
-                covered,
-                write,
-            } => {
-                return self.accumulation(frame, site, append.as_deref(), reads, *covered, write);
-            }
-            Op::Publish {
-                name,
-                reg,
-                pc,
-                bind,
-            } => {
-                if !self.write_session(*name, regs[*reg as usize], *bind) {
-                    return Err(self.at(*pc));
-                }
-            }
-            Op::Effect(pc) => return Err(self.at(*pc)),
-            Op::Return { reg, pc } => {
-                // A public root return copies its value out of the run in
-                // its source statement, which raises a value that is no data
-                // at that statement's coordinate (FIG-7377).
-                if frame.recovery || (self.public_return && self.depth == 1) {
-                    return Err(self.at(*pc));
-                }
-                let value = regs[*reg as usize];
-                return self.returning(frame, value);
-            }
-            Op::Done { leaves, empty } => return self.finish_statement(frame, *leaves, *empty),
-            Op::Branch {
-                reg,
-                pc,
-                otherwise,
-                opens,
-            } => {
-                let arm = match regs[*reg as usize] {
-                    Value::Bool(true) => 0,
-                    Value::Bool(false) => {
-                        frame.pc = *otherwise;
-                        1
-                    }
-                    _ => return Err(self.at(*pc)),
-                };
-                self.transient = self
-                    .transient
-                    .saturating_sub(std::mem::take(&mut frame.transient));
-                frame.statement = None;
-                if let Some(block) = opens[arm] {
-                    frame.control.push(Position::Block(block, 0));
+                Op::Open(block) => {
+                    frame.control.push(Position::Block(*block, 0));
+                    frame.statement = None;
                     if self.spent() || self.arena.boundary_due() {
-                        #[cfg(any(test, feature = "perf-witness"))]
-                        if !self.spent() && self.fits(1) {
-                            self.scratch.exit.reason = Some(Reason::SourceContinuation);
-                        }
                         return Err(Stop);
                     }
                 }
+                Op::ReturnLiteral {
+                    id,
+                    index,
+                    ahead,
+                    value,
+                    close,
+                    covered,
+                    reg,
+                    entry,
+                } => {
+                    if let Some(block) = entry
+                        && frame.control.is_empty()
+                    {
+                        frame.control.push(Position::Block(*block, 0));
+                        frame.statement = None;
+                        if self.spent() {
+                            return Err(Stop);
+                        }
+                    }
+                    self.begin(frame, *id, *index, *ahead)?;
+                    if let Some(close) = close
+                        && !self.close_in(close, *covered)
+                    {
+                        return Err(self.at_held(close.head, *reg, *value));
+                    }
+                    if frame.recovery || (self.public_return && self.depth == 1 && frame.may_clean)
+                    {
+                        return Err(self.at_held(self.exe.stmt(*id).ops.end() - 1, *reg, *value));
+                    }
+                    return self.returning(frame, *value);
+                }
+                Op::Keep { src, saved } => {
+                    regs[*saved as usize] = regs[*src as usize];
+                    regs[*saved as usize + 1] = Value::Bool(true);
+                }
+                Op::Constant { dst, value } => regs[*dst as usize] = *value,
+                Op::Local {
+                    dst,
+                    at,
+                    shared,
+                    miss,
+                } => {
+                    regs[*dst as usize] = if *shared {
+                        let SlotState::Cell(cell) = frame.slots[*at] else {
+                            return Err(self.at(*miss));
+                        };
+                        self.arena.cell(cell).ok()
+                    } else {
+                        match frame.slots[*at] {
+                            SlotState::Value(value) => Some(value),
+                            _ => None,
+                        }
+                    }
+                    .ok_or_else(|| self.at(*miss))?;
+                }
+                Op::Session { dst, name, miss } => {
+                    regs[*dst as usize] = self.session(*name).ok_or_else(|| self.at(*miss))?;
+                }
+                Op::Operator {
+                    site,
+                    args,
+                    covered,
+                } => {
+                    let mut values = [Value::Absent; 3];
+                    for (to, reg) in values.iter_mut().zip(args.iter()) {
+                        *to = regs[*reg as usize];
+                    }
+                    let values = &values[..args.len()];
+                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
+                        island.operator_value(site, values, *covered)
+                    })?;
+                }
+                Op::DirectOperator {
+                    site,
+                    reads,
+                    covered,
+                } => {
+                    let values = self.inputs::<3>(&frame.slots, reads)?;
+                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
+                        island.operator_value(site, &values[..reads.len()], *covered)
+                    })?;
+                }
+                Op::Unary {
+                    site,
+                    arg,
+                    covered,
+                    to,
+                } => {
+                    return self.numeric_unary(frame, site, arg, *covered, to);
+                }
+                Op::Binary {
+                    kernel,
+                    site,
+                    left,
+                    right,
+                    covered,
+                    to,
+                } => {
+                    return self.numeric_binary(frame, *kernel, site, (left, right), *covered, to);
+                }
+                Op::Native { site, args } => {
+                    let mut values = [Value::Absent; MAX_ARGS];
+                    for (to, reg) in values.iter_mut().zip(args.iter()) {
+                        *to = regs[*reg as usize];
+                    }
+                    let answer = self.retaining(&mut frame.transient, |island| {
+                        island.native(site, &values, args.len())
+                    });
+                    regs[site.reg as usize] = answer?;
+                }
+                Op::DirectNative { site, reads } => {
+                    let values = self.inputs::<MAX_ARGS>(&frame.slots, reads)?;
+                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
+                        island.native(site, &values, reads.len())
+                    })?;
+                }
+                Op::PropertyStore {
+                    site,
+                    args,
+                    reads,
+                    property,
+                } => {
+                    let values = match reads {
+                        Some(reads) => self.inputs::<3>(&frame.slots, reads)?,
+                        None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
+                    };
+                    let answer = self
+                        .property_value(frame.statement, property, site.close, &values)
+                        .unwrap_or_else(|| {
+                            self.retaining(&mut frame.transient, |island| {
+                                island.heap_call(site, &values)
+                            })
+                        });
+                    frame.regs[site.reg as usize] = answer.inspect_err(|_| {
+                        for (source, value) in args.iter().zip(values) {
+                            if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
+                                self.scratch.exit.regs.push((*source, value));
+                            }
+                        }
+                    })?;
+                }
+                Op::Heap { site, args } => {
+                    let mut values = [Value::Absent; MAX_ARGS];
+                    for (to, reg) in values.iter_mut().zip(args.iter()) {
+                        *to = regs[*reg as usize];
+                    }
+                    let answer = self.retaining(&mut frame.transient, |island| {
+                        island.heap_call(site, &values[..args.len()])
+                    });
+                    regs[site.reg as usize] = answer?;
+                }
+                Op::Reserve {
+                    kind,
+                    members,
+                    miss,
+                } => {
+                    if !self.retaining(&mut frame.transient, |island| {
+                        island.reserve_construction(*kind, *members)
+                    }) {
+                        return Err(self.at(*miss));
+                    }
+                }
+                Op::Make {
+                    ahead,
+                    make,
+                    items,
+                    reg,
+                    members,
+                    miss,
+                } => {
+                    // Construction destroys its source operands. Refuse before
+                    // that overwrite when the unpaid source region cannot fit;
+                    // otherwise a later close would replay it with its result.
+                    if !self.fits(*ahead) {
+                        return Err(self.at(*miss));
+                    }
+                    let before = self.transient;
+                    let kind = make.kind();
+                    let floor = self.construction_floor(kind, *members);
+                    self.transient = self.transient.saturating_sub(floor);
+                    frame.transient = frame.transient.saturating_sub(floor);
+                    let values = items.iter().map(|reg| regs[*reg as usize]);
+                    let answer = self.make(*make, values);
+                    frame.transient += self.transient.saturating_sub(before);
+                    regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
+                }
+                Op::Record {
+                    ahead,
+                    names,
+                    values,
+                    reg,
+                    members,
+                    miss,
+                } => {
+                    if !self.fits(*ahead) {
+                        return Err(self.at(*miss));
+                    }
+                    let before = self.transient;
+                    let floor =
+                        self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
+                    self.transient = self.transient.saturating_sub(floor);
+                    frame.transient = frame.transient.saturating_sub(floor);
+                    let values = values.iter().map(|reg| regs[*reg as usize]);
+                    let answer = self.record(names, values);
+                    frame.transient += self.transient.saturating_sub(before);
+                    regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
+                }
+                Op::Closure { code, reg, miss } => {
+                    let closure = self.retaining(&mut frame.transient, |island| {
+                        island.fresh_closure(frame.callee, &frame.slots, *code)
+                    });
+                    regs[*reg as usize] = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
+                }
+                Op::Store {
+                    target,
+                    index,
+                    value,
+                    field,
+                    pc,
+                } => {
+                    self.retaining(&mut frame.transient, |island| {
+                        island.store(
+                            *field,
+                            regs[*target as usize],
+                            index.map_or(Value::Absent, |reg| regs[reg as usize]),
+                            regs[*value as usize],
+                        )
+                    })
+                    .ok_or_else(|| self.at(*pc))?;
+                }
+                Op::Unit { site, src } => {
+                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
+                        island.unit_test(site, regs[*src as usize])
+                    })?
+                }
+                Op::Kind { site, src } => {
+                    regs[site.same.reg as usize] = self
+                        .retaining(&mut frame.transient, |island| {
+                            island.kind_test(site, regs[*src as usize])
+                        })?
+                }
+                Op::Access(site) => return self.access(frame, site),
+                Op::AccessInit { head, original } => {
+                    return self.access_init(frame, *head, original);
+                }
+                Op::DirectKind { site, reads } => {
+                    let [value] = self.inputs::<1>(&frame.slots, reads)?;
+                    regs[site.same.reg as usize] = self
+                        .retaining(&mut frame.transient, |island| island.kind_test(site, value))?;
+                }
+                Op::Field { dst, field, miss } => {
+                    let x = regs[*dst as usize];
+                    regs[*dst as usize] = self
+                        .field(x, *field)
+                        .ok_or_else(|| self.at_held(*miss, *dst, x))?;
+                }
+                Op::Index { dst, site, miss } => {
+                    let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
+                    regs[*dst as usize] = self
+                        .retaining(&mut frame.transient, |island| island.item(*site, x, at))
+                        .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
+                }
+                Op::Call { site, read, args } => {
+                    return self.call(frame, site, (*read, args), callers, slots);
+                }
+                Op::Bind { at, src } => {
+                    let value = regs[*src as usize];
+                    frame.slots[*at] = SlotState::Value(value);
+                }
+                Op::Unbind(at) => frame.slots[*at] = SlotState::Empty,
+                Op::Cond {
+                    reg,
+                    close,
+                    pc,
+                    otherwise,
+                } => {
+                    if let Some(close) = close
+                        && !self.close(close)
+                    {
+                        return Err(self.at(close.head));
+                    }
+                    match regs[*reg as usize] {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => frame.pc = *otherwise,
+                        _ => return Err(self.at(*pc)),
+                    }
+                }
+                Op::Jump(pc) => frame.pc = *pc,
+                Op::Close { close, covered, .. } => {
+                    if !self.close_in(close, *covered) {
+                        return Err(self.at(close.head));
+                    }
+                }
+                Op::Write { site } => {
+                    if let Some(begin) = &site.begin {
+                        self.begin(frame, begin.id, begin.index, begin.ahead)?;
+                    }
+                    let value = if let Some(reads) = &site.reads {
+                        self.inputs::<1>(&frame.slots, reads)?[0]
+                    } else {
+                        frame.regs[site.reg as usize]
+                    };
+                    return self.write_value(frame, site, value);
+                }
+                Op::Accumulate(at) => self.accumulate(frame, *at),
+                Op::Accumulation {
+                    site,
+                    append,
+                    reads,
+                    covered,
+                    write,
+                } => {
+                    return self.accumulation(
+                        frame,
+                        site,
+                        append.as_deref(),
+                        reads,
+                        *covered,
+                        write,
+                    );
+                }
+                Op::Publish {
+                    name,
+                    reg,
+                    pc,
+                    bind,
+                } => {
+                    if !self.write_session(*name, regs[*reg as usize], *bind) {
+                        return Err(self.at(*pc));
+                    }
+                }
+                Op::Effect(pc) => return Err(self.at(*pc)),
+                Op::Return { reg, pc } => {
+                    // A public root return copies its value out of the run in
+                    // its source statement, which raises a value that is no data
+                    // at that statement's coordinate (FIG-7377).
+                    if frame.recovery || (self.public_return && self.depth == 1) {
+                        return Err(self.at(*pc));
+                    }
+                    let value = regs[*reg as usize];
+                    return self.returning(frame, value);
+                }
+                Op::Done { leaves, empty } => return self.finish_statement(frame, *leaves, *empty),
+                Op::Branch {
+                    reg,
+                    pc,
+                    otherwise,
+                    opens,
+                } => {
+                    let arm = match regs[*reg as usize] {
+                        Value::Bool(true) => 0,
+                        Value::Bool(false) => {
+                            frame.pc = *otherwise;
+                            1
+                        }
+                        _ => return Err(self.at(*pc)),
+                    };
+                    self.transient = self
+                        .transient
+                        .saturating_sub(std::mem::take(&mut frame.transient));
+                    frame.statement = None;
+                    if let Some(block) = opens[arm] {
+                        frame.control.push(Position::Block(block, 0));
+                        if self.spent() || self.arena.boundary_due() {
+                            #[cfg(any(test, feature = "perf-witness"))]
+                            if !self.spent() && self.fits(1) {
+                                self.scratch.exit.reason = Some(Reason::SourceContinuation);
+                            }
+                            return Err(Stop);
+                        }
+                    }
+                }
+                Op::Spawn(pc) | Op::Yield(pc) | Op::Join(pc) | Op::Wait(pc) | Op::Cancel(pc) => {
+                    // The instruction has paid its ordered operand/charge prefix.
+                    // Project all windows before a scheduler handler can claim a
+                    // task, expose an effect, call the host, or collect the arena.
+                    self.scratch.exit.scheduling = true;
+                    return Err(self.at(*pc));
+                }
+                Op::Cold(pc) => return Err(self.at(*pc)),
             }
-            Op::Spawn(pc) | Op::Yield(pc) | Op::Join(pc) | Op::Wait(pc) | Op::Cancel(pc) => {
-                // The instruction has paid its ordered operand/charge prefix.
-                // Project all windows before a scheduler handler can claim a
-                // task, expose an effect, call the host, or collect the arena.
-                self.scratch.exit.scheduling = true;
-                return Err(self.at(*pc));
-            }
-            Op::Cold(pc) => return Err(self.at(*pc)),
+            return Ok(Next::Continue);
         }
-        Ok(Next::Continue)
     }
 
     #[inline(always)]

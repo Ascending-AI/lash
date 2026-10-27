@@ -786,7 +786,7 @@ impl Former<'_> {
                     else_: self.block(else_block),
                 }
             }
-            (Form::Plain, Op::SetField { target, field, src }) => {
+            (Form::Plain | Form::Action(_), Op::SetField { target, field, src }) => {
                 let mut operands = vec![tree.take(target)?, tree.take(src)?];
                 operands.sort_by_key(|expr| expr.pc);
                 for operand in &mut operands {
@@ -802,7 +802,7 @@ impl Former<'_> {
                     pc: end,
                 }
             }
-            (Form::Plain, Op::SetIndex { target, src }) => {
+            (Form::Plain | Form::Action(_), Op::SetIndex { target, src }) => {
                 let index = Reg(target.0 + 1);
                 let mut operands = vec![tree.take(target)?, tree.take(index)?, tree.take(src)?];
                 operands.sort_by_key(|expr| expr.pc);

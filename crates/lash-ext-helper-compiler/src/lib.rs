@@ -164,6 +164,19 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
         let Some(facts) = analysis.facts(function) else {
             continue;
         };
+        // Array callback loops use the common register frame and its source
+        // continuations. Keep their canonical bodies for recovery, without a
+        // second segmented executor beside the register program.
+        if definition.name.as_str().starts_with("ts.array.")
+            && facts.metered()
+            && facts
+                .callback_sites()
+                .iter()
+                .any(|site| site == "apply callback")
+        {
+            outcomes.insert(*function, "register program".to_owned());
+            continue;
+        }
         // A body that reaches guest code or performs compiles to a
         // resumable segment (FIG-6709, FIG-6916); one that reaches only a
         // task action or a host read stays a body.

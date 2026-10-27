@@ -17,7 +17,7 @@ mod guarded;
 mod merge;
 use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
-pub(in crate::machine::islands) use merge::Merge;
+pub(in crate::machine::islands) use merge::{CollectionStep, Merge, Placement, ReadSlot, Visit};
 
 pub(in crate::machine::islands) struct Instruction {
     pub(in crate::machine::islands) op: Op,
@@ -52,8 +52,8 @@ impl Read {
 }
 
 pub(in crate::machine::islands) enum Op {
-    Merge {
-        merge: std::sync::Arc<Merge>,
+    Collection {
+        step: std::sync::Arc<CollectionStep>,
         tail: bool,
         original: Box<Op>,
     },
