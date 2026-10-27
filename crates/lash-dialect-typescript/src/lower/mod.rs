@@ -31,7 +31,7 @@ mod async_fn;
 mod calls;
 mod captions;
 mod constructors;
-pub(crate) use calls::tool_calls;
+pub(crate) use calls::{position_guard, tool_calls};
 mod expressions;
 mod functions;
 mod implicit_text;

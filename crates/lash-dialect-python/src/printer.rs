@@ -90,6 +90,14 @@ pub(crate) fn print_regions(
                 r.main = true;
                 r.authored_statement_range(main, range.clone());
             }
+            ModulePart::Alias { .. } => {
+                return Err(PrintError::Unprintable {
+                    site: lash_kernel_value::sites::Site::new(
+                        lash_kernel_value::sites::Unit::Main,
+                        Vec::new(),
+                    ),
+                });
+            }
             ModulePart::Implicit => r.implicit(),
         }
     }

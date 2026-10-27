@@ -1428,9 +1428,15 @@ fn direct_service_calls_still_plan_their_reads() {
 
 /// Numeric operators over checked `number` operands and primitive text
 /// methods over constant bounds print as the TypeScript they lower from.
+/// FIG-7481: a computed read also recovers its numeric-index guards.
 #[test]
 fn numeric_operators_and_primitive_text_methods_print_as_written() {
     for (params, result, expression) in [
+        (
+            "names: JsonValue, index: number",
+            "JsonValue",
+            "names[index + 0]",
+        ),
         ("n: number", "boolean", "n < 1"),
         ("n: number", "boolean", "n >= 1"),
         ("n: number", "number", "n * 2 + 1"),

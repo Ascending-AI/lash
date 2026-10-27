@@ -37,11 +37,18 @@ pub fn print(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     let mut printed = print_attempt(document, captions, library, options, STYLES[0]);
-    for style in &STYLES[1..] {
+    for style in STYLES[1..]
+        .iter()
+        .copied()
+        .chain(STYLES.iter().map(|style| lift::Style {
+            const_functions: true,
+            ..*style
+        }))
+    {
         if !matches!(printed, Err(PrintError::Unprintable { .. })) {
             break;
         }
-        printed = print_attempt(document, captions, library, options, *style);
+        printed = print_attempt(document, captions, library, options, style);
     }
     printed
 }
@@ -50,18 +57,22 @@ pub fn print(
 /// written where they are read over their own `const`s.
 const STYLES: [lift::Style; 4] = [
     lift::Style {
+        const_functions: false,
         operators: true,
         preserve_temporaries: false,
     },
     lift::Style {
+        const_functions: false,
         operators: true,
         preserve_temporaries: true,
     },
     lift::Style {
+        const_functions: false,
         operators: false,
         preserve_temporaries: false,
     },
     lift::Style {
+        const_functions: false,
         operators: false,
         preserve_temporaries: true,
     },
@@ -144,6 +155,9 @@ impl regions::Regions for Printing<'_> {
                             let start = writer.out.len();
                             writer.item(item);
                             written.insert(name.clone(), start..writer.out.len());
+                        }
+                        lift::ModulePart::Alias { local, exported } => {
+                            writer.export_alias(local.as_str(), exported.as_str())
                         }
                         lift::ModulePart::Statements(statements) => writer.top_level(statements),
                     }

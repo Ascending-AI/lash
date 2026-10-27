@@ -135,6 +135,7 @@ pub(super) struct Arm {
 /// A top-level function of the module.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Item {
+    pub(super) const_binding: bool,
     pub(super) is_async: bool,
     pub(super) caption: Option<Caption>,
     pub(super) name: String,
@@ -199,10 +200,15 @@ impl Writer {
         }
     }
 
+    pub(super) fn export_alias(&mut self, local: &str, exported: &str) {
+        self.out
+            .push_str(&format!("export {{ {local} as {exported} }};\n"));
+    }
+
     pub(super) fn item(&mut self, item: &Item) {
         self.pad();
         self.caption(item.caption.as_ref());
-        if let Body::Expr(expression) = &item.body {
+        if item.const_binding || matches!(&item.body, Body::Expr(_)) {
             self.out.push_str("export const ");
             self.out.push_str(&item.name);
             self.out.push_str(" = ");
@@ -211,7 +217,7 @@ impl Writer {
                     is_async: item.is_async,
                     params: item.params.clone(),
                     result: item.result.clone(),
-                    body: Body::Expr(expression.clone()),
+                    body: item.body.clone(),
                 }),
                 0,
             );

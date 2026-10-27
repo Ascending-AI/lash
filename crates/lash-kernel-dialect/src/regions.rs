@@ -345,14 +345,19 @@ fn complete_source_sites(document: &k::Document, sites: Vec<k::SourceSite>) -> V
 /// supply declarations; other runs retain their original statement indices.
 pub enum ModulePart {
     Export(Name),
+    /// An additional export of a callable already declared in Main.
+    Alias {
+        local: Name,
+        exported: Name,
+    },
     Statements(Range<usize>),
     /// A scope predeclaration restored by lowering the later export binding.
     Implicit,
 }
 
 /// Project module declarations and executable work from the same Main body.
-/// Every Export must have exactly one matching binding; nested declarations
-/// remain within their containing statement run.
+/// Every callable must have exactly one matching binding; additional export
+/// names alias that callable. Nested declarations stay in their statement run.
 pub fn module_parts(document: &k::Document) -> Option<Vec<ModulePart>> {
     let mut parts = Vec::new();
     let mut seen = BTreeSet::new();
@@ -390,5 +395,16 @@ pub fn module_parts(document: &k::Document) -> Option<Vec<ModulePart>> {
     if first < main.len() {
         parts.push(ModulePart::Statements(first..main.len()));
     }
-    (seen.len() == document.exports.len()).then_some(parts)
+    for (name, export) in &document.exports {
+        if !seen.contains(name) {
+            let local = seen
+                .iter()
+                .find(|local| document.exports.get(*local) == Some(export))?;
+            parts.push(ModulePart::Alias {
+                local: local.clone(),
+                exported: name.clone(),
+            });
+        }
+    }
+    Some(parts)
 }

@@ -59,5 +59,28 @@
       "title",
       "digest"
     ]
+  },
+  {
+    "name": "FIG-7481 export alias entry",
+    "source": "/** A joke every minute */\nconst minuteJoke = async (): Promise<void> => {\n  const jokes = [\n    \"Why don't scientists trust atoms? Because they make up everything.\",\n    \"Why did the scarecrow win an award? He was outstanding in his field.\",\n    \"What do you call fake spaghetti? An impasta.\",\n    \"Why did the bicycle fall over? It was two-tired.\",\n    \"Why can't a nose be twelve inches long? Because then it would be a foot.\",\n    \"What do you call a bear with no teeth? A gummy bear.\",\n    \"Why did the math book look sad? It had too many problems.\",\n    \"What do you call cheese that isn't yours? Nacho cheese.\",\n    \"I only know 25 letters of the alphabet. I don't know y.\",\n    \"Why did the computer get cold? It left its Windows open.\",\n    \"What do you call a sleeping dinosaur? A dino-snore.\",\n    \"Why don't eggs tell jokes? They'd crack each other up.\"\n  ];\n  const index = Math.floor(Date.now() / 60000) % jokes.length;\n  /** Send this minute's joke to your Inbox */\n  await inbox.sendItem({ title: \"Your minute of humor\", body: jokes[index] });\n};\nexport { minuteJoke as run };\n",
+    "names": [
+      "minuteJoke"
+    ]
+  },
+  {
+    "name": "FIG-7481 thin adapter entry",
+    "source": "/** A joke every minute */\nconst minuteJoke = async (): Promise<void> => {\n  const jokes = [\n    \"Why don't scientists trust atoms? Because they make up everything.\",\n    \"Why did the scarecrow win an award? He was outstanding in his field.\",\n    \"What do you call fake spaghetti? An impasta.\",\n    \"Why did the bicycle fall over? It was two-tired.\",\n    \"Why can't a nose be twelve inches long? Because then it would be a foot.\",\n    \"What do you call a bear with no teeth? A gummy bear.\",\n    \"Why did the math book look sad? It had too many problems.\",\n    \"What do you call cheese that isn't yours? Nacho cheese.\",\n    \"I only know 25 letters of the alphabet. I don't know y.\",\n    \"Why did the computer get cold? It left its Windows open.\",\n    \"What do you call a sleeping dinosaur? A dino-snore.\",\n    \"Why don't eggs tell jokes? They'd crack each other up.\"\n  ];\n  const index = Math.floor(Date.now() / 60000) % jokes.length;\n  /** Send this minute's joke to your Inbox */\n  await inbox.sendItem({ title: \"Your minute of humor\", body: jokes[index] });\n};\nexport async function run(): Promise<void> { await minuteJoke(); }\n",
+    "names": [
+      "minuteJoke",
+      "run"
+    ]
+  },
+  {
+    "name": "FIG-7481 computed index helper argument",
+    "source": "function greetReader(name: string): string { return \"Hello, \" + name; }\nexport const minuteJoke = async (): Promise<void> => {\n  const names = [\"repin37\"];\n  const index = 0;\n  const now = Date.now();\n  await inbox.sendItem({ title: greetReader(names[index]), body: \"A joke at \" + JSON.stringify(now) });\n};\n",
+    "names": [
+      "greetReader",
+      "minuteJoke"
+    ]
   }
 ]

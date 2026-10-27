@@ -34,13 +34,14 @@ pub(super) fn authored_name(value: &k::Expr) -> Option<&str> {
 }
 
 impl Lifter<'_> {
-    /// A module arrow's expression body differs from a statement body in its
-    /// packed closure. Preserve that form when another entry captures it.
-    pub(super) fn module_expression(
+    /// Recover a captured module function's body form. Block bodies can
+    /// come from either a declaration or a const-bound function; read-back
+    /// selects the declaration form that recreates the capture.
+    pub(super) fn module_body(
         &mut self,
         name: &Name,
         body: &[super::source::Stmt],
-    ) -> Lift<Option<Expr>> {
+    ) -> Lift<Option<Body>> {
         for definition in self.document.functions.values() {
             let Some(block) = definition.body() else {
                 continue;
@@ -56,20 +57,21 @@ impl Lifter<'_> {
                 if authored_name(value) != Some(name.as_str()) {
                     continue;
                 }
-                if let Some(Function {
-                    body: Body::Expr(_),
-                    ..
-                }) = self.closure(
+                if let Some(function) = self.closure(
                     value,
                     &Site::new(lash_kernel_value::sites::Unit::Main, Vec::new()),
-                )? && let [
-                    super::source::Stmt {
-                        kind: super::source::StmtKind::Return(Some(value)),
-                        ..
-                    },
-                ] = body
-                {
-                    return Ok(Some(value.clone()));
+                )? {
+                    if matches!(function.body, Body::Expr(_))
+                        && let [
+                            super::source::Stmt {
+                                kind: super::source::StmtKind::Return(Some(value)),
+                                ..
+                            },
+                        ] = body
+                    {
+                        return Ok(Some(Body::Expr(value.clone())));
+                    }
+                    return Ok(Some(Body::Block(body.to_vec())));
                 }
             }
         }

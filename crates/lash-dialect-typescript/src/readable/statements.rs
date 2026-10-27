@@ -457,6 +457,29 @@ impl Lifter<'_> {
             }
             None => (condition, then_block, else_block, None),
         };
+        // A variable numeric index first proves it is whole and nonnegative.
+        let (bounds, in_bounds, out_of_bounds, position) = if let Some(index) =
+            crate::lower::position_guard(bounds, |id, name| self.is(id, name))
+        {
+            let [
+                k::Stmt::If {
+                    condition,
+                    then_block,
+                    else_block,
+                },
+            ] = in_bounds
+            else {
+                return Ok(None);
+            };
+            (
+                condition,
+                then_block.as_slice(),
+                else_block.as_slice(),
+                Some((index, out_of_bounds)),
+            )
+        } else {
+            (bounds, in_bounds, out_of_bounds, None)
+        };
         let k::Expr::Call { function: lt, args } = bounds else {
             return Ok(None);
         };
@@ -520,7 +543,9 @@ impl Lifter<'_> {
                 .and_then(|value| self.helper_read(value, "ts.get_numeric"))
                 .is_some_and(|args| args == helper)
         };
-        if !computed(Self::sets(out_of_bounds, name))
+        if position
+            .is_some_and(|(held, fallback)| held != index || !computed(Self::sets(fallback, name)))
+            || !computed(Self::sets(out_of_bounds, name))
             || otherwise.is_some_and(|otherwise| !computed(Self::sets(otherwise, name)))
         {
             return Ok(None);

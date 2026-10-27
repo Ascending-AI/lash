@@ -1324,3 +1324,36 @@ impl Lowerer<'_> {
         }
     }
 }
+
+/// Inverse of the nonliteral numeric-index test in `position_tests`.
+pub(crate) fn position_guard(
+    condition: &Expr,
+    is_native: impl Fn(&lash_kernel_value::FunctionId, &str) -> bool,
+) -> Option<&Expr> {
+    let Expr::Call { function, args } = condition else {
+        return None;
+    };
+    if !is_native(function, "eq") {
+        return None;
+    }
+    let [
+        Expr::Call {
+            function: floor,
+            args: rounded,
+        },
+        Expr::Call {
+            function: abs,
+            args: magnitude,
+        },
+    ] = args.as_slice()
+    else {
+        return None;
+    };
+    let [index] = rounded.as_slice() else {
+        return None;
+    };
+    (is_native(floor, "num.floor")
+        && is_native(abs, "num.abs")
+        && magnitude.as_slice() == std::slice::from_ref(index))
+    .then_some(index)
+}

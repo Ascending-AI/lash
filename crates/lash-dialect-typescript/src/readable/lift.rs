@@ -20,6 +20,8 @@ pub(super) type Lift<T> = Result<T, String>;
 /// tries the plainest style first and keeps the first one that reads back.
 #[derive(Clone, Copy)]
 pub(super) struct Style {
+    /// Captured module functions retain their `const` declaration form.
+    pub(super) const_functions: bool,
     /// Front-end temporaries keep their own `const`s instead of being written
     /// where they are read.
     pub(super) preserve_temporaries: bool,
@@ -48,6 +50,7 @@ pub(super) enum Main {
 
 pub(super) enum ModulePart {
     Export(Name),
+    Alias { local: Name, exported: Name },
     Statements(Vec<Stmt>),
 }
 
@@ -112,6 +115,7 @@ fn module_main(
             use lash_kernel_dialect::regions::ModulePart as Part;
             match part {
                 Part::Export(name) => Some(Ok(ModulePart::Export(name))),
+                Part::Alias { local, exported } => Some(Ok(ModulePart::Alias { local, exported })),
                 Part::Statements(range) => Some(
                     lifter
                         .block_at(
@@ -374,11 +378,11 @@ impl<'a> Lifter<'a> {
             }
         }
         let body = self.block_at(&statements[skip..], &site, skip)?;
-        let body = match self.module_expression(name, &body)? {
-            Some(expression) => source::Body::Expr(expression),
-            None => source::Body::Block(body),
-        };
+        let captured_body = self.module_body(name, &body)?;
+        let const_binding = captured_body.is_some() && self.style.const_functions;
+        let body = captured_body.unwrap_or(source::Body::Block(body));
         Ok(Item {
+            const_binding,
             is_async: entry.asynchronous,
             caption: self.caption(site),
             name: name.as_str().to_owned(),
