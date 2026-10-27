@@ -27,7 +27,11 @@ the rest and reds are fixed forward:
 - one `kiln clippy`;
 - only when they apply: `//crates/lash:ui_fixtures` and
   `//crates/lash:facade_completeness` when exports change, and
-  `kiln build //:schema_checks` when a serialized shape changes.
+  `kiln build //:schema_checks` when a serialized shape changes;
+- only when they apply: a host-facing signature, wire shape, default or
+  dependency-floor change adds `docs/host-upgrades/unreleased/<ticket>.md`
+  in the same landing, with the old/new contract and missed-change diagnostic
+  ([entry format](docs/host-upgrades/unreleased/README.md)).
 
 To land a change, commit it, source `./env.sh`, then run `scripts/land` from
 your fork. It rebases onto main, runs the required workspace `kiln clippy`,

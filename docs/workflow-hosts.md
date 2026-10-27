@@ -1,5 +1,7 @@
 # Editing, publishing and showing workflows
 
+Upgrading an existing host? Start with the [host upgrade checklist](host-upgrades.md).
+
 Recovery and external-effect guarantees follow [What survives a crash](../README.md#what-survives-a-crash).
 
 A host imports or constructs a kernel Document, edits it, publishes a linked

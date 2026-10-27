@@ -89,6 +89,24 @@ when no new opt-in is required. For example, hosts that want workflow node
 spans set `TraceDetailPolicy` for `TraceSpanKind::Workflow` to
 `TraceDetail::Extended`; `standard()` does not enable those spans.
 
+## Host upgrade entries
+
+A change that alters a host-facing signature, wire shape, default or dependency
+floor adds `docs/host-upgrades/unreleased/<ticket>.md` in the same landing.
+Use one file per change, with the old/new contract, commit and ticket, required
+opt-ins and the compiler/decoder/startup diagnostic or behavior a host sees if
+it misses the change. Verify each row against its owning code. Internal-only
+changes need no entry. This is part of the applicable proof in `AGENTS.md`,
+alongside facade checks for exports and schema checks for serialized shapes.
+The existing "Hosts that ..." commit paragraph remains required.
+
+Follow the [entry format](../host-upgrades/unreleased/README.md). At a release
+cut, fold the ticket files into [the host upgrade guide](../host-upgrades.md),
+resolve their introducing commits, and remove the folded files in that release
+commit. Review checks the entry requirement: facade completeness proves type
+reachability, and schema checks prove generated-file agreement; neither detects
+all host contract changes or distinguishes them from internal changes.
+
 ## Lifecycle: states and labels
 
 **States are the lifecycle position. Labels carry only what a state can't express: who picks the ticket up.** Keep the two orthogonal; don't say the same thing twice in both.

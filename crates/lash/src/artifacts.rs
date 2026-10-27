@@ -884,7 +884,7 @@ impl HostArtifacts {
     /// Publish one Main or data-only function Export under its immutable Link.
     /// The explicit attachment includes any permitted deferred paths.
     /// Supplied source is admitted under `limits` (implicit text defaults to
-    /// `Refuse`). Copied source facts retained by a Draft are checked even
+    /// `Allow`). Copied source facts retained by a Draft are checked even
     /// without source; newly authored typed code has no implicit source conversions.
     #[cfg(feature = "codemode")]
     #[tracing::instrument(level = "debug", name = "lash.artifacts.publish_workflow", skip_all, fields(document_id = %document.id(), document_bytes = document.as_bytes().len(), publication_count = environment.snapshot.advertisements.len()))]
