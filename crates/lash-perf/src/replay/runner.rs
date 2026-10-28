@@ -367,7 +367,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         "runtime_workers": tokio::runtime::Handle::current().metrics().num_workers(),
         "prompt_render_workers": matches!(options.store, StoreChoice::CountedSqliteFile(_)).then_some(1),
         "input_policy": if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
-            "fresh process per workload; frozen clock and timers; fixed send IDs, lease incarnation, sequential environment identities and same-length logical publication domain; private physical files; local wakes only; facade recovery polls deferred beyond run; tool-live flush 60s and slot linger 3600s; uncoalesced presentation; one prompt renderer and one blocking worker; local acknowledged terminal before outcome read; fixed enqueue nonce and private staging directory"
+            "fresh process per workload; frozen clock and timers; fixed send IDs, lease incarnation, sequential environment identities and same-length logical publication domain; private physical files; local wakes only; facade recovery polls deferred beyond run; tool-live flush 60s and slot linger 3600s; uncoalesced presentation; one prompt renderer and one blocking worker; local acknowledged terminal before outcome read and local owner idle before counter cut; fixed enqueue nonce and private staging directory"
         } else {
             "system clock; ordinary identity sources"
         },
@@ -695,6 +695,16 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         )
         .await
         .with_context(|| format!("{} turn {} never settled", workload.name, turn + 1))?;
+        if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+            let wakes = backend.stores().wake_sink();
+            tokio::time::timeout(ROUND_WATCHDOG, async {
+                while !wakes.local_actors_idle_for_testing() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .context("the counted turn's owner never became idle")?;
+        }
         let wall_ms = started.elapsed().as_secs_f64() * 1_000.0;
         if off_cpu_marks {
             crate::perf_support::time::instruction_control("disable")?;
@@ -794,23 +804,25 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             let keys = oracle
                 .check(&value)
                 .with_context(|| format!("turn {} result oracle", turn + 1))?;
-            let super::oracle::Oracle::RecordKeys {
+            if let super::oracle::Oracle::RecordKeys {
                 records,
                 offset,
                 sorted,
                 ..
-            } = *oracle;
-            metrics.insert("oracle_record_count".to_owned(), records as f64);
-            metrics.insert("oracle_offset".to_owned(), offset as f64);
-            metrics.insert("oracle_keys_checked".to_owned(), keys.len() as f64);
-            for (name, position) in [
-                ("first", 0),
-                ("middle", keys.len() / 2),
-                ("last", keys.len() - 1),
-            ] {
-                metrics.insert(format!("oracle_{name}_key"), keys[position] as f64);
+            } = *oracle
+            {
+                metrics.insert("oracle_record_count".to_owned(), records as f64);
+                metrics.insert("oracle_offset".to_owned(), offset as f64);
+                metrics.insert("oracle_keys_checked".to_owned(), keys.len() as f64);
+                for (name, position) in [
+                    ("first", 0),
+                    ("middle", keys.len() / 2),
+                    ("last", keys.len() - 1),
+                ] {
+                    metrics.insert(format!("oracle_{name}_key"), keys[position] as f64);
+                }
+                metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));
             }
-            metrics.insert("oracle_sorted".to_owned(), f64::from(u8::from(sorted)));
         }
         if let Some(mode) = lanes[0].inputs[turn].0.capability_turn {
             metrics.extend(super::capabilities::metrics(
@@ -1023,6 +1035,11 @@ async fn send(
         host_tools
             .context("fresh document requires host catalogue")?
             .attach_document();
+    }
+    if scripted.capability_turn == Some(super::script::CapabilityTurn::EditedDocument) {
+        host_tools
+            .context("document edit requires host catalogue")?
+            .edit_document();
     }
     let mut send = lane.session.send(input);
     if lane.counted {

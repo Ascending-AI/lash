@@ -8,6 +8,51 @@
 
 use std::process::Command;
 
+/// ENV-NAMESPACE-BATCH: ten additional roots of one publisher must not add
+/// transactions to the same preparing environment claim. FIG-7482 found
+/// separate package/publication transactions for every root.
+#[test]
+fn environment_namespace_acquisition_batches_roots_under_one_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut transactions = Vec::new();
+    for roots in [1, 11] {
+        let mut script: serde_json::Value =
+            serde_json::from_str(include_str!("../workloads/replay/hostturn.json")).unwrap();
+        script["host"]["package_roots"] = roots.into();
+        let path = dir.path().join(format!("roots-{roots:02}"));
+        std::fs::create_dir(&path).unwrap();
+        let fixture = path.join("workload.json");
+        std::fs::write(&fixture, serde_json::to_vec(&script).unwrap()).unwrap();
+        let receipt = path.join("receipt.json");
+        let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+            .arg("replay")
+            .arg(fixture)
+            .args(["--turns", "1"])
+            .arg("--store-dir")
+            .arg(path.join("stores"))
+            .arg("--out")
+            .arg(&receipt)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
+        transactions.push(
+            receipt["workloads"][0]["rounds"][0]["metrics"]["sql_transactions"]
+                .as_f64()
+                .expect("SQLite counts physical transactions"),
+        );
+    }
+    assert_eq!(
+        transactions[0], transactions[1],
+        "package roots sharing a claim add transactions: {transactions:?}"
+    );
+}
+
 #[test]
 fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     let dir = tempfile::tempdir().unwrap();

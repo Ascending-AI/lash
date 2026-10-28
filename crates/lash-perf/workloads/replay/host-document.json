@@ -1,0 +1,49 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "host-document",
+  "description": "FIG-7482: first text turn, unchanged warm turn, then a host document edit with fresh turn authority. Same 31 tools, 24 optional fields and 11 roots as hostturn. The host edits its document and notifies the source before the third send, changing tools.host0 binding revision while owner options stay unchanged. The cell must return the edited document text through the real tool. Scripted provider has fixed zero injected delay. Unlike Figments, the document already exists, the host document store is in memory, and one scripted cell finishes with the read value instead of a provider follow-up.",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "setup": true,
+      "user": "Warm the host catalogue with the document capability.",
+      "replies": [
+        {
+          "text": "READY"
+        }
+      ]
+    },
+    {
+      "capability_turn": "quiet",
+      "user": "A quiet model turn with the same document capability and unchanged host catalogue.",
+      "replies": [
+        {
+          "text": "Quiet warm host capability turn complete."
+        }
+      ],
+      "repeat": 1
+    },
+    {
+      "capability_turn": "edited-document",
+      "user": "Read the current host document and finish with its exact text.",
+      "oracle": {
+        "kind": "value",
+        "expected": "EDITED-DOCUMENT"
+      },
+      "replies": [
+        {
+          "cell": [
+            "const doc = await tools.host0({});",
+            "await control.finish(doc.document);"
+          ]
+        }
+      ]
+    }
+  ],
+  "host": {
+    "tools": 31,
+    "schema_fields": 24,
+    "run_override": true,
+    "package_roots": 11
+  }
+}

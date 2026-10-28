@@ -99,6 +99,9 @@ pub enum CapabilityTurn {
     Warm,
     Quiet,
     FreshDocument,
+    /// A host document edit changes its tool binding, without sending a raw
+    /// message attachment. Figments grants document access through its tools.
+    EditedDocument,
 }
 
 /// One scripted model reply.
@@ -332,7 +335,11 @@ fn expand_reply(reply: &Reply, vars: &[(&str, String)]) -> Reply {
 }
 
 /// The committed corpus, compiled in so a test target needs no runfiles.
-pub const CORPUS: [(&str, &str); 10] = [
+pub const CORPUS: [(&str, &str); 11] = [
+    (
+        "host-document",
+        include_str!("../../workloads/replay/host-document.json"),
+    ),
     (
         "hostturn",
         include_str!("../../workloads/replay/hostturn.json"),

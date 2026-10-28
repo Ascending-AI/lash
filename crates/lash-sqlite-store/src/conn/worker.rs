@@ -15,6 +15,36 @@ enum Command {
     Close(oneshot::Sender<rusqlite::Result<()>>),
 }
 
+enum Sender {
+    Queued(mpsc::Sender<Command>),
+    #[cfg(feature = "testing")]
+    Inline(mpsc::SyncSender<Command>),
+}
+
+impl Sender {
+    fn send(&self, command: Command) -> tokio_rusqlite::Result<()> {
+        match self {
+            Self::Queued(sender) => sender.send(command),
+            #[cfg(feature = "testing")]
+            Self::Inline(sender) => sender.send(command),
+        }
+        .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)
+    }
+}
+
+fn channel(#[cfg(feature = "testing")] inline_calls: bool) -> (Sender, mpsc::Receiver<Command>) {
+    #[cfg(feature = "testing")]
+    if inline_calls {
+        // Inline issuing waits for each answer before sending the next call.
+        // One reusable slot avoids unbounded-channel block allocation cycles
+        // moving with the number of calls in a counted fixture's cold turn.
+        let (sender, receiver) = mpsc::sync_channel(1);
+        return (Sender::Inline(sender), receiver);
+    }
+    let (sender, receiver) = mpsc::channel();
+    (Sender::Queued(sender), receiver)
+}
+
 /// The writes queued right behind `first` that may join its batch, taken
 /// in queue order without waiting: from `held` first, then the channel. The
 /// first command that cannot join stays at the head of `held`.
@@ -45,7 +75,7 @@ fn gather(
 }
 
 struct Owner {
-    sender: Option<mpsc::Sender<Command>>,
+    sender: Option<Sender>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -150,7 +180,22 @@ impl Connection {
     pub(super) async fn start(
         open: impl FnOnce() -> rusqlite::Result<rusqlite::Connection> + Send + 'static,
     ) -> rusqlite::Result<Self> {
-        let (sender, receiver) = mpsc::channel();
+        Self::start_configured(
+            open,
+            #[cfg(feature = "testing")]
+            false,
+        )
+        .await
+    }
+
+    pub(super) async fn start_configured(
+        open: impl FnOnce() -> rusqlite::Result<rusqlite::Connection> + Send + 'static,
+        #[cfg(feature = "testing")] inline_calls: bool,
+    ) -> rusqlite::Result<Self> {
+        let (sender, receiver) = channel(
+            #[cfg(feature = "testing")]
+            inline_calls,
+        );
         let (opened, ready) = oneshot::channel();
         let worker = thread::Builder::new()
             .name("lash-sqlite".into())
@@ -281,7 +326,6 @@ impl Connection {
             .as_ref()
             .ok_or(tokio_rusqlite::Error::ConnectionClosed)?
             .send(command)
-            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)
     }
 }
 
@@ -353,9 +397,10 @@ mod drop_tests {
     /// preserving the channel-disconnection behavior of the counted fixture.
     #[tokio::test]
     async fn an_inline_callback_panic_releases_its_caller() {
-        let connection = super::Connection::start(rusqlite::Connection::open_in_memory)
-            .await
-            .expect("open inline connection");
+        let connection =
+            super::Connection::start_configured(rusqlite::Connection::open_in_memory, true)
+                .await
+                .expect("open inline connection");
         let result = connection.call_inline::<(), _>(|_| panic!("failed callback"));
         assert!(matches!(
             result,

@@ -17,6 +17,8 @@ type WeakEnvironmentSink = std::sync::Weak<dyn Fn(EnvironmentChange) + Send + Sy
 #[derive(Default)]
 struct State {
     documents: usize,
+    document: String,
+    document_revision: u64,
     subscriptions: Vec<(SourceId, WeakEnvironmentSink)>,
     authorized_calls: u64,
 }
@@ -58,7 +60,10 @@ impl HostTools {
             .collect::<Result<Vec<_>>>()?;
         Ok(Arc::new(Self {
             definitions,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                document: "ORIGINAL-DOCUMENT".into(),
+                ..State::default()
+            }),
         }))
     }
     /// A real host document publication changes the catalogue and notifies the
@@ -76,6 +81,23 @@ impl HostTools {
     }
     pub fn authorized_calls(&self) -> u64 {
         self.state.lock_recover().authorized_calls
+    }
+    /// The host edits its own document between settled turns. Only the
+    /// document operation's binding changes; the catalogue geometry is stable.
+    pub fn edit_document(&self) {
+        let subscriptions = {
+            let mut state = self.state.lock_recover();
+            state.document = "EDITED-DOCUMENT".into();
+            state.document_revision += 1;
+            state.subscriptions.clone()
+        };
+        for (source, sink) in subscriptions {
+            if let Some(sink) = sink.upgrade() {
+                sink(EnvironmentChange::ConfigSelection {
+                    sources: [source].into(),
+                });
+            }
+        }
     }
     pub fn counted(
         self: &Arc<Self>,
@@ -261,16 +283,26 @@ fn host_definition(root: &str, name: &str, fields: usize) -> Result<ToolDefiniti
     Ok(ToolDefinition::raw(
         format!("replay-{name}"), format!("{root}.{name}"), "Host capability guarded document operation",
         serde_json::json!({"title":name,"type":"object","properties":properties,"additionalProperties":false}),
-        serde_json::json!({"type":"object","properties":{"authorized":{"type":"boolean"}},"required":["authorized"],"additionalProperties":false}),
+        output_schema(name),
     )?.with_execution(std::time::Duration::from_secs(1)))
 }
 
 fn definition(name: &str) -> Result<ToolDefinition> {
     Ok(ToolDefinition::raw(
-        format!("replay-{name}"), format!("tools.{name}"), "Host capability guarded document operation",
+        format!("replay-{name}"),
+        format!("tools.{name}"),
+        "Host capability guarded document operation",
         serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
-        serde_json::json!({"type":"object","properties":{"authorized":{"type":"boolean"}},"required":["authorized"],"additionalProperties":false}),
-    )?.with_execution(std::time::Duration::from_secs(1)))
+        output_schema(name),
+    )?
+    .with_execution(std::time::Duration::from_secs(1)))
+}
+fn output_schema(name: &str) -> serde_json::Value {
+    let mut schema = serde_json::json!({"type":"object","properties":{"authorized":{"type":"boolean"}},"required":["authorized"],"additionalProperties":false});
+    if name == "host0" {
+        schema["properties"]["document"] = serde_json::json!({"type":"string"});
+    }
+    schema
 }
 #[async_trait::async_trait]
 impl ToolProvider for HostTools {
@@ -320,10 +352,11 @@ impl ToolProvider for HostTools {
         manifest: &ToolManifest,
         _: &OwnerConfigView,
     ) -> Option<(FormatVersion, serde_json::Value)> {
-        Some((
-            FormatVersion::ONE,
-            serde_json::json!({"operation":manifest.tool()}),
-        ))
+        let mut payload = serde_json::json!({"operation":manifest.tool()});
+        if manifest.tool() == "tools.host0" {
+            payload["document_revision"] = self.state.lock_recover().document_revision.into();
+        }
+        Some((FormatVersion::ONE, payload))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let capabilities = call.context.run_capabilities();
@@ -346,8 +379,16 @@ impl ToolProvider for HostTools {
         if capabilities != &run_spec().capabilities && !host_authorized {
             return lash_core::ToolOutcome::err("missing host document capability").into();
         }
-        self.state.lock_recover().authorized_calls += 1;
-        lash_core::ToolOutcome::ok(serde_json::json!({"authorized":true})).into()
+        let output = {
+            let mut state = self.state.lock_recover();
+            state.authorized_calls += 1;
+            let mut output = serde_json::json!({"authorized":true});
+            if call.name().as_str() == "tools.host0" {
+                output["document"] = state.document.clone().into();
+            }
+            output
+        };
+        lash_core::ToolOutcome::ok(output).into()
     }
 }
 /// Retain the default snapshot, so its virtual calls reach the counted runner.
@@ -453,7 +494,7 @@ pub fn check(turn: CapabilityTurn, metrics: &BTreeMap<String, f64>, authorized: 
                 "quiet warm turn entered {name}: {}",
                 metrics[name]
             ),
-            CapabilityTurn::FreshDocument => {
+            CapabilityTurn::FreshDocument | CapabilityTurn::EditedDocument => {
                 ensure!(metrics[name] > 0.0, "fresh document entered no {name}")
             }
             CapabilityTurn::Warm => {}

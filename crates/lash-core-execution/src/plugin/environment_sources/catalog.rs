@@ -26,6 +26,20 @@ impl CatalogSource {
             })
             .collect()
     }
+
+    fn namespaces_match(&self, recorded: &NamespaceSlices) -> bool {
+        let state = self.session.state.lock_recover();
+        self.owners
+            .iter()
+            .filter_map(|owner| {
+                state
+                    .data
+                    .plugins
+                    .get(owner)
+                    .map(|namespace| (owner, namespace))
+            })
+            .eq(recorded.iter())
+    }
 }
 impl EnvironmentSource for CatalogSource {
     fn descriptor(&self) -> SourceDescriptor {
@@ -100,19 +114,21 @@ impl CatalogSource {
             .lock_recover()
             .clone()
             .ok_or_else(|| SourceCollectionError::UnknownSource(SourceId(SOURCE.into())))?;
-        let (mut snapshot, namespaces) =
-            if recorded.is_some_and(|f| f.config == witness.0.fragment.config) {
-                witness
-            } else {
-                // A run override observes its own view without replacing the base
-                // head. Re-establish this view's witness before deriving it again.
-                self.snapshot(config)?;
-                self.witness
-                    .lock_recover()
-                    .clone()
-                    .ok_or_else(|| SourceCollectionError::UnknownSource(SourceId(SOURCE.into())))?
-            };
-        if namespaces != self.namespaces() {
+        let (mut snapshot, namespaces) = if recorded
+            .is_some_and(|f| f.config == witness.0.fragment.config)
+            && self.namespaces_match(&witness.1)
+        {
+            witness
+        } else {
+            // A run override or a prior namespace publication can leave the
+            // witness behind the current view. Observe it before projecting.
+            self.snapshot(config)?;
+            self.witness
+                .lock_recover()
+                .clone()
+                .ok_or_else(|| SourceCollectionError::UnknownSource(SourceId(SOURCE.into())))?
+        };
+        if !self.namespaces_match(&namespaces) {
             return Err(SourceCollectionError::ChangedDuringSnapshot(
                 snapshot.source,
             ));
@@ -133,7 +149,7 @@ impl CatalogSource {
         contributions.push(self.session.tool_catalog_overlay.clone());
         let removed: BTreeSet<_> = contributions.into_iter().flat_map(|c| c.remove).collect();
         snapshot.fragment.model_removals = removed;
-        if namespaces != self.namespaces() {
+        if !self.namespaces_match(&namespaces) {
             return Err(SourceCollectionError::ChangedDuringSnapshot(
                 snapshot.source,
             ));
@@ -185,5 +201,97 @@ impl PluginSession {
         sources.register(catalog.clone(), sink)?;
         sources.catalog = Some(catalog);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7482: a prior turn's witness is stale before projection starts;
+    /// namespace changes during the new observation must still be refused.
+    #[test]
+    fn a_prior_namespace_witness_does_not_refuse_a_current_projection() {
+        let hidden = lash_kernel_value::names::QualifiedOperation::from_effect(
+            &lash_kernel_value::EffectName::new("hidden.work").unwrap(),
+        )
+        .unwrap();
+        let during = Arc::new(Mutex::new(None::<Arc<dyn Fn() + Send + Sync>>));
+        let mut reg = crate::plugin::PluginRegistrar::new("test_protocol");
+        crate::testing::register_inventory_protocol(&mut reg).unwrap();
+        let removed = hidden.clone();
+        let hook = during.clone();
+        reg.tool_catalog()
+            .contribute(crate::hook_key!("catalog"), move |_, _| {
+                let removed = removed.clone();
+                let hook = hook.clone();
+                Ok(Arc::new(move |_| {
+                    if let Some(change) = hook.lock_recover().take() {
+                        change();
+                    }
+                    Ok(crate::ToolCatalogContribution::remove_tools([
+                        removed.clone()
+                    ]))
+                }))
+            })
+            .unwrap();
+        let factory = crate::plugin::PluginRecipeFactory::new(
+            crate::plugin::PluginDeclaration::initial("test_protocol"),
+            crate::plugin::PluginRecipe::from_registrar("test_protocol", reg),
+        );
+        let session = crate::testing::test_plugin_host(vec![Arc::new(factory)])
+            .build_session(crate::plugin::PluginSessionRequest::creation(
+                "catalog-witness",
+                crate::plugin::SessionAuthorityContext::fixture(),
+            ))
+            .unwrap();
+        session
+            .state
+            .lock_recover()
+            .data
+            .plugins
+            .insert("state".into(), Default::default());
+        let source = CatalogSource {
+            session: session.clone(),
+            owners: ["state".into()].into(),
+            revision: Mutex::new(SourceRevision {
+                incarnation: uuid::Uuid::nil(),
+                counter: 0,
+            }),
+            witness: Mutex::new(None),
+        };
+        let config = OwnerConfigView::default();
+        let prior = source.snapshot(&config).unwrap();
+        session
+            .state
+            .lock_recover()
+            .data
+            .plugins
+            .get_mut("state")
+            .unwrap()
+            .generation += 1;
+        let current = source
+            .project(Vec::new(), Some(&prior.fragment), &config)
+            .unwrap();
+        assert_eq!(current.fragment.model_removals, [hidden].into());
+        assert_eq!(
+            current.fragment.config, prior.fragment.config,
+            "generation changes freshness without changing namespace content"
+        );
+
+        let state = session.state.clone();
+        *during.lock_recover() = Some(Arc::new(move || {
+            state
+                .lock_recover()
+                .data
+                .plugins
+                .get_mut("state")
+                .unwrap()
+                .generation += 1;
+        }));
+        assert!(matches!(
+            source.project(Vec::new(), Some(&current.fragment), &config),
+            Err(SourceCollectionError::ChangedDuringSnapshot(_))
+        ));
     }
 }

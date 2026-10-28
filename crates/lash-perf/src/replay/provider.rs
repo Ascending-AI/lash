@@ -214,7 +214,12 @@ pub fn model(book: Arc<ScriptBook>) -> ProviderHandle {
         })
         .complete(move |request: LlmRequest| {
             let book = Arc::clone(&book);
-            async move { Ok(book.respond(&request)) }
+            async move {
+                Ok(lash_core::operational_metrics::turn::sync_phase(
+                    "provider dispatch",
+                    || book.respond(&request),
+                ))
+            }
         })
         .build()
         .into_handle()

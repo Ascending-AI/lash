@@ -455,15 +455,17 @@ impl super::ExecutionComposition {
             return Ok(());
         }
         let mut held = BTreeSet::new();
+        let mut records = Vec::new();
+        let mut publications = Vec::new();
         for accepted in &packages.snapshot.advertisements {
             if !missing.remove(&accepted.publication.key()) {
                 continue;
             }
+            let publication = &accepted.publication;
             if matches!(accepted.publication.context.scope, PublicationScope::Host) {
-                store
-                    .acquire_publication(claim, &accepted.publication.key())
-                    .await
-                    .map_err(package_store_error)?;
+                publications.push(lash_durable::packages::PackageHold::Publication(
+                    publication,
+                ));
                 continue;
             }
             if held.insert(accepted.publication.context.publisher.clone()) {
@@ -483,22 +485,22 @@ impl super::ExecutionComposition {
                 self.hold_packages(claim, &advertisements).await?;
             }
             if let PackageAdvertisement::Enumerated(package) = &accepted.advertisement {
-                store
-                    .put_package(
-                        claim,
-                        &lash_core_store::packages::PackageRecord {
-                            id: package.identity(),
-                            package: package.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(package_store_error)?;
+                records.push(lash_core_store::packages::PackageRecord {
+                    id: package.identity(),
+                    package: package.clone(),
+                });
             }
-            store
-                .publish(claim, &accepted.publication)
-                .await
-                .map_err(package_store_error)?;
+            publications.push(lash_durable::packages::PackageHold::Publish(publication));
         }
+        let mut batch: Vec<_> = records
+            .iter()
+            .map(lash_durable::packages::PackageHold::Package)
+            .collect();
+        batch.extend(publications);
+        store
+            .acquire_batch(claim, &batch)
+            .await
+            .map_err(package_store_error)?;
         Ok(())
     }
 

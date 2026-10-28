@@ -211,68 +211,71 @@ impl EnvironmentSources {
         changes: impl IntoIterator<Item = EnvironmentChange>,
         config: &OwnerConfigView,
     ) -> Result<Vec<SourceSnapshot>, SourceCollectionError> {
-        let mut dirty: BTreeMap<SourceId, bool> = self
-            .sources
-            .keys()
-            .filter(|id| !frontier.contains_key(*id))
-            .map(|id| (id.clone(), true))
-            .collect();
-        let mut refresh = BTreeSet::new();
-        for change in changes {
-            match change {
-                EnvironmentChange::ConfigSelection { sources } => {
-                    for source in sources {
-                        self.require(&source)?;
-                        dirty.insert(source, true);
+        lash_core_ids::operational_metrics::turn::sync_phase("environment collection", || {
+            let mut dirty: BTreeMap<SourceId, bool> = self
+                .sources
+                .keys()
+                .filter(|id| !frontier.contains_key(*id))
+                .map(|id| (id.clone(), true))
+                .collect();
+            let mut refresh = BTreeSet::new();
+            for change in changes {
+                match change {
+                    EnvironmentChange::ConfigSelection { sources } => {
+                        for source in sources {
+                            self.require(&source)?;
+                            dirty.insert(source, true);
+                        }
                     }
-                }
-                EnvironmentChange::Refresh { sources } => {
-                    let sources = sources.unwrap_or_else(|| self.sources.keys().cloned().collect());
-                    for id in sources {
-                        if self.require(&id)?.descriptor().mode != SourceMode::Immutable {
-                            // Coalesced below so duplicate refresh mail asks once.
-                            refresh.insert(id.clone());
-                            dirty.insert(id, true);
+                    EnvironmentChange::Refresh { sources } => {
+                        let sources =
+                            sources.unwrap_or_else(|| self.sources.keys().cloned().collect());
+                        for id in sources {
+                            if self.require(&id)?.descriptor().mode != SourceMode::Immutable {
+                                // Coalesced below so duplicate refresh mail asks once.
+                                refresh.insert(id.clone());
+                                dirty.insert(id, true);
+                            }
+                        }
+                    }
+                    EnvironmentChange::SourceRevision { source, revision } => {
+                        if self.require(&source)?.descriptor().mode == SourceMode::Notifying
+                            && frontier.get(&source).is_none_or(|old| {
+                                old.incarnation != revision.incarnation
+                                    || old.counter < revision.counter
+                            })
+                        {
+                            dirty.entry(source).or_insert(false);
                         }
                     }
                 }
-                EnvironmentChange::SourceRevision { source, revision } => {
-                    if self.require(&source)?.descriptor().mode == SourceMode::Notifying
-                        && frontier.get(&source).is_none_or(|old| {
-                            old.incarnation != revision.incarnation
-                                || old.counter < revision.counter
-                        })
-                    {
-                        dirty.entry(source).or_insert(false);
+            }
+            for id in refresh {
+                self.require(&id)?.refresh();
+            }
+            let mut snapshots = Vec::with_capacity(dirty.len());
+            for (id, forced) in dirty {
+                let snapshot = self.require(&id)?.snapshot(config)?;
+                if snapshot.source != id {
+                    return Err(SourceCollectionError::WrongSource {
+                        expected: id,
+                        actual: snapshot.source,
+                    });
+                }
+                if let Some(old) = frontier.get(&id)
+                    && old.incarnation == snapshot.revision.incarnation
+                {
+                    if snapshot.revision.counter < old.counter {
+                        return Err(SourceCollectionError::RegressedRevision(id));
+                    }
+                    if !forced && snapshot.revision == *old {
+                        continue;
                     }
                 }
+                snapshots.push(snapshot);
             }
-        }
-        for id in refresh {
-            self.require(&id)?.refresh();
-        }
-        let mut snapshots = Vec::with_capacity(dirty.len());
-        for (id, forced) in dirty {
-            let snapshot = self.require(&id)?.snapshot(config)?;
-            if snapshot.source != id {
-                return Err(SourceCollectionError::WrongSource {
-                    expected: id,
-                    actual: snapshot.source,
-                });
-            }
-            if let Some(old) = frontier.get(&id)
-                && old.incarnation == snapshot.revision.incarnation
-            {
-                if snapshot.revision.counter < old.counter {
-                    return Err(SourceCollectionError::RegressedRevision(id));
-                }
-                if !forced && snapshot.revision == *old {
-                    continue;
-                }
-            }
-            snapshots.push(snapshot);
-        }
-        Ok(snapshots)
+            Ok(snapshots)
+        })
     }
     /// Complete derived projections only for a dirty candidate. Source owners
     /// retain coherence witnesses; a replay consumes their recorded output.

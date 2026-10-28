@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Oracle {
+    Value {
+        expected: serde_json::Value,
+    },
     RecordKeys {
         records: usize,
         offset: usize,
@@ -18,6 +21,13 @@ pub enum Oracle {
 impl Oracle {
     pub fn check(&self, value: &serde_json::Value) -> Result<Vec<u64>> {
         match *self {
+            Self::Value { ref expected } => {
+                ensure!(
+                    value == expected,
+                    "finished value differs from the independent oracle"
+                );
+                Ok(Vec::new())
+            }
             Self::RecordKeys {
                 records,
                 offset,

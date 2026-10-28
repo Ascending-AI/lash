@@ -109,8 +109,8 @@ use {
 
 /// One execution admission. Every entry retains its own root and complete
 /// provenance under the supplied execution claim, in one store transaction.
-/// Documents precede the Links that name them; publication holds refer to
-/// already published immutable records.
+/// Documents precede the Links that name them. Package and Publish introduce
+/// immutable namespace records; Publication retains an already stored record.
 pub enum PackageHold<'a> {
     Document {
         id: lash_kernel_value::names::DocumentId,
@@ -120,10 +120,16 @@ pub enum PackageHold<'a> {
         record: &'a LinkRecord,
         artifacts: &'a [ArtifactName],
     },
+    /// Publish a package in the same admission as its publications.
+    Package(&'a PackageRecord),
+    /// Publish a namespace record, validating supplied or stored content.
+    Publish(&'a PublicationRecord),
     Publication(&'a PublicationRecord),
     /// Retain an existing Link and its stored dependency metadata.
     RetainLink(&'a LinkId),
 }
+
+mod batch;
 
 /// A prepared immutable root and its closure, passed intact to storage.
 #[derive(Debug)]
@@ -491,82 +497,7 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
         claim: &ReferrerClaim,
         holds: &[PackageHold<'_>],
     ) -> Result<(), DurableError> {
-        let mut records = Vec::with_capacity(holds.len());
-        let mut prepared = std::collections::BTreeMap::new();
-        let mut roots = Vec::new();
-        for hold in holds {
-            let (reference, bytes, document, dependencies) = match hold {
-                PackageHold::Document { id, body } => {
-                    if *id
-                        != lash_kernel_value::names::DocumentId::from_bytes(
-                            lash_kernel_value::tokens::logical_digest(body),
-                        )
-                    {
-                        return Err(PackageRefusal::Identity(id.to_string()).into());
-                    }
-                    (id.to_string(), Some(body.to_vec()), true, Vec::new())
-                }
-                PackageHold::Link { record, artifacts } => {
-                    if record.link.identity() != record.id {
-                        return Err(PackageRefusal::Identity(link_reference(&record.id)).into());
-                    }
-                    let stored = StoredLink {
-                        record: (*record).clone(),
-                        artifacts: artifacts.iter().cloned().collect(),
-                    };
-                    let bytes = encode(&stored)?;
-                    let reference = link_reference(&record.id);
-                    let roots = content_dependencies(&reference, &bytes)?;
-                    (reference, Some(bytes), false, roots)
-                }
-                PackageHold::RetainLink(id) => {
-                    let reference = link_reference(id);
-                    (reference.clone(), None, false, vec![reference])
-                }
-                PackageHold::Publication(record) => {
-                    let key = record.key();
-                    let reference = publication_reference(&key);
-                    let bytes = self
-                        .load_package_record(&reference)
-                        .await?
-                        .ok_or_else(|| PackageRefusal::Identity(reference.clone()))?;
-                    let stored: PublicationRecord = decode(&bytes)?;
-                    if stored.key() != key
-                        || stored.path.as_slice().first() != Some(&stored.context.root)
-                        || stored != **record
-                    {
-                        return Err(PackageRefusal::Identity(reference).into());
-                    }
-                    prepared.insert(reference.clone(), bytes);
-                    (reference.clone(), None, false, vec![reference])
-                }
-            };
-            roots.extend(dependencies);
-            if let Some(bytes) = &bytes
-                && let Some(previous) = prepared.insert(reference.clone(), bytes.clone())
-                && previous != *bytes
-            {
-                return Err(PackageRefusal::Immutable(reference).into());
-            }
-            records.push(PackageRecordHold {
-                reference,
-                bytes,
-                document,
-                dependencies: Vec::new(),
-            });
-        }
-        // Every member has the same claim and commits in one transaction.
-        // Discover the union once, using this batch's immutable records for
-        // freshly prepared Links that storage cannot read yet.
-        let dependencies = closure_with(self, roots, &prepared).await?;
-        let supplied = records
-            .iter()
-            .map(|record| record.reference.clone())
-            .collect();
-        if let Some(first) = records.first_mut() {
-            first.dependencies = dependencies.difference(&supplied).cloned().collect();
-        }
-        self.hold_package_batch(claim, &records).await
+        batch::acquire(self, claim, holds).await
     }
 
     async fn prepare_publications(
@@ -665,29 +596,10 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
         claim: &ReferrerClaim,
         record: &PackageRecord,
     ) -> Result<(), DurableError> {
-        if record.package.identity() != record.id {
-            return Err(PackageRefusal::Identity(package_reference(&record.id)).into());
-        }
-        let roots = record
-            .package
-            .members
-            .values()
-            .filter_map(|member| match &member.kind {
-                lash_kernel_value::package::MemberKind::Export { link, .. } => {
-                    Some(link_reference(link))
-                }
-                _ => None,
-            })
-            .collect();
-        let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
-        self.hold_package_record(
-            claim,
-            &package_reference(&record.id),
-            Some(&encode(record)?),
-            &dependencies,
-        )
-        .await
+        self.acquire_batch(claim, &[PackageHold::Package(record)])
+            .await
     }
+
     async fn put_labels(
         &self,
         claim: &ReferrerClaim,
@@ -708,54 +620,11 @@ impl<S: PackageStorage + ?Sized> PackageStore for S {
         claim: &ReferrerClaim,
         record: &PublicationRecord,
     ) -> Result<PublicationKey, DurableError> {
-        use lash_vocabulary::package::PublishedContent;
-        if record.path.as_slice().first() != Some(&record.context.root) {
-            return Err(PackageRefusal::Publication.into());
-        }
-        let mut roots: Vec<_> = record.code_links.iter().map(link_reference).collect();
-        match &record.content {
-            PublishedContent::Package(id) => {
-                let package = self
-                    .package(id)
-                    .await?
-                    .ok_or_else(|| PackageRefusal::Missing(package_reference(id)))?;
-                let links: std::collections::BTreeSet<_> = package
-                    .package
-                    .members
-                    .values()
-                    .filter_map(|member| match &member.kind {
-                        lash_kernel_value::package::MemberKind::Export { link, .. } => Some(*link),
-                        _ => None,
-                    })
-                    .collect();
-                if package.package.path != record.path || links != record.code_links {
-                    return Err(PackageRefusal::Publication.into());
-                }
-                roots.push(package_reference(id));
-            }
-            PublishedContent::Deferred(package) => {
-                if package.path != record.path || !record.code_links.is_empty() {
-                    return Err(PackageRefusal::Publication.into());
-                }
-            }
-        }
-        roots.extend(
-            record
-                .imported_publications
-                .iter()
-                .map(publication_reference),
-        );
-        let dependencies: Vec<_> = closure(self, roots).await?.into_iter().collect();
-        let key = record.key();
-        self.hold_package_record(
-            claim,
-            &publication_reference(&key),
-            Some(&encode(record)?),
-            &dependencies,
-        )
-        .await?;
-        Ok(key)
+        self.acquire_batch(claim, &[PackageHold::Publish(record)])
+            .await?;
+        Ok(record.key())
     }
+
     async fn link(&self, id: &LinkId) -> Result<Option<LinkRecord>, DurableError> {
         let Some(bytes) = self.load_package_record(&link_reference(id)).await? else {
             return Ok(None);

@@ -94,13 +94,32 @@ callbacks. `host.tools`, `host.schema_fields` and `host.package_roots` vary the
 catalogue independently of the turn's work. Prompt limits are 128 KiB per
 section and 512 KiB total.
 
+`just profile-turn host-document --turn 3` uses the same catalogue for a
+first text turn, a quiet warm turn and a host document edit. The third turn
+reads `tools.host0` and must finish with the independently specified edited
+text. Its tool binding changes revision while the other operations stay the
+same. This models a host document store and tool grants, rather than a raw
+Lash message attachment. The scripted provider injects zero delay; the
+document store is in memory and the cell finishes directly, without the
+production provider's follow-up response. PostgreSQL requires `kiln gate`.
+
+The physical profile records `environment collection` around source callbacks.
+It excludes projection, package retention and checkpoint work, which remain in
+their existing parent intervals. `provider dispatch` marks entry into the scripted
+provider. Its first interval's `start_ns` gives elapsed time from
+the turn-profile start to actual provider entry, including earlier admission,
+preparation and checkpoint work. It is distinct from the broader `model call`
+phase, which also includes Lash journal work. The scripted provider injects no
+network latency, and its dispatch interval does not measure production TTFT.
+
 The root/provider, owner-option, authority and prompt-limit geometry follows
 Figments revision `083899321`, specifically `apps/lash-runtime/src/tools.rs`,
 `crates/figments-lash-runtime-api/src/turn_run.rs`, `run_authority.rs`, `lib.rs`
 and `prompt.rs`. Schemas and tool distribution are synthetic. This workload
 reproduces those mechanisms, without claiming a byte-identical production
-session. Compare matching profiles and backends; the supplied Figments trace
-used a debug build. Phase wall durations on a shared host are observations,
+session. Compare matching profiles and backends. The earlier FIG-7453 source
+used a debug Figments deployment; FIG-7482's repin-37 uses an optimized release
+build. Phase wall durations on a shared host are observations,
 not latency guarantees.
 
 ### Warm host capabilities and a fresh document
@@ -453,7 +472,10 @@ Wall time is never asserted.
 
 Each gate workload runs in its own fresh producer process, five times. Each
 producer uses a private current-thread runtime, one blocking worker, one prompt
-renderer and SQLite's synchronous request/reply option. The reply uses a fixed allocation and a condition variable.
+renderer and SQLite's synchronous request/reply option. The reply uses a fixed
+allocation and a condition variable. Inline connections use one reusable worker
+queue slot, so unbounded-channel block allocations cannot move between turns
+when cold SQL counts change.
 The fixture fixes its injected clock, send IDs, lease incarnation, environment
 owner/source IDs and logical publication domain. Its frozen clock returns
 stateless pending waits for future deadlines. Polling a losing timer branch
@@ -489,6 +511,8 @@ sending. After the exact input's terminal handoff, it reads the public outcome
 once. The private single-node fixture therefore measures terminal observation
 without speculative live-follower reads racing intermediate commits. Its
 existing watchdog still fails a turn that never hands off a terminal.
+Before the counter cut, the single-threaded fixture also waits for its local
+actors to become idle, so owner cleanup after that handoff stays in the turn.
 
 Foreground commits, worker exchanges, send/outcome observation and meter reads
 remain counted process-wide. Artifact cleanup and page retirement settle

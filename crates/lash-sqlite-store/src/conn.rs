@@ -484,14 +484,6 @@ impl SqliteConnection {
         Self::open_configured(target, policy, hooks).await
     }
 
-    /// This connection, running each call to its answer before its caller
-    /// goes on when `inline_calls` is set.
-    #[cfg(feature = "testing")]
-    pub(crate) fn with_inline_calls(mut self, inline_calls: bool) -> Self {
-        self.inline_calls = inline_calls;
-        self
-    }
-
     /// One open path for every target: a `memdb` database answers the WAL
     /// switch with its own `memory` journal mode, so the file and memory
     /// forms differ only in the name opened.
@@ -514,9 +506,12 @@ impl SqliteConnection {
         lash_core_ids::perf_witness::startup::record(
             lash_core_ids::perf_witness::startup::Phase::StoreOpenStarted,
         );
-        let inner =
-            AsyncConnection::start(move || open_connection(path, rusqlite::OpenFlags::default()))
-                .await?;
+        let inner = AsyncConnection::start_configured(
+            move || open_connection(path, rusqlite::OpenFlags::default()),
+            #[cfg(feature = "testing")]
+            hooks.inline_calls,
+        )
+        .await?;
         #[cfg(feature = "perf-witness")]
         lash_core_ids::perf_witness::startup::record(
             lash_core_ids::perf_witness::startup::Phase::StoreOpened,
@@ -608,19 +603,37 @@ impl SqliteConnection {
         target: &DatabaseTarget,
         operational: crate::SqliteOperationalSettings,
     ) -> tokio_rusqlite::Result<Self> {
+        Self::open_readonly_with_issuing(
+            target,
+            operational,
+            #[cfg(feature = "testing")]
+            false,
+        )
+        .await
+    }
+
+    pub(crate) async fn open_readonly_with_issuing(
+        target: &DatabaseTarget,
+        operational: crate::SqliteOperationalSettings,
+        #[cfg(feature = "testing")] inline_calls: bool,
+    ) -> tokio_rusqlite::Result<Self> {
         operational.validate()?;
 
         let gate = write_gate(target);
         let setup_gate = Arc::clone(&gate);
         let uri = target.read_only_uri();
-        let inner = AsyncConnection::start(move || {
-            open_connection(
-                uri,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-            )
-        })
+        let inner = AsyncConnection::start_configured(
+            move || {
+                open_connection(
+                    uri,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+                )
+            },
+            #[cfg(feature = "testing")]
+            inline_calls,
+        )
         .await?;
         inner
             .call(move |c| {
@@ -672,7 +685,7 @@ impl SqliteConnection {
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]
-            inline_calls: false,
+            inline_calls,
         })
     }
 

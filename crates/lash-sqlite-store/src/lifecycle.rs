@@ -209,13 +209,13 @@ impl SqliteStore {
         crate::schema::ensure_versioned_schema_with_writable(&conn, writable).await?;
         let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
         for _ in 0..options.connection_policy.read_connections.get() {
-            let reader = SqliteConnection::open_readonly_configured(
+            let reader = SqliteConnection::open_readonly_with_issuing(
                 core.target(),
                 options.connection_policy.operational,
+                #[cfg(feature = "testing")]
+                inline_calls,
             )
             .await?;
-            #[cfg(feature = "testing")]
-            let reader = reader.with_inline_calls(inline_calls);
             readers.push(reader);
         }
         let configs = Arc::clone(conn.configs());

@@ -64,6 +64,21 @@ struct WakeSinkInner {
 }
 
 impl WakeSink {
+    /// Whether every actor served by this process's attached nodes is idle.
+    /// This is a local fixture cut, not authoritative completion evidence.
+    /// A single-threaded fixture can yield until this follows its committed
+    /// terminal, keeping the owner's post-commit work in the same turn cut.
+    #[cfg(feature = "testing")]
+    pub fn local_actors_idle_for_testing(&self) -> bool {
+        self.nodes().iter().all(|(_, hints)| {
+            hints
+                .slots()
+                .by_actor
+                .values()
+                .all(|slot| slot.idle.is_some())
+        })
+    }
+
     /// Hand `hints` what this sink is handed, until the answer drops.
     #[must_use = "the node hears the sink's wakes only while the attachment lives"]
     pub fn attach(&self, hints: &Hints) -> WakeAttachment {

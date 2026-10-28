@@ -241,6 +241,12 @@ impl SqliteStore {
                         insert.raw_bind_parameter(index * 2 + 2, &envelope[..])?;
                     }
                     insert.raw_execute()?;
+                    // Retain the scalar and full-batch forms. A partial tail
+                    // otherwise leaves a prepared statement for each cold
+                    // namespace size in the connection's resident cache.
+                    if chunk.len() > 1 && chunk.len() < BLOB_BATCH_ROWS {
+                        insert.discard();
+                    }
                 }
                 if !nodes.is_empty() {
                     crate::durable::install_staged(tx, &nodes)?.map_err(|refusal| {
