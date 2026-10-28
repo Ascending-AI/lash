@@ -777,9 +777,14 @@ impl super::Arena {
             return Ok(false);
         }
         let old = std::mem::replace(held, value);
-        // Floats have identical leaf sizes and no arena holding edges.
-        // Dirty-card marking still happens immediately on this path.
-        if matches!((old, value), (Value::Float(_), Value::Float(_))) {
+        // Equal-size scalar replacements change neither the flat size nor
+        // holding edges. The dirty card still records the new value.
+        let unchanged = match (old, value) {
+            (Value::Float(_), Value::Float(_)) => true,
+            (Value::Int(old), Value::Int(new)) => (old == 0) == (new == 0),
+            _ => false,
+        };
+        if unchanged {
             Self::mark_resident(facts, &mut self.dirty, handle, Some(seq / CARD));
             return Ok(true);
         }

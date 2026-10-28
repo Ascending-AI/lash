@@ -389,11 +389,27 @@ impl Arena {
 
     /// Writes a shared variable.
     pub fn cell_set(&mut self, handle: ArenaHandle, value: Value) -> Result<(), NativeError> {
-        self.warm(handle)?;
-        let Some(Body::Cell(held)) = self.objects.get_mut(handle) else {
+        let (Some(body), Some(facts)) = (
+            self.objects.get_mut(handle),
+            self.facts.get_mut(handle.index() as usize),
+        ) else {
+            return Err(malformed("a stale handle reached the machine"));
+        };
+        if facts.cold {
+            return Err(Retry::Cold {
+                object: handle,
+                chunk: 0,
+            }
+            .into());
+        }
+        let Body::Cell(held) = body else {
             return Err(malformed("a cell handle names another body"));
         };
         let old = std::mem::replace(held, value);
+        if old.handle().is_none() && value.handle().is_none() {
+            Self::mark_resident(facts, &mut self.dirty, handle, None);
+            return Ok(());
+        }
         self.hold(&value);
         self.unhold(&old);
         self.mark(handle, None)
