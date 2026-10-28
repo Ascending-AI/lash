@@ -14,6 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "schemas" / "host"
+FACADE_SOURCE = Path("crates/lash/src/schema/host.rs")
 
 # Every host contract is also committed inside the facade. The workflow
 # view and PostgreSQL config additionally ship from their owning crates.
@@ -152,6 +153,23 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
     return documents
 
 
+def facade_source(documents: dict[Path, str], source: str) -> str:
+    """Keep existing public schema constants pointed at the emitted versions."""
+    current = {(path.parent.name, "".join(path.suffixes)): path for path in documents}
+
+    def replace(match: re.Match[str]) -> str:
+        key = (match["shape"], match["suffix"])
+        if key not in current:
+            raise ValueError(f"no generated document for facade schema {key}")
+        return f'{match["prefix"]}{current[key].as_posix()}"'
+
+    return re.sub(
+        r'(?P<prefix>include_str!\("(?:\.\./){2}(?:(?:\.\./){2}schemas/host|host-schemas)/)'
+        r'(?P<shape>[^/]+)/v[0-9]+(?P<suffix>\.schema\.json|\.d\.ts)"',
+        replace, source,
+    )
+
+
 def generate(
     check: bool,
     generators: list[Path] | None = None,
@@ -215,27 +233,33 @@ def generate(
             print(f"invalid workflow schema generator output: {error}", file=sys.stderr)
             return 1
 
-    stale: list[str] = []
+    targets: dict[Path, str] = {}
+    source = ROOT / FACADE_SOURCE
+    if source.is_file():
+        targets[source] = facade_source(documents, source.read_text(encoding="utf-8"))
     for relative, expected in documents.items():
         paths = [output / relative, ROOT / "crates/lash/host-schemas" / relative]
         if relative in CRATE_DECLARATIONS:
             paths.append(ROOT / CRATE_DECLARATIONS[relative])
         for path in paths:
-            if check:
-                try:
-                    actual = path.read_text(encoding="utf-8")
-                except OSError as error:
-                    stale.append(f"{path} cannot be read: {error}")
-                else:
-                    if actual != expected:
-                        stale.append(f"{path} differs")
+            targets[path] = expected
+    stale: list[str] = []
+    for path, expected in targets.items():
+        if check:
+            try:
+                actual = path.read_text(encoding="utf-8")
+            except OSError as error:
+                stale.append(f"{path} cannot be read: {error}")
             else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(expected, encoding="utf-8")
+                if actual != expected:
+                    stale.append(f"{path} differs")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected, encoding="utf-8")
 
-    expected_paths = {output / relative for relative in documents}
-    if output.exists():
-        for path in [*output.glob("*/*.schema.json"), *output.glob("*/*.d.ts")]:
+    for tree in dict.fromkeys([output, ROOT / "crates/lash/host-schemas"]):
+        expected_paths = {tree / relative for relative in documents}
+        for path in [*tree.glob("*/*.schema.json"), *tree.glob("*/*.d.ts")]:
             if path not in expected_paths:
                 if check:
                     stale.append(f"{path} is obsolete")

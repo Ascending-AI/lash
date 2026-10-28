@@ -103,9 +103,10 @@ def surfaces(repo: Path):
     return discovered
 
 
-def inventory(repo: Path):
+def inventory(repo: Path, *, view=None):
     rows = []
-    for surface in surfaces(repo):
+    declared = surfaces(repo) if view is None else discover(view)[0]
+    for surface in declared:
         key = f'{surface["constant_path"]}:{surface["constant"]}'
         try:
             text = (repo / surface["constant_path"]).read_text()

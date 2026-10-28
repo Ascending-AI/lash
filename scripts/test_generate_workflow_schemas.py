@@ -124,16 +124,34 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
             output = root / "output"
             (generated / "workflow").mkdir(parents=True)
             (generated / "workflow/v7.schema.json").write_text('{"type":"object"}\n')
+            source = MODULE.ROOT / MODULE.FACADE_SOURCE
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                'include_str!("../../host-schemas/workflow/v6.schema.json");\n'
+                'include_str!("../../../../schemas/host/workflow/v6.schema.json");\n'
+            )
             with unittest.mock.patch.object(MODULE, "OUTPUT", output):
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()):
                     self.assertEqual(MODULE.generate(True, generated=generated), 1)
                 self.assertEqual(MODULE.generate(False, generated=generated), 0)
-                self.assertEqual(MODULE.generate(True, generated=generated), 0)
-                (output / "workflow/v6.schema.json").write_text("obsolete\n")
+                self.assertEqual(source.read_text().count("v7.schema.json"), 2)
+                source.write_text(source.read_text().replace("v7.", "v6."))
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
                     self.assertEqual(MODULE.generate(True, generated=generated), 1)
-                self.assertIn("obsolete", errors.getvalue())
-                (output / "workflow/v6.schema.json").unlink()
+                self.assertIn(f"{source} differs", errors.getvalue())
+                self.assertEqual(MODULE.generate(False, generated=generated), 0)
+                self.assertEqual(MODULE.generate(True, generated=generated), 0)
+                for tree in [output, MODULE.ROOT / "crates/lash/host-schemas"]:
+                    # Advancing a witness must remove its previous snapshots
+                    # from both distributions, including TS declarations.
+                    for name in ["v6.schema.json", "v6.d.ts"]:
+                        obsolete = tree / "workflow" / name
+                        obsolete.write_text("obsolete\n")
+                        with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
+                            self.assertEqual(MODULE.generate(True, generated=generated), 1)
+                        self.assertIn(f"{obsolete} is obsolete", errors.getvalue())
+                        self.assertEqual(MODULE.generate(False, generated=generated), 0)
+                        self.assertFalse(obsolete.exists())
                 (output / "workflow/v7.schema.json").write_text("changed\n")
                 with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
                     self.assertEqual(MODULE.generate(True, generated=generated), 1)

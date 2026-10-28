@@ -401,14 +401,37 @@ async fn a_22d_function_store_requires_reset_before_decode() {
             .expect("valid current document");
     let current_function = lash_kernel_value::tokens::encode_body(&definition);
     let current_document = lash_kernel_value::tokens::encode_body(&document);
-    for (kind, body, readable) in [
-        (NodeKind::HELPER_DEFINITION, old.as_bytes(), false),
+    let mut input = TokenReader::new(&current_document);
+    assert_eq!(input.seq().expect("document fields"), 9);
+    assert_eq!(input.unsigned_u32().expect("document grammar"), newest);
+    let mut stale_header = TokenWriter::new();
+    stale_header.seq(9);
+    stale_header.unsigned(2);
+    let mut stale_document = stale_header.into_bytes();
+    stale_document.extend_from_slice(&current_document[input.position()..]);
+    assert!(
+        newest > 2,
+        "the current document grammar has advanced past 2"
+    );
+
+    // An unstamped helper's eight fields identify encoding 2, even when a
+    // current native helper happens to decode. That arity cannot establish
+    // today's nested document grammar, so the bounded probe must refuse it.
+    for (kind, body, found, readable) in [
+        (NodeKind::HELPER_DEFINITION, old.as_bytes(), 1, false),
         (
             NodeKind::HELPER_DEFINITION,
             current_function.as_slice(),
+            2,
+            false,
+        ),
+        (NodeKind::DOCUMENT, stale_document.as_slice(), 2, false),
+        (
+            NodeKind::DOCUMENT,
+            current_document.as_slice(),
+            newest,
             true,
         ),
-        (NodeKind::DOCUMENT, current_document.as_slice(), true),
     ] {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1_048_576)));
         let root = staging
@@ -436,7 +459,7 @@ async fn a_22d_function_store_requires_reset_before_decode() {
         assert_eq!(
             row.found,
             vec![FoundVersion {
-                version: if readable { newest } else { 1 },
+                version: found,
                 count: 1
             }]
         );
@@ -481,6 +504,10 @@ async fn a_22d_function_store_requires_reset_before_decode() {
             .expect("current document reads"),
         document
     );
+    assert!(matches!(
+        lash_kernel_value::tokens::decode_body::<lash_kernel_doc::Document>(&stale_document),
+        Err(TokenError::Invalid(_))
+    ));
     let mut unsupported = current_document.clone();
     let mut header = TokenReader::new(&current_document);
     header.seq().expect("a stamped document is a sequence");

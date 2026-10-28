@@ -11,6 +11,7 @@
 
 use std::time::Duration;
 
+use lash_core_store::store::FleetFormat;
 use lash_core_store::store::StorePreflight;
 use lash_core_store::store::StoreSchemaOutcome;
 use lash_core_store::store::StoreSchemaVerdict;
@@ -658,7 +659,7 @@ mod walk {
 async fn release_build_refuses_pre_release_store_before_counters_without_mutation() {
     for writing in ["0.0.0-dev", "0.9.0", "1.0.0-rc.1"] {
         for counter in [1, 2, 99] {
-            assert_release_admission(writing, "1.0.0", counter, true).await;
+            assert_release_admission(writing, "1.0.0", counter, counter, true).await;
         }
     }
 }
@@ -666,7 +667,14 @@ async fn release_build_refuses_pre_release_store_before_counters_without_mutatio
 /// FIG-5270: a release build opens its own declared store version.
 #[tokio::test]
 async fn release_build_admits_release_store() {
-    assert_release_admission("1.0.0", "1.0.0", crate::schema::expected_version(), false).await;
+    assert_release_admission(
+        "1.0.0",
+        "1.0.0",
+        crate::schema::expected_version(),
+        i64::from(FleetFormat::writable().min()),
+        false,
+    )
+    .await;
 }
 
 /// FIG-5270: the release cut rule does not change development admission.
@@ -676,12 +684,19 @@ async fn pre_release_build_admits_pre_release_store() {
         "0.0.0-dev",
         "0.0.0-dev",
         crate::schema::expected_version(),
+        i64::from(FleetFormat::writable().min()),
         false,
     )
     .await;
 }
 
-async fn assert_release_admission(writing: &str, build: &str, counter: i64, refuses: bool) {
+async fn assert_release_admission(
+    writing: &str,
+    build: &str,
+    schema_version: i64,
+    fleet_format: i64,
+    refuses: bool,
+) {
     let root = temp_root();
     let path = root.path().join("lash.db");
     drop(
@@ -695,8 +710,8 @@ async fn assert_release_admission(writing: &str, build: &str, counter: i64, refu
         .expect("stamp release");
     connection
         .execute(
-            "UPDATE lash_compat SET version = ?1, min_reader = ?1, fleet_format = ?1",
-            [counter],
+            "UPDATE lash_compat SET version = ?1, min_reader = ?1, fleet_format = ?2",
+            rusqlite::params![schema_version, fleet_format],
         )
         .expect("stamp counters");
     // The open guard must refuse before changing DELETE mode to WAL.

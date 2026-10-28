@@ -409,6 +409,13 @@ class FreezeVerdicts(Fixture):
                          "-- lash-postgres-store teardown, component version 9.\nDROP TABLE demo;\n")
         self.assertEqual((self.repo / "crates/lash-postgres-store/schema-shape.txt").read_text(),
                          "version 9\ntable demo\n")
+        self.assertEqual(automatic.check_artifacts(self.repo), [])
+        # The pre-push check must refuse a startup stamp drift even when the
+        # guarded shapes and witness have not changed again.
+        self.write("crates/lash-postgres-store/schema-shape.txt", "version 8\ntable demo\n")
+        self.assertEqual(automatic.check_artifacts(self.repo), [
+            "crates/lash-postgres-store/schema-shape.txt: stale witness-keyed artifact",
+        ])
 
     def test_a_frozen_wire_schema_uses_its_complete_host_reset_witness(self) -> None:
         import apply_format_witnesses as automatic

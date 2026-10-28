@@ -6072,6 +6072,7 @@ schema_check(
         "//crates/lash:host-schemas/worker-seal-batch/v3.schema.json",
         "//crates/lash:host-schemas/worker-start/v3.schema.json",
         "//crates/lash:host-schemas/workflow-execution-overlay/v37.schema.json",
+        "//crates/lash:src/schema/host.rs",
         "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",
         "//crates/lash-kernel-view:kernel-workflow-view-v1.d.ts",
         "//crates/lash-kernel-view:kernel-workflow-view-v1.schema.json",

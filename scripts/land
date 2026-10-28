@@ -142,7 +142,7 @@ def push(main):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true", help="rebase and lint, without pushing")
+    parser.add_argument("--dry-run", action="store_true", help="rebase, regenerate and check, without pushing")
     args = parser.parse_args()
     os.chdir(git("rev-parse", "--show-toplevel"))
     if rebasing():
@@ -158,7 +158,7 @@ def main():
         if witness_paths:
             run("git", "add", "--", *witness_paths)
             ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s"))
-            subject = "Advance format witnesses for the rebased shapes"
+            subject = "Refresh format witnesses and schemas for the rebased shapes"
             if ticket:
                 subject += " " + ticket.group()
             run("git", "commit", "-m", subject, "-m",
@@ -169,6 +169,8 @@ def main():
         # Allocation validates the complete planned tree, including unchanged
         # guards and the post-cut evidence. Do not project it a second time.
         run("python3", "scripts/perf-gates.py", "check-sources")
+        run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
+        run("kiln", "build", "//:schema_checks")
         run("kiln", "clippy")
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))

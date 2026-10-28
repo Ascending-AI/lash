@@ -90,6 +90,7 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
 /// Seven-field functions and unstamped documents belong to encoding 1.
 /// Eight-field functions are encoding 2; stamped documents carry their
 /// witness first. Other artifact kinds do not carry a document encoding.
+/// Arity identifies historical evidence, never this build's current grammar.
 fn kernel_document(payload: Payload<'_>) -> Vec<Extraction> {
     let format = DurableFormat::KernelDocument;
     if let Payload::Graph(bytes) = payload {

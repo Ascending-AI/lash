@@ -1943,6 +1943,13 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+export_file(
+    name = "src/schema/host.rs",
+    src = "src/schema/host.rs",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

@@ -603,7 +603,7 @@ test262_corpus = { glob = [
 # artifact itself, materialized at its repository path. A filegroup would hand
 # it a symlinked directory instead.
 [exported_files]
-lash-runtime = ["host-schemas/*/*.schema.json", "host-schemas/*/*.d.ts"]
+lash-runtime = ["host-schemas/*/*.schema.json", "host-schemas/*/*.d.ts", "src/schema/host.rs"]
 lash-kernel-view = ["kernel-workflow-view-v1.d.ts", "kernel-workflow-view-v1.schema.json"]
 # The schema `postgres_action_runner.py` applies to a hermetic test's database.
 lash-internal-postgres-store = ["schema.sql", "postgres-host-config-v1.schema.json"]

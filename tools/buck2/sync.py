@@ -1121,7 +1121,7 @@ def host_schema_checked_labels(inventory: dict) -> str:
     copies = [
         f"//{directory}:{path}"
         for path in generate_model.exported_paths(facade, directory)
-        if path.startswith("host-schemas/")
+        if path.startswith("host-schemas/") or path == "src/schema/host.rs"
     ]
     return generate_model.string_list(copies + [
         "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",

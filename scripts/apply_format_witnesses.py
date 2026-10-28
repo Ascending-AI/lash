@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 import re
 import sys
+import subprocess
 
 import check_version_bumps as gate
 
@@ -80,6 +81,108 @@ def advance(view: gate.TreeView, surface: gate.Surface, delta: int) -> tuple[str
     return surface.constant_path, text
 
 
+def postgres_artifacts(view: gate.TreeView, version: int) -> dict[str, str]:
+    """The PostgreSQL provisioning and artifact stamps, maintained since FIG-7515."""
+    files: dict[str, str] = {}
+    path = "crates/lash-postgres-store/schema.sql"
+    text = view.content(path)
+    if text is not None:
+        text, matches = re.subn(
+            r"(VALUES\s*\('lash-postgres-store',\s*)\d+(,\s*)\d+(\))",
+            lambda m: f"{m[1]}{version}{m[2]}{version}{m[3]}", text,
+        )
+        if matches != 1:
+            raise gate.CheckError("cannot locate PostgreSQL provisioning stamp")
+        files[path] = text
+    for artifact, pattern, replacement in (
+        ("schema.sql", r"(?m)^-- lash-postgres-store schema, component version \d+\.$",
+         f"-- lash-postgres-store schema, component version {version}."),
+        ("teardown.sql", r"(?m)^-- lash-postgres-store teardown, component version \d+\.$",
+         f"-- lash-postgres-store teardown, component version {version}."),
+        ("schema-shape.txt", r"(?m)^version \d+$", f"version {version}"),
+    ):
+        path = f"crates/lash-postgres-store/{artifact}"
+        text = files[path] if path in files else view.content(path)
+        if text is None:
+            raise gate.CheckError(f"cannot read PostgreSQL artifact {path}")
+        text, matches = re.subn(pattern, replacement, text)
+        if matches != 1:
+            raise gate.CheckError(f"cannot locate PostgreSQL artifact stamp in {path}")
+        files[path] = text
+
+    return files
+
+
+def stamped_artifacts(repo: Path) -> dict[Path, str]:
+    import release_baseline as baseline
+
+    class Declarations(baseline.WorktreeSources):
+        def matching_paths(self, patterns):
+            # Artifact values need declared writers only. Allocation already
+            # scans every source for unregistered versions; avoid repeating
+            # that full Rust inspection for this cheap pre-push comparison.
+            return tuple(path for path in super().matching_paths(patterns)
+                         if "version_surface" in (self.content(path) or ""))
+
+    tables = (baseline.BLAKE3_DOMAIN_TABLE, baseline.PREDECESSOR_TABLE)
+    postgres_schema = repo / "crates/lash-postgres-store/schema.sql"
+    has_tables = any((repo / path).exists() for path in tables)
+    if not has_tables and not postgres_schema.exists():
+        return {}
+    try:
+        rows = baseline.inventory(repo, view=Declarations(repo))
+        files = baseline.generated_tables(rows, baseline.retired_hash_domains(repo)) if has_tables else {}
+    except baseline.BaselineError as error:
+        raise gate.CheckError(str(error)) from error
+    postgres = next((row for row in rows if row["key"].endswith(":POSTGRES_SCHEMA_VERSION")), None)
+    if postgres:
+        files.update({Path(path): text for path, text in
+                      postgres_artifacts(gate.WorktreeView(repo), postgres["default"]).items()})
+    return files
+
+
+def dirty_state(repo: Path) -> dict[str, bytes | None]:
+    paths = gate.git(repo, "diff", "HEAD", "--name-only", "-z").stdout.split("\0")
+    paths += gate.git(repo, "ls-files", "--others", "--exclude-standard", "-z").stdout.split("\0")
+    return {path: (repo / path).read_bytes() if (repo / path).is_file() else None
+            for path in paths if path}
+
+
+def regenerate_artifacts(repo: Path) -> list[str]:
+    """Run each existing authority after allocation, including in-place edits."""
+    before = dirty_state(repo)
+    for path, expected in stamped_artifacts(repo).items():
+        if not (repo / path).exists() or (repo / path).read_text(encoding="utf-8") != expected:
+            (repo / path).write_text(expected, encoding="utf-8")
+    if any((repo / tree).exists() for tree in ("schemas/host", "crates/lash/host-schemas")):
+        command = [sys.executable, "scripts/generate-workflow-schemas.py"]
+        print("+ " + " ".join(command), flush=True)
+        result = subprocess.run(command, cwd=repo)
+        if result.returncode:
+            raise gate.CheckError("authoritative host schema generation failed")
+        after = dirty_state(repo)
+        if any(path.startswith(("schemas/host/", "crates/lash/host-schemas/"))
+               and (path not in before or path not in after or before[path] != after[path])
+               for path in before.keys() | after.keys()):
+            result = subprocess.run(["kiln", "sync"], cwd=repo)
+            if result.returncode:
+                raise gate.CheckError("schema artifact graph synchronization failed")
+    after = dirty_state(repo)
+    return sorted(path for path in before.keys() | after.keys()
+                  if path not in before or path not in after or before[path] != after[path])
+
+
+def check_artifacts(repo: Path) -> list[str]:
+    """Check stamped files and tables without the post-cut migration policy.
+
+    The authoritative JSON/TS comparison is //:schema_checks in land.
+    """
+    view = gate.WorktreeView(repo)
+    expected = {str(path): text for path, text in stamped_artifacts(repo).items()}
+    return [f"{path}: stale witness-keyed artifact" for path, text in expected.items()
+            if view.content(path) != text]
+
+
 def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     strict = gate.STRICT_VERSION_BUMPS if strict is None else strict
     base_view = gate.RevisionView(repo, gate.resolve_revision(repo, base))
@@ -130,41 +233,8 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
             if before != after:
                 changed[surface.key] = (surface, before, after)
 
-    # PostgreSQL embeds its descriptor in provisioning and artifact metadata;
-    # readers reject a shape stamp that lags even when the catalog is unchanged.
-    postgres = next((row for row in changed.values() if row[0].constant == "POSTGRES_SCHEMA_VERSION"), None)
-    if postgres:
-        path = "crates/lash-postgres-store/schema.sql"
-        text = PlannedView(repo, files).content(path)
-        if text is not None:
-            text, matches = re.subn(
-                r"(VALUES\s*\('lash-postgres-store',\s*)\d+(,\s*)\d+(\))",
-                lambda m: f"{m[1]}{postgres[2]}{m[2]}{postgres[2]}{m[3]}", text,
-            )
-            if matches != 1:
-                raise gate.CheckError("cannot locate PostgreSQL provisioning stamp")
-            files[path] = text
-        for artifact, pattern, replacement in (
-            ("schema.sql", r"(?m)^-- lash-postgres-store schema, component version \d+\.$",
-             f"-- lash-postgres-store schema, component version {postgres[2]}."),
-            ("teardown.sql", r"(?m)^-- lash-postgres-store teardown, component version \d+\.$",
-             f"-- lash-postgres-store teardown, component version {postgres[2]}."),
-            ("schema-shape.txt", r"(?m)^version \d+$", f"version {postgres[2]}"),
-        ):
-            path = f"crates/lash-postgres-store/{artifact}"
-            text = PlannedView(repo, files).content(path)
-            if text is None:
-                raise gate.CheckError(f"cannot read PostgreSQL artifact {path}")
-            text, matches = re.subn(pattern, replacement, text)
-            if matches != 1:
-                raise gate.CheckError(f"cannot locate PostgreSQL artifact stamp in {path}")
-            files[path] = text
-
-    # The loop's last projection already checked the complete planned tree.
-    # Only PostgreSQL artifact stamps can have changed it since that check.
-    final = PlannedView(repo, files)
-    if postgres:
-        result = gate.check_views(base_view, final, strict=False)
+    # The loop's last projection checked the complete planned tree. Derived
+    # artifacts follow these witnesses after materialization below.
     if result.errors or result.failures:
         raise gate.CheckError("automatic format witnesses left unresolved obligations")
     if changed:
@@ -196,16 +266,24 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
         written.append(path)
-    return written
+    return sorted(set(written + regenerate_artifacts(repo)))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--base", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--base")
+    mode.add_argument("--check-artifacts", action="store_true")
     parser.add_argument("--repo", type=Path, default=gate.ROOT)
     parser.add_argument("--strict", action="store_true", default=gate.STRICT_VERSION_BUMPS)
     args = parser.parse_args()
     try:
+        if args.check_artifacts:
+            errors = check_artifacts(args.repo)
+            if errors:
+                raise gate.CheckError("; ".join(errors))
+            print("witness-keyed stamps and tables are current")
+            return
         for path in apply(args.repo, args.base, strict=args.strict):
             print(path)
     except gate.CheckError as error:
