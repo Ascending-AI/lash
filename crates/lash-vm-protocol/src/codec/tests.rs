@@ -24,6 +24,48 @@ fn request_frame() -> WorkerFrame {
     }
 }
 
+/// REPLAY-COUNTED-WIRE: CPU time must not change a frame's counted byte size.
+#[test]
+fn cpu_receipts_preserve_values_without_changing_frame_size() {
+    for progress in [true, false] {
+        let mut size = None;
+        for cpu_nanos in [
+            0,
+            127,
+            128,
+            65_535,
+            65_536,
+            u32::MAX as u64,
+            u32::MAX as u64 + 1,
+            u64::MAX,
+        ] {
+            let message = if progress {
+                WorkerMessage::Progress {
+                    phase: crate::WorkerPhase::Computing,
+                    cpu_nanos,
+                    work: None,
+                }
+            } else {
+                WorkerMessage::ResetDone { cpu_nanos }
+            };
+            let frame = WorkerFrame {
+                header: fence().next_header(),
+                message,
+            };
+            let bytes = codec().encode_worker(&frame).unwrap();
+            assert_eq!(codec().decode_worker(&bytes).unwrap(), frame);
+            assert_eq!(
+                bytes.len(),
+                *size.get_or_insert(bytes.len()),
+                "CPU value {cpu_nanos}"
+            );
+            let json = serde_json::to_value(&frame.message).unwrap();
+            let variant = if progress { "progress" } else { "reset_done" };
+            assert_eq!(json[variant]["cpu_nanos"], cpu_nanos);
+        }
+    }
+}
+
 /// A frame header around an arbitrary payload, for hostile payloads.
 fn frame_around(_codec: &FrameCodec, payload: &[u8]) -> Vec<u8> {
     let mut bytes = FRAME_MAGIC.to_vec();

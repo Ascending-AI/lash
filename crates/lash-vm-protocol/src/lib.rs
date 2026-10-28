@@ -25,6 +25,7 @@
 
 pub mod bounds;
 pub mod codec;
+mod cpu_counter;
 pub mod message;
 pub mod outcome;
 /// The page exchange of the persistent heap (FIG-6195, FIG-6190).

@@ -564,6 +564,7 @@ pub enum WorkerMessage {
     /// extra time when repeated: the parent owns the absolute phase deadline.
     Progress {
         phase: WorkerPhase,
+        #[serde(with = "crate::cpu_counter")]
         cpu_nanos: u64,
         /// Opt-in diagnostic delta, with no execution or admission authority.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -642,6 +643,7 @@ pub enum WorkerMessage {
     },
     Cancelled,
     ResetDone {
+        #[serde(with = "crate::cpu_counter")]
         cpu_nanos: u64,
     },
     /// A complete response to pure worker work.
