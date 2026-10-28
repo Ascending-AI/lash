@@ -11,7 +11,7 @@ use std::sync::Arc;
 impl Stream {
     /// Cold verification against the independent source tree. Ordinary worker
     /// activation does not walk that tree or force its memory description.
-    pub(super) fn verify_holding_sites(
+    pub(crate) fn verify_holding_sites(
         &self,
         source: &room::Source,
         range: OpRange,
@@ -66,11 +66,23 @@ impl Stream {
                 continue;
             }
             let op = self.ops[pc as usize];
-            for reg in op.reads() {
+            let expected = self.source_sites[pc as usize].as_ref().and_then(|site| {
+                let mut node = Node::Block(&source.body);
+                for index in &site.path[source.site.path.len()..] {
+                    node = *node.children().get(*index as usize)?;
+                }
+                inputs(op, site, node)
+            });
+            for (index, reg) in op.reads().into_iter().enumerate() {
                 let Some(owner) = owners.get_mut(reg.ix()) else {
                     return false;
                 };
                 if owner.is_none() {
+                    return false;
+                }
+                if let Some(expected) = &expected
+                    && owner.as_deref() != expected.get(index)
+                {
                     return false;
                 }
                 if !matches!(op, Op::Pin { .. }) {
@@ -125,6 +137,59 @@ impl Stream {
         }
         true
     }
+}
+
+fn inputs(op: Op, site: &Site, node: Node<'_>) -> Option<Vec<Site>> {
+    let count = match op {
+        Op::MakeTuple { items }
+        | Op::MakeList { items }
+        | Op::MakeSet { items }
+        | Op::MakeMap { entries: items }
+        | Op::MakeRecord { values: items, .. }
+        | Op::Call { args: items, .. }
+        | Op::Operator { args: items, .. } => items.len,
+        Op::Nested { args, .. } => {
+            if let Node::Expr(Expr::Act(act)) = node
+                && args.len as usize == act.args.len() + 1
+            {
+                return Some(
+                    std::iter::once(site.clone())
+                        .chain((0..act.args.len() as u32).map(|index| site.child(index)))
+                        .collect(),
+                );
+            }
+            args.len
+        }
+        Op::Field { .. }
+        | Op::LetBind { .. }
+        | Op::LetBindShared { .. }
+        | Op::JumpIfFalse { .. }
+        | Op::Branch { .. }
+        | Op::Test { .. }
+        | Op::ForIn { .. }
+        | Op::Bind { .. }
+        | Op::BindShared { .. }
+        | Op::BindSession { .. }
+        | Op::WriteLocal { .. }
+        | Op::WriteSession { .. }
+        | Op::WriteUnbound { .. }
+        | Op::RemoveField { .. }
+        | Op::Return { .. }
+        | Op::ReturnVia { .. }
+        | Op::Throw { .. }
+        | Op::Print { .. }
+        | Op::Finish { .. }
+        | Op::Fail { .. } => 1,
+        Op::Index { .. } | Op::SetField { .. } | Op::RemoveIndex { .. } => 2,
+        Op::SetIndex { .. } => 3,
+        Op::Pin { .. } => {
+            return Some(vec![
+                site.child(node.children().len().checked_sub(1)? as u32),
+            ]);
+        }
+        _ => return None,
+    };
+    Some((0..count).map(|index| site.child(index)).collect())
 }
 
 fn implements(op: Op, node: Node<'_>) -> bool {

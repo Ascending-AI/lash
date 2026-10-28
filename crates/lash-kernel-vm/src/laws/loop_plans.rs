@@ -330,6 +330,7 @@ fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
 fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
     use crate::compile::{CodeId, LibId};
     let typed_count = std::cell::Cell::new(0);
+    let rejected_joins = std::cell::Cell::new(0);
     let typed_text = LOOP
         .replace("num.add", "law.typed_add")
         .replace("num.lt", "law.typed_less");
@@ -393,6 +394,34 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                             ranges.push(test);
                         }
                         for range in ranges {
+                            if stream
+                                .source_joins
+                                .range(range.start..range.end())
+                                .next()
+                                .is_some()
+                                && matches!(
+                                    stream.ops[range.end() as usize - 1],
+                                    lash_kernel_exec::Op::Bind { .. }
+                                        | lash_kernel_exec::Op::BindSession { .. }
+                                        | lash_kernel_exec::Op::Return { .. }
+                                )
+                            {
+                                let mut omitted = crate::compile::Stream {
+                                    ops: stream.ops.clone(),
+                                    source_sites: stream.source_sites.clone(),
+                                    source_joins: stream.source_joins.clone(),
+                                    ..Default::default()
+                                };
+                                omitted
+                                    .source_joins
+                                    .retain(|pc, _| *pc < range.start || *pc >= range.end());
+                                assert!(!omitted.verify_holding_sites(
+                                    &code.source_room,
+                                    range,
+                                    stmt.regs
+                                ));
+                                rejected_joins.set(rejected_joins.get() + 1);
+                            }
                             for pc in range.start..range.end() {
                                 let op = stream.ops[pc as usize];
                                 if matches!(op, lash_kernel_exec::Op::Region { .. }) {
@@ -477,6 +506,10 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
     assert!(
         typed_count.get() > 0,
         "typed repeats retain their checked source prefix"
+    );
+    assert!(
+        rejected_joins.get() > 0,
+        "missing source ownership transfers are refused"
     );
 }
 fn room_join(
