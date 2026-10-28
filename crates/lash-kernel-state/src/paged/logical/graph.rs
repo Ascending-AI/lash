@@ -137,7 +137,7 @@ impl CensusGraph for Graph<'_, '_> {
                         .map_err(|_| invalid("logical ordinal key"))?,
                 ),
             });
-            key = Some(next.into());
+            key = Some(next);
         }
         Ok(entities)
     }
@@ -164,7 +164,7 @@ impl CensusGraph for Graph<'_, '_> {
                 return Err(invalid("ended owner key mismatch"));
             }
             tasks.push(task);
-            key = Some(next.into());
+            key = Some(next);
         }
         Ok(tasks)
     }

@@ -223,11 +223,11 @@ impl Prepared {
         self.peak = self.peak.max(self.before.checked_add(extra)?);
         Some(self)
     }
-    pub fn admit(self, bound: u64) -> Result<Accepted, Self> {
+    pub fn admit(self, bound: u64) -> Result<Accepted, Box<Self>> {
         if self.peak <= bound {
             Ok(Accepted(self))
         } else {
-            Err(self)
+            Err(Box::new(self))
         }
     }
 }
