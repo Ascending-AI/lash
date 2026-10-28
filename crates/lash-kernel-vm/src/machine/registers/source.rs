@@ -37,7 +37,7 @@ impl Operands {
         let roles = stmt
             .source_roles_at(stream, pc)
             .ok_or("source resume has no operand projection")?;
-        for (reg, site) in roles {
+        for (reg, site) in roles.iter() {
             self.values.push(Operand {
                 reg: *reg,
                 site: Arc::clone(site),
@@ -56,6 +56,10 @@ impl Operands {
     ) -> Result<(), &'static str> {
         let op = stream.ops[pc as usize];
         if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
+            return Ok(());
+        }
+        if matches!(op, Op::End) {
+            self.values.clear();
             return Ok(());
         }
         let reads = op.reads();

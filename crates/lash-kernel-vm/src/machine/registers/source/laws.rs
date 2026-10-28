@@ -49,7 +49,7 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         ops: OpRange { start: 0, len: 3 },
         regs: 64,
         form: Form::Plain,
-        source_roles: std::sync::OnceLock::new(),
+        source_roles: std::sync::Mutex::new(Default::default()),
     };
     let mut registers = vec![Value::Null; 64];
     let mut owners = Operands::default();

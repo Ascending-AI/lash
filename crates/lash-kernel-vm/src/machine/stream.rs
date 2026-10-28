@@ -284,7 +284,7 @@ impl KernelMachine {
                     if !self.session_write(name, value, true)? {
                         return unbound(name);
                     }
-                    return Ok(Ran::Done);
+                    return self.source_done(running, source_pc, Ran::Done);
                 }
                 Op::Jump { skip } => {
                     self.close_region(running.stream);
@@ -302,13 +302,13 @@ impl KernelMachine {
                     self.close_region(running.stream);
                     let value = self.take(at(src));
                     self.bind(task, local.at, false, value)?;
-                    return Ok(Ran::Done);
+                    return self.source_done(running, source_pc, Ran::Done);
                 }
                 Op::WriteLocal { local, src } => {
                     self.close_region(running.stream);
                     let value = self.take(at(src));
                     self.write_local(task, running.exe, local, value)?;
-                    return Ok(Ran::Done);
+                    return self.source_done(running, source_pc, Ran::Done);
                 }
                 Op::Branch { cond, then_, else_ } => {
                     self.close_region(running.stream);
@@ -320,26 +320,26 @@ impl KernelMachine {
                     // An empty block would end as soon as it began.
                     if running.exe.block(block).stmts.is_empty() {
                         self.observe_empty_block(task, block, running.exe);
-                        return Ok(Ran::Done);
+                        return self.source_done(running, source_pc, Ran::Done);
                     }
                     self.push_block(task, block)?;
-                    return Ok(Ran::Step);
+                    return self.source_done(running, source_pc, Ran::Step);
                 }
                 Op::Test { cond } => {
                     self.close_region(running.stream);
                     let Value::Bool(tested) = self.take(at(cond)) else {
                         return raise("type_error", "a `while` condition must be a bool");
                     };
-                    return Ok(Ran::Tested(tested));
+                    return self.source_done(running, source_pc, Ran::Tested(tested));
                 }
                 Op::End => {
                     self.close_region(running.stream);
-                    return Ok(Ran::Done);
+                    return self.source_done(running, source_pc, Ran::Done);
                 }
                 op => {
                     self.close_region(running.stream);
                     if let Some(ran) = self.run_rare(host, running, op)? {
-                        return Ok(ran);
+                        return self.source_done(running, source_pc, ran);
                     }
                 }
             }
@@ -349,6 +349,13 @@ impl KernelMachine {
                     .map_err(fault)?;
             }
         }
+    }
+
+    fn source_done(&mut self, running: &Running<'_>, pc: u32, ran: Ran) -> Eval<Ran> {
+        self.regs
+            .source_complete(running.stream, pc)
+            .map_err(fault)?;
+        Ok(ran)
     }
 
     /// Admits charge region `region`, headed at the op before `pc` with

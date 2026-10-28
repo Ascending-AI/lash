@@ -1,51 +1,42 @@
 //! The source node of each lowered operation. Placement changes only operands;
 //! it must not change the node whose holding event that operation implements.
 
-use super::{Form, OpRange, Stmt, Stream, room};
+use super::{Form, OpRange, Stmt as CompiledStmt, Stream, room};
 use lash_kernel_doc::{Expr, Node, Stmt};
 use lash_kernel_exec::Op;
 use lash_kernel_value::sites::Site;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub(crate) type SourceRoles = BTreeMap<u32, Box<[(lash_kernel_exec::Reg, Arc<Site>)]>>;
+pub(crate) type SourceRoleList = Arc<[(lash_kernel_exec::Reg, Arc<Site>)]>;
+pub(crate) type SourceRoles = BTreeMap<u32, SourceRoleList>;
 
-impl Stmt {
-    /// A resume or a register miss recovers only named source operands.
-    /// Formation reads the already lowered stream, never the source AST.
-    pub(crate) fn source_roles_at(
-        &self,
-        stream: &Stream,
-        pc: u32,
-    ) -> Option<&[(lash_kernel_exec::Reg, Arc<Site>)]> {
-        let roles = self.source_roles.get_or_init(|| {
-            let mut roles = stream.form_source_roles(self.ops, self.regs)?;
-            if let Form::While { test, .. } = self.form {
-                roles.extend(stream.form_source_roles(test, self.regs)?);
-            }
-            Some(roles)
-        });
-        roles.as_ref()?.get(&pc).map(AsRef::as_ref)
+impl CompiledStmt {
+    /// Cache only requested resume points. A representative forward path
+    /// suffices because source joins give both arms identical exit owners.
+    pub(crate) fn source_roles_at(&self, stream: &Stream, pc: u32) -> Option<SourceRoleList> {
+        let mut cache = self.source_roles.lock().ok()?;
+        if let Some(roles) = cache.get(&pc) {
+            return Some(Arc::clone(roles));
+        }
+        let range = match self.form {
+            Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
+            _ => self.ops,
+        };
+        let roles = stream.form_source_roles(range, self.regs, pc)?;
+        cache.insert(pc, Arc::clone(&roles));
+        Some(roles)
     }
 }
 
 impl Stream {
-    fn form_source_roles(&self, range: OpRange, regs: u32) -> Option<SourceRoles> {
-        let mut pending = vec![(range.start, vec![None::<Arc<Site>>; regs as usize])];
-        let mut seen = BTreeMap::new();
-        while let Some((pc, mut owners)) = pending.pop() {
-            if pc == range.end() {
-                continue;
-            }
-            if pc > range.end() {
-                return None;
-            }
-            if let Some(previous) = seen.insert(pc, owners.clone()) {
-                if previous != owners {
-                    return None;
-                }
-                continue;
-            }
+    fn form_source_roles(&self, range: OpRange, regs: u32, wanted: u32) -> Option<SourceRoleList> {
+        if wanted < range.start || wanted >= range.end() {
+            return None;
+        }
+        let mut owners = vec![None::<Arc<Site>>; regs as usize];
+        let mut pc = range.start;
+        while pc < wanted {
             let op = *self.ops.get(pc as usize)?;
             for reg in op.reads() {
                 let owner = owners.get_mut(reg.ix())?;
@@ -68,30 +59,24 @@ impl Stream {
                 }
             }
             let next = pc.checked_add(1)?;
-            match op {
-                Op::Jump { skip } => pending.push((next.checked_add(skip)?, owners)),
-                Op::JumpIfFalse { skip, .. } => {
-                    pending.push((next.checked_add(skip)?, owners.clone()));
-                    pending.push((next, owners));
+            pc = match op {
+                Op::Jump { skip } => next.checked_add(skip)?,
+                Op::JumpIfFalse { skip, .. } if wanted >= next.checked_add(skip)? => {
+                    next.checked_add(skip)?
                 }
-                _ => pending.push((next, owners)),
-            }
+                _ => next,
+            };
+        }
+        if pc != wanted {
+            return None;
         }
         Some(
-            seen.into_iter()
-                .map(|(pc, owners)| {
-                    (
-                        pc,
-                        owners
-                            .into_iter()
-                            .enumerate()
-                            .filter_map(|(reg, site)| {
-                                Some((lash_kernel_exec::Reg(reg as u32), site?))
-                            })
-                            .collect(),
-                    )
-                })
-                .collect(),
+            owners
+                .into_iter()
+                .enumerate()
+                .filter_map(|(reg, site)| Some((lash_kernel_exec::Reg(reg as u32), site?)))
+                .collect::<Vec<_>>()
+                .into(),
         )
     }
 

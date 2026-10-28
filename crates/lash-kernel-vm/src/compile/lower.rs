@@ -469,7 +469,7 @@ impl Compiler<'_> {
             ops: range,
             regs: ops.regs,
             form,
-            source_roles: std::sync::OnceLock::new(),
+            source_roles: std::sync::Mutex::new(Default::default()),
         }
     }
 
