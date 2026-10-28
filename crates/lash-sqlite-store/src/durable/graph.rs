@@ -1254,8 +1254,11 @@ pub(super) fn install(
             .map(|(_, node)| &node.id),
     );
     let mut absent = 0;
+    let children = json_array(&children);
     let mut statement = tx.prepare_cached(SQL.sqlite.install_frontier.sql())?;
-    let mut rows = statement.query(rusqlite::params![roots, json_array(&children)])?;
+    let _bindings =
+        crate::observed_sql::text_bindings(SQL.sqlite.install_frontier.sql(), &[&roots, &children]);
+    let mut rows = statement.query(rusqlite::params![roots, children])?;
     while let Some(row) = rows.next()? {
         let hash = crate::codec::hash_column(row, 0)?;
         // Children outside the supplied graph are validated by the external
@@ -1348,6 +1351,8 @@ pub(super) fn install(
     }
     if edges.len() > 1 {
         edges.push(']');
+        let _bindings =
+            crate::observed_sql::text_bindings(SQL.sqlite.insert_edges.sql(), &[&edges]);
         cached_execute(tx, SQL.sqlite.insert_edges.sql(), [edges])?;
     }
     if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current() {

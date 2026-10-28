@@ -82,7 +82,7 @@ unsafe fn expanded_sql(statement: *mut ffi::sqlite3_stmt) -> *mut std::ffi::c_ch
 }
 
 #[derive(Clone, Copy)]
-struct BlobBindings {
+struct BindingLengths {
     sql: &'static str,
     #[cfg(feature = "perf-witness")]
     value_bytes: u64,
@@ -92,11 +92,52 @@ struct BlobBindings {
 }
 
 thread_local! {
-    static BLOB_BINDINGS: std::cell::Cell<Option<BlobBindings>> = const { std::cell::Cell::new(None) };
+    static KNOWN_BINDINGS: std::cell::Cell<Option<BindingLengths>> = const { std::cell::Cell::new(None) };
 }
 
-fn blob_bindings(sql: &str) -> Option<BlobBindings> {
-    BLOB_BINDINGS
+pub(crate) struct TextBindings(
+    Option<BindingLengths>,
+    std::marker::PhantomData<std::rc::Rc<()>>,
+);
+
+impl Drop for TextBindings {
+    fn drop(&mut self) {
+        KNOWN_BINDINGS.with(|current| current.set(self.0));
+    }
+}
+
+/// Supply the lengths of one-use text parameters while their statement runs.
+pub(crate) fn text_bindings(sql: &'static str, values: &[&str]) -> TextBindings {
+    debug_assert_eq!(placeholders(sql).count(), values.len());
+    let (value_bytes, literal_bytes) =
+        values
+            .iter()
+            .fold((0_u64, 0_u64), |(value, literal), text| {
+                // sqlite3_expanded_sql stops TEXT at its first NUL and doubles
+                // apostrophes. Keep those existing accounting semantics exactly.
+                let text = text.split('\0').next().unwrap_or_default();
+                let len = text.len() as u64;
+                let quotes = text.bytes().filter(|byte| *byte == b'\'').count() as u64;
+                (value + len, literal + len + quotes + 2)
+            });
+    let bindings = BindingLengths {
+        sql,
+        #[cfg(feature = "perf-witness")]
+        value_bytes,
+        literal_bytes,
+        #[cfg(feature = "perf-witness")]
+        expanded_bytes: sql.len() - placeholder_bytes(sql) + literal_bytes as usize,
+    };
+    #[cfg(not(feature = "perf-witness"))]
+    let _ = value_bytes;
+    TextBindings(
+        KNOWN_BINDINGS.with(|current| current.replace(Some(bindings))),
+        std::marker::PhantomData,
+    )
+}
+
+fn known_bindings(sql: &str) -> Option<BindingLengths> {
+    KNOWN_BINDINGS
         .with(std::cell::Cell::get)
         .filter(|bindings| bindings.sql == sql)
 }
@@ -113,7 +154,7 @@ pub(crate) fn with_blob_bindings<R>(
         .fold((0_u64, 0_u64), |(value, literal), len| {
             (value + len as u64, literal + 2 * len as u64 + 3)
         });
-    let bindings = BlobBindings {
+    let bindings = BindingLengths {
         sql,
         #[cfg(feature = "perf-witness")]
         value_bytes: _value_bytes,
@@ -121,13 +162,13 @@ pub(crate) fn with_blob_bindings<R>(
         #[cfg(feature = "perf-witness")]
         expanded_bytes: sql.len() - placeholder_bytes(sql) + literal_bytes as usize,
     };
-    struct Restore(Option<BlobBindings>);
+    struct Restore(Option<BindingLengths>);
     impl Drop for Restore {
         fn drop(&mut self) {
-            BLOB_BINDINGS.with(|current| current.set(self.0));
+            KNOWN_BINDINGS.with(|current| current.set(self.0));
         }
     }
-    let _restore = Restore(BLOB_BINDINGS.with(|current| current.replace(Some(bindings))));
+    let _restore = Restore(KNOWN_BINDINGS.with(|current| current.replace(Some(bindings))));
     work()
 }
 
@@ -248,7 +289,7 @@ unsafe extern "C" fn trace(
                     #[cfg(feature = "perf-witness")]
                     let mut binding = None;
                     window.statement(&sql);
-                    if let Some(known) = blob_bindings(&sql) {
+                    if let Some(known) = known_bindings(&sql) {
                         window.payload(&sql, 0, known.literal_bytes, 0);
                         #[cfg(feature = "perf-witness")]
                         {
@@ -344,7 +385,7 @@ unsafe extern "C" fn trace(
                 }
                 #[cfg(feature = "perf-witness")]
                 let mut binding = before.and_then(|before| before.binding).or_else(|| {
-                    blob_bindings(&sql).map(|known| BindingBytes {
+                    known_bindings(&sql).map(|known| BindingBytes {
                         expanded: known.expanded_bytes,
                         value: Some(known.value_bytes),
                     })
@@ -575,7 +616,7 @@ mod tests {
     use super::*;
 
     /// SQL-PAYLOAD-ONCE: the physical window and write witness share one
-    /// expansion for unknown bindings; known graph blob lengths need none
+    /// expansion for unknown bindings; known graph binding lengths need none
     /// (FIG-7506). Both retain their distinct spelling/value byte counters.
     #[cfg(feature = "perf-witness")]
     #[expect(
@@ -681,6 +722,42 @@ mod tests {
                     before,
                     "known blobs need no expansion: receipts={receipts}, window={observed}"
                 );
+                const TEXT_SQL: &str = "INSERT INTO payload VALUES (?1)";
+                for text in [value.as_str(), "nul\0trailing"] {
+                    let mut expected = connection.prepare(TEXT_SQL).unwrap();
+                    expected.raw_bind_parameter(1, text).unwrap();
+                    let expanded = expected.expanded_sql().unwrap();
+                    let value_bytes = bound_value_bytes(TEXT_SQL, expanded.as_bytes());
+                    let snapshot = collector.snapshot();
+                    let before = EXPANSIONS.with(std::cell::Cell::get);
+                    let text_window = Window::new("known-text-payload", "sqlite");
+                    Window::on_worker(observed.then(|| text_window.clone()), || {
+                        let _binding = text_bindings(TEXT_SQL, &[text]);
+                        connection.execute(TEXT_SQL, [text]).unwrap();
+                    });
+                    let after = collector.snapshot();
+                    assert_eq!(
+                        after.sql_bytes_written - snapshot.sql_bytes_written,
+                        value_bytes
+                    );
+                    if observed {
+                        assert_eq!(
+                            text_window.snapshot().bound_bytes,
+                            (expanded.len() + placeholder_bytes(TEXT_SQL) - TEXT_SQL.len()) as u64
+                        );
+                    }
+                    if receipts {
+                        assert_eq!(
+                            after.sql_receipts.last().unwrap().expanded_bytes,
+                            expanded.len()
+                        );
+                    }
+                    assert_eq!(
+                        EXPANSIONS.with(std::cell::Cell::get),
+                        before,
+                        "known text needs no expansion: receipts={receipts}, window={observed}"
+                    );
+                }
             }
         }
     }
