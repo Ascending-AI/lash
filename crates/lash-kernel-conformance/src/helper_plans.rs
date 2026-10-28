@@ -245,11 +245,16 @@ fn run_with_options<const L: u64>(
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
                             let operation = crate::linked::operation(&effect.use_);
-                            assert!(
-                                operation.as_str() == "host.observe"
-                                    || operation.as_str().ends_with(".sleep")
-                            );
-                            (effect.wait, Outcome::Completed(Datum::Null))
+                            let answer = if operation.as_str() == "host.echo" {
+                                effect.args.first().cloned().expect("echo argument")
+                            } else {
+                                assert!(
+                                    operation.as_str() == "host.observe"
+                                        || operation.as_str().ends_with(".sleep")
+                                );
+                                Datum::Null
+                            };
+                            (effect.wait, Outcome::Completed(answer))
                         }
                     };
                     requests.push(request);

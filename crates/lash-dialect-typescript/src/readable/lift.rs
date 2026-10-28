@@ -322,7 +322,7 @@ impl<'a> Lifter<'a> {
             self.style,
         );
         if !matches!(&entry.convention, k::StartConvention::TsDirect { await_fn }
-            if export_scope.is(await_fn, "ts.await"))
+            if export_scope.is(await_fn, "ts.entry_result"))
         {
             return refuse("an entry the dialect starts directly");
         }
@@ -592,6 +592,27 @@ impl<'a> Lifter<'a> {
                 .cloned()
         };
         let caption = caption_at(0);
+        if let k::Stmt::Assign {
+            place: k::Place::Variable(name),
+            value,
+            ..
+        } = &block[0]
+        {
+            let input = match value {
+                k::Rhs::Expr(k::Expr::Act(input)) => Some((input.kind.clone(), input.args.clone())),
+                k::Rhs::Action(action) => {
+                    let input = super::statements::act_of(action);
+                    Some((input.kind, input.args))
+                }
+                _ => None,
+            };
+            if let Some((k::ActKind::Call(k::Callee::Local(id)), args)) = input
+                && self.is(&id, "ts.bigint.input")
+                && matches!(args.first(), Some(k::Expr::Variable(value)) if value == name)
+            {
+                return Ok(1);
+            }
+        }
         if let k::Stmt::Let { name, value } = &block[0]
             && self.process_awaits.contains(name)
             && match value {

@@ -1,9 +1,9 @@
 language: Python
 exceptions: absent-binding initialization, task finalizer
 main/0 [38..296] "async def demo(value: int) -> str:\n    #: Check for a negative value\n    if value < 0:\n        #: Stop and report that it is negative\n        return \"negative\"\n    #: Echo the value\n    await corpus.echo(value)\n    #: Report that it is done\n    return \"done\""
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0 [111..197] "if value < 0:\n        #: Stop and report that it is negative\n        return \"negative\""
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/0/1/0 [180..197] "return \"negative\""
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1 [224..248] "await corpus.echo(value)"
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1/0 [224..248] "await corpus.echo(value)"
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/1/0/0 [224..248] "await corpus.echo(value)"
-function c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c/2 [283..296] "return \"done\""
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0 [111..197] "if value < 0:\n        #: Stop and report that it is negative\n        return \"negative\""
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0/1/0 [180..197] "return \"negative\""
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1 [224..248] "await corpus.echo(value)"
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1/0 [224..248] "await corpus.echo(value)"
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1/0/0 [224..248] "await corpus.echo(value)"
+function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/2 [283..296] "return \"done\""

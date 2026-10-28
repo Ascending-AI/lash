@@ -26,7 +26,8 @@ impl Lowerer<'_> {
         mode: Mode,
     ) -> Lowering<()> {
         match pattern {
-            ast::Pattern::Ident(name, _) => {
+            ast::Pattern::Ident(name, annotation) => {
+                let value = self.annotated_input(annotation.as_ref(), value)?;
                 match mode {
                     Mode::Declared => self.initialise(name, value),
                     Mode::Local => {

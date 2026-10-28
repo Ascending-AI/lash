@@ -152,7 +152,7 @@ pub(super) fn closure(
                 },
             ],
             StartConvention::TsArgsList {
-                await_fn: FunctionTarget::Local(helper(helpers, "ts.await")?),
+                await_fn: FunctionTarget::Local(helper(helpers, "ts.entry_result")?),
                 same_fn: FunctionTarget::Local(helper(helpers, "same")?),
             },
             FunctionRepresentation::Token {

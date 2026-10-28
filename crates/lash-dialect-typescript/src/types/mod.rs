@@ -59,7 +59,7 @@ pub(crate) enum Ty {
     /// A number the kernel holds as a float: a literal, or the result of
     /// arithmetic.
     Float,
-    /// A TypeScript BigInt is the kernel mathematical Integer.
+    /// An explicit TypeScript BigInt carries a tag around an exact kernel Integer.
     BigInt,
     /// A trusted Number annotation, without proof of the runtime kind.
     Number,
@@ -172,8 +172,8 @@ impl Ty {
     }
 
     /// What a tool's result is, decoded as the type its `perform` states
-    /// (`K-EFF-005`). An `Int` is a BigInt; a bare Number is a float,
-    /// by the policy of every TypeScript document.
+    /// (`K-EFF-005`). Incoming integers are Numbers; only the Float boundary
+    /// proves a binary64 representation before a checked Number operation.
     pub(crate) fn decoded(stated: &Type) -> Self {
         if let Some(brand) = lash_kernel_dialect::dispatch::Brand::of_type(stated) {
             return Self::Package(Box::new(brand));
@@ -182,8 +182,8 @@ impl Ty {
             Type::Null => Self::Null,
             Type::Absent => Self::Undefined,
             Type::Bool => Self::Bool,
-            Type::Int => Self::BigInt,
-            Type::Float | Type::Number => Self::Float,
+            Type::Int | Type::Number => Self::Number,
+            Type::Float => Self::Float,
             Type::Text | Type::Enum(_) => Self::Text,
             Type::List(element) => Self::List(Box::new(Self::decoded(element))),
             Type::Record(record) => Self::Record(

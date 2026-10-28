@@ -1,15 +1,15 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017
 library @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43
 library @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77
 library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"d706b988e652b92dcdfbf9a64e057a6ee84b097c932a7de643f0ba01ae036399\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  let out = []\n  for item in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set out[list.len(out)] = invoke py.reply(perform 3(item) as Json)\n  }\n  return out\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"text\"}}],\"result\":{\"list\":\"text\"}},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse py.for_in.check = @cb272b3b3c5a4bf0c8397d8697f19b58aae8a3796474ec050e060f005b47bd77\nuse py.for_in.open = @28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017\nuse py.iterator.step = @c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  let out = []\n  for item in items via (open py.for_in.open, next py.iterator.step, check py.for_in.check) {\n    set out[list.len(out)] = invoke py.reply(perform 0(item) as Json)\n  }\n  return out\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(d706b988e652b92dcdfbf9a64e057a6ee84b097c932a7de643f0ba01ae036399)): statements=4 scopes=2 sites=7
+unit Library(FunctionId(006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268)): statements=4 scopes=2 sites=7

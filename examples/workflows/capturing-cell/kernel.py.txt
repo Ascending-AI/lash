@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
+import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
 library @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795
 library @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161
 library @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3
@@ -11,7 +11,7 @@ main {
   let limit = 3
   let shared = [1]
   let add = let(t2 = fn local.function presentation(x: Int) -> Any token("py.function", 1) py_args(1), ("py.function", t2, (("x", 1, false),), "add", ("py.callable", true)))
-  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7(perform 3(t4) as Union(Null, Record{list: List(Json), ..Json}))))
+  do let(t3 = [1, add], let(t4 = {list: t3}, invoke @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7(perform 0(t4) as Union(Null, Record{list: List(Json), ..Json}))))
   do invoke @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795(shared, 0, 9)
 }
 

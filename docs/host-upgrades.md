@@ -41,7 +41,7 @@ current source authority. Mark the rows that apply to your host before upgrading
 | `SessionStore::input_status` / `RunStore::input_status` and `InputStatus`; separate run-binding and terminal reads | Call the inherited `RunStore::follow_facts(session, &FollowSubject::Input(input)) -> FollowFacts`. Read binding and terminal evidence together from `FollowFacts::Input` and its optional `run`. Re-read on each resolution; an input can rebind. [Snapshot contract](../crates/lash-core-store/src/store/run_follow.rs). | [3453a8da71](https://github.com/Ascending-AI/lash/commit/3453a8da71), FIG-7045 | Removed method/type at compile time; stale separate reads can associate terminal evidence with the wrong binding. Never await an active run while holding a product lock its tools need: release the lock before following, then reacquire and validate product state. |
 | RLM `history[N]`, `rlm.history.length/at/slice`, `control.read_output` and host `read_output_tool_definition` | Remove retired prompt/catalogue guidance and calls. Cells see the current frame and its variables; retained values remain readable by hosts through their attachment store. Remove `SessionGlobal.cell` and `RetainedValueUnavailable` matches. [Current protocol](../crates/lash-protocol-rlm/src/lib.rs). | [656e9fdbec](https://github.com/Ascending-AI/lash/commit/656e9fdbec), FIG-7370 | Unbound history name or unavailable operation; removed facade symbols fail to compile. |
 | XML/fenced source cells or a configurable RLM cell channel | Use one provider-native `execute_code` call with exactly `{"code":"<complete program>"}`. Invoke product tools and `control.finish` inside that program. Prose is commentary. FIG-7471's supplied examples print output and do not finish the task for the model. [Transport](../crates/lash-protocol-rlm/src/native/tool.rs), [prompt contract](../crates/lash-protocol-rlm/src/prompt_contract_tests.rs). | [b4882e1f03](https://github.com/Ascending-AI/lash/commit/b4882e1f03), FIG-7374; [6f7aea35df](https://github.com/Ascending-AI/lash/commit/6f7aea35df), FIG-7471 | Text source does not execute; malformed/multiple native calls get `No code executed` repair feedback. |
-| Kernel `Int` tool results treated as TypeScript `number`, then logged with `JSON.stringify` | They are TypeScript `bigint`. Use `console.log(value)` for output, or an explicit JSON replacer that converts bigint to text. Use `Number(value)` only when the host accepts possible precision loss. [BigInt implementation and laws](../crates/lash-dialect-typescript/src/tests/module.rs). | [e60f5334dc](https://github.com/Ascending-AI/lash/commit/e60f5334dc), FIG-7286 | `TypeError: Cannot serialize a BigInt` from `JSON.stringify`; mixed Number/BigInt arithmetic also refuses. No new opt-in. |
+| Kernel `Int` tool results exposed as TypeScript `bigint` by FIG-7286 | Incoming integers are TypeScript `number`, matching generated declarations and JavaScript JSON. Ordinary arithmetic and `JSON.stringify` work directly. Exact large integers needed in TypeScript must be returned as strings. Explicit `1n`, `BigInt(...)` and `bigint` entry annotations retain exact integer semantics. [Upgrade entry](host-upgrades/unreleased/FIG-7511.md). | FIG-7511, superseding the inbound rule of [e60f5334dc](https://github.com/Ascending-AI/lash/commit/e60f5334dc) | Old adapters that expect incoming `bigint` must accept `number`. Values above the safe-integer range round to the nearest binary64 value, as in `JSON.parse`. Python integers are unchanged. |
 
 ## Repin-39 wire and Rust shape changes
 
@@ -147,8 +147,10 @@ const document = await x.readDocument({ id: "example" });
 console.log(document);
 ```
 
-Use the host's actual declared argument shape. Do not wrap an arbitrary result
-in `JSON.stringify`: a nested kernel Int becomes BigInt and can make it throw.
+Use the host's actual declared argument shape. Integer fields in tool results are
+TypeScript `number`; `JSON.stringify(document)` also works. Return a string when
+TypeScript callers need exact integers outside the safe range
+`[-9007199254740991, 9007199254740991]`.
 
 ## Paired PostgreSQL settings
 

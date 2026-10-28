@@ -1,4 +1,5 @@
 # JavaScript map behavior, expressed in kernel code.
+use ts.number.input
 use ts.callable
 use deref
 use error.new
@@ -48,7 +49,7 @@ charge sum(8, deep(result))
 body {
   # Kernel numeric keys identify integral floats with integers. JavaScript
   # BigInt keys have their own kind, so retain it in an unforgeable tuple.
-  if same(kind(value), "integer") { return ("ts.bigint", value) }
+  if same(kind(value), "integer") { set value = invoke ts.number.input(value) }
   return key.identity(value, ("undefined", "key"), "error")
 }
 
@@ -60,7 +61,7 @@ native
 body {
   if same(kind(key), "ref") { return deref(key) }
   if same(kind(key), "tuple") {
-    if same(key[0], "ts.bigint") { return key[1] }
+    if same(key[0], "ts.bigint") { return key }
     if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
     if same(key[0], "undefined") { return absent }
     if same(key[0], "ts.function") {

@@ -1,5 +1,5 @@
 language: TypeScript
 exceptions: none
 main/0 [24..152] "async function demo(): Promise<string> {\n  /** Send a greeting and give back the reply */\n  return await corpus.echo(\"hello\");\n}"
-function f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368/0 [116..150] "return await corpus.echo(\"hello\");"
-function f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368/0/0 [116..150] "return await corpus.echo(\"hello\");"
+function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0 [116..150] "return await corpus.echo(\"hello\");"
+function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0/0 [116..150] "return await corpus.echo(\"hello\");"

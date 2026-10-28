@@ -779,13 +779,26 @@ impl<'a> Lowerer<'a> {
                 let kind = self.native("kind", vec![value.expr()])?;
                 let float = self.same(kind, Operand::text("float").expr())?;
                 let converted = self.native("float.to_int", vec![value.expr()])?;
+                let kind = self.native("kind", vec![value.expr()])?;
+                let tuple = self.same(kind, Operand::text("tuple").expr())?;
+                let untagged = Expr::If {
+                    cond: Box::new(tuple),
+                    then: Box::new(Expr::If {
+                        cond: Box::new(
+                            self.same(Self::element(&value, 0), Operand::text("ts.bigint").expr())?,
+                        ),
+                        then: Box::new(Self::element(&value, 1)),
+                        r#else: Box::new(value.expr()),
+                    }),
+                    r#else: Box::new(value.expr()),
+                };
                 Ok(self.inline(
                     Expr::If {
                         cond: Box::new(float),
                         then: Box::new(converted),
-                        r#else: Box::new(value.expr()),
+                        r#else: Box::new(untagged),
                     },
-                    Ty::BigInt,
+                    Ty::Number,
                 ))
             }
             Adapt::Function(signature) => {

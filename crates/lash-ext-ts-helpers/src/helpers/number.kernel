@@ -56,6 +56,7 @@ use ts.number.toPrecision
 use ts.number.toString
 use ts.number.format_value
 use ts.number.valueOf
+use ts.number.input
 use ts.number.receiver
 use ts.pad
 use ts.receiver
@@ -71,6 +72,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(value))
 body {
   let primitive = invoke ts.to_primitive(value, "number")
+  if same(kind(primitive), "tuple") { set primitive = primitive[1] }
   if same(kind(primitive), "integer") {
     try { return num.to_float(primitive) } catch too_large {
       if num.lt(primitive, 0) { return -inf }
@@ -102,6 +104,7 @@ body {
   let value = args[0]
   let k = invoke ts.receiver(value)
   if same(k, "number") {} else { return false }
+  if same(kind(value), "integer") { set value = invoke ts.number.input(value) }
   return num.is_finite(value)
 }
 
@@ -114,6 +117,7 @@ body {
   let value = args[0]
   let k = invoke ts.receiver(value)
   if same(k, "number") {} else { return false }
+  if same(kind(value), "integer") { set value = invoke ts.number.input(value) }
   return num.is_nan(value)
 }
 
@@ -126,6 +130,7 @@ body {
   let value = args[0]
   let k = invoke ts.receiver(value)
   if same(k, "number") {} else { return false }
+  if same(kind(value), "integer") { set value = invoke ts.number.input(value) }
   return num.is_integer(value)
 }
 
@@ -138,6 +143,7 @@ body {
   let value = args[0]
   let k = invoke ts.receiver(value)
   if same(k, "number") {} else { return false }
+  if same(kind(value), "integer") { set value = invoke ts.number.input(value) }
   if num.is_integer(value) { return num.le(num.abs(value), 9007199254740991.0) }
   return false
 }
@@ -176,7 +182,10 @@ charge 8
 body {
   let receiver = invoke ts.receiver(value)
   if same(receiver, "builtin") { if same(value[1], "Number.prototype") { return 0.0 } }
-  if same(receiver, "number") { return value }
+  if same(receiver, "number") {
+    if same(kind(value), "integer") { let number = invoke ts.number.input(value) return number }
+    return value
+  }
   throw error.new("type_error", "Number receiver required", null)
 }
 

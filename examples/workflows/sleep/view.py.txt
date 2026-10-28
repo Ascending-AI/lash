@@ -2,7 +2,7 @@ unit Library(FunctionId(3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea53703
 statement function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/0 ordinal=3 depth=0 block=function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80 Do { value: Act(ActExpr { kind: Call(Local(FunctionId(1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48))), args: [Literal(Float(Float(0.005)))] }) }
 statement function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/1 ordinal=4 depth=0 block=function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80 Return { value: Literal(Text("awake")) }
 scope function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80 ordinal=2 depth=0 Entry
-action function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/0/0 Some(Timer { use_: OperationUse { link: LinkId(a96f1f197880), slot: ImportSlot(2) } })
+action function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/0/0 Some(Timer { use_: OperationUse { link: LinkId(ce0737cd8c1a), slot: Helper(HelperOperationId(92fc47e8d5a1)) } })
 caption callable 0 block=function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80 "Wait a moment, then report"
 caption node 0 site=function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/0 "Pause briefly"
 caption node 1 site=function 3fcdca09cb1738e99083257fb6ef191d3fd6bd1c230f38a53ea537032e7c3c80/1 "Say it is awake"

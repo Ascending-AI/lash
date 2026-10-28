@@ -1,12 +1,12 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse lt = @14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  if lt(value, 0) {\n    return \"negative\"\n  }\n  do invoke py.reply(perform 3(value) as Json)\n  return \"done\"\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse lt = @14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  if lt(value, 0) {\n    return \"negative\"\n  }\n  do invoke py.reply(perform 0(value) as Json)\n  return \"done\"\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(c8542e436b7d7e390797a3849464064807bdb002b256fc92a3f45a6f3923834c)): statements=4 scopes=3 sites=7
+unit Library(FunctionId(db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3)): statements=4 scopes=3 sites=7

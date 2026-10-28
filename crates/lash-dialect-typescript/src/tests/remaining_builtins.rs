@@ -585,7 +585,7 @@ fn locale_case_uses_pinned_root_unicode_mapping() {
     "#.trim());
 }
 
-/// TS16 / K-VAL, K-EVAL: mathematical integers keep BigInt dispatch and
+/// TS16 / K-VAL, K-EVAL: explicit BigInts keep exact dispatch and
 /// conversions evaluate their operands exactly once, in source order.
 #[test]
 fn bigint_never_silently_coerces_to_number() {
@@ -671,4 +671,44 @@ fn numeric_computed_keys_admit_before_their_values_are_known() {
     let ended = machine::run(source, &[]);
     assert_eq!(ended.end, "ok", "{ended:?}");
     assert_eq!(ended.lines(), ["second"]);
+}
+
+/// FIG-7511: tool and stored integers obey the JS Number boundary, while authored BigInts stay exact.
+/// Expected lines come from Node with a JSON tool result.
+#[test]
+fn external_integers_are_numbers_and_authored_bigints_stay_exact() {
+    let ended = machine::run(
+        r#"
+      const x = await host.echo({version: 0n, count: 3n, large: 9007199254740993n});
+      console.log(typeof x.version, typeof x.count, JSON.stringify({version: x.version, count: x.count}), x.count + 1.5 === 4.5);
+      console.log(x.large === JSON.parse("9007199254740993"), String(x.large), Math.max(x.count, 2), x.count === 3);
+      console.log(typeof 1n, String(2n ** 64n), typeof BigInt(x.count));
+      const exact = {value: 9007199254740993n};
+      const returned = await host.echo([exact, exact]);
+      console.log(returned[0].value === JSON.parse("9007199254740993"), String(exact.value), typeof exact.value);
+    "#,
+        &[],
+    );
+    assert_eq!(ended.end, "ok", "{ended:?}");
+    assert_eq!(
+        ended.lines(),
+        [
+            "number number {\"version\":0,\"count\":3} true",
+            "true 9007199254740992 3 true",
+            "bigint 18446744073709551616 bigint",
+            "true 9007199254740993 bigint",
+        ]
+    );
+    use lash_kernel_doc::Datum;
+    let stored = super::pages::Session::seeded([(
+        lash_kernel_value::Name::new("stored"),
+        Datum::Record(vec![("count".into(), Datum::Int(3.into()))]),
+    )]);
+    assert_eq!(
+        machine::end_with_bindings(
+            "await control.finish(JSON.stringify([typeof stored.count, stored.count + 1.5, stored.count === 3]));",
+            stored
+        ),
+        machine::Ended::Finished(Datum::Text("[\"number\",4.5,true]".into()))
+    );
 }

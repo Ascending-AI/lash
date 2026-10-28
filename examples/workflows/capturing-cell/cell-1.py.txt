@@ -1,10 +1,10 @@
 cell entries: []
-crossing OperationUse { link: LinkId(40d76cc3d9b6), slot: ImportSlot(3) }
+crossing OperationUse { link: LinkId(9eee52e736aa), slot: Import(ImportSlot(0)) }
 Record {
 field list
 List [
 Int(Integer(1))
-FunctionValue callable=CallableId { link: LinkId(40d76cc3d9b6), function: FunctionId(ace1b2bba6aea703497dd50d0b5672e55c4407d0b4fa24fd0155f062528295ba) } signature=Signature { params: [Param { name: Name("x"), ty: Int, optional: false }], result: Any }
+FunctionValue callable=CallableId { link: LinkId(9eee52e736aa), function: FunctionId(ace1b2bba6aea703497dd50d0b5672e55c4407d0b4fa24fd0155f062528295ba) } signature=Signature { params: [Param { name: Name("x"), ty: Int, optional: false }], result: Any }
 started with x=2: Int(Integer(6))
 ]
 }

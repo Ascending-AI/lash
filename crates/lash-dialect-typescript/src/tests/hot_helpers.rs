@@ -438,7 +438,7 @@ fn leaf(bits: &mut Bits) -> Datum {
         4 | 5 => text(TEXTS[bits.below(TEXTS.len() as u64) as usize]),
         6 => Datum::Absent,
         7 => Datum::Tuple(Vec::new()),
-        8 => Datum::Int(Integer::from(-12i64)),
+        8 => float(-12.0),
         9 => match bits.below(4) {
             0 => Datum::Tuple(vec![text("ts.object"), text("Math"), text("Math")]),
             1 => Datum::Tuple(vec![text("ts.function"), text("parseInt")]),

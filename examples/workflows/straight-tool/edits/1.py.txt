@@ -1,28 +1,28 @@
 --- before
 -kernel 1
 -numbers by_spelling
--import 3 operation corpus.echo(input?: Json) -> Json
+-import 0 operation corpus.echo(input?: Json) -> Json
 -library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
--export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
--definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 3(\"hello\") as Json)\n}\n"
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 0(\"hello\") as Json)\n}\n"
 -main {
 -  let demo = &local.function
 -}
 +++ after
 +kernel 1
 +numbers by_spelling
-+import 3 operation corpus.echo(input?: Json) -> Json
++import 0 operation corpus.echo(input?: Json) -> Json
 +library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 3(\"edited λ\") as Json)\n}\n"
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
++definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 0(\"edited λ\") as Json)\n}\n"
 +main {
 +  let demo = &local.function
 +}
 
 Correspondence:
 {
-  "base": "593a7fb37351ebc0204601c3f455a3a9f922db1ed40b6eb0894b928d79bff245",
-  "result": "8ee3f84c2fa34d25c16a054bb2f8998fc42b8f7f6df0dc2d7889f427a1c3608a",
+  "base": "e50730574b3a80fc3851aabdae32a2c864ca989534a760183be7012ae697a3be",
+  "result": "a3cbb446e294826ad278f50817989658a9459cc13c12a99a52caa69eb56e78b9",
   "entries": [
     {
       "from": {
@@ -65,19 +65,19 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83"
+          "library": "01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35"
         }
       },
       "to": {
         "unit": {
-          "library": "504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c"
+          "library": "a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b"
         }
       }
     },
     {
       "from": {
         "unit": {
-          "library": "a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83"
+          "library": "01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35"
         },
         "path": [
           0
@@ -85,7 +85,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c"
+          "library": "a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b"
         },
         "path": [
           0
@@ -95,7 +95,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83"
+          "library": "01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35"
         },
         "path": [
           0,
@@ -104,7 +104,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c"
+          "library": "a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b"
         },
         "path": [
           0,
@@ -115,7 +115,7 @@ Correspondence:
     {
       "from": {
         "unit": {
-          "library": "a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83"
+          "library": "01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35"
         },
         "path": [
           0,
@@ -125,7 +125,7 @@ Correspondence:
       },
       "to": {
         "unit": {
-          "library": "504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c"
+          "library": "a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b"
         },
         "path": [
           0,
@@ -139,8 +139,8 @@ Correspondence:
 }
 
 Captions to review:
-function 504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c "Say hello"
-function 504b2bf138fc9bea9afc3c3824fdb9c599490209a5eeca52a9ea9b34259b425c/0 "Send a greeting and give back the reply"
+function a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b "Say hello"
+function a3b9999935ff581a32c87ce7976599d4da2eac7c07c900343500340e6c74426b/0 "Send a greeting and give back the reply"
 
 Reprinted source:
 #: Say hello

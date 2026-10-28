@@ -244,7 +244,7 @@ impl Runner {
 
     /// Lowers and admits `case`, or what a refusal to lower it observes.
     pub fn lower(&self, case: &Case) -> Result<Lowered, String> {
-        let effects = BTreeMap::from([(
+        let mut effects = BTreeMap::from([(
             EffectName::new("host.observe").map_err(|e| e.to_string())?,
             Signature {
                 params: vec![Param {
@@ -255,6 +255,27 @@ impl Runner {
                 result: Type::Any,
             },
         )]);
+        effects.insert(
+            EffectName::new("host.echo").map_err(|e| e.to_string())?,
+            Signature {
+                params: vec![Param {
+                    name: Name::new("value"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Record(lash_kernel_value::RecordType {
+                    fields: ["version", "count", "large"]
+                        .into_iter()
+                        .map(|name| lash_kernel_value::RecordTypeField {
+                            name: name.into(),
+                            ty: Type::Int,
+                            optional: false,
+                        })
+                        .collect(),
+                    rest: lash_kernel_value::RecordRest::Closed,
+                }),
+            },
+        );
         let env_namespaces =
             crate::linked::namespaces(&effects, &Default::default()).map_err(|e| e.to_string())?;
         let env = Environment::new(&self.library, &env_namespaces);
@@ -345,6 +366,13 @@ impl Runner {
                         if operation.as_str().ends_with(".sleep") {
                             machine
                                 .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                                .map_err(|e| e.to_string())?;
+                            continue;
+                        }
+                        if operation.as_str() == "host.echo" {
+                            let value = effect.args.first().cloned().ok_or("echo needs a value")?;
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(value))
                                 .map_err(|e| e.to_string())?;
                             continue;
                         }

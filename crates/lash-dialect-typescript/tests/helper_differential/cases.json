@@ -8214,5 +8214,10 @@
     "id": "typescript/sortbench2/register-reads",
     "dialect": "typescript",
     "source": "let a=['','a','\ud83d\ude00','\\ue000',undefined,, 'abcdefghijklmnopqrstuvwxyz\ud83d\ude00']; let out=[]; for(let i=1;i<a.length;i++){out.push([a[i]!==undefined,a[i-1]>a[i]]); await host.observe(out[out.length-1]);} await host.observe(out); await host.observe(a[-1]); await host.observe(a[1.5]); await host.observe(a[100]);"
+  },
+  {
+    "id": "typescript/boundary/external-integers-are-numbers",
+    "dialect": "typescript",
+    "source": "const x = await host.echo({version:0n,count:3n,large:9007199254740993n}); await host.observe([typeof x.version, typeof x.count, JSON.stringify({version:x.version,count:x.count}), x.count+1.5===4.5, x.large===JSON.parse('9007199254740993'), String(x.large), typeof 1n, String(2n**64n), typeof BigInt(x.count), JSON.parse(\"1e400\") === Infinity, JSON.parse(\"-1e400\") === -Infinity]);"
   }
 ]

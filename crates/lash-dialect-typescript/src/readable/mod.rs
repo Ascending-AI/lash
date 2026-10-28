@@ -327,7 +327,21 @@ mod tests {
             ) {
                 Ok(printed) => printed,
                 Err(error) => {
-                    failures.push(format!("{}: {error:?}", case.name));
+                    let reasons: Vec<_> = lift::document(
+                        &lowered.document,
+                        Some(&lowered.captions),
+                        library,
+                        STYLES[0],
+                    )
+                    .functions
+                    .into_iter()
+                    .filter_map(|(name, (_, item))| item.err().map(|why| (name, why)))
+                    .collect();
+                    failures.push(format!(
+                        "{}: {error:?}, {reasons:?}\n{}",
+                        case.name,
+                        lash_kernel_doc::print_document(&lowered.document)
+                    ));
                     continue;
                 }
             };

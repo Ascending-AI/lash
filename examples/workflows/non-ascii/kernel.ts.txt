@@ -1,14 +1,14 @@
 kernel 1
 numbers float
-import 3 operation corpus.echo(input?: Json) -> Json
-library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
+import 0 operation corpus.echo(input?: Json) -> Json
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+library @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586
 library @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo(name: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nuse ts.copy_boundary = @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let `größe` = \"日本 🦀\"\n  return perform 3(invoke ts.copy_boundary(text.concat(`größe`, name), absent)) as Json then yield via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nuse ts.copy_boundary = @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let `größe` = \"日本 🦀\"\n  return perform 0(invoke ts.copy_boundary(text.concat(`größe`, name), absent)) as Json then yield via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72)): statements=2 scopes=1 sites=5
+unit Library(FunctionId(0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef)): statements=2 scopes=1 sites=5

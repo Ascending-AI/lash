@@ -387,3 +387,15 @@ body {
     set b = int.div_floor(b, 2)
   }
 }
+
+# The Number representation of an incoming kernel integer, including JS overflow.
+function ts.number.input(value: Number) -> Float
+kernel 1
+charge sum(4, size(value))
+native
+body {
+  try { return num.to_float(value) } catch too_large {
+    if num.lt(value, 0) { return -inf }
+    return inf
+  }
+}

@@ -1,12 +1,12 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"4a6cbb28421b96b8fcdf284ebd2ddc6a97c5f0c60e3fe48c7dafe3922eda2c35\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nbody {\n  let `größe` = \"日本 🦀\"\n  return invoke py.reply(perform 3(text.concat(`größe`, name)) as Json)\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"51fd2c6adae1879ce10898dbece8ba1b402681e2f24485a0defe021f758f21e9\",\"signature\":{\"params\":[{\"name\":\"name\",\"ty\":\"text\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function(name: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nuse text.concat = @da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f\nbody {\n  let `größe` = \"日本 🦀\"\n  return invoke py.reply(perform 0(text.concat(`größe`, name)) as Json)\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(4a6cbb28421b96b8fcdf284ebd2ddc6a97c5f0c60e3fe48c7dafe3922eda2c35)): statements=2 scopes=1 sites=5
+unit Library(FunctionId(51fd2c6adae1879ce10898dbece8ba1b402681e2f24485a0defe021f758f21e9)): statements=2 scopes=1 sites=5

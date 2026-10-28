@@ -699,6 +699,14 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
         ),
         definition(
             selection,
+            "json.parse_binary64",
+            &[("text", Type::Text)],
+            Type::Any,
+            &["json_syntax", "json_depth"],
+            parse_binary64,
+        ),
+        definition(
+            selection,
             "json.stringify",
             &[("value", Type::Any)],
             Type::Text,
@@ -733,6 +741,21 @@ fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     parse_objects(call, false)
 }
 
+// Binary64 language JSON permits overflow to infinity. Typed kernel JSON keeps
+// its finite Float contract; only this explicit codec selects IEEE overflow.
+fn parse_binary64(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call.args, 0)?;
+    let json = read(&text, call.args.limits().document_depth(), call.new)?;
+    decode_with_numbers(
+        &json,
+        &Type::Float,
+        NumberPolicy::Float,
+        false,
+        true,
+        call.new,
+    )
+}
+
 fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let maps = match materialized_text(&call.args, call.new, 3)?.as_ref() {
         "map" => true,
@@ -756,7 +779,7 @@ fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeEr
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
     };
-    decode_with_numbers(&json, &numbers, policy, maps, call.new)
+    decode_with_numbers(&json, &numbers, policy, maps, false, call.new)
 }
 
 fn decode_with_numbers(
@@ -764,14 +787,20 @@ fn decode_with_numbers(
     numbers: &Type,
     policy: NumberPolicy,
     maps: bool,
+    ieee: bool,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
     match json {
+        Json::Number(token) if ieee => {
+            new.read_whole(token.as_str().len() as u64)?;
+            let value = token.as_str().parse::<f64>().map_err(|_| mismatch())?;
+            Ok(Value::Float(Float::new(value)))
+        }
         Json::Number(token) => decode_number(token, numbers, policy, new),
         Json::Array(items) => {
             let values = items
                 .iter()
-                .map(|item| decode_with_numbers(item, numbers, policy, maps, new))
+                .map(|item| decode_with_numbers(item, numbers, policy, maps, ieee, new))
                 .collect::<Result<_, _>>()?;
             Ok(new.allocate(NewObject::List(values)))
         }
@@ -780,7 +809,10 @@ fn decode_with_numbers(
                 .iter()
                 .map(|(key, item)| {
                     let key = new.text(key);
-                    Ok((key, decode_with_numbers(item, numbers, policy, maps, new)?))
+                    Ok((
+                        key,
+                        decode_with_numbers(item, numbers, policy, maps, ieee, new)?,
+                    ))
                 })
                 .collect::<Result<_, NativeError>>()?;
             Ok(new.allocate(if maps {

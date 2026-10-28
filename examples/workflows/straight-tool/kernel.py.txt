@@ -1,11 +1,11 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 3(\"hello\") as Json)\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  return invoke py.reply(perform 0(\"hello\") as Json)\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(a0549636717c344f47262b31d87de72003ea2bb74265749fe4acd22cc86a5c83)): statements=1 scopes=1 sites=4
+unit Library(FunctionId(01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35)): statements=1 scopes=1 sites=4

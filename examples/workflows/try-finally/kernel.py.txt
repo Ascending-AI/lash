@@ -1,12 +1,12 @@
 kernel 1
 numbers by_spelling
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"fefe99f9baa2592bc7dafc517c1e4e502dbae3f076c916d70dde976e00fbbadc\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 3(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 3(\"finally\") as Json)\n  }\n  return `result`\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
+definition "function local.function() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse py.exc.is_exception = @bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92\nuse py.reply = @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7\nbody {\n  let `result` = \"start\"\n  try {\n    set `result` = invoke py.reply(perform 0(\"try\") as Json)\n  } catch t1 {\n    if invoke py.exc.is_exception(t1, ()) {\n      set `result` = \"caught\"\n    } else {\n      throw t1\n    }\n  } finally {\n    do invoke py.reply(perform 0(\"finally\") as Json)\n  }\n  return `result`\n}\n"
 main {
   let demo = &local.function
 }
 
-unit Library(FunctionId(fefe99f9baa2592bc7dafc517c1e4e502dbae3f076c916d70dde976e00fbbadc)): statements=8 scopes=6 sites=14
+unit Library(FunctionId(b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198)): statements=8 scopes=6 sites=14

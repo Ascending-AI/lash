@@ -13,6 +13,7 @@ fn to_boolean(args: &[Value]) -> Option<Value> {
         Value::Null | Value::Absent => false,
         Value::Bool(value) => *value,
         Value::Int(value) => *value != 0,
+        Value::Tuple(_) => return None,
         Value::Float(value) => value.get() != 0.0 && !value.get().is_nan(),
         Value::Text(value) => !value.as_str().is_empty(),
         // Long texts are nonempty and non-word integers are nonzero by

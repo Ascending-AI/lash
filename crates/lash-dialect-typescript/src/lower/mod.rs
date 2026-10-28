@@ -301,6 +301,7 @@ enum Control {
 
 #[derive(Debug)]
 struct FunctionFrame {
+    bigint_result: Option<Expr>,
     implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
     arrow: bool,
     async_body: bool,
@@ -462,6 +463,7 @@ fn lower_beside_result(
         temporaries: HashSet::new(),
         scopes: Vec::new(),
         functions: vec![FunctionFrame {
+            bigint_result: None,
             implicit_text_conversions: Vec::new(),
             arrow: false,
             async_body: false,

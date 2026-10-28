@@ -220,6 +220,7 @@ impl Lowerer<'_> {
             &mut self.functions,
             vec![
                 FunctionFrame {
+                    bigint_result: None,
                     implicit_text_conversions: Vec::new(),
                     arrow: false,
                     async_body: false,
@@ -231,6 +232,7 @@ impl Lowerer<'_> {
                     labels: Vec::new(),
                 },
                 FunctionFrame {
+                    bigint_result: None,
                     implicit_text_conversions: Vec::new(),
                     arrow: false,
                     async_body: false,
@@ -358,11 +360,11 @@ impl Lowerer<'_> {
     ) -> Lowering<lash_kernel_doc::StartConvention> {
         if !packed {
             return Ok(lash_kernel_doc::StartConvention::TsDirect {
-                await_fn: self.function_target("ts.await")?,
+                await_fn: self.function_target("ts.entry_result")?,
             });
         }
         Ok(lash_kernel_doc::StartConvention::TsArgsList {
-            await_fn: self.function_target("ts.await")?,
+            await_fn: self.function_target("ts.entry_result")?,
             same_fn: lash_kernel_doc::FunctionTarget::Local(self.function("same")?),
         })
     }

@@ -109,7 +109,7 @@ impl Lifter<'_> {
             return refuse("a function value no host can start");
         };
         if !matches!(&start.convention, k::StartConvention::TsArgsList { await_fn, same_fn }
-            if self.is(await_fn, "ts.await") && self.is(same_fn, "same"))
+            if self.is(await_fn, "ts.entry_result") && self.is(same_fn, "same"))
         {
             return refuse("a function value started another way");
         }
@@ -300,10 +300,26 @@ fn padded(lifter: &Lifter<'_>, args: &Name, arity: usize, value: &k::Expr) -> bo
 }
 
 /// `args'[index]` of the padded list `padded`.
-fn argument(padded: &Name, index: usize, value: &k::Expr) -> bool {
+fn argument(lifter: &Lifter<'_>, padded: &Name, index: usize, value: &k::Expr) -> bool {
+    let value = match value {
+        k::Expr::Act(act) if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input")) =>
+        {
+            let [value, _shape] = act.args.as_slice() else {
+                return false;
+            };
+            value
+        }
+        _ => value,
+    };
     matches!(value, k::Expr::Member(member) if matches!(&**member, k::Member::Index { target, index: at }
         if *target == k::Expr::Variable(padded.clone())
             && *at == k::Expr::Literal(k::Literal::Float(k::Float::new(index as f64)))))
+}
+
+fn bigint_binding(lifter: &Lifter<'_>, value: &k::Expr, name: &Name) -> bool {
+    matches!(value, k::Expr::Act(act)
+        if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input"))
+            && matches!(act.args.first(), Some(k::Expr::Variable(value)) if value == name))
 }
 
 /// The body `value` binds `names` around, from the padded `args`.
@@ -313,6 +329,13 @@ fn arguments_around<'v>(
     names: &[&Name],
     value: &'v k::Expr,
 ) -> Option<&'v k::Expr> {
+    let mut value = value;
+    while let k::Expr::Act(act) = value
+        && matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input"))
+        && let [inner, _shape] = act.args.as_slice()
+    {
+        value = inner;
+    }
     let k::Expr::Let {
         name: list,
         value: list_value,
@@ -334,10 +357,25 @@ fn arguments_around<'v>(
         else {
             return None;
         };
-        if bound != *name || !argument(list, index, value) {
+        if bound == *name && argument(lifter, list, index, value) {
+            body = rest;
+            continue;
+        }
+        if !argument(lifter, list, index, value) {
             return None;
         }
-        body = rest;
+        let k::Expr::Let {
+            name: authored,
+            value: normalized,
+            body: after,
+        } = &**rest
+        else {
+            return None;
+        };
+        if authored != *name || !bigint_binding(lifter, normalized, bound) {
+            return None;
+        }
+        body = after;
     }
     Some(body)
 }
@@ -362,19 +400,39 @@ fn arguments_before(
     if !padded(lifter, args, names.len(), value) || rest.len() < names.len() {
         return None;
     }
-    for (index, (name, statement)) in names.iter().zip(rest).enumerate() {
+    let mut consumed = 0;
+    for (index, name) in names.iter().enumerate() {
         let k::Stmt::Let {
             name: bound,
             value: k::Rhs::Expr(value),
-        } = statement
+        } = rest.get(consumed)?
         else {
             return None;
         };
-        if bound != *name || !argument(list, index, value) {
+        if !argument(lifter, list, index, value) {
             return None;
         }
+        consumed += 1;
+        if bound == *name {
+            continue;
+        }
+        let k::Stmt::Let {
+            name: authored,
+            value,
+        } = rest.get(consumed)?
+        else {
+            return None;
+        };
+        let normalized = match value {
+            k::Rhs::Expr(value) => value.clone(),
+            k::Rhs::Action(action) => k::Expr::Act(Box::new(super::statements::act_of(action))),
+        };
+        if authored != *name || !bigint_binding(lifter, &normalized, bound) {
+            return None;
+        }
+        consumed += 1;
     }
-    Some(1 + names.len())
+    Some(1 + consumed)
 }
 
 impl Lifter<'_> {

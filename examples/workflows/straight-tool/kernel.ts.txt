@@ -1,12 +1,12 @@
 kernel 1
 numbers float
-import 3 operation corpus.echo(input?: Json) -> Json
+import 0 operation corpus.echo(input?: Json) -> Json
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 3(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 0(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(f32927fa4f04e8fead461e1b5c9355f76e4e2913d0348e8cea11791b39ee1368)): statements=1 scopes=1 sites=3
+unit Library(FunctionId(565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6)): statements=1 scopes=1 sites=3

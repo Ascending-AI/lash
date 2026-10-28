@@ -6,7 +6,7 @@ use date.ecma.format
 use eq
 use error.new
 use float.to_int
-use json.parse
+use json.parse_binary64
 use json.classify
 use num.rem_trunc
 use json.stringify
@@ -43,6 +43,7 @@ use ts.pad
 use ts.receiver
 use ts.set
 use ts.to_property_key
+use ts.number.input
 use ts.to_string
 
 function ts.json.parse(this: Any, args: List(Any)) -> Any
@@ -54,7 +55,7 @@ body {
   let builtin_arg_0 = args[0]
 let text = invoke ts.to_string(builtin_arg_0)
   let value = absent
-  try { set value = json.parse(text, "float", "float") } catch invalid {
+  try { set value = json.parse_binary64(text) } catch invalid {
     throw error.new("SyntaxError", "Invalid JSON", null)
   }
   let reviver = args[1]
@@ -163,6 +164,7 @@ body {
     }
     if same(k, "bigint") { throw error.new("type_error", "Cannot serialize a BigInt", null) }
     if same(k, "number") {
+      set value = invoke ts.number.input(value)
       let rendered = "null"
       if num.is_finite(value) { set rendered = invoke ts.number.format_value(value) }
       set out[list.len(out)] = rendered

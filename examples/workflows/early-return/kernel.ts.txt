@@ -1,15 +1,15 @@
 kernel 1
 numbers float
-import 3 operation corpus.echo(input?: Json) -> Json
-library @105e850b8ce2d2591a7432bb1b3c85fafe02d09a9b62a15bad479ccab39adf45
-library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
+import 0 operation corpus.echo(input?: Json) -> Json
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+library @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586
 library @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo(value: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse ts.copy_boundary = @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd\nuse ts.number.checked = @105e850b8ce2d2591a7432bb1b3c85fafe02d09a9b62a15bad479ccab39adf45\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  if num.lt(ts.number.checked(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 3(invoke ts.copy_boundary(value, absent)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
+library @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(value: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse ts.copy_boundary = @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  if num.lt(ts.number.checked(value), 0.0) {\n    return \"negative\" via ts.promise.adopt\n  }\n  do perform 0(invoke ts.copy_boundary(value, absent)) as Json then yield\n  return \"done\" via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(c2d57f87e4b67fbeea52fbc0e41cb435460bd73358af4266bfd84c59323a605e)): statements=4 scopes=3 sites=7
+unit Library(FunctionId(c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669)): statements=4 scopes=3 sites=7

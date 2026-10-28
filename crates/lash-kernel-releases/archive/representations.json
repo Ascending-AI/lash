@@ -8,5 +8,6 @@
   "typescript:iterator": "Record with next as a ts.function token retaining the exact lifted closure and its captures. Source: lash-ext-ts-helpers/src/helpers/array.kernel iterator constructors.",
   "typescript:arguments": "Record with properties and hidden set containing length. Source: lash-ext-ts-helpers/src/helpers/core.kernel arguments constructor.",
   "typescript:regex_match": "Record with items, index, input, groups; optional indices contains items and groups. Source: lash-ext-ts-helpers/src/helpers/regexp.kernel match_record.",
-  "typescript:template": "Record with items and raw source string lists, constructed once per tagged-template site. Sources: lash-dialect-typescript/src/lower/expressions.rs tagged templates; lash-ext-ts-helpers/src/helpers/core.kernel template consumers."
+  "typescript:template": "Record with items and raw source string lists, constructed once per tagged-template site. Sources: lash-dialect-typescript/src/lower/expressions.rs tagged templates; lash-ext-ts-helpers/src/helpers/core.kernel template consumers.",
+  "typescript:bigint": "Explicit TypeScript BigInts are immutable tuples (ts.bigint, Int), created by literals, constructors, arithmetic and declared bigint inputs. Untagged incoming kernel integers have JavaScript binary64 Number semantics; host copy-out unwraps tagged BigInts as exact Ints. Sources: lash-dialect-typescript/src/lower/expressions.rs; lash-ext-ts-helpers/src/helpers/bigint.kernel; lash-ext-ts-helpers/src/helpers/core.kernel."
 }

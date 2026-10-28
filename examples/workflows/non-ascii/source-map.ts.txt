@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
 main/0 [38..250] "async function demo(name: string): Promise<string> {\n  /** Pick the greeting: 日本 🦀 */\n  const größe = \"日本 🦀\";\n  /** Echo the greeting with the name */\n  return await corpus.echo(größe + name);\n}"
-function 45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72/0 [133..163] "const größe = \"日本 🦀\";"
-function 45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72/1 [207..248] "return await corpus.echo(größe + name);"
-function 45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72/1/0 [207..248] "return await corpus.echo(größe + name);"
-function 45e216a63b98df01c025592d8ac4dccae889b3337aa8809632ca9409a2723a72/1/0/0 [207..248] "return await corpus.echo(größe + name);"
+function 0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef/0 [133..163] "const größe = \"日本 🦀\";"
+function 0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef/1 [207..248] "return await corpus.echo(größe + name);"
+function 0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef/1/0 [207..248] "return await corpus.echo(größe + name);"
+function 0e05153a6a3e1aad1229129ce38846cbdf5f9f9fd90ad4707372509021a7ccef/1/0/0 [207..248] "return await corpus.echo(größe + name);"

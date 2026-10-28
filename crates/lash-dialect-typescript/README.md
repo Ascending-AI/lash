@@ -14,16 +14,19 @@ saved functions against each cell's Namespaces while preserving resolved pins; s
 
 ## BigInt
 
-`1n` and `BigInt(value)` produce mathematical kernel integers, distinct from
-binary64 Numbers. BigInt arithmetic and bit operations preserve integer
-precision; mixing BigInt and Number in arithmetic raises `TypeError`.
-Comparisons work across numeric kinds without rounding the integer. Use
-`Number(value)` for an explicit binary64 conversion. BigInt property keys are
-textual, and `JSON.stringify` raises `TypeError` unless a replacer converts
-them. `bigint` entry annotations map exactly to the kernel `Int` boundary.
-Integer work and amplifying allocations obey the run's charge and memory bounds.
-Primitive BigInts support `valueOf`, `toString(radix)` and `BigInt.asIntN/asUintN`;
-boxed primitive objects remain outside the dialect.
+Integers received from tools, host inputs and stored data behave as JavaScript
+`number` values. JSON parsing uses the same binary64 representation. Integers
+outside the safe range round to the nearest binary64 value; hosts should return
+strings when callers need exact large integers.
+
+`1n`, `BigInt(value)` and declared `bigint` entry annotations request exact
+integer semantics. Arithmetic and bit operations preserve precision; mixing
+BigInt and Number in arithmetic raises `TypeError`, and `JSON.stringify` rejects
+explicit BigInts. BigInt property keys are textual. BigInts passed to tools or
+hosts cross as exact kernel `Int` values. Integer work and amplifying allocations
+obey the run's charge and memory bounds. Primitive BigInts support `valueOf`,
+`toString(radix)` and `BigInt.asIntN/asUintN`; boxed primitive objects remain
+outside the dialect.
 
 ## Builtin values and guest reflection
 

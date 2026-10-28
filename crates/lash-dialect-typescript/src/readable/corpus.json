@@ -123,5 +123,12 @@
     "name": "FIG-7508 authored await binding with shadowed process controls",
     "source": "export async function run(processes: number): Promise<number> { const awaited1 = await 1; return awaited1; }",
     "processes": true
+  },
+  {
+    "name": "FIG-7511 explicit BigInt entry keeps its tag across printing",
+    "source": "export function exact(n: bigint): bigint { const add = (value: bigint): bigint => value + 2n ** 64n; return add(n); }",
+    "names": [
+      "exact"
+    ]
   }
 ]

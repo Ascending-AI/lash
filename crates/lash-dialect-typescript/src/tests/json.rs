@@ -369,7 +369,7 @@ fn trap(bits: &mut Bits) -> Datum {
         11 => Datum::Timestamp(Timestamp {
             nanoseconds: Integer::from(1_000_000_000i64),
         }),
-        12 => Datum::Int(Integer::from(-12i64)),
+        12 => Datum::Tuple(vec![text("ts.bigint"), Datum::Int(Integer::from(-12i64))]),
         13 => Datum::Tuple(vec![text("ts.object"), text("Math"), text("Math")]),
         14 => Datum::Error(Box::new(ErrorDatum {
             kind: "boom".to_owned(),

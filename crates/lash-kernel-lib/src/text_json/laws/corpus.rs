@@ -262,6 +262,20 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             Err("invalid_utf8"),
         ),
         (
+            "K-EFF-006",
+            "json.parse_binary64".to_owned(),
+            vec![t(r#"{"value":[9007199254740993,1e400,-1e400,-0]}"#)],
+            Ok(Datum::Record(vec![(
+                "value".into(),
+                Datum::List(vec![
+                    f(9007199254740992.0),
+                    f(f64::INFINITY),
+                    f(f64::NEG_INFINITY),
+                    f(-0.0),
+                ]),
+            )])),
+        ),
+        (
             "K-EFF-005",
             "json.parse".to_owned(),
             vec![t("18446744073709551617e2"), t("int"), t("float")],

@@ -2,11 +2,11 @@ kernel 1
 numbers float
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
 library @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
 library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
 library @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a
-export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"eee30810873c69cd47e9a0ab6bbfb1030ea5f0f7d13e449d23a5dcef956170fc\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
-export declared "{\"kind\":\"function\",\"value\":{\"function\":\"07c02ad70ef95441a622a575a03ad625b5acd9d03875e9cfdf881c89c52d2731\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
+export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"eee30810873c69cd47e9a0ab6bbfb1030ea5f0f7d13e449d23a5dcef956170fc\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"number\"}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+export declared "{\"kind\":\"function\",\"value\":{\"function\":\"07c02ad70ef95441a622a575a03ad625b5acd9d03875e9cfdf881c89c52d2731\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
 definition "function local(this4: Any, args4: Any) -> Any\nkernel 1\nmetering statements\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse local = @fdc3adc8e86e5a6197ae9fa8b29b62ad24ab39122c77ded68194e1eadaafd500\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn local, this4, list.copy(args4))\n}\n"
 definition "function declared() -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return \"top\" via ts.promise.adopt\n}\n"
 definition "function alsoLocal(this5: Any, args5: Any) -> Any\nkernel 1\nmetering statements\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return \"block\" via ts.promise.adopt\n}\n"
@@ -17,8 +17,8 @@ main {
   let arrow = &arrow
   let declared = &declared
   if true {
-    let local_1 = ("ts.function", "", "local", 0.0, fn @025fa92e5edf1402d6dc24c2673b2cc5d6af5cb03cc174224a2cfc9fd1ecffd1 presentation() -> Any token("ts.function", 4) ts_args(@d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
-    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn @3df93edb9b720a385ea3c0f7fe069aaeb81c43ab6268e23494d13ccf3eaa9486 presentation() -> Any token("ts.function", 4) ts_args(@d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
+    let local_1 = ("ts.function", "", "local", 0.0, fn @025fa92e5edf1402d6dc24c2673b2cc5d6af5cb03cc174224a2cfc9fd1ecffd1 presentation() -> Any token("ts.function", 4) ts_args(@a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
+    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn @3df93edb9b720a385ea3c0f7fe069aaeb81c43ab6268e23494d13ccf3eaa9486 presentation() -> Any token("ts.function", 4) ts_args(@a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
   }
 }
 

@@ -29,6 +29,7 @@ use ts.pad
 use ts.iterate
 use ts.promise.is
 use ts.promise.pending
+use ts.boundary
 use ts.await
 use ts.promise.adopt
 use ts.promise.run
@@ -493,4 +494,14 @@ body {
   }
   let promise = invoke ts.promise.start(wait, absent, absent)
   return promise
+}
+
+# A host-started TypeScript callable settles before its program values cross out.
+function ts.entry_result(value: Any) -> Any
+kernel 1
+charge sum(6, deep(value))
+body {
+  let outcome = invoke ts.await(value)
+  let output = invoke ts.boundary(outcome)
+  return output
 }

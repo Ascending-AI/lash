@@ -1,24 +1,24 @@
 kernel 1
 numbers float
-import 3 operation typescript.sleep(milliseconds: Int) -> Null
-import 4 operation display.show_message(input: Any) -> Any
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+import 1 operation display.show_message(input: Any) -> Any
 library @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873
-library @0b6166233fe4d88e3dea4ca9c5089bf8113faffc69c7b64f904c1d1a58e3842c
-library @15898d12b00faf4e9da1841cbf5eecb05cadeb95a71d24b2b953bfcaf3bbfd36
-library @2386f92dd1a4d273cf2c725d5e351bc3b91bb08c9ee95dc6168ebf5ae85ff08b
+library @1203889fd9d77b5a84dcfa66d861799477160913c465f2c0bcbbcc437cd8c6ba
 library @32eacfc27d310f316a722dcd969531145bf4ca545c780fb6de06e38832b50292
-library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-library @7f99de5cdaac4df60dd75e05d079cdc549809b883d827e35571701528c7725dd
+library @7e3fe08949d651ef20f66821449230b77aca4fe4642da047162dba72ee936089
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+library @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586
+library @c6e2dc828c3d38f9dfc852a3a41d014505176d913646d4706dd3054085643e31
 library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
 library @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef
 library @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795
 library @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0
-export digest "{\"kind\":\"function\",\"value\":{\"function\":\"68fdf5f433d4eba3f28706c6193d6b2be08f8c73946205f826dfa9a96b179f20\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":{\"record\":{\"fields\":[{\"name\":\"title\",\"ty\":\"text\"}],\"rest\":\"drop\"}}}}],\"result\":{\"record\":{\"fields\":[{\"name\":\"sent\",\"ty\":\"number\"}],\"rest\":\"closed\"}}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function digest(items: Any) -> Any\nkernel 1\nmetering statements\nimport 3 operation typescript.sleep(milliseconds: Int) -> Null\nimport 4 operation display.show_message(input: Any) -> Any\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse record.contains = @32eacfc27d310f316a722dcd969531145bf4ca545c780fb6de06e38832b50292\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.copy_boundary = @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd\nuse ts.for_of.item = @0b6166233fe4d88e3dea4ca9c5089bf8113faffc69c7b64f904c1d1a58e3842c\nuse ts.for_of.next = @15898d12b00faf4e9da1841cbf5eecb05cadeb95a71d24b2b953bfcaf3bbfd36\nuse ts.for_of.open = @2386f92dd1a4d273cf2c725d5e351bc3b91bb08c9ee95dc6168ebf5ae85ff08b\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nuse ts.read = @7f99de5cdaac4df60dd75e05d079cdc549809b883d827e35571701528c7725dd\nuse ts.sleep_duration = @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0\nbody {\n  let sent = 0.0\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    do let(t2 = perform 3(invoke ts.sleep_duration(6000.0)) as Null then yield, absent)\n    let t3 = absent\n    if same(kind(item), \"record\") {\n      if bool.not(record.contains(item, \"__lash_brand\")) {\n        set t3 = item.title\n      } else {\n        set t3 = invoke ts.read(item, \"title\")\n      }\n    } else {\n      set t3 = invoke ts.read(item, \"title\")\n    }\n    do perform 4(invoke ts.copy_boundary({text: t3}, absent)) as Any then yield\n    set sent = num.add(sent, 1.0)\n  }\n  return {sent: sent} via ts.promise.adopt\n}\n"
+library @fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7
+export digest "{\"kind\":\"function\",\"value\":{\"function\":\"4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":{\"record\":{\"fields\":[{\"name\":\"title\",\"ty\":\"text\"}],\"rest\":\"drop\"}}}}],\"result\":{\"record\":{\"fields\":[{\"name\":\"sent\",\"ty\":\"number\"}],\"rest\":\"closed\"}}},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function digest(items: Any) -> Any\nkernel 1\nmetering statements\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nimport 1 operation display.show_message(input: Any) -> Any\nuse bool.not = @00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873\nuse kind = @e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse record.contains = @32eacfc27d310f316a722dcd969531145bf4ca545c780fb6de06e38832b50292\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.copy_boundary = @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586\nuse ts.for_of.item = @1203889fd9d77b5a84dcfa66d861799477160913c465f2c0bcbbcc437cd8c6ba\nuse ts.for_of.next = @7e3fe08949d651ef20f66821449230b77aca4fe4642da047162dba72ee936089\nuse ts.for_of.open = @c6e2dc828c3d38f9dfc852a3a41d014505176d913646d4706dd3054085643e31\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nuse ts.read = @fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7\nuse ts.sleep_duration = @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0\nbody {\n  let sent = 0.0\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    do let(t2 = perform 0(invoke ts.sleep_duration(6000.0)) as Null then yield, absent)\n    let t3 = absent\n    if same(kind(item), \"record\") {\n      if bool.not(record.contains(item, \"__lash_brand\")) {\n        set t3 = item.title\n      } else {\n        set t3 = invoke ts.read(item, \"title\")\n      }\n    } else {\n      set t3 = invoke ts.read(item, \"title\")\n    }\n    do perform 1(invoke ts.copy_boundary({text: t3}, absent)) as Any then yield\n    set sent = num.add(sent, 1.0)\n  }\n  return {sent: sent} via ts.promise.adopt\n}\n"
 main {
   let digest = &digest
 }
 
-unit Library(FunctionId(68fdf5f433d4eba3f28706c6193d6b2be08f8c73946205f826dfa9a96b179f20)): statements=12 scopes=6 sites=19
+unit Library(FunctionId(4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf)): statements=12 scopes=6 sites=19

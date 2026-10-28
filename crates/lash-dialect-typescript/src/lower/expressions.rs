@@ -78,6 +78,9 @@ impl Lowerer<'_> {
             Some(value) => value,
             None => self.lower_expr_inner(expr)?,
         };
+        if value.ty == Ty::BigInt && !matches!(expr, ast::Expr::BigInt(_)) {
+            value = self.invoke("ts.bigint.input", &[value, Operand::bool(true)], Ty::BigInt)?;
+        }
         value.plain = self.facts.plain(expr);
         value.text_prefix = self.facts.text_prefix(expr);
         Ok(value)
@@ -220,9 +223,13 @@ impl Lowerer<'_> {
             ast::Expr::Null => Ok(Operand::null()),
             ast::Expr::Bool(value) => Ok(Operand::bool(*value)),
             ast::Expr::Number(value) => Ok(Operand::number(*value)),
-            ast::Expr::BigInt(value) => {
-                Ok(self.inline(Expr::Literal(Literal::Int(value.clone())), Ty::BigInt))
-            }
+            ast::Expr::BigInt(value) => Ok(self.inline(
+                Expr::Tuple(vec![
+                    Operand::text("ts.bigint").expr(),
+                    Expr::Literal(Literal::Int(value.clone())),
+                ]),
+                Ty::BigInt,
+            )),
             ast::Expr::String(value) => Ok(Operand::text(value.clone())),
             ast::Expr::LoneSurrogateString => Err(Diagnostic::new(
                 DiagnosticCode::LoneSurrogateLiteralUnsupported,

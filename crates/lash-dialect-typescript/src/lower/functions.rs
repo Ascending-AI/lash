@@ -8,7 +8,87 @@ use super::patterns::Mode;
 use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
+/// Only authored bigint positions change the ordinary Number boundary.
+fn bigint_input_shape(ty: &lash_kernel_value::Type) -> Option<Expr> {
+    use lash_kernel_doc::RecordEntry;
+    use lash_kernel_value::Type;
+    let text = |value: &str| Expr::Literal(Literal::Text(value.into()));
+    match ty {
+        Type::Int => Some(Expr::Literal(Literal::Bool(true))),
+        Type::List(element) => {
+            bigint_input_shape(element).map(|shape| Expr::Tuple(vec![text("list"), shape]))
+        }
+        Type::Tuple(elements) => {
+            let shapes: Vec<_> = elements.iter().map(bigint_input_shape).collect();
+            shapes.iter().any(Option::is_some).then(|| {
+                Expr::Tuple(vec![
+                    text("tuple"),
+                    Expr::List(
+                        shapes
+                            .into_iter()
+                            .map(|shape| shape.unwrap_or(Expr::Literal(Literal::Absent)))
+                            .collect(),
+                    ),
+                ])
+            })
+        }
+        Type::Record(record) => {
+            let fields: Vec<_> = record
+                .fields
+                .iter()
+                .filter_map(|field| {
+                    bigint_input_shape(&field.ty).map(|value| RecordEntry {
+                        field: field.name.clone(),
+                        value,
+                    })
+                })
+                .collect();
+            let rest = record.rest.kept_type().and_then(bigint_input_shape);
+            if fields.is_empty() && rest.is_none() {
+                return None;
+            }
+            Some(Expr::Tuple(vec![
+                text("record"),
+                Expr::Record(fields),
+                rest.unwrap_or(Expr::Literal(Literal::Absent)),
+            ]))
+        }
+        Type::Union(members) => {
+            let number = members
+                .iter()
+                .any(|member| matches!(member, Type::Number | Type::Float));
+            let mut shapes: Vec<_> = members
+                .iter()
+                .filter(|member| !(number && matches!(member, Type::Int)))
+                .filter_map(bigint_input_shape)
+                .collect();
+            match shapes.len() {
+                0 => None,
+                1 => shapes.pop(),
+                _ => Some(Expr::List(shapes)),
+            }
+        }
+        _ => None,
+    }
+}
+
 impl Lowerer<'_> {
+    pub(super) fn annotated_input(
+        &mut self,
+        annotation: Option<&ast::TypeAnnotation>,
+        value: Operand,
+    ) -> Lowering<Operand> {
+        let Some(shape) = annotation
+            .and_then(|annotation| self.facts.entry_annotation(annotation, false).ok())
+            .as_ref()
+            .and_then(bigint_input_shape)
+        else {
+            return Ok(value);
+        };
+        let shape = self.inline(shape, Ty::Unknown);
+        self.invoke("ts.bigint.input", &[value, shape], Ty::Unknown)
+    }
+
     /// What the source wrote of `function`: its signature as text. A call
     /// places its arguments by position, so it states no call shape.
     pub(super) fn written(&self, function: &ast::Function) -> Written {
@@ -164,6 +244,12 @@ impl Lowerer<'_> {
         let args = self.fresh("args");
         let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
         self.functions.push(FunctionFrame {
+            bigint_result: function
+                .return_ty
+                .as_ref()
+                .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
+                .as_ref()
+                .and_then(bigint_input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
@@ -233,6 +319,12 @@ impl Lowerer<'_> {
         let args = self.fresh("args");
         let arguments = self.fresh("arguments");
         self.functions.push(FunctionFrame {
+            bigint_result: function
+                .return_ty
+                .as_ref()
+                .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
+                .as_ref()
+                .and_then(bigint_input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: false,
             async_body: function.is_async,
@@ -255,10 +347,16 @@ impl Lowerer<'_> {
                 params = vec![this.clone(), args.clone()];
             } else {
                 for param in &function.params {
-                    let ast::Pattern::Ident(name, _) = param else {
+                    let ast::Pattern::Ident(name, annotation) = param else {
                         unreachable!("an admitted entry has plain parameters");
                     };
-                    params.push(lowerer.declare(name, BindingKind::Local));
+                    let kernel = lowerer.declare(name, BindingKind::Local);
+                    params.push(kernel.clone());
+                    let value = Operand::variable(kernel.clone(), Ty::Unknown);
+                    let normalized = lowerer.annotated_input(annotation.as_ref(), value.clone())?;
+                    if normalized.expr != value.expr {
+                        lowerer.store(Place::Variable(kernel), normalized);
+                    }
                 }
             }
             lowerer.function_body(function)?;
@@ -304,6 +402,12 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn source_return(&mut self, value: Operand) -> Lowering<()> {
+        let value = if let Some(shape) = self.frame().bigint_result.clone() {
+            let shape = self.inline(shape, Ty::Unknown);
+            self.invoke("ts.bigint.input", &[value, shape], Ty::Unknown)?
+        } else {
+            value
+        };
         let (value, note) = match self.take_binding_of(&value) {
             Some((rhs, note)) => (
                 match rhs {
@@ -368,6 +472,12 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let mut params = vec![this.clone()];
         self.functions.push(FunctionFrame {
+            bigint_result: function
+                .return_ty
+                .as_ref()
+                .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
+                .as_ref()
+                .and_then(bigint_input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,

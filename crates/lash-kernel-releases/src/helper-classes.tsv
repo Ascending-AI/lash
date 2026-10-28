@@ -398,6 +398,7 @@ ts.bigint.bits	operation
 ts.bigint.bitwise	total
 ts.bigint.coerce	operation
 ts.bigint.convert	operation
+ts.bigint.input	total
 ts.bigint.parse	total
 ts.bigint.toString	operation
 ts.bigint.valueOf	total
@@ -474,6 +475,7 @@ ts.date.toUTCString	total
 ts.date.valueOf	total
 ts.delete	operation
 ts.div	operation
+ts.entry_result	body
 ts.error.construct	body
 ts.error.is_AggregateError	operation
 ts.error.is_Error	total
@@ -896,6 +898,7 @@ ts.number.digit	total
 ts.number.format_value	total
 ts.number.global_isFinite	operation
 ts.number.global_isNaN	operation
+ts.number.input	total
 ts.number.isFinite	total
 ts.number.isInteger	total
 ts.number.isNaN	total

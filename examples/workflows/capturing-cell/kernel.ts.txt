@@ -1,28 +1,28 @@
 kernel 1
 numbers float
-import 3 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
-library @105e850b8ce2d2591a7432bb1b3c85fafe02d09a9b62a15bad479ccab39adf45
-library @2682249d117e6b7340c0a76b8661dd4a29d48777e2a10ca49ba113e74cf193fa
-library @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd
+import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
+library @639f80a597354bdbcf873d26bd1ebca48f729023cb68f1cd3630c86021e04910
+library @715803a57a9a9ffdaf2b8aa410936d0dd6e3b2ab53b4408df24b81d5add53fdb
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
 library @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a
+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+library @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586
 library @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc
+library @b410ccdeb6145a35ed47b869ca7fb35abb5a220356d62efdc37b6d040ea2caae
+library @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5
 library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
-library @c9e3c735bac95d5b3afeb00251b217484315dbbbc1037d61452c0e3b247d19fb
 library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
-library @d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e
 library @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef
-library @eaf811e819cf9bc0bafd32dce4cc11400767c7bba3ef2f785cea8dba7d278076
 library @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a
 library @f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c
-definition "function add(this1: Any, args1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.add = @c9e3c735bac95d5b3afeb00251b217484315dbbbc1037d61452c0e3b247d19fb\nuse ts.get_numeric = @2682249d117e6b7340c0a76b8661dd4a29d48777e2a10ca49ba113e74cf193fa\nuse ts.number.checked = @105e850b8ce2d2591a7432bb1b3c85fafe02d09a9b62a15bad479ccab39adf45\nuse ts.pad = @f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let t1 = if(num.lt(list.len(args1), 1.0), invoke ts.pad(args1, 1.0), args1)\n  let x = t1[0.0]\n  let t4 = num.add(ts.number.checked(x), limit)\n  let t3 = absent\n  if num.lt(0.0, list.len(shared)) {\n    set t3 = shared[0.0]\n    if same(t3, ()) {\n      set t3 = absent\n    }\n  } else {\n    set t3 = invoke ts.get_numeric(shared, 0.0)\n  }\n  return ts.add(t4, t3) via ts.promise.adopt\n}\n"
-definition "function add(this2: Any, args2: Any) -> Any\nkernel 1\nmetering statements\nuse add = @2b16054274b6f830e73724c4eb8a860bc62c8462a161556fecfad71a21f7c1dd\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn add, this2, list.copy(args2))\n}\n"
+definition "function add(this1: Any, args1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.add = @b410ccdeb6145a35ed47b869ca7fb35abb5a220356d62efdc37b6d040ea2caae\nuse ts.get_numeric = @715803a57a9a9ffdaf2b8aa410936d0dd6e3b2ab53b4408df24b81d5add53fdb\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.pad = @f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let t1 = if(num.lt(list.len(args1), 1.0), invoke ts.pad(args1, 1.0), args1)\n  let x = t1[0.0]\n  let t4 = num.add(ts.number.checked(x), limit)\n  let t3 = absent\n  if num.lt(0.0, list.len(shared)) {\n    set t3 = shared[0.0]\n    if same(t3, ()) {\n      set t3 = absent\n    }\n  } else {\n    set t3 = invoke ts.get_numeric(shared, 0.0)\n  }\n  return ts.add(t4, t3) via ts.promise.adopt\n}\n"
+definition "function add(this2: Any, args2: Any) -> Any\nkernel 1\nmetering statements\nuse add = @74d6b0f6a987744bee2c53d63fe91dfcbcfc83406382ab457a205295db13251a\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn add, this2, list.copy(args2))\n}\n"
 main {
   let limit = 3.0
   let shared = [1.0]
-  let add = ("ts.function", "", "add", 1.0, fn @966206b4fcaeb1fe047db11d3fc95c1867b9862533499936562cbc47be494fad presentation(x: Number) -> Any token("ts.function", 4) ts_args(@d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
-  do perform 3(invoke @5fa89dd0cee4ff8082a7fdf18b58be8a1437bc2e707fb056d7e913c687310ebd({list: [1.0, add]}, absent)) as Union(Null, Record{list: List(Json), ..Json}) then yield
-  do invoke @eaf811e819cf9bc0bafd32dce4cc11400767c7bba3ef2f785cea8dba7d278076(shared, 0.0, 9.0)
+  let add = ("ts.function", "", "add", 1.0, fn @b2037b4bc6a3a81fdf0d138f90a02606517fab46feb106b6183bf68116ce93c5 presentation(x: Number) -> Any token("ts.function", 4) ts_args(@a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
+  do perform 0(invoke @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586({list: [1.0, add]}, absent)) as Union(Null, Record{list: List(Json), ..Json}) then yield
+  do invoke @639f80a597354bdbcf873d26bd1ebca48f729023cb68f1cd3630c86021e04910(shared, 0.0, 9.0)
 }
 
 unit Main: statements=16 scopes=7 sites=22

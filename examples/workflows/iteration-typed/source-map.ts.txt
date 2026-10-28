@@ -1,7 +1,7 @@
 language: TypeScript
 exceptions: none
 main/0 [33..334] "async function demo(\n  /** The numbers to add */\n  items: number[],\n): Promise<number> {\n  /** Start the total at zero */\n  let total = 0;\n  /** Go through each number */\n  for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }\n  /** Give back the total */\n  return total;\n}"
-function 3d7ac540b38d5820afcd9c0164d4ae7bdbda462e5bf7b8021c08d377122b6423/0 [157..171] "let total = 0;"
-function 3d7ac540b38d5820afcd9c0164d4ae7bdbda462e5bf7b8021c08d377122b6423/1 [206..287] "for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }"
-function 3d7ac540b38d5820afcd9c0164d4ae7bdbda462e5bf7b8021c08d377122b6423/1/1/0 [269..283] "total += item;"
-function 3d7ac540b38d5820afcd9c0164d4ae7bdbda462e5bf7b8021c08d377122b6423/2 [319..332] "return total;"
+function e26092b196047118f26aeb2980628e106cce008b6ee524920f6a9c3f6e315fe3/0 [157..171] "let total = 0;"
+function e26092b196047118f26aeb2980628e106cce008b6ee524920f6a9c3f6e315fe3/1 [206..287] "for (const item of items) {\n    /** Add it to the total */\n    total += item;\n  }"
+function e26092b196047118f26aeb2980628e106cce008b6ee524920f6a9c3f6e315fe3/1/1/0 [269..283] "total += item;"
+function e26092b196047118f26aeb2980628e106cce008b6ee524920f6a9c3f6e315fe3/2 [319..332] "return total;"

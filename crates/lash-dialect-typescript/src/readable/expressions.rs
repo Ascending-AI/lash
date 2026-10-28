@@ -37,6 +37,15 @@ impl Lifter<'_> {
             )),
             k::Expr::Tuple(items) | k::Expr::Set(items) => {
                 if matches!(expr, k::Expr::Tuple(_))
+                    && let [
+                        k::Expr::Literal(k::Literal::Text(tag)),
+                        k::Expr::Literal(k::Literal::Int(value)),
+                    ] = items.as_slice()
+                    && tag == "ts.bigint"
+                {
+                    return Ok(Expr::Number(format!("{value}n")));
+                }
+                if matches!(expr, k::Expr::Tuple(_))
                     && let Some(value) = builtin_value(items)
                 {
                     return Ok(value);
@@ -524,6 +533,8 @@ impl Lifter<'_> {
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
         match (name, args) {
+            ("ts.bigint.input", [value, _shape]) => self.expr(value),
+            ("ts.pow", [left, right]) => self.binary("**", left, right),
             // A slice over constant bounds; an omitted end is the whole length.
             ("ts.string.slice_units", [receiver, start, end]) => {
                 let receiver = self.expr(receiver)?;
@@ -736,7 +747,9 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
         k::Literal::Absent => Expr::Undefined,
         k::Literal::Bool(value) => Expr::Bool(*value),
         k::Literal::Text(text) => Expr::Text(text.clone()),
-        k::Literal::Int(value) => Expr::Number(format!("{value}n")),
+        k::Literal::Int(value) => {
+            constructor("integer.from_decimal", vec![Expr::Text(value.to_string())])
+        }
         k::Literal::Bytes(value) => constructor("bytes.from_hex", vec![Expr::Text(value.to_hex())]),
         k::Literal::Float(value) => match source::number(value.get()) {
             Some(text) => Expr::Number(text),

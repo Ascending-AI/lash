@@ -1153,7 +1153,7 @@ fn materialized_entry_has_no_free_module_bindings() {
         super::machine::end_of_entry(
             lowered.document.into_document(),
             "run",
-            vec![lash_kernel_doc::Datum::Float(3.0.into())]
+            vec![lash_kernel_doc::Datum::Int(3.into())]
         )
         .1,
         lash_kernel_doc::Datum::Float(10.0.into())
@@ -1328,6 +1328,28 @@ fn bigint_maps_to_the_exact_boundary_shape() {
             .unwrap();
     assert_eq!(signature.params[0].ty, Type::Int);
     assert_eq!(signature.result, Type::Int);
+    use lash_kernel_doc::Datum;
+    let lowered =
+        module("type Count = bigint; export function count(n: Count): bigint { return n + 1n; }")
+            .unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "count",
+            vec![Datum::Int(9_007_199_254_740_992_i64.into())]
+        )
+        .1,
+        Datum::Int(9_007_199_254_740_993_i64.into())
+    );
+    let lowered = module("export function run(): any { const exact = {value: 9007199254740993n}; return [exact, exact]; }").unwrap();
+    let exact = Datum::Record(vec![(
+        "value".into(),
+        Datum::Int(9_007_199_254_740_993_i64.into()),
+    )]);
+    assert_eq!(
+        super::machine::end_of_entry(lowered.document.into_document(), "run", vec![]).1,
+        Datum::List(vec![exact.clone(), exact])
+    );
 }
 
 /// FIG-7284: ordinary workflow text conversion is default; refusal remains an explicit host policy.
@@ -1528,5 +1550,82 @@ fn authored_import_at_former_helper_slot_runs_with_clock() {
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(
             lash_kernel_doc::Float::new(0.0)
         )),
+    );
+}
+
+/// FIG-7511: host entry integers become Numbers unless the author declares bigint.
+#[test]
+fn host_entry_integers_follow_the_declared_javascript_kinds() {
+    use lash_kernel_doc::Datum;
+    for annotation in ["any", "number", "{value: number}"] {
+        let (argument, expression) = if annotation.starts_with('{') {
+            (
+                Datum::Record(vec![("value".into(), Datum::Int(3.into()))]),
+                "x.value",
+            )
+        } else {
+            (Datum::Int(3.into()), "x")
+        };
+        let source = format!(
+            "export function run(x: {annotation}): string {{ const n = {expression}; return JSON.stringify([typeof n, n + 1.5, n === 3]); }}"
+        );
+        let lowered = module(&source).unwrap();
+        assert_eq!(
+            super::machine::end_of_entry(lowered.document.into_document(), "run", vec![argument]).1,
+            Datum::Text("[\"number\",4.5,true]".into())
+        );
+    }
+    let lowered =
+        module("export function run(x: bigint): string { return String(x + 1n); }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "run",
+            vec![Datum::Int(9_007_199_254_740_993_i64.into())]
+        )
+        .1,
+        Datum::Text("9007199254740994".into())
+    );
+    let input = Datum::Record(vec![(
+        "value".into(),
+        Datum::Int(9_007_199_254_740_993_i64.into()),
+    )]);
+    let lowered =
+        module("export function run(x: {value: bigint}): {value: bigint} { return x; }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(lowered.document.into_document(), "run", vec![input.clone()])
+            .1,
+        input
+    );
+    let lowered = module("export function run(x: any): string { function exact(): bigint { return x; } return typeof exact() + ':' + String(exact() + 1n); }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "run",
+            vec![Datum::Int(3.into())]
+        )
+        .1,
+        Datum::Text("bigint:4".into())
+    );
+    let lowered = module("export function run(x: any): bigint { return x; }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "run",
+            vec![Datum::Int(9_007_199_254_740_993_i64.into())]
+        )
+        .1,
+        Datum::Int(9_007_199_254_740_993_i64.into())
+    );
+    let huge = lash_kernel_doc::Integer::parse(&format!("1{}", "0".repeat(400))).unwrap();
+    let lowered = module("export function run(x: any): string { try { BigInt(x); return 'missed'; } catch (e) { return e.name; } }").unwrap();
+    assert_eq!(
+        super::machine::end_of_entry(
+            lowered.document.into_document(),
+            "run",
+            vec![Datum::Int(huge)]
+        )
+        .1,
+        Datum::Text("RangeError".into())
     );
 }
