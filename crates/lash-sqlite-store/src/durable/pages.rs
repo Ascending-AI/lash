@@ -282,6 +282,10 @@ fn install_nodes(
             InstallEntry::Supplied(node) => Some(&node.id),
         }));
         let mut statement = tx.prepare_cached(SQL.sqlite.candidate_nodes.sql())?;
+        let _bindings = crate::observed_sql::text_bindings(
+            SQL.sqlite.candidate_nodes.sql(),
+            &[&named, &supplied],
+        );
         let mut rows = statement.query([named, supplied])?;
         while let Some(row) = rows.next()? {
             let hash: String = crate::codec::hash_column(row, 0)?;
@@ -335,7 +339,13 @@ fn install_nodes(
             installed.new_nodes += 1;
             installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
         }
-        insert.raw_execute()?;
+        crate::observed_sql::with_blob_bindings(
+            graph::blob_batch_sql(chunk.len()),
+            chunk
+                .iter()
+                .flat_map(|node| [node.id.0.len(), node.bytes.len()]),
+            || insert.raw_execute(),
+        )?;
     }
     Ok(Ok(()))
 }
@@ -349,12 +359,14 @@ fn install_edges(
 ) -> GraphAnswer<()> {
     for chunk in pairs.chunks(EDGE_BATCH) {
         let children: BTreeSet<NodeId> = chunk.iter().map(|(_, child)| *child).collect();
-        let present: BTreeSet<String> = tx
-            .prepare_cached(SQL.sqlite.encodings.sql())?
-            .query_map([graph::digest_array(children.iter())], |row| {
-                crate::codec::hash_column(row, 0)
-            })?
-            .collect::<rusqlite::Result<_>>()?;
+        let present: BTreeSet<String> = {
+            let digests = graph::digest_array(children.iter());
+            let _bindings =
+                crate::observed_sql::text_bindings(SQL.sqlite.encodings.sql(), &[&digests]);
+            tx.prepare_cached(SQL.sqlite.encodings.sql())?
+                .query_map([digests], |row| crate::codec::hash_column(row, 0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
         if let Some(missing) = children
             .iter()
             .find(|child| !present.contains(&child.to_hex()))
@@ -373,6 +385,8 @@ fn install_edges(
             edges.push_str("\"]");
         }
         edges.push(']');
+        let _bindings =
+            crate::observed_sql::text_bindings(SQL.sqlite.insert_edges_once.sql(), &[&edges]);
         let inserted = cached_execute(tx, SQL.sqlite.insert_edges_once.sql(), [edges])?;
         installed.new_edges += inserted as u64;
         installed.sql_logical_bytes += inserted as u64 * EDGE_ROW_LOGICAL_BYTES;
