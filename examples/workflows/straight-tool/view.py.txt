@@ -2,6 +2,6 @@ unit Library(FunctionId(01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220e
 statement function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35/0 ordinal=3 depth=0 block=function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35 Return { value: Act(ActExpr { kind: Call(Local(FunctionId(f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7))), args: [Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
 scope function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35 ordinal=2 depth=0 Entry
 action function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35/0/0 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
-action function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35/0/0/0 Some(Effect(OperationUse { link: LinkId(928444c91e2c), slot: Import(ImportSlot(0)) }))
+action function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35/0/0/0 Some(Effect(OperationUse { link: LinkId(a2c975912153), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35 "Say hello"
 caption node 0 site=function 01898455e1fba5e614733e68b5f9fdcb1b2720809ce6d47b024b220edca73b35/0 "Send a greeting and give back the reply"

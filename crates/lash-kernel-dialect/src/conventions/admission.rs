@@ -1,34 +1,86 @@
 //! The source inverse is checked at the atomic publication boundary.
 use lash_kernel_doc::{self as k, FunctionCatalog};
 use lash_kernel_value::FunctionId;
+use std::collections::BTreeMap;
 
-pub(super) struct CatalogLibrary<'a>(pub &'a dyn FunctionCatalog);
+pub(super) struct CatalogLibrary<'a> {
+    catalog: &'a dyn FunctionCatalog,
+    pinned: BTreeMap<String, Option<FunctionId>>,
+}
+impl<'a> CatalogLibrary<'a> {
+    pub(super) fn new(catalog: &'a dyn FunctionCatalog, document: &k::Document) -> Self {
+        let mut pinned = BTreeMap::new();
+        let listed = document
+            .library
+            .iter()
+            .copied()
+            .chain(document.requires.natives.iter().copied())
+            .chain(
+                document
+                    .functions
+                    .values()
+                    .filter_map(|function| function.body())
+                    .flat_map(|body| body.functions.keys().copied()),
+            );
+        for id in listed {
+            let Some(header) = catalog.header(&id) else {
+                continue;
+            };
+            pinned
+                .entry(header.name.to_string())
+                .and_modify(|found| {
+                    if *found != Some(id) {
+                        *found = None;
+                    }
+                })
+                .or_insert(Some(id));
+        }
+        Self { catalog, pinned }
+    }
+}
 impl FunctionCatalog for CatalogLibrary<'_> {
     fn named_helper(&self, name: &str) -> Option<FunctionId> {
-        self.0.named_helper(name)
+        crate::Library::resolve(self, name)
     }
     fn definition(&self, id: &FunctionId) -> Option<&k::FunctionDefinition> {
-        self.0.definition(id)
+        self.catalog.definition(id)
     }
     fn registered(&self, id: &FunctionId) -> Option<&k::RegisteredFunction> {
-        self.0.registered(id)
+        self.catalog.registered(id)
     }
     fn header(&self, id: &FunctionId) -> Option<std::sync::Arc<k::FunctionHeader>> {
-        self.0.header(id)
+        self.catalog.header(id)
     }
     fn helper_library(&self) -> Option<&k::BuildHelpers> {
-        self.0.helper_library()
+        self.catalog.helper_library()
     }
     fn projection_helper(&self, role: k::ProjectionRole) -> Option<FunctionId> {
-        self.0.projection_helper(role)
+        let mut found = self
+            .pinned
+            .values()
+            .filter_map(|function| *function)
+            .filter(|id| {
+                self.catalog
+                    .header(id)
+                    .is_some_and(|header| header.projection == role)
+            });
+        match found.next() {
+            Some(id) => found.next().is_none().then_some(id),
+            None => self.catalog.projection_helper(role),
+        }
     }
     fn registration(&self, definition: &k::FunctionDefinition) -> Option<&k::RegisteredFunction> {
-        self.0.registration(definition)
+        self.catalog.registration(definition)
     }
 }
 impl crate::Library for CatalogLibrary<'_> {
     fn resolve(&self, name: &str) -> Option<FunctionId> {
-        self.0.named_helper(name)
+        // Retained releases may expose several definitions under one name.
+        // Source recovery must use the exact helper this document declares.
+        match self.pinned.get(name) {
+            Some(function) => *function,
+            None => self.catalog.named_helper(name),
+        }
     }
 }
 

@@ -23,15 +23,9 @@ use super::lift::{Lift, Lifter};
 use super::source::Expr;
 
 impl Lifter<'_> {
-    /// The array read or method call `block`, whose first statement is child `first` of
-    /// the block at `site`, opens with, with the temporary it is bound to
-    /// and how many statements it takes.
-    pub(super) fn array_ladder(
-        &mut self,
-        block: &[k::Stmt],
-        site: &Site,
-        first: usize,
-    ) -> Lift<Option<(Name, Expr, usize)>> {
+    /// The array read or method call at the start of `block`, its result
+    /// temporary, and how many statements it takes.
+    pub(super) fn array_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {
         let [
             k::Stmt::Let {
                 name: test,
@@ -140,11 +134,10 @@ impl Lifter<'_> {
             return Ok(None);
         };
         // The general arm's own temporaries: the function values it passes.
-        let arm = site.child((first + 3) as u32).child(2);
         let saved = self.enter();
         let mut bound = Vec::new();
         let mut lifted = Ok(());
-        for (index, statement) in middle.iter().enumerate() {
+        for statement in middle {
             let k::Stmt::Let {
                 name,
                 value: k::Rhs::Expr(value),
@@ -153,12 +146,7 @@ impl Lifter<'_> {
                 lifted = Err("a statement among a method's arguments".to_owned());
                 break;
             };
-            let at = arm.child((index + 1) as u32).child(0);
-            let value = match self.closure(value, &at) {
-                Ok(Some(function)) => Ok(Expr::arrow(function)),
-                Ok(None) => self.expr(value),
-                Err(why) => Err(why),
-            };
+            let value = self.expr(value);
             match value {
                 Ok(value) => bound.push((name.clone(), value)),
                 Err(why) => {
@@ -169,7 +157,12 @@ impl Lifter<'_> {
         }
         self.leave(saved);
         lifted?;
-        let target = self.expr(target)?;
+        // A local annotation can be erased while its initializer infers a
+        // narrower receiver. Retain the kind check this ladder declares.
+        let target = Expr::As(
+            Box::new(self.expr(target)?),
+            super::source::Type::Array(Box::new(super::source::Type::Word("any"))),
+        );
         let mut written = Vec::with_capacity(args.len());
         for arg in args {
             let value = match arg {

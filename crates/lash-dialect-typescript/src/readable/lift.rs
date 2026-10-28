@@ -4,6 +4,8 @@
 //! Lifting only proposes: [`super::print`] keeps a region's lift only when
 //! reading it back gives the region again.
 
+mod lazy;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{self as k, Caption, CaptionTarget, FieldPath, FieldRoot};
@@ -665,7 +667,7 @@ impl<'a> Lifter<'a> {
             });
             return Ok(2);
         }
-        let ladder = match self.array_ladder(block, site, at)? {
+        let ladder = match self.array_ladder(block)? {
             Some(ladder) => Some(ladder),
             None => self.read_ladder(block)?,
         };
@@ -679,6 +681,16 @@ impl<'a> Lifter<'a> {
                 caption,
             });
             return Ok(taken);
+        }
+        // A guarded read also has two result-storing arms. Its declared
+        // inverse takes priority over a general authored conditional.
+        if let Some((name, value)) = self.conditional(block, site, at)? {
+            self.pending.push(Pending {
+                name,
+                value,
+                caption,
+            });
+            return Ok(2);
         }
         // A helper call's result is a temporary too: reading the call where
         // it is read hoists it again.
@@ -701,81 +713,6 @@ impl<'a> Lifter<'a> {
         Ok(0)
     }
 
-    /// `a || b` (`a && b`, `a ?? b`) whose right operand needs statements of its own:
-    /// `let t = a; if t {} else { …; set t = b }`, the arm's statements
-    /// all temporaries `b` reads.
-    fn short_circuit(
-        &mut self,
-        block: &[k::Stmt],
-        site: &Site,
-        at: usize,
-    ) -> Lift<Option<(Name, source::Expr)>> {
-        let [
-            k::Stmt::Let { name, value: left },
-            k::Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            },
-            ..,
-        ] = block
-        else {
-            return Ok(None);
-        };
-        let tested = match condition {
-            k::Expr::Call { function, args } if self.is(function, "ts.to_boolean") => {
-                args.as_slice()
-            }
-            condition => std::slice::from_ref(condition),
-        };
-        if !temporary(name) || self.style.preserve_temporaries {
-            return Ok(None);
-        }
-        let (operator, arm, child) = if self.nullish(condition, name) && else_block.is_empty() {
-            ("??", then_block, 1)
-        } else if tested == [k::Expr::Variable(name.clone())] {
-            match (then_block.is_empty(), else_block.is_empty()) {
-                (true, false) => ("||", else_block, 2),
-                (false, true) => ("&&", then_block, 1),
-                _ => return Ok(None),
-            }
-        } else {
-            return Ok(None);
-        };
-        let [
-            prelude @ ..,
-            k::Stmt::Assign {
-                place: k::Place::Variable(set),
-                value: right,
-                order: k::AssignOrder::ValueFirst,
-            },
-        ] = arm.as_slice()
-        else {
-            return Ok(None);
-        };
-        if set != name {
-            return Ok(None);
-        }
-        let left = self.rhs(left)?;
-        let outer = self.pending.len();
-        let arm_site = site.child((at + 1) as u32).child(child);
-        let mut index = 0;
-        while index < prelude.len() {
-            match self.pend(&prelude[index..], &arm_site, index)? {
-                0 => return refuse("a statement in a short circuit's right operand"),
-                taken => index += taken,
-            }
-        }
-        let right = self.rhs(right)?;
-        if self.pending.len() > outer {
-            return refuse("a temporary a short circuit's right operand does not read");
-        }
-        Ok(Some((
-            name.clone(),
-            source::Expr::Binary(operator, Box::new(left), Box::new(right)),
-        )))
-    }
-
     /// [`Self::block`] of statements that begin at child `first` of the
     /// block at `site`.
     pub(super) fn block_at(
@@ -794,8 +731,50 @@ impl<'a> Lifter<'a> {
                 .captions
                 .and_then(|captions| captions.at(&here))
                 .cloned();
+            if let Some(update) = crate::constructs::operators::UPDATE
+                .recognize(&block[index..], |id, helper| self.is(id, helper))
+                && temporary(update.snapshot)
+                && !reads_name(k::Node::Block(&block[index + 2..]), update.snapshot)
+                && !(caption.is_some()
+                    && self.captions.is_some_and(|captions| {
+                        captions
+                            .at(&site.child((first + index + 1) as u32))
+                            .is_some()
+                    }))
+            {
+                let second = self
+                    .captions
+                    .and_then(|captions| captions.at(&site.child((first + index + 1) as u32)))
+                    .cloned();
+                out.push(Stmt {
+                    caption: caption.or(second),
+                    kind: source::StmtKind::Expr(source::Expr::Unary(
+                        update.operator,
+                        Box::new(source::Expr::Ident(self.binding(update.target)?)),
+                    )),
+                });
+                index += 2;
+                continue;
+            }
             let pended = self.pend(&block[index..], site, first + index)?;
             if pended > 0 {
+                if self.pending.len() == outer + 1
+                    && self.pending.last().is_some_and(|pending| {
+                        !reads_name(k::Node::Block(&block[index + pended..]), &pending.name)
+                    })
+                    && let Some(pending) = self.pending.pop()
+                {
+                    let mut caption = pending.caption;
+                    for taken in std::mem::take(&mut self.taken_captions) {
+                        if caption.replace(taken).is_some() {
+                            return refuse("two captions on a discarded expression");
+                        }
+                    }
+                    out.push(Stmt {
+                        caption,
+                        kind: source::StmtKind::Expr(pending.value),
+                    });
+                }
                 index += pended;
                 continue;
             }
@@ -803,9 +782,12 @@ impl<'a> Lifter<'a> {
             // that appears later. Its source is that later declaration.
             if let k::Stmt::Let {
                 name,
-                value: k::Rhs::Expr(k::Expr::Tuple(items)),
+                value: k::Rhs::Expr(value),
             } = &block[index]
-                && items.is_empty()
+                && *value
+                    == crate::constructs::conventions::CONVENTIONS
+                        .bindings
+                        .uninitialized()
                 && self.reassigned(name.as_str())
             {
                 predeclared.insert(name.clone());
@@ -924,5 +906,26 @@ impl Reference for k::FunctionTarget {
             Self::Local(id) => id.name(document, imports, library),
             Self::Import(_) => None,
         }
+    }
+}
+
+fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
+    match node {
+        k::Node::Expr(k::Expr::Variable(value)) => value == name,
+        k::Node::Action(action) => {
+            let act = super::statements::act_of(action);
+            reads_name(k::Node::Expr(&k::Expr::Act(Box::new(act))), name)
+        }
+        k::Node::Expr(k::Expr::Act(act)) => {
+            matches!(&act.kind, k::ActKind::Call(k::Callee::Value(value)) | k::ActKind::Spawn(k::Callee::Value(value)) if value == name)
+                || act
+                    .args
+                    .iter()
+                    .any(|value| reads_name(k::Node::Expr(value), name))
+        }
+        _ => node
+            .children()
+            .into_iter()
+            .any(|child| reads_name(child, name)),
     }
 }

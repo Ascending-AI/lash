@@ -1,0 +1,6 @@
+{
+  "kind": "create_workflow",
+  "display_name": "Information source repro",
+  "source": "export async function lookup(token: string, readRef: string): Promise<{ hits: { id: string; read_ref: string }[]; passage: unknown; refused: { message: string } | null }> {\n  const found = await information.search({ query: token, targets: { sources: { record_types: [\"file\"] } } });\n  const hits = found.results.sources.results.map((hit) => ({ id: hit.id, read_ref: hit.read_ref }));\n  const ref = readRef === \"\" ? hits[0].read_ref : readRef;\n  let passage = null;\n  let refused = null;\n  try {\n    passage = await information.read({ read_ref: ref });\n  } catch (error) {\n    refused = { message: error.message };\n  }\n  return { hits: hits, passage: passage, refused: refused };\n}",
+  "entry": "lookup"
+}

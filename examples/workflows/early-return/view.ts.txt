@@ -6,7 +6,7 @@ statement function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a
 scope function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669 ordinal=2 depth=0 Entry
 scope function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/0/1 ordinal=4 depth=1 Then
 scope function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/0/2 ordinal=6 depth=1 Else
-action function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/1/0 Some(Effect(OperationUse { link: LinkId(ecfee4d9519e), slot: Import(ImportSlot(0)) }))
+action function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/1/0 Some(Effect(OperationUse { link: LinkId(35324d139120), slot: Import(ImportSlot(0)) }))
 action function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/1/0/0 library id=a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586 name=ts.copy_boundary exports=[]
 caption callable 0 block=function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669 "Echo a value unless it is negative"
 caption node 0 site=function c192e1d9d42a7bf252fe3327e4851c5e2badda88c5801372d7b2cd6b9089a669/0 "Check for a negative value"

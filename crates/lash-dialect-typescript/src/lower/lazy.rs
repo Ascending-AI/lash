@@ -1,6 +1,6 @@
 //! Lazy expression regions and the boundary for statement control flow.
 
-use lash_kernel_doc::{Expr, Literal, Place, Rhs, Stmt};
+use lash_kernel_doc::{Expr, Literal, Place};
 
 use super::{Buf, Lowerer, Lowering, Operand};
 use crate::adapter::{self as ast, LogicalOp};
@@ -99,12 +99,10 @@ impl Lowerer<'_> {
         let (mut then_buf, then_value) = then_branch;
         let (mut else_buf, else_value) = else_branch;
         let result = self.temp();
-        self.emit(Stmt::Let {
-            name: result.clone(),
-            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-        });
-        then_buf = self.store_branch((then_buf, then_value), Place::Variable(result.clone()));
-        else_buf = self.store_branch((else_buf, else_value), Place::Variable(result.clone()));
+        let recipe = &crate::constructs::conditional::CONDITIONAL;
+        self.emit(recipe.binding(result.clone()));
+        then_buf = self.store_branch((then_buf, then_value), recipe.destination(&result));
+        else_buf = self.store_branch((else_buf, else_value), recipe.destination(&result));
         self.emit_if(condition, then_buf, else_buf);
         Operand::variable(result, ty)
     }

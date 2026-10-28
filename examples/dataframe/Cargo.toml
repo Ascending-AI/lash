@@ -16,5 +16,5 @@ lash = { workspace = true, features = ["rlm", "dialect-typescript", "dialect-pyt
 serde_json.workspace = true
 
 [dev-dependencies]
-lash = { workspace = true, features = ["testing", "sqlite"] }
+lash = { workspace = true, features = ["testing", "sqlite", "typescript", "workflow-authoring"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

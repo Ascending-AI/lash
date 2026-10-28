@@ -1638,10 +1638,13 @@ lash_rust_integration_test(
     ],
     data_patterns = [
         "tests/workflow_laws/fixtures/canvas-insert-request.json",
+        "tests/workflow_laws/fixtures/information-create-request.json",
     ],
     exec_properties = sized_exec_properties("lash-runtime", "workflow_laws", "//crates/lash:workflow_laws__test"),
     extra_compile_data = [],
     extra_data = [
+        "//examples:typescript_host_flow_cells",
+        "//examples/kernel-engine-hello:package_files",
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     library = ":lash",

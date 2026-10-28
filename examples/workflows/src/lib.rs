@@ -302,6 +302,7 @@ pub(crate) fn render_with(
 ) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
     let mut report = Vec::new();
     let mut canvas_failures = Vec::new();
+    let mut fresh_admissions = 0;
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
     let mut effects = BTreeMap::new();
@@ -419,6 +420,18 @@ pub(crate) fn render_with(
                 written_captions(&source, lang)
             );
             let document = &*lowered.document;
+            let mut fresh = Draft::open(document.clone())?;
+            fresh
+                .apply(
+                    &Transaction {
+                        base: document.identity(),
+                        edits: vec![],
+                    },
+                    &checker,
+                    lash::workflow::edit::CONVENTIONS,
+                )
+                .with_context(|| format!("{} {extension}: fresh zero-edit admission", case.name))?;
+            fresh_admissions += 1;
             let entries: Vec<_> = document
                 .exports
                 .iter()
@@ -549,6 +562,7 @@ pub(crate) fn render_with(
         "canvas edit law:\n{}",
         canvas_failures.join("\n")
     );
+    eprintln!("fresh corpus zero-edit admissions: {fresh_admissions}");
     Ok((outputs, report))
 }
 

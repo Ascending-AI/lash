@@ -1,8 +1,8 @@
 unit Library(FunctionId(d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d))
-statement function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d/0 ordinal=9 depth=0 block=function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d Return { value: Variable(Name("value")) }
-scope function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d ordinal=8 depth=0 Entry
+statement function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d/0 ordinal=11 depth=0 block=function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d Return { value: Variable(Name("value")) }
+scope function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d ordinal=10 depth=0 Entry
 caption callable 0 block=function d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d "Give back the number it is given"
 unit Library(FunctionId(e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4))
-statement function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4/0 ordinal=11 depth=0 block=function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 Return { value: Literal(Text("top")) }
-scope function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 ordinal=10 depth=0 Entry
+statement function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4/0 ordinal=13 depth=0 block=function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 Return { value: Literal(Text("top")) }
+scope function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 ordinal=12 depth=0 Entry
 caption callable 0 block=function e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4 "Answer from the top level"

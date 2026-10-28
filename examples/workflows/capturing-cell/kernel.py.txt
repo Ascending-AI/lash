@@ -1,12 +1,16 @@
 kernel 1
 numbers by_spelling
 import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
+library @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4
 library @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795
-library @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161
+library @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb
 library @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3
-library @cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5
+library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
+library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
+library @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec
+library @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
-definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nuse py.bind = @5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161\nuse py.getitem = @cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5\nbody {\n  return let(t1 = invoke py.bind(\"add\", ((\"x\", 1, false),), positional1, keywords1, false), let(x = t1[0], invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0))))\n}\n"
+definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\nuse py.add = @b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nuse py.fail = @3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb\nuse py.getitem = @0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nbody {\n  return if(if(same(list.len(positional1), 1), same(map.len(keywords1), 0), false), let(x = positional1[0], if(same(x, absent), invoke py.fail(\"TypeError\", \"add() missing a required positional argument\"), invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))), let(t1 = invoke py.bind(\"add\", ((\"x\", 1, false),), positional1, keywords1, false), let(x = t1[0], invoke py.add(invoke py.add(x, limit), invoke py.getitem(shared, 0)))))\n}\n"
 main {
   let limit = 3
   let shared = [1]
@@ -15,4 +19,4 @@ main {
   do invoke @20602e85712540e8f8c2c791e9d70cac7691c8de367fc3ed1b1b8faa1a4c9795(shared, 0, 9)
 }
 
-unit Main: statements=6 scopes=2 sites=13
+unit Main: statements=6 scopes=2 sites=17

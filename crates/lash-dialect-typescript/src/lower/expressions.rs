@@ -737,6 +737,7 @@ impl Lowerer<'_> {
     /// `operand + delta` as a number, with the number the operand was: the
     /// two values `++` and `--` give.
     fn stepped(&mut self, current: Operand, delta: f64) -> Lowering<(Operand, Operand)> {
+        let recipe = &crate::constructs::operators::UPDATE;
         let ty = if current.ty == Ty::BigInt {
             Ty::BigInt
         } else if current.ty.is_number() {
@@ -748,13 +749,13 @@ impl Lowerer<'_> {
             let number = self.float(&current)?;
             self.let_expr(number, Ty::Float)
         } else {
-            self.invoke("ts.to_numeric", &[current], ty.clone())?
+            self.invoke(recipe.conversion, &[current], ty.clone())?
         };
         let old = self.pin(old);
         let new = if old.ty == Ty::Float {
-            self.binary(BinaryOp::Add, old.clone(), Operand::number(delta))?
+            self.binary(recipe.numeric, old.clone(), Operand::number(delta))?
         } else {
-            self.invoke("ts.step", &[old.clone(), Operand::number(delta)], ty)?
+            self.invoke(recipe.general, &[old.clone(), Operand::number(delta)], ty)?
         };
         Ok((old, new))
     }

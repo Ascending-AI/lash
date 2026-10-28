@@ -10,6 +10,9 @@ use super::source::{self, Expr, Part};
 
 impl Lifter<'_> {
     pub(super) fn expr(&mut self, expr: &k::Expr) -> Lift<Expr> {
+        if let Some(function) = self.closure(expr)? {
+            return Ok(Expr::arrow(function));
+        }
         match expr {
             k::Expr::Literal(literal) => literal_of(literal),
             k::Expr::Variable(name) => self.variable(name),
@@ -495,6 +498,13 @@ impl Lifter<'_> {
                 };
                 Ok(Expr::Unary("await ", Box::new(self.expr(value)?)))
             }
+            k::ActKind::Call(k::Callee::Import(slot)) => Ok(Expr::Call(
+                Box::new(self.operation(slot)?),
+                act.args
+                    .iter()
+                    .map(|value| self.expr(value))
+                    .collect::<Lift<_>>()?,
+            )),
             k::ActKind::Call(k::Callee::Local(id)) => {
                 let Some(name) = self.library(id) else {
                     return refuse("a call of a function the manifest does not list");
@@ -703,7 +713,25 @@ impl Lifter<'_> {
                     args,
                 ))
             }
-            (name, _) => refuse(format!("`{name}` has no source spelling")),
+            (name, _) => {
+                let Some((path, _)) = lash_ext_ts_helpers::builtins::table()
+                    .positional
+                    .iter()
+                    .find(|(_, declaration)| {
+                        declaration.arity == args.len()
+                            && (declaration.helper == name || declaration.float == Some(name))
+                    })
+                else {
+                    return refuse(format!("`{name}` has no source spelling"));
+                };
+                let callee = builtin_path(path)
+                    .ok_or_else(|| "a builtin path TypeScript cannot spell".to_owned())?;
+                let args = args
+                    .iter()
+                    .map(|value| self.expr(value))
+                    .collect::<Lift<_>>()?;
+                Ok(Expr::Call(Box::new(callee), args))
+            }
         }
     }
 }
@@ -727,6 +755,10 @@ fn builtin_value(parts: &[k::Expr]) -> Option<Expr> {
     {
         return None;
     }
+    builtin_path(path)
+}
+
+fn builtin_path(path: &str) -> Option<Expr> {
     let mut segments = path.split('.');
     let root = segments.next().filter(|root| source::identifier(root))?;
     let mut value = Expr::Ident(root.to_owned());

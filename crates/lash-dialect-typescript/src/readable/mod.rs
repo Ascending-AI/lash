@@ -251,6 +251,9 @@ mod tests {
         let mut packages = BTreeMap::new();
         for (package, member) in [
             ("people", "lookup"),
+            ("information", "search"),
+            ("information", "read"),
+            ("io", "read_csv"),
             ("inbox", "send_item"),
             ("workflows", "create"),
             ("corpus", "echo"),
@@ -271,7 +274,11 @@ mod tests {
                                         ty: lash_kernel_value::types::Type::Any,
                                         optional: false,
                                     }],
-                                    result: lash_kernel_value::types::Type::Any,
+                                    result: if package == "io" {
+                                        lash_kernel_value::types::Type::Text
+                                    } else {
+                                        lash_kernel_value::types::Type::Any
+                                    },
                                 },
                                 controls: lash_kernel_value::TurnControls::none(),
                                 mode: lash_kernel_value::OperationMode::Waited,
@@ -309,6 +316,18 @@ mod tests {
             };
             let lowered = crate::lower(&case.source, &environment, mode)
                 .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+            let mut draft =
+                lash_kernel_edit::Draft::open(lowered.document.document().clone()).unwrap();
+            if let Err(error) = draft.apply(
+                &lash_kernel_edit::Transaction {
+                    base: lowered.document.id(),
+                    edits: vec![],
+                },
+                &lash_kernel_check::Environment::new(library),
+                &[crate::CONVENTIONS],
+            ) {
+                failures.push(format!("{}: zero-edit admission: {error:?}", case.name));
+            }
             for name in &case.names {
                 assert!(
                     lowered

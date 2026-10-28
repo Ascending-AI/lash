@@ -806,3 +806,205 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
         .unwrap();
     assert_eq!(read.canonical_bytes(), draft.document().canonical_bytes());
 }
+
+/// FIG-7514: fresh source import must survive create's zero-edit admission.
+#[tokio::test]
+async fn a_fresh_information_workflow_survives_zero_edit_creation() {
+    use std::sync::Arc;
+    const INFORMATION: lash::process::ProcessConfigKey<()> = lash::process::ProcessConfigKey::new(
+        "information-create",
+        lash::plugins::FormatVersion::ONE,
+    );
+    let provider = Arc::new(lash::tools::StaticToolProvider::new(
+        ["search", "read"]
+            .into_iter()
+            .map(|name| {
+                lash::tools::ToolDefinition::raw(
+                    format!("tool:information_{name}"),
+                    format!("information.{name}"),
+                    "Information workflow contract.",
+                    serde_json::json!(true),
+                    lash::tools::ToolDefinition::any_output(),
+                )
+                .unwrap()
+                .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
+                .with_execution(std::time::Duration::from_secs(120))
+            })
+            .collect(),
+        super::Echo,
+    ));
+    let component = lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(INFORMATION.component()),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("information"), provider.clone())
+            .with_package_provider(
+                lash::tool_provider_key!("information"),
+                Arc::new(lash::package::ToolPackageProvider::new(
+                    INFORMATION.component(),
+                    lash::tool_provider_key!("information"),
+                    [lash::package::Segment::new("information").unwrap()].into(),
+                    provider,
+                )),
+            ),
+    )
+    .as_component(INFORMATION.format())
+    .unwrap();
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let core = super::builder_with_process_tools(stores, false, super::EchoComponent::Installed)
+        .await
+        .process_component(Arc::new(component), INFORMATION)
+        .build(super::node_identity("information-create"))
+        .unwrap();
+    let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(INFORMATION, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let pin = lash::process::HostArtifactPin::mint();
+    let (_, request) = super::namespace(&core, &pin, &environment).await;
+    let checked = core
+        .host_artifacts()
+        .workflow_environment(&request)
+        .await
+        .unwrap()
+        .unwrap();
+    let captured: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/information-create-request.json")).unwrap();
+    let source = captured["source"].as_str().unwrap();
+    assert_eq!(source.len(), 680);
+    let imported = core
+        .host_artifacts()
+        .import_workflow(k::SourceLanguage::TypeScript, source, &request, None)
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("fresh source must import: {imported:?}");
+    };
+    let original = document.to_document().unwrap();
+    let mut draft = lash::workflow::edit::Draft::open(original.clone()).unwrap();
+    let result = draft.apply(
+        &lash::workflow::edit::Transaction {
+            base: original.identity(),
+            edits: vec![],
+        },
+        &checked.checker(),
+        lash::workflow::edit::CONVENTIONS,
+    );
+    core.shutdown().await.unwrap();
+    result.expect("fresh source must survive create's zero-edit admission");
+}
+
+/// FIG-7514: standalone source examples remain admissible before any edit.
+#[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "reads declared standalone example source fixtures"
+)]
+async fn standalone_source_examples_survive_zero_edit_admission() {
+    use lash_kernel_value::{
+        Name, OperationMode, PackagePath, Param, Segment, Signature, TurnControls, Type, Visibility,
+    };
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
+    let mut packages = std::collections::BTreeMap::new();
+    for (package, member) in [
+        ("host", "greet"),
+        ("web", "fetch"),
+        ("host", "approval"),
+        ("processes", "start"),
+        ("control", "finish"),
+    ] {
+        let greet = member == "greet";
+        let signature = Signature {
+            params: vec![Param {
+                name: Name::new(if greet { "name" } else { "input" }),
+                ty: if greet { Type::Text } else { Type::Any },
+                optional: false,
+            }],
+            result: if greet { Type::Text } else { Type::Any },
+        };
+        packages
+            .entry(PackagePath::parse(package).unwrap())
+            .or_insert_with(std::collections::BTreeMap::new)
+            .insert(
+                Segment::new(member).unwrap(),
+                lash::dialect::NamespaceMember {
+                    visibility: Visibility::Public,
+                    kind: lash::dialect::NamespaceKind::Operation(
+                        lash::dialect::OperationSignature {
+                            signature,
+                            controls: if member == "finish" {
+                                TurnControls::finish(lash_kernel_value::JsonSchema::any())
+                            } else {
+                                TurnControls::none()
+                            },
+                            mode: OperationMode::Waited,
+                        },
+                    ),
+                },
+            );
+    }
+    let namespaces =
+        lash::dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
+    let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
+    for (name, language, cell) in [
+        (
+            "kernel-engine-hello/hello.ts",
+            k::SourceLanguage::TypeScript,
+            false,
+        ),
+        (
+            "kernel-engine-hello/hello.py",
+            k::SourceLanguage::Python,
+            false,
+        ),
+        (
+            "kernel-engine-hello/snippet.ts",
+            k::SourceLanguage::TypeScript,
+            true,
+        ),
+        (
+            "kernel-engine-hello/snippet.py",
+            k::SourceLanguage::Python,
+            true,
+        ),
+        (
+            "typescript-host-flows/turn.ts",
+            k::SourceLanguage::TypeScript,
+            true,
+        ),
+        (
+            "typescript-host-flows/durable-process.ts",
+            k::SourceLanguage::TypeScript,
+            true,
+        ),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(name);
+        let source = std::fs::read_to_string(path).unwrap();
+        let mode = if cell {
+            lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first())
+        } else {
+            lash::dialect::Mode::Module
+        };
+        let lowered = match language {
+            k::SourceLanguage::TypeScript => lash::typescript::lower(&source, &environment, mode)
+                .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}")),
+            k::SourceLanguage::Python => lash::python::lower(&source, &environment, mode)
+                .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}")),
+        };
+        let mut draft =
+            lash::workflow::edit::Draft::open(lowered.document.into_document()).unwrap();
+        draft
+            .apply(
+                &lash::workflow::edit::Transaction {
+                    base: draft.identity(),
+                    edits: vec![],
+                },
+                &lash_kernel_check::Environment::new(embedding.library()),
+                lash::workflow::edit::CONVENTIONS,
+            )
+            .unwrap_or_else(|refusal| panic!("{name}: zero-edit admission: {refusal:?}"));
+        eprintln!("standalone example zero-edit admission: {name}");
+    }
+}

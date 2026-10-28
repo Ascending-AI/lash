@@ -27,6 +27,11 @@ pub(crate) enum Recipe {
     Split(E),
 }
 impl Method {
+    /// The string recipe's result, even when its fallback helper is not reached.
+    pub fn returns_text(&self) -> bool {
+        matches!(self.recipe, Recipe::Slice | Recipe::Trim(_))
+    }
+
     pub fn kind(&self) -> Kind {
         match self.recipe {
             Recipe::Slice => Kind::Slice,

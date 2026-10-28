@@ -132,10 +132,25 @@ pub enum BindingScope {
     Callable,
 }
 impl BindingScope {
+    /// The dialect's sentinel for a local declared before its authored initializer.
+    pub fn uninitialized(&self) -> Expr {
+        match self {
+            Self::Block => Expr::Tuple(Vec::new()),
+            Self::Callable => Expr::Literal(Literal::Absent),
+        }
+    }
+
+    /// Scope predeclarations precede every authored insertion point.
+    pub fn prelude_end(&self, block: &[k::Stmt]) -> usize {
+        block.iter().take_while(|statement| matches!(statement,
+            k::Stmt::Let { value: k::Rhs::Expr(value), .. } if *value == self.uninitialized()
+        )).count()
+    }
+
     pub fn predeclaration(&self, name: lash_kernel_value::Name) -> k::Stmt {
         k::Stmt::Let {
             name,
-            value: k::Rhs::Expr(Expr::Literal(Literal::Absent)),
+            value: k::Rhs::Expr(self.uninitialized()),
         }
     }
 
@@ -342,7 +357,7 @@ impl Conventions {
         document: &k::Document,
         catalog: &dyn FunctionCatalog,
     ) -> Result<(k::Document, BTreeMap<FunctionId, FunctionId>), crate::PrintError> {
-        let library = admission::CatalogLibrary(catalog);
+        let library = admission::CatalogLibrary::new(catalog, document);
         let canonical = if let Some(language) = self.language {
             match self.inverse {
                 Inverse::Checked(verify) => verify(document, &library)?,
@@ -401,6 +416,21 @@ impl Conventions {
                 })?;
         }
         Ok(())
+    }
+
+    /// The first authored position follows the dialect's scope predeclarations.
+    pub fn canvas_start(
+        &self,
+        document: &k::Document,
+        block: &lash_kernel_value::sites::Site,
+    ) -> usize {
+        if self.language.is_none() {
+            return 0;
+        }
+        match document.node(block) {
+            Some(k::Node::Block(block)) => self.bindings.prelude_end(block),
+            _ => 0,
+        }
     }
 
     /// Resolve a canvas end through the same return declaration as lowering.

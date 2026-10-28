@@ -20,6 +20,66 @@ async fn df_library_and_workflow_keep_their_defining_links() {
     )
     .await
     .unwrap();
+    let request = crate::host::environment_request(&creator.namespace, creator.context.clone());
+    let names = creator
+        .artifacts
+        .workflow_environment(&request)
+        .await
+        .unwrap()
+        .unwrap();
+    let release = lash::vm::helper_release().unwrap();
+    let roots = release.resolver_roots();
+    let library =
+        lash::dialect::NamedLibrary::resolving(names.functions(), |id| roots.contains(id)).unwrap();
+    let source_environment = lash::dialect::Environment::new(&library, names.namespaces());
+    let mut admission_failures = Vec::new();
+    for (name, source, mode) in [
+        ("df.ts", crate::LIBRARY, lash::dialect::Mode::Module),
+        ("nightly.ts", crate::NIGHTLY, lash::dialect::Mode::Module),
+        (
+            "cell.ts",
+            crate::CELL,
+            lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+        ),
+    ] {
+        let imported = lash::typescript::lower(source, &source_environment, mode).unwrap();
+        let mut draft =
+            lash::workflow::edit::Draft::open(imported.document.into_document()).unwrap();
+        if let Err(refusal) = draft.apply(
+            &lash::workflow::edit::Transaction {
+                base: draft.identity(),
+                edits: vec![],
+            },
+            &names.checker(),
+            lash::workflow::edit::CONVENTIONS,
+        ) {
+            admission_failures.push(format!("{name}: zero-edit admission: {refusal:?}"));
+        } else {
+            let printed = creator
+                .workers
+                .print(
+                    draft.document(),
+                    None,
+                    lash::dialect::SourceFormat::TypeScriptV1,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            let relowered =
+                lash::typescript::lower(&printed.source, &source_environment, mode).unwrap();
+            assert_eq!(
+                draft.document().canonical_bytes(),
+                relowered.document.canonical_bytes(),
+                "{name}: ordinary import under the actual package namespace"
+            );
+            eprintln!("dataframe zero-edit admission: {name}");
+        }
+    }
+    assert!(
+        admission_failures.is_empty(),
+        "{}",
+        admission_failures.join("\n")
+    );
     let package = creator
         .namespace
         .snapshot

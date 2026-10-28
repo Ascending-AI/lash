@@ -14,7 +14,7 @@ impl Lifter<'_> {
             k::Stmt::Let { name, value } => {
                 let name = self.binding(name)?;
                 if let k::Rhs::Expr(value) = value
-                    && let Some(function) = self.closure(value, &site.child(0))?
+                    && let Some(function) = self.closure(value)?
                 {
                     return Ok(StmtKind::Const(name, Expr::arrow(function)));
                 }
@@ -74,10 +74,34 @@ impl Lifter<'_> {
                 metered: 0,
                 binding,
                 iterable,
+                via: None,
+                body,
+                else_block,
+            } if else_block.is_empty() => {
+                let Some(enumeration) = crate::constructs::iteration::FOR_IN.recognize(
+                    iterable,
+                    binding,
+                    body,
+                    &|id, name| self.is(id, name),
+                ) else {
+                    return refuse("a property enumeration the dialect does not lower to");
+                };
+                StmtKind::For {
+                    operator: "in",
+                    binding: self.binding(enumeration.binding)?,
+                    iterable: self.expr(enumeration.subject)?,
+                    body: self.block_at(enumeration.body, &site.child(1).child(0).child(1), 1)?,
+                }
+            }
+            k::Stmt::For {
+                metered: 0,
+                binding,
+                iterable,
                 via: Some(via),
                 body,
                 else_block,
-            } if else_block.is_empty() && self.for_of(via) => StmtKind::ForOf {
+            } if else_block.is_empty() && self.for_of(via) => StmtKind::For {
+                operator: "of",
                 binding: self.binding(binding)?,
                 iterable: self.expr(iterable)?,
                 body: self.block(body, &site.child(1))?,
@@ -250,6 +274,24 @@ impl Lifter<'_> {
         else {
             return Ok(None);
         };
+        let computed = &crate::constructs::reads::COMPUTED;
+        if let Some(access) = computed.recognize(
+            name,
+            &block[1..2],
+            &|id, helper| self.is(id, helper),
+            |value, helper| self.helper_read(value, helper),
+        ) {
+            let target = self.expr(access.target)?;
+            // A local's annotation is erased from the document. Retain the
+            // record test even when its initializer would infer `object`.
+            let target = if access.tests_record {
+                Expr::As(Box::new(target), source::Type::Word("any"))
+            } else {
+                target
+            };
+            let read = Expr::Index(Box::new(target), Box::new(self.expr(access.index)?));
+            return Ok(Some((name.clone(), read, 2)));
+        }
         if let Some(read) = self.field_ladder(name, condition, then_block, else_block)? {
             return Ok(Some((name.clone(), read, 2)));
         }

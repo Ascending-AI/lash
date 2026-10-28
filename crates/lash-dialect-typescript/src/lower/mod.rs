@@ -681,7 +681,9 @@ impl Lowerer<'_> {
         let kernel = binding.kernel.clone();
         let value = match binding.kind {
             // The empty tuple marks a binding that is not initialised.
-            BindingKind::Let | BindingKind::Const => Expr::Tuple(Vec::new()),
+            BindingKind::Let | BindingKind::Const => crate::constructs::conventions::CONVENTIONS
+                .bindings
+                .uninitialized(),
             _ => Expr::Literal(Literal::Absent),
         };
         if scope == 0 && self.session.contains(&kernel) {

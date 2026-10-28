@@ -105,7 +105,8 @@ pub(super) enum StmtKind {
         then: Vec<Stmt>,
         otherwise: Option<Arm>,
     },
-    ForOf {
+    For {
+        operator: &'static str,
         binding: String,
         iterable: Expr,
         body: Vec<Stmt>,
@@ -440,14 +441,17 @@ impl Writer {
                     self.else_arm(arm);
                 }
             }
-            StmtKind::ForOf {
+            StmtKind::For {
+                operator,
                 binding,
                 iterable,
                 body,
             } => {
                 self.out.push_str("for (const ");
                 self.out.push_str(binding);
-                self.out.push_str(" of ");
+                self.out.push(' ');
+                self.out.push_str(operator);
+                self.out.push(' ');
                 self.expr(iterable, ASSIGN);
                 self.out.push_str(") ");
                 self.block(body);

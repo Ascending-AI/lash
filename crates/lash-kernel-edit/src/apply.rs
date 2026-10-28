@@ -221,6 +221,7 @@ impl Working {
                 })?
                 .unwrap_or_else(|| self.block(&block).len()),
         };
+        let index = index.max(source.canvas_start(&self.document, &block));
         Ok((block, index))
     }
 

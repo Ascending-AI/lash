@@ -139,7 +139,8 @@
         "docs/instrumentation-contract.md"
       ],
       "workflow_laws": [
-        "tests/workflow_laws/fixtures/canvas-insert-request.json"
+        "tests/workflow_laws/fixtures/canvas-insert-request.json",
+        "tests/workflow_laws/fixtures/information-create-request.json"
       ]
     },
     "test_input_fallbacks": {

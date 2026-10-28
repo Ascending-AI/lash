@@ -130,5 +130,27 @@
     "names": [
       "exact"
     ]
+  },
+  {
+    "name": "FIG-7514 fresh information workflow survives zero-edit creation",
+    "source": "export async function lookup(token: string, readRef: string): Promise<{ hits: { id: string; read_ref: string }[]; passage: unknown; refused: { message: string } | null }> {\n  const found = await information.search({ query: token, targets: { sources: { record_types: [\"file\"] } } });\n  const hits = found.results.sources.results.map((hit) => ({ id: hit.id, read_ref: hit.read_ref }));\n  const ref = readRef === \"\" ? hits[0].read_ref : readRef;\n  let passage = null;\n  let refused = null;\n  try {\n    passage = await information.read({ read_ref: ref });\n  } catch (error) {\n    refused = { message: error.message };\n  }\n  return { hits: hits, passage: passage, refused: refused };\n}",
+    "names": [
+      "lookup"
+    ]
+  },
+  {
+    "name": "FIG-7514 annotated local array retains its method guard",
+    "source": "export function append(): number[] { const rows: number[] = []; rows.push(1); return rows; }",
+    "names": [
+      "append"
+    ]
+  },
+  {
+    "name": "FIG-7514 dataframe library source",
+    "source": "import { readCsv } from \"io\";\n\nexport function to_cols(rows: Record<string, number>[]): Record<string, number[]> {\n    const cols: Record<string, number[]> = {};\n    for (const row of rows) {\n        for (const key in row) {\n            if (cols[key] === undefined) cols[key] = [];\n            cols[key].push(row[key]);\n        }\n    }\n    return cols;\n}\n\nexport async function load(path: string): Promise<Record<string, number>[]> {\n    const text = await readCsv({ path });\n    const started = Date.now();\n    const lines = text.trim().split(\"\\n\");\n    const keys = lines[0].split(\",\");\n    const rows: Record<string, number>[] = [];\n    for (let line = 1; line < lines.length; line++) {\n        const values = lines[line].split(\",\");\n        const row: Record<string, number> = {};\n        for (let column = 0; column < keys.length; column++) {\n            row[keys[column]] = Number(values[column]);\n        }\n        rows.push(row);\n    }\n    return rows;\n}\n",
+    "names": [
+      "load",
+      "to_cols"
+    ]
   }
 ]

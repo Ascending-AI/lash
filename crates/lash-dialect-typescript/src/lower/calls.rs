@@ -308,7 +308,7 @@ impl Lowerer<'_> {
             // A numeric spelling cannot name an arbitrary built-in member.
             // Keep only the matching rows in the helper's executable reach.
             Key::Computed(index) if index.ty.is_number() => "ts.get_numeric",
-            Key::Computed(_) => "ts.get_computed",
+            Key::Computed(_) => reads::COMPUTED.fallback,
             Key::Static(_) => "ts.read",
         };
         self.invoke(function, &[object.clone(), key.operand()], ty)

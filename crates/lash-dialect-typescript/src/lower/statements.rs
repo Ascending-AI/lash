@@ -705,11 +705,12 @@ impl Lowerer<'_> {
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
         let subject = self.pin(subject);
-        let items = self.invoke("ts.keys", std::slice::from_ref(&subject), Ty::Unknown)?;
+        let recipe = &crate::constructs::iteration::FOR_IN;
+        let items = self.invoke(recipe.keys, std::slice::from_ref(&subject), Ty::Unknown)?;
         let item = self.temp();
         let element = Operand::variable(item.clone(), Ty::Unknown);
         let body = self.loop_block(Vec::new(), |this| {
-            let present = this.invoke("ts.has", &[subject, element.clone()], Ty::Bool)?;
+            let present = this.invoke(recipe.present, &[subject, element.clone()], Ty::Bool)?;
             let visits = this.block(|this| {
                 this.destructure(pattern, element, mode_of(kind))?;
                 this.lower_statement(body)

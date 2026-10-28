@@ -294,6 +294,12 @@ impl Facts {
                     let header = library.header(&id)?;
                     (header.signature.result == lash_kernel_value::Type::Text).then_some(*name)
                 })
+                .chain(
+                    crate::constructs::methods::METHODS
+                        .iter()
+                        .filter(|method| method.returns_text())
+                        .map(|method| method.name),
+                )
                 .collect(),
             assigned: collector
                 .bindings

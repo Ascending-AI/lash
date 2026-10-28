@@ -907,6 +907,21 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         lash_kernel_check::admit(document, &environment)
             .unwrap_or_else(|error| panic!("{} is admitted before editing: {error:?}", case.name));
         let base = lowered.document.id();
+        let mut fresh = Draft::open(document.clone()).expect("a fresh imported draft");
+        fresh
+            .apply(
+                &Transaction {
+                    base,
+                    edits: vec![],
+                },
+                &environment,
+                &[
+                    lash_dialect_typescript::CONVENTIONS,
+                    lash_dialect_python::CONVENTIONS,
+                ],
+            )
+            .unwrap_or_else(|refusal| panic!("{}: zero-edit admission: {refusal:?}", case.name));
+        eprintln!("K-CAP-004 zero-edit admission: {}", case.name);
         let insert = Operation::InsertStep {
             base,
             at: Position::before(root.child(0)).expect("a statement of the body"),
@@ -1024,11 +1039,77 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                 },
             ));
         }
-        // A condition that runs an action is no canvas edit's to change.
-        if let Some(statement) = first_site(
-            document,
-            |node| matches!(node, Node::Stmt(Stmt::If { condition, .. }) if !acts(Node::Expr(condition))),
-        ) {
+        // A lowering-owned guard has the source span of its enclosing call,
+        // while an authored conditional starts at its own `if` or `elif`.
+        let raw_condition = first_site(document, |node| {
+            matches!(node,
+            Node::Stmt(Stmt::If { condition, .. }) if !acts(Node::Expr(condition)))
+        });
+        let authored_condition = lowered.source_map.as_ref().and_then(|map| {
+            map.sites.iter().find_map(|entry| {
+                let Some(Node::Stmt(Stmt::If { condition, .. })) = document.node(&entry.site)
+                else {
+                    return None;
+                };
+                if acts(Node::Expr(condition)) {
+                    return None;
+                }
+                entry
+                    .location
+                    .ranges()
+                    .iter()
+                    .any(|span| {
+                        case.source.get(span.start..span.end).is_some_and(|text| {
+                            let text = text.trim_start();
+                            ["if", "elif"].iter().any(|keyword| {
+                                text.strip_prefix(keyword)
+                                    .and_then(|rest| rest.chars().next())
+                                    .is_some_and(|next| next == '(' || next.is_whitespace())
+                            })
+                        })
+                    })
+                    .then(|| entry.site.clone())
+            })
+        });
+        if let Some(statement) = raw_condition.filter(|raw| {
+            dialect.format == SourceFormat::TypeScriptV1 && Some(raw) != authored_condition.as_ref()
+        }) {
+            let mut draft = Draft::open(document.clone()).expect("the imported source");
+            let refusal = draft
+                .apply(
+                    &Transaction {
+                        base,
+                        edits: vec![Operation::ChangeCondition {
+                            base,
+                            statement,
+                            condition: Expr::Literal(Literal::Bool(false)),
+                        }],
+                    },
+                    &environment,
+                    &[
+                        lash_dialect_typescript::CONVENTIONS,
+                        lash_dialect_python::CONVENTIONS,
+                    ],
+                )
+                .expect_err("a generated forwarding guard has no authored condition edit");
+            assert!(
+                refusal.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.kind,
+                    lash_kernel_edit::EditDiagnosticKind::Unprintable { .. }
+                )),
+                "{refusal:?}"
+            );
+            assert_eq!(
+                draft.document(),
+                document,
+                "a generated-guard refusal is atomic"
+            );
+            eprintln!(
+                "K-CAP-004 generated guard refused atomically: {}",
+                case.name
+            );
+        }
+        if let Some(statement) = authored_condition {
             operations.push((
                 statement.clone(),
                 Operation::ChangeCondition {

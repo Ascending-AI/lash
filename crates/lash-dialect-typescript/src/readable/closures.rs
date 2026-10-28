@@ -38,10 +38,7 @@ impl Lifter<'_> {
                 if authored_name(value) != Some(name.as_str()) {
                     continue;
                 }
-                if let Some(function) = self.closure(
-                    value,
-                    &Site::new(lash_kernel_value::sites::Unit::Main, Vec::new()),
-                )? {
+                if let Some(function) = self.closure(value)? {
                     if matches!(function.body, Body::Expr(_))
                         && let [
                             super::source::Stmt {
@@ -59,8 +56,8 @@ impl Lifter<'_> {
         Ok(None)
     }
 
-    /// The function `value`, at `site`, is the token of, when it is one.
-    pub(super) fn closure(&mut self, value: &k::Expr, _site: &Site) -> Lift<Option<Function>> {
+    /// The function `value` is the token of, when it is one.
+    pub(super) fn closure(&mut self, value: &k::Expr) -> Lift<Option<Function>> {
         let Some(Token {
             path: bound,
             length: declared,

@@ -797,3 +797,10 @@ dataframe_law_plans = { srcs = ["src/laws/continuation/dataframe_plans.rs"] }
 
 [filegroups.lash-kernel-conformance]
 control_law_plans = { srcs = ["src/helper_plan_control_generated.rs"] }
+
+# Zero-edit admission reads the standalone examples under their declared catalogues.
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["test"]
+targets = ["workflow_laws"]
+data = ["//examples:typescript_host_flow_cells", "//examples/kernel-engine-hello:package_files"]

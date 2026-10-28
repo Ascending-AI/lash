@@ -2,6 +2,65 @@
 use crate::adapter::BinaryOp;
 use crate::types::Ty;
 
+pub(crate) const UPDATE: Update = Update {
+    numeric: BinaryOp::Add,
+    conversion: "ts.to_numeric",
+    general: "ts.step",
+};
+pub(crate) struct Update {
+    pub numeric: BinaryOp,
+    pub conversion: &'static str,
+    pub general: &'static str,
+}
+pub(crate) struct NumericUpdate<'a> {
+    pub snapshot: &'a lash_kernel_value::Name,
+    pub target: &'a lash_kernel_value::Name,
+    pub operator: &'static str,
+}
+impl Update {
+    pub fn recognize<'a>(
+        &self,
+        block: &'a [lash_kernel_doc::Stmt],
+        is: impl Fn(&lash_kernel_value::FunctionId, &str) -> bool,
+    ) -> Option<NumericUpdate<'a>> {
+        use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
+        let [
+            Stmt::Let {
+                name: snapshot,
+                value: Rhs::Expr(Expr::Variable(target)),
+            },
+            Stmt::Assign {
+                place: Place::Variable(written),
+                value: Rhs::Expr(Expr::Call { function, args }),
+                order: AssignOrder::ValueFirst,
+            },
+            ..,
+        ] = block
+        else {
+            return None;
+        };
+        let [Expr::Variable(old), Expr::Literal(Literal::Float(delta))] = args.as_slice() else {
+            return None;
+        };
+        let native = binary(self.numeric)
+            .direct(&Ty::Float, &Ty::Float)?
+            .function();
+        if written != target || old != snapshot || !is(function, native) {
+            return None;
+        }
+        let operator = match delta.get() {
+            1.0 => "++",
+            -1.0 => "--",
+            _ => return None,
+        };
+        Some(NumericUpdate {
+            snapshot,
+            target,
+            operator,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Direct {
     Numeric(&'static str),
