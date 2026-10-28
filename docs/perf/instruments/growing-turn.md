@@ -313,6 +313,21 @@ different quantities and must not be added together. The sampler includes its
 own observation buffers. No threshold, capacity promise or timing claim follows
 from this run.
 
+For non-pending populations, add `--idle-wait-seconds 121` to observe the
+standard replay window after traffic stops. `idle-aged` samples the population
+after that wait without reading replay. `idle-expired` then samples after the
+host calls `InMemoryLiveReplayStore::expire_idle_sessions`, recording the number
+of released windows. `idle-expired-trimmed` follows when trim is selected. The
+store performs lazy expiry on traffic and offers this explicit host tick for
+quiet periods, as ADR 0002 specifies; waiting alone does not schedule expiry.
+These samples precede the same durable reopen probe.
+
+The DHAT window still ends at the final population endpoint before the wait.
+Its retained-site profile therefore describes the live replay window. Finishing
+DHAT releases profiler bookkeeping before `idle-aged`; use ordinary allocator
+runs for before/after memory comparisons and the adjacent aged/expired samples
+to isolate the expiry tick.
+
 
 ### Recorded population on 2026-10-28
 

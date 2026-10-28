@@ -41,6 +41,9 @@ pub(super) struct Options {
     /// Build this many sessions before each population sample.
     #[arg(long, default_value_t = 25)]
     wave_size: usize,
+    /// Wait this long at the final population, then sample before and after the host replay expiry tick.
+    #[arg(long, default_value_t = 0)]
+    idle_wait_seconds: u64,
 }
 
 struct Tools {
@@ -183,7 +186,11 @@ async fn boot(
     args: &Args,
     counts: Arc<ScriptCounts>,
     meter: Arc<measure::Meter>,
-) -> Result<(lash::LashCore, Option<lash::vm::WorkerPool>)> {
+) -> Result<(
+    lash::LashCore,
+    Option<lash::vm::WorkerPool>,
+    Arc<lash::observe::InMemoryLiveReplayStore>,
+)> {
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         &args.database,
         lash_sqlite_store::SqliteSynchronous::Full,
@@ -216,7 +223,11 @@ async fn boot(
     } else {
         (lash::LashCore::standard_builder(backend), None)
     };
+    let replay = Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+        lash::DataRetention::standard().live_replay,
+    ));
     let core = builder
+        .live_replay_store(replay.clone())
         .commit_budget(lash::CommitBudget::bounded(256 * 1024 * 1024, 1_000_000))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -234,7 +245,7 @@ async fn boot(
             lash::persistence::LeaseOwnerId::new("idlepop"),
             lash::persistence::LeaseIncarnationId::new(format!("idlepop-{}", std::process::id())),
         ))?;
-    Ok((core, pool))
+    Ok((core, pool, replay))
 }
 fn id(ordinal: usize) -> Result<lash::SessionId> {
     Ok(lash::SessionId::try_from(format!("idlepop-{ordinal:08}"))?)
@@ -408,7 +419,7 @@ pub(super) async fn run(args: &Args, meter: &Arc<measure::Meter>) -> Result<()> 
     );
     let identity = identity(args)?;
     let counts = Arc::new(ScriptCounts::default());
-    let (core, pool) = boot(args, Arc::clone(&counts), Arc::clone(meter)).await?;
+    let (core, pool, replay) = boot(args, Arc::clone(&counts), Arc::clone(meter)).await?;
     let baseline = lash_perf::GLOBAL_ALLOCATOR.stats();
     let mut held = Vec::new();
     let mut parks = Vec::new();
@@ -489,6 +500,21 @@ pub(super) async fn run(args: &Args, meter: &Arc<measure::Meter>) -> Result<()> 
     }
     // End the heap window while the measured population is still retained.
     meter.finish_profile(true)?;
+    if args.idle.idle_wait_seconds > 0 {
+        tokio::time::sleep(Duration::from_secs(args.idle.idle_wait_seconds)).await;
+        let residency = quiescent(&core, pool.as_ref(), args.sessions, args.idle.idle_mode).await?;
+        let mut population = json!({"identity":identity,"sessions":args.sessions,
+            "residency":residency,"idle_wait_seconds":args.idle.idle_wait_seconds,
+            "history":history(args,args.sessions)?,"expiry_tick":false});
+        meter.population_sample("idle-aged", args.idle.history_turns, population.clone())?;
+        population["expiry_tick"] = json!(true);
+        population["replay_sessions_expired"] = json!(replay.expire_idle_sessions());
+        meter.population_sample("idle-expired", args.idle.history_turns, population.clone())?;
+        if args.trim_at_idle {
+            native::trim()?;
+            meter.population_sample("idle-expired-trimmed", args.idle.history_turns, population)?;
+        }
+    }
     if let Some((call, handle)) = sample_pending {
         super::resolve(&core, &call).await?;
         finished(handle).await?;
