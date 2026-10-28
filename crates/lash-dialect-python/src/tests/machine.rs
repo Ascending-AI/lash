@@ -1883,6 +1883,21 @@ await build()
         execution_observation_with_layout(on.clone(), BOUNDS, true, ExecutionStrategy::Optimized),
         reference
     );
+    // FIG-7513: terminal held bytes must not depend on whether an earlier
+    // memory-pressure sweep already collected unreachable cycles.
+    assert_eq!(
+        execution_observation_with_memory(
+            on.clone(),
+            Bounds {
+                memory: 43_520,
+                ..BOUNDS
+            },
+            false,
+            ExecutionStrategy::Optimized,
+        ),
+        execution_observation_with_memory(on.clone(), BOUNDS, false, ExecutionStrategy::Optimized,),
+        "completed guest state is independent of earlier memory pressure",
+    );
     for charge_limit in 0..=reference.charged {
         let bounds = Bounds {
             charge_limit,

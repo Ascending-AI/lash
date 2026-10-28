@@ -116,7 +116,9 @@ impl KernelMachine {
             tasks.each_value(visit);
             session.each_value(visit);
         };
-        self.arena.borrow_mut().release(&mut roots);
+        let mut arena = self.arena.borrow_mut();
+        arena.collect_cycles(&mut roots);
+        arena.release(&mut roots);
     }
 
     /// Writes `value` to register `out`, growing the registers to it.
