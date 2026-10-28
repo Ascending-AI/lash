@@ -11,6 +11,7 @@ fn slot_parts(slot: Slot) -> (u8, u32) {
         Slot::Departure(n) => (5, n),
         Slot::Continuation(n) => (6, n),
         Slot::Scratch(n) => (7, n),
+        Slot::Capture(n) => (8, n),
     }
 }
 pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
@@ -52,6 +53,7 @@ impl TokenCodec for Slot {
             5 => Self::Departure(n),
             6 => Self::Continuation(n),
             7 => Self::Scratch(n),
+            8 => Self::Capture(n),
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
     }

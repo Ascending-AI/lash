@@ -399,7 +399,13 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                                     continue;
                                 }
                                 let site = stream.source_sites[pc as usize].as_ref().unwrap();
-                                *sites.entry((site.as_ref().clone(), op.kind())).or_insert(0) += 1;
+                                let kind = match op {
+                                    lash_kernel_exec::Op::Operator { .. } => {
+                                        lash_kernel_exec::OpKind::Call
+                                    }
+                                    _ => op.kind(),
+                                };
+                                *sites.entry((site.as_ref().clone(), kind)).or_insert(0) += 1;
                             }
                         }
                         blocks.extend(stmt.form.blocks());

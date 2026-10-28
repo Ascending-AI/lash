@@ -24,6 +24,9 @@ pub enum Slot {
     Departure(u32),
     Continuation(u32),
     Scratch(u32),
+    /// A frame's borrowed reach to a captured variable cell. The declaring
+    /// binding and closure entity own the priced occurrences.
+    Capture(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -142,6 +142,45 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         &access,
     );
     assert_eq!(ledger.balance().unwrap(), cold.balance().unwrap());
+    // Entering a closure adopts reach to its cells, rather than creating
+    // another value occurrence for every physical capture slot.
+    let capture = Owner::Value {
+        task: TaskId::MAIN,
+        depth: 0,
+        slot: Slot::Capture(0),
+    };
+    admit(
+        &mut ledger,
+        vec![
+            Change::Allocate {
+                entity: id(2),
+                body: Holding::scalar(49),
+            },
+            Change::Roots(vec![(owner(0), Some(value(16, &[2], &access)))]),
+        ],
+        129,
+        &access,
+    );
+    admit(
+        &mut ledger,
+        vec![Change::Roots(vec![
+            (owner(0), None),
+            (capture, Some(value(0, &[2], &access))),
+        ])],
+        129,
+        &access,
+    );
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 113);
+    let root = ledger.seal(&access, budget()).unwrap().unwrap();
+    let mut cold = Ledger::open(root).unwrap();
+    assert_eq!(cold.balance().unwrap(), ledger.balance().unwrap());
+    admit(
+        &mut cold,
+        vec![Change::Roots(vec![(capture, None)])],
+        113,
+        &access,
+    );
+    assert_eq!(cold.balance().unwrap().total().unwrap(), 64);
 }
 
 /// K-BND-003 / K-MACH-008: source-retained cycles and unreferenced ended
