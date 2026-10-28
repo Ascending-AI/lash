@@ -347,6 +347,16 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
     Ok(())
 }
 
+// Engine metadata belongs to counted startup. Its randomized compiler caches
+// must not be initialized by whichever workload first admits a schema.
+pub(super) fn prepare_schema_engines() {
+    let _ = jsonschema::draft4::meta::validator();
+    let _ = jsonschema::draft6::meta::validator();
+    let _ = jsonschema::draft7::meta::validator();
+    let _ = jsonschema::draft201909::meta::validator();
+    let _ = jsonschema::draft202012::meta::validator();
+}
+
 /// Run `lash-perf replay-gate`; the exit code is the verdict.
 pub async fn run_gate(args: &GateArgs) -> Result<i32> {
     let budgets = gate::Budgets::committed()?;

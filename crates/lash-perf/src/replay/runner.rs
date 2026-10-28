@@ -430,6 +430,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let backend_name = meter.backend().to_owned();
     lash_core::perf_witness::sql_shapes::work::set_window(None, "node_start");
     let (start_before, start_shapes, _) = meter.read_with_shapes(0).await;
+    if matches!(options.store, StoreChoice::CountedSqliteFile(_)) {
+        super::prepare_schema_engines();
+    }
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .config(replay_settings())

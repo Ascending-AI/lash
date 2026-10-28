@@ -21,6 +21,7 @@ pub fn python_worker_entry() -> Result<bool, lash::vm::PoolError> {
     let python = !args.iter().any(|a| a == "--replay-typescript");
     lash_vm_worker::worker_entry(&move |tuning| {
         if counted {
+            super::prepare_schema_engines();
             let mut previous = crate::GLOBAL_ALLOCATOR.stats();
             let counter = instructions
                 .then(crate::perf_support::instructions::InstructionCounter::open_threads)
