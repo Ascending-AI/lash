@@ -184,8 +184,15 @@ impl Build<'_> {
             }
             let begin = self.ops[at - 3].begin.take();
             let live = self.ops[at - 3].live.clone();
-            let Op::Store { inputs, .. } = &mut self.ops[at].op else {
+            let Op::Store { inputs, cache, .. } = &mut self.ops[at].op else {
                 unreachable!()
+            };
+            *cache = match reads[index] {
+                Read::Literal {
+                    value: Value::Text(_),
+                    ..
+                } => begin.as_ref().map(|begin| begin.id),
+                _ => None,
             };
             *inputs = Some(Box::new(StoreInputs {
                 reads,

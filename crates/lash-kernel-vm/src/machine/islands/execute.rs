@@ -1170,6 +1170,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     field,
                     pc,
                     inputs,
+                    cache,
                     finish,
                 } => {
                     let values = match inputs {
@@ -1183,7 +1184,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let ordered = inputs
                         .as_ref()
                         .map_or(values, |inputs| inputs.roles.map(|at| values[at]));
-                    let statement = frame.statement;
+                    let statement = *cache;
                     let stored = self.retaining(&mut frame.transient, |island| {
                         island.store(statement, *field, ordered[0], ordered[1], ordered[2])
                     });
