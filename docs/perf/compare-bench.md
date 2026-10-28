@@ -180,7 +180,7 @@ The source-matched charge census has 383 executable programs, 5 lower, 378
 equal and no higher charges. Full evidence is in
 `/workspace/notes/lash/tasks/lanes/r33/pyjson.evidence/report.md`.
 
-## Monty baseline before FIG-7465
+## Monty comparison
 
 The archived full optimized run on 2026-10-27 completed all **17/17 Python workloads**
 on Monty 1.4.0. All **170/170 measured Monty outputs exactly equal CPython's**,
@@ -208,27 +208,47 @@ not a latency claim. Values below are median incremental instructions/op;
 ratios above one mean Lash executed more instructions. Different Python/TS
 work units, especially sorting, keep their own denominators.
 
-| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Likely cause from source |
+The nine core rows below were updated for FIG-7486 on 2026-10-28 from the
+full optimized source `46a6d6efdc`, based on main `8ed4923df3`. The other rows
+retain the archived measurements above and do not describe current acceptance. The new run uses one warmup, three
+low/high pairs and factor 20, with exact charge and memory metering enabled
+under an 8 GiB address-space cap. All 85 engine/workload rows passed checksum
+and source/geometry checks. All 204 scoped Lash windows and 306 reference
+process windows qualified at >=99% PMU running time.
+
+Every owned core row meets 2x Monty. Across all 34 Lash rows, none regresses
+more than 1% against the fresh starting full baseline `1c93dfa7cfd2`; the
+largest increase is Python `int_to_string` at 0.825%. Every TS/QuickJS row
+meets 10x, with a maximum of 9.881560x. Shared-host wall time is unclaimed.
+Seven owned rows remain above parity, and complete intrinsic-cost attribution
+remains open. Raw results, the starting ratios and causal diagnostics are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-core.evidence/`, particularly
+`compare-summary.md`, `accepted.json` and `semantic-costs.md`.
+
+| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Cause or remaining work |
 |---|---:|---:|---:|---:|---|
 | object_sort | 90770.03 | 7769.08 | 11.68× | 8.87× | Key extraction calls a Python lambda and reads each record before the native key sort; the secant is nonlinear. |
 | map_set_string | 45581.25 | 5408.45 | 8.43× | 8.01× | Each batch builds 1,000 text keys twice, stores dictionary entries and checks membership. |
 | records | 174035856.11 | 20827344.47 | 8.36× | 8.51× | Two materialized comprehensions, dictionary reads and helper-based summation traverse 10,000 records. |
 | templating | 3461959.00 | 565692.79 | 6.12× | 7.34× | Two f-string substitutions per line use Python formatting helpers before text concatenation. |
 | sort_bench | 21633352.16 | 5576494.58 | 3.88× | 22.98× | Text conversion, list population and order-checking surround the native sort. |
-| array_read | 2194.81 | 695.25 | 3.16× | 8.64× | Ten indexed reads per trip retain typed access guards and VM operand handling. |
-| prop_read | 2338.00 | 1023.24 | 2.28× | 9.89× | Four dictionary reads per trip use the proven dictionary helper, including its membership check. |
+| array_read | 857.31 | 695.25 | 1.23× | 8.65× | Source-certified integer reads fuse pure operands and preserve Python tuples; a 27 instr/op memory-admission diagnostic leaves a residual unassigned. |
+| prop_read | 1081.26 | 1023.25 | 1.06× | 9.88× | Source-certified map reads reuse the resident VM member path; a 27 instr/op memory-admission diagnostic leaves a residual unassigned. |
 | string_build1 | 2483.33 | 1242.50 | 2.00× | 8.41× | The inner loop repeatedly concatenates and replaces text with Python add semantics. |
-| float_arith | 2431.69 | 1251.47 | 1.94× | 2.36× | Multiply and float-add operations retain Python numeric dispatch alongside loop control. |
-| prop_write | 1409.00 | 742.00 | 1.90× | 9.63× | Four resident map stores per trip retain VM/store bookkeeping around each update. |
-| empty_loop | 325.99 | 193.53 | 1.68× | 3.42× | Only range/loop control and VM metering remain; their individual shares are unmeasured. |
-| object_build | 5897.86 | 3768.07 | 1.57× | 1.90× | Record/list allocation, integer remainder and list append occur once per object. |
-| func_closure_call | 2472.99 | 1771.85 | 1.40× | 6.98× | Four calls per trip mutate a captured binding, adding closure access to call/return work. |
-| func_call | 1182.99 | 902.59 | 1.31× | 2.95× | Four virtual calls per trip return a constant, so call/return and accumulation are the main work. |
+| float_arith | 608.28 | 1251.33 | 0.49× | 2.36× | The existing typed scalar path was already below Monty at the fresh starting baseline. |
+| prop_write | 1163.24 | 741.94 | 1.57× | 9.64× | Resident map writes avoid the generic heap context; the 26 instr/op memory-admission diagnostic explains only part of the remaining cost. |
+| empty_loop | 320.03 | 193.55 | 1.65× | 3.43× | Scalar-loop charge formulas cost about 33 instr/op in the diagnostic; the remaining excess is unassigned. |
+| object_build | 5202.81 | 3768.07 | 1.38× | 1.91× | Maps stream register operands and eligible append uses a source certificate; a 515 instr/op memory-admission diagnostic is only partial attribution. |
+| func_closure_call | 2477.26 | 1771.87 | 1.40× | 6.98× | The existing call and captured-cell paths remain; the 3 instr/op memory-admission diagnostic leaves closure overhead open. |
+| func_call | 1048.25 | 902.55 | 1.16× | 2.95× | Outlining heap construction/mutation removes dispatch code-generation regressions; the 3 instr/op memory-admission diagnostic leaves call overhead open. |
 | int_to_string | 1770.70 | 1470.97 | 1.20× | 3.43× | Three integer conversions per trip use the Python string helper and native number formatting. |
-| int_arith | 534.99 | 720.53 | 0.74× | 2.43× | The scalar integer loop reaches numeric natives; its measured instruction count is below Monty. |
+| int_arith | 527.05 | 720.49 | 0.73× | 2.43× | The existing typed integer path remains below Monty. |
 
-The cause column is a source-based hypothesis, not a profile or causal
-ablation. Typed indexing is selected in
+The memory and fee deltas in the updated core rows come from controlled
+first-candidate iteration ablations, not final optimized component costs.
+They explain only part of the above-parity cost; the remainder is open
+implementation work, not a measured intrinsic semantic cost. The archived
+rows' cause text remains a source-based hypothesis. Typed indexing is selected in
 [`lower/subscripts.rs`](../../crates/lash-dialect-python/src/lower/subscripts.rs).
 Its Python helper definitions, numeric/string operations and mutation rules
 are in [`core.kernel`](../../crates/lash-ext-py-helpers/src/helpers/core.kernel).
