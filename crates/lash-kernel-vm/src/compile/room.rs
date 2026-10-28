@@ -1,0 +1,473 @@
+//! Source memory programs. Compilation records source obligations; production
+//! admission continues to use its existing metric until the ledger cutover.
+#![allow(
+    dead_code,
+    reason = "checked phase-one projection; admission consumes it in phase two"
+)]
+
+use lash_kernel_doc::{self as doc, LogicalHeldV1 as Cost};
+use lash_kernel_value::sites::{Site, Unit};
+use lash_kernel_value::{FunctionId, Name};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+mod derive;
+mod evaluate;
+mod verify;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Phase {
+    Enter,
+    Open,
+    Next,
+    Check,
+    Item,
+    Test,
+    Catch,
+    Commit,
+    Fallthrough,
+    Leave,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Point {
+    pub(crate) site: Site,
+    pub(crate) phase: Phase,
+}
+
+pub(crate) struct Prefix<'a> {
+    pub(crate) source: &'a Arc<Source>,
+    pub(crate) at: &'a Site,
+}
+
+/// Source owner selectors, instantiated per invocation and loop occurrence.
+/// Scope selects active bindings in its source subtree; Operands selects its
+/// pending source occurrences. Sessions selects durable session roots. These
+/// groups are disjoint, and Frame names only the header. A departure transfers
+/// outside them before cleanup. No selector refers to physical registers.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Owner {
+    Operand(Site),
+    Selected(Site),
+    Sessions(Site),
+    SessionCell { at: Site, name: Name },
+    Atom { at: Site, index: u32 },
+    Departure(Site),
+    HookArgument { at: Site, phase: Phase, index: u32 },
+    HookResult { at: Site, phase: Phase },
+    Cell { declared: Site, name: Name },
+    Binding { declared: Site, name: Name },
+    Visible { at: Site, name: Name },
+    Scope(Site),
+    Operands(Site),
+    Frame(Site),
+    Entity(Site),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CallSource {
+    Body(FunctionId),
+    Native(FunctionId),
+    Dynamic,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Measure {
+    Local(Owner),
+    /// Direct member occurrences, plus record field-name payload bytes. Pooled
+    /// children cost one reference; aliased mutable bodies are owned separately.
+    Members(Site),
+    Release(Box<[Owner]>),
+    CaptureEdges(Site),
+    MemberDelta(Site),
+    MemberGrowth(Site),
+    NativeScratch {
+        at: Site,
+        function: FunctionId,
+    },
+    CallPeak {
+        at: Site,
+        callee: CallSource,
+    },
+    CallDelta {
+        at: Site,
+        callee: CallSource,
+    },
+    NativeRelease {
+        at: Site,
+        callee: CallSource,
+        owners: Box<[Owner]>,
+    },
+}
+
+/// A checked integer polynomial over logical source facts. Only member updates
+/// and callee deltas are signed. Missing facts and overflow fail eligibility.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Amount {
+    pub(crate) fixed: i128,
+    pub(crate) terms: BTreeMap<Measure, i128>,
+}
+impl Amount {
+    fn fixed(n: u64) -> Self {
+        Self {
+            fixed: n.into(),
+            ..Self::default()
+        }
+    }
+    fn term(mut self, m: Measure, coefficient: i128) -> Self {
+        *self.terms.entry(m).or_default() += coefficient;
+        self
+    }
+    fn evaluate(&self, facts: &dyn Facts) -> Option<i128> {
+        self.terms.iter().try_fold(self.fixed, |sum, (m, c)| {
+            let value = match m {
+                Measure::CallPeak { at, callee } => i128::from(
+                    facts
+                        .call(at, *callee)?
+                        .for_call(*callee, facts.resolved(at))?
+                        .peak_extra,
+                ),
+                Measure::CallDelta { at, callee } => {
+                    facts
+                        .call(at, *callee)?
+                        .for_call(*callee, facts.resolved(at))?
+                        .retained_delta
+                }
+                Measure::MemberGrowth(at) => {
+                    facts.measure(&Measure::MemberDelta(at.clone()))?.max(0)
+                }
+                Measure::NativeScratch { at, function } => {
+                    let call = facts.call(at, CallSource::Native(*function))?;
+                    call.for_call(CallSource::Native(*function), None)?;
+                    i128::from(call.native_contract.as_ref()?.peak_scratch_bytes()?)
+                }
+                Measure::NativeRelease { at, callee, owners } => {
+                    let called = facts.call(at, *callee)?;
+                    called.for_call(*callee, facts.resolved(at))?;
+                    if called.native {
+                        facts.measure(&Measure::Release(owners.clone()))?
+                    } else {
+                        0
+                    }
+                }
+                _ => facts.measure(m)?,
+            };
+            if value < 0 && !matches!(m, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
+                return None;
+            }
+            sum.checked_add(value.checked_mul(*c)?)
+        })
+    }
+}
+
+/// Facts belong to the source ledger at one occurrence. Release removes an
+/// itemized owner group atomically, so aliases cannot release an entity twice.
+/// A callee result can only be built by evaluating its checked source program
+/// or the exact native contract; an unchecked peak number is not a fact.
+pub(crate) trait Facts {
+    fn measure(&self, measure: &Measure) -> Option<i128>;
+    fn call(&self, at: &Site, callee: CallSource) -> Option<&CheckedRoom>;
+    fn raised(&self) -> bool;
+    fn resolved(&self, at: &Site) -> Option<FunctionId>;
+}
+pub(crate) trait Execution {
+    fn event(&mut self, point: &Point) -> Option<Box<dyn Facts + '_>>;
+    /// Selected from the source condition/cursor, not a plan's trip count.
+    fn choose(&mut self, site: &Site) -> Option<bool>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ExitKind {
+    Normal,
+    Return,
+    Raise,
+    Action,
+    Finish,
+    Fail,
+    Break,
+    Continue,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Event {
+    pub(crate) point: Point,
+    pub(crate) inputs: Box<[Owner]>,
+    pub(crate) output: Option<Owner>,
+    pub(crate) entities: Box<[Owner]>,
+    pub(crate) peak: Amount,
+    pub(crate) delta: Amount,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Exit {
+    pub(crate) point: Point,
+    /// Canonical source prefix. The existing charge projection owns its units
+    /// and maps this coordinate to the earliest unpaid region head.
+    pub(crate) charge_prefix: Point,
+    pub(crate) kind: ExitKind,
+    pub(crate) owners: Box<[Owner]>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Scratch {
+    pub(crate) at: Point,
+    pub(crate) function: FunctionId,
+    pub(crate) amount: Amount,
+    /// The primitive's contract owns all scratch, qualified by function + at.
+    pub(crate) normal: Point,
+    pub(crate) raised: Point,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SourceRoom {
+    pub(crate) source: Site,
+    pub(crate) peak_extra: BTreeMap<Point, Event>,
+    pub(crate) retained_delta: BTreeMap<Point, Event>,
+    pub(crate) scratch: Box<[Scratch]>,
+    pub(crate) exits: Box<[Exit]>,
+}
+
+/// Immutable source authority retained separately from the projections. The
+/// verifier reads this tree, not a second consumer of SourceRoom's formulas.
+pub(crate) struct Source {
+    pub(crate) owner: doc::constant_pool::PoolOwner,
+    pub(crate) site: Site,
+    pub(crate) body: Arc<doc::Block>,
+    pub(crate) params: Box<[Name]>,
+    pub(crate) shared: BTreeMap<(Site, Name), bool>,
+    pub(crate) persistent: BTreeMap<Site, Name>,
+    pub(crate) calls: BTreeMap<FunctionId, CallSource>,
+    pub(crate) room: SourceRoom,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    Source,
+    Peak,
+    Retained,
+    Scratch,
+    Exit,
+    Path,
+    Facts,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Balance {
+    pub(crate) peak_extra: u64,
+    pub(crate) retained_delta: i128,
+}
+
+/// Constructors are private to checked source/native evaluation.
+pub(crate) struct CheckedRoom {
+    owner: doc::constant_pool::PoolOwner,
+    native: bool,
+    whole: bool,
+    native_contract: Option<doc::NativeResourceContract>,
+    balance: Balance,
+    exit: ExitKind,
+}
+impl CheckedRoom {
+    fn for_call(&self, callee: CallSource, resolved: Option<FunctionId>) -> Option<&Balance> {
+        let function = match callee {
+            CallSource::Body(f) | CallSource::Native(f) => f,
+            CallSource::Dynamic => resolved?,
+        };
+        (self.whole
+            && self.owner == doc::constant_pool::PoolOwner::Function(function)
+            && (matches!(callee, CallSource::Dynamic)
+                || self.native == matches!(callee, CallSource::Native(_)))
+            && matches!(
+                self.exit,
+                ExitKind::Normal | ExitKind::Return | ExitKind::Raise
+            ))
+        .then_some(&self.balance)
+    }
+    /// Input holdings remain with the caller until the primitive exits. This
+    /// bound includes temporary entities that leave before the returned exit.
+    pub(crate) fn native(
+        function: FunctionId,
+        contract: &doc::NativeResourceContract,
+    ) -> Option<Self> {
+        let retained = contract.retained_bytes()?;
+        let peak = contract.peak_extra_bytes()?;
+        Some(Self {
+            owner: doc::constant_pool::PoolOwner::Function(function),
+            native: true,
+            whole: true,
+            native_contract: Some(contract.clone()),
+            balance: Balance {
+                peak_extra: peak,
+                retained_delta: retained.into(),
+            },
+            exit: match contract.exit {
+                doc::NativeResourceExit::Returned => ExitKind::Return,
+                doc::NativeResourceExit::Raised => ExitKind::Raise,
+            },
+        })
+    }
+    pub(crate) fn balance(&self) -> Balance {
+        self.balance
+    }
+}
+impl Source {
+    pub(crate) fn compile(
+        owner: doc::constant_pool::PoolOwner,
+        site: Site,
+        body: &doc::Block,
+        params: &[Name],
+        mut shared: BTreeMap<(Site, Name), bool>,
+        catalog: &dyn doc::FunctionCatalog,
+        private: &std::collections::BTreeSet<Name>,
+    ) -> Self {
+        let mut persistent = BTreeMap::new();
+        if site.unit == Unit::Main {
+            for (index, stmt) in body.iter().enumerate() {
+                if let doc::Stmt::Let { name, .. } = stmt
+                    && !private.contains(name)
+                {
+                    let at = child(&site, index);
+                    persistent.insert(at.clone(), name.clone());
+                    shared.insert((at, name.clone()), true);
+                }
+            }
+        }
+        let mut calls = BTreeMap::new();
+        let mut pending = vec![doc::Node::Block(body)];
+        while let Some(node) = pending.pop() {
+            if let doc::Node::Expr(doc::Expr::Call { function, .. }) = node {
+                let body = catalog.header(function).is_some_and(|h| {
+                    matches!(
+                        h.implementation,
+                        doc::ImplementationKind::Guest | doc::ImplementationKind::Both
+                    )
+                });
+                calls.insert(
+                    *function,
+                    if body {
+                        CallSource::Body(*function)
+                    } else {
+                        CallSource::Native(*function)
+                    },
+                );
+            }
+            if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
+                for target in [&via.open]
+                    .into_iter()
+                    .chain(via.next.iter())
+                    .chain(via.check.iter())
+                    .chain(via.item.iter())
+                {
+                    if let doc::FunctionTarget::Local(function) = target {
+                        let has_body = catalog.header(function).is_some_and(|h| {
+                            matches!(
+                                h.implementation,
+                                doc::ImplementationKind::Guest | doc::ImplementationKind::Both
+                            )
+                        });
+                        calls.insert(
+                            *function,
+                            if has_body {
+                                CallSource::Body(*function)
+                            } else {
+                                CallSource::Native(*function)
+                            },
+                        );
+                    }
+                }
+            }
+            node.children_into(&mut pending);
+        }
+        let pool = doc::constant_pool::ConstantPool::extract(owner, body);
+        let mut source = Self {
+            owner,
+            site: site.clone(),
+            body: Arc::new(body.clone()),
+            params: params.into(),
+            shared,
+            persistent,
+            calls,
+            room: SourceRoom {
+                source: site,
+                peak_extra: BTreeMap::new(),
+                retained_delta: BTreeMap::new(),
+                scratch: Box::new([]),
+                exits: Box::new([]),
+            },
+        };
+        source.room = derive::body(&source, &pool);
+        source
+    }
+    pub(crate) fn verify(&self) -> Result<(), Refused> {
+        verify::body(self, &self.room)
+    }
+    pub(crate) fn verify_room(&self, room: &SourceRoom) -> Result<(), Refused> {
+        verify::body(self, room)
+    }
+    /// A finite source execution, including selected branches and repeated
+    /// source loop tests. Budget exhaustion is an eligibility miss.
+    pub(crate) fn evaluate(
+        &self,
+        execution: &mut impl Execution,
+        budget: usize,
+    ) -> Result<CheckedRoom, Refused> {
+        self.verify()?;
+        evaluate::prefix(self, &self.site, execution, budget)
+    }
+    pub(crate) fn evaluate_prefix(
+        &self,
+        at: &Site,
+        execution: &mut impl Execution,
+        budget: usize,
+    ) -> Result<CheckedRoom, Refused> {
+        self.verify()?;
+        evaluate::prefix(self, at, execution, budget)
+    }
+}
+fn point(site: &Site, phase: Phase) -> Point {
+    Point {
+        site: site.clone(),
+        phase,
+    }
+}
+fn child(site: &Site, index: usize) -> Site {
+    let mut s = site.clone();
+    s.path.push(index as u32);
+    s
+}
+fn operand(site: &Site) -> Owner {
+    Owner::Operand(site.clone())
+}
+fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
+    match node {
+        doc::Node::Expr(doc::Expr::If { .. }) => return vec![Owner::Selected(site.clone())].into(),
+        doc::Node::Expr(doc::Expr::Let { .. }) => return vec![operand(&child(site, 1))].into(),
+        doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::While { .. }) => return Box::new([]),
+        _ => {}
+    }
+    node.children()
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| matches!(n, doc::Node::Expr(_) | doc::Node::Action(_)))
+        .map(|(i, _)| operand(&child(site, i)))
+        .collect()
+}
+fn release(owners: impl IntoIterator<Item = Owner>) -> Measure {
+    Measure::Release(owners.into_iter().collect())
+}
+fn shared(shared: &BTreeMap<(Site, Name), bool>, site: &Site, name: &Name) -> u64 {
+    if shared.get(&(site.clone(), name.clone())) == Some(&true) {
+        Cost::OBJECT
+    } else {
+        0
+    }
+}
+
+fn atoms(action: &doc::Action) -> &[doc::Atom] {
+    match action {
+        doc::Action::Call { args, .. }
+        | doc::Action::Spawn { args, .. }
+        | doc::Action::Perform { args, .. } => args,
+        doc::Action::Join { task } | doc::Action::Cancel { task } => std::slice::from_ref(task),
+        doc::Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
+        doc::Action::Await { value, .. } => std::slice::from_ref(value),
+        doc::Action::Yield => &[],
+    }
+}
+
+fn hook(target: &doc::FunctionTarget, calls: &BTreeMap<FunctionId, CallSource>) -> CallSource {
+    match target {
+        doc::FunctionTarget::Local(f) => calls[f],
+        doc::FunctionTarget::Import(_) => CallSource::Dynamic,
+    }
+}

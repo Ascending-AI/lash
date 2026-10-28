@@ -24,12 +24,33 @@ pub(crate) struct Lib {
 /// The exact admitted function's resolved specialization facts. Register sites
 /// project these facts; they never select a native implementation by name.
 pub(crate) struct Specialization {
+    pub(crate) resource: super::room::CallSource,
     pub(crate) function: FunctionId,
     pub(crate) prepared: Option<(Entry, Fast)>,
     pub(crate) native: lash_kernel_doc::NativeSpecialization,
 }
 
 impl Lib {
+    /// Every prepared, metered, typed, scalar, heap and joined-text entry uses
+    /// this exact declaration. Inspecting its source is cold and preserves
+    /// ordinary preparation's body laziness.
+    #[allow(dead_code, reason = "phase-one source projection inspected by laws")]
+    pub(crate) fn source_room<'e>(&self, exe: &'e Executable) -> Option<&'e super::room::Source> {
+        let code = match self.run {
+            LibRun::Body(code)
+            | LibRun::Native {
+                body: Some(code), ..
+            } => code,
+            _ => return None,
+        };
+        let source = &exe.code(code).source_room;
+        (self.specialization.resource
+            == super::room::CallSource::Body(self.specialization.function)
+            && source.owner
+                == doc::constant_pool::PoolOwner::Function(self.specialization.function))
+        .then_some(source.as_ref())
+    }
+
     pub(crate) fn body_arity(&self, given: usize) -> bool {
         given <= self.arity
             && self.header.signature.params[given..]

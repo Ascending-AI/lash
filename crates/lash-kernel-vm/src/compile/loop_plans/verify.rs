@@ -494,6 +494,28 @@ impl LoopPlan {
     /// an allocating plan. Summaries are numbered in order: the head 0,
     /// then the body's statements depth first.
     pub(crate) fn verify(&self, lowered: &Lowered<'_>, loop_test: u64) -> Result<(), Refused> {
+        self.source_room.verify().map_err(Refused::Room)?;
+        if (lowered.block)(self.source_block).site != self.source_room.site {
+            return Err(Refused::Room(super::super::room::Refused::Source));
+        }
+        let mut blocks = vec![self.source_block];
+        let mut source_site = None;
+        while let Some(id) = blocks.pop() {
+            let block = (lowered.block)(id);
+            for (index, stmt) in block.stmts.iter().enumerate() {
+                if *stmt == self.stmt {
+                    source_site = Some(block.site.child(index as u32));
+                }
+                blocks.extend((lowered.stmt)(*stmt).form.blocks());
+            }
+        }
+        let at = super::super::room::Point {
+            site: source_site.ok_or(Refused::Room(super::super::room::Refused::Source))?,
+            phase: super::super::room::Phase::Test,
+        };
+        if at.site != self.source_site || !self.source_room.room.peak_extra.contains_key(&at) {
+            return Err(Refused::Room(super::super::room::Refused::Source));
+        }
         if self.loop_test != loop_test {
             return Err(Refused::LoopTest);
         }

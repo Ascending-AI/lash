@@ -49,6 +49,8 @@ impl Compiler<'_> {
         free: bool,
     ) -> Code {
         let site = self.site();
+        let source_body = body;
+        let source_params = params;
         // A body's statements have roles of their own: the operands of an
         // enclosing expression are no role of theirs.
         let enclosing = std::mem::take(&mut self.live);
@@ -133,7 +135,29 @@ impl Compiler<'_> {
             .chain(free.iter().map(|(name, _)| name.clone()))
             .collect();
         capture_names.sort();
+        let owner = match site.unit {
+            Unit::Library(function) => doc::constant_pool::PoolOwner::Function(function),
+            Unit::Main | Unit::Function(_) => {
+                doc::constant_pool::PoolOwner::Document(self.document_owner.unwrap_or_else(|| {
+                    unreachable!("admitted document compilation names its exact owner")
+                }))
+            }
+        };
+        let source_room = Arc::new(room::Source::compile(
+            owner,
+            site.clone(),
+            source_body,
+            source_params,
+            scopes
+                .slots
+                .iter()
+                .map(|s| ((s.declared.clone(), s.name.clone()), s.shared))
+                .collect(),
+            self.resolve.library.registry.as_ref(),
+            self.private,
+        ));
         Code {
+            source_room,
             capture_names,
             created: None,
             site,

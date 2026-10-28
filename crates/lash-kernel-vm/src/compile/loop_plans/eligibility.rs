@@ -5,29 +5,42 @@ use super::*;
 /// Why lowering does not admit a formed plan.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Refused {
+    Room(super::super::room::Refused),
     /// A summary's fixed units are not its program's fixed events.
-    Fixed { statement: usize },
+    Fixed {
+        statement: usize,
+    },
     /// A charge region's head states a total its events do not sum to.
-    Region { region: u32 },
+    Region {
+        region: u32,
+    },
     /// A program's events are not the stream's, in order.
-    Program { statement: usize },
+    Program {
+        statement: usize,
+    },
     /// The iteration maximum is not the head's, the dearest path's and the
     /// loop-test unit's sum, or not 0 for an allocating plan.
     Iteration,
     /// A summary's reads or write are not the slots its ops read and
     /// write, or the plan's session bindings are not the ones its ops
     /// use, in order.
-    Slots { statement: usize },
+    Slots {
+        statement: usize,
+    },
     /// The call sites are not the occurrences of the calls its ops make.
     Calls,
     /// The loop-test unit is not the cost table's.
     LoopTest,
     /// The plan's statements, arms or declarations are not the lowered
     /// code's, or its head is not its loop's.
-    Shape { statement: usize },
+    Shape {
+        statement: usize,
+    },
     /// A summary says it allocates where its ops do not, or the other way
     /// round, or the plan does where none of its summaries does.
-    Allocates { statement: usize },
+    Allocates {
+        statement: usize,
+    },
 }
 
 /// The lowered code a plan is formed and checked against: its stream, its

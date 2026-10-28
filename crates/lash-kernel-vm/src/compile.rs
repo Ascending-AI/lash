@@ -57,6 +57,7 @@ mod occurrences;
 mod parameters;
 mod preparation;
 mod reads;
+pub(crate) mod room;
 mod scopes;
 mod template_meter;
 mod templates;
@@ -170,6 +171,12 @@ impl Tables {
     ) -> Result<usize, KirError> {
         let mut stmts = Vec::with_capacity(self.stmts.len());
         for code in &self.codes {
+            assert_eq!(
+                code.source_room.verify(),
+                Ok(()),
+                "source room at {}",
+                code.site
+            );
             let mut pending = vec![code.body];
             while let Some(block) = pending.pop() {
                 for id in &self.blocks[(block.0 - base.blocks) as usize].stmts {
@@ -751,6 +758,7 @@ impl Executable {
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
+    pub(crate) source_room: Arc<room::Source>,
     /// Sorted lexical capture names distinguish compilations of one lifted body.
     pub(crate) capture_names: Vec<Name>,
     pub(crate) created: Option<Site>,

@@ -170,6 +170,8 @@ pub(crate) struct Block {
 
 /// A body that runs as an island.
 pub(crate) struct IslandPlan {
+    pub(crate) source_room: std::sync::Arc<super::room::Source>,
+    pub(crate) source_site: lash_kernel_value::sites::Site,
     pub(crate) code: CodeId,
     /// Where each parameter sits, in order.
     pub(crate) params: Box<[u32]>,
@@ -188,8 +190,11 @@ pub(crate) struct IslandPlan {
 /// Why lowering does not admit a formed plan.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Refused {
+    Room(super::room::Refused),
     /// A region an op closes is not stated as its table sums it.
-    Region { region: u32 },
+    Region {
+        region: u32,
+    },
     /// A counted site is not at the occurrence the stream numbers.
     Calls,
 }
@@ -326,6 +331,8 @@ pub(super) fn form(
         };
         let body = former.block(code.body);
         let plan = IslandPlan {
+            source_room: std::sync::Arc::clone(&code.source_room),
+            source_site: code.site.clone(),
             code: CodeId(codes + index as u32),
             params: code.params.iter().map(|param| param.at).collect(),
             captures: code
@@ -1411,6 +1418,10 @@ impl IslandPlan {
     /// headed there with the total its `RegionSummary` gives, and every
     /// counted site is at the occurrence the stream numbers, in op order.
     pub(crate) fn verify(&self, stream: &super::Stream) -> Result<(), Refused> {
+        if self.source_site != self.source_room.site {
+            return Err(Refused::Room(super::room::Refused::Source));
+        }
+        self.source_room.verify().map_err(Refused::Room)?;
         let mut calls = Vec::new();
         verify_block(&self.body, stream, &mut calls)?;
         if *calls != *self.calls {
@@ -1423,6 +1434,8 @@ impl IslandPlan {
     #[cfg(test)]
     pub(crate) fn copied(&self) -> Self {
         Self {
+            source_room: std::sync::Arc::clone(&self.source_room),
+            source_site: self.source_site.clone(),
             code: self.code,
             params: self.params.clone(),
             captures: self.captures.clone(),

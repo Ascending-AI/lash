@@ -374,6 +374,9 @@ impl Head {
 
 /// A `while` or a `for` loop that runs as a batch of whole iterations.
 pub(crate) struct LoopPlan {
+    pub(crate) source_room: std::sync::Arc<super::room::Source>,
+    pub(crate) source_block: BlockId,
+    pub(crate) source_site: lash_kernel_value::sites::Site,
     pub(crate) stmt: StmtId,
     pub(crate) head: Head,
     pub(crate) body: Body,
@@ -498,7 +501,21 @@ impl Formation<'_> {
             test.counted(&mut calls);
         }
         body.calls(&mut calls);
+        let mut pending = vec![code.body];
+        let mut source_site = None;
+        while let Some(block_id) = pending.pop() {
+            let block = (self.lowered.block)(block_id);
+            for (index, stmt) in block.stmts.iter().enumerate() {
+                if *stmt == id {
+                    source_site = Some(block.site.child(index as u32));
+                }
+                pending.extend((self.lowered.stmt)(*stmt).form.blocks());
+            }
+        }
         Some(LoopPlan {
+            source_room: std::sync::Arc::clone(&code.source_room),
+            source_block: code.body,
+            source_site: source_site?,
             stmt: id,
             head,
             body,
@@ -1303,7 +1320,8 @@ impl LoopPlan {
         let Head::While(test) = &self.head else {
             return None;
         };
-        let run = typed::compile(exe, registers, exe.charging(), Some(test), &self.body, 0)?;
+        let run=typed::compile(exe, registers, exe.charging(), Some(test), &self.body, 0,
+            super::room::Prefix {source:&self.source_room,at:&self.source_site})?;
         run.whole.then_some(run)
     }
 
@@ -1311,6 +1329,9 @@ impl LoopPlan {
     #[cfg(test)]
     pub(crate) fn copied(&self) -> Self {
         Self {
+            source_room: std::sync::Arc::clone(&self.source_room),
+            source_block: self.source_block,
+            source_site: self.source_site.clone(),
             stmt: self.stmt,
             head: self.head.clone(),
             body: self.body.clone(),

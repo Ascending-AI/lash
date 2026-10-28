@@ -538,6 +538,11 @@ impl Prepared {
         } else {
             Vec::new()
         };
+        let resource = if matches!(run, LibRun::Body(_) | LibRun::Native { body: Some(_), .. }) {
+            super::room::CallSource::Body(function)
+        } else {
+            super::room::CallSource::Native(function)
+        };
         LibSlot {
             lib: Lib {
                 index: id,
@@ -550,6 +555,7 @@ impl Prepared {
                 limit,
                 specialization: super::library::Specialization {
                     function,
+                    resource,
                     prepared,
                     native,
                 },

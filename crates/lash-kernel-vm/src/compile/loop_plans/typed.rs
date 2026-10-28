@@ -68,6 +68,16 @@ pub(crate) struct Typed {
     /// It is a `while`'s test and its whole body:
     /// it runs whole iterations ([`Typed::repeat`]).
     pub(crate) whole: bool,
+    #[allow(
+        dead_code,
+        reason = "phase-one source projection; consumed by ledger admission later"
+    )]
+    pub(crate) source_room: std::sync::Arc<super::super::room::Source>,
+    #[allow(
+        dead_code,
+        reason = "phase-one prefix selector; ledger admission follows"
+    )]
+    pub(crate) source_site: lash_kernel_value::sites::Site,
 }
 
 /// What admits each iteration a whole loop's typed run repeats: the charge
@@ -829,6 +839,7 @@ pub(super) fn compile(
     test: Option<&Summary>,
     body: &Body,
     from: usize,
+    source: super::super::room::Prefix<'_>,
 ) -> Option<Typed> {
     let mixed = test.and_then(|test| Mixed::compile(exe, registers, charged, test, body, from));
     let floats = Builder::<f64>::new(exe, registers, charged).program(test, body, from);
@@ -842,6 +853,8 @@ pub(super) fn compile(
     // body. A shorter prefix must return to the ordinary register program.
     let homogeneous = mixed.is_none() || covers == body.steps.len() - from;
     Some(Typed {
+        source_room: std::sync::Arc::clone(source.source),
+        source_site: source.at.clone(),
         floats: floats.and_then(|(program, covered)| {
             (homogeneous && covered == covers).then(|| program.fused())
         }),

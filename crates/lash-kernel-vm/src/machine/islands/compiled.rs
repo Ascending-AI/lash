@@ -52,6 +52,11 @@ pub(crate) struct Compiled {
     pub(super) has_restarts: bool,
     room: u32,
     observes: bool,
+    #[allow(
+        dead_code,
+        reason = "phase-one source projection; consumed by ledger admission later"
+    )]
+    pub(crate) source_room: std::sync::Arc<crate::compile::room::Source>,
 }
 
 /// Private copies used only when a source region's charge close refuses.
@@ -315,6 +320,22 @@ pub(crate) struct RepeatSite {
 }
 
 impl Compiled {
+    #[cfg(test)]
+    pub(crate) fn verify_room_projections(&self, exe:&Executable)->Result<usize,crate::compile::room::Refused> {
+        let mut checked=0;
+        for instruction in &self.ops {
+            if let Op::Header {id,repeat:Some(repeat),..}=&instruction.op {
+                let plan=exe.islands.scalar.iter().find(|p|p.stmt==*id).ok_or(crate::compile::room::Refused::Source)?;
+                if !std::sync::Arc::ptr_eq(&repeat.run.source_room,&plan.source_room) || repeat.run.source_site!=plan.source_site {
+                    return Err(crate::compile::room::Refused::Source);
+                }
+                repeat.run.source_room.verify()?;
+                checked+=1;
+            }
+        }
+        Ok(checked)
+    }
+
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
         let stream = plan.stream(exe);
         let mut measure = Build::new(exe, &plan.shared, stream, None, 0);
@@ -367,6 +388,7 @@ impl Compiled {
         };
         Some(Self {
             literal,
+            source_room: std::sync::Arc::clone(&plan.source_room),
             layout: Layout::of(plan)?,
             blocks: cx.blocks,
             cleanups: cx.ops.iter().any(|instruction| {
