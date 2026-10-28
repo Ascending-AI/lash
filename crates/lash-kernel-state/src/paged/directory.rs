@@ -403,7 +403,7 @@ pub mod execution {
     use lash_kernel_doc::TaskId;
     use lash_kernel_value::names::Name;
 
-    /// A cursor holding retains identity roots without another PageValue header.
+    /// The iterable or pending hook item owned by a source loop.
     #[derive(Clone)]
     pub struct IteratedRecord(pub PageValue);
     impl TokenCodec for IteratedRecord {
@@ -416,10 +416,7 @@ pub mod execution {
     }
     impl Cell for IteratedRecord {
         fn cost(&self) -> u64 {
-            match &self.0 {
-                PageValue::Tuple(tuple) => tuple.summary.cost.0,
-                _ => 0,
-            }
+            value_cost(&self.0)
         }
         fn task_edges(&self) -> u64 {
             self.0.task_edges()
@@ -716,7 +713,6 @@ pub mod execution {
                 self.bindings.cost(),
                 self.iterated.cost(),
                 self.departing.cost(),
-                self.arguments.as_ref().map_or(0, Tree::cost),
                 self.pending.as_ref().map_or(0, PendingRecord::cost),
             ])
         }

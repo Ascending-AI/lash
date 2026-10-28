@@ -64,14 +64,40 @@ impl Frames {
             let local = match self.cache.iter().find(|(at, _)| *at == index) {
                 Some((_, frame)) => {
                     let mut local = lash_kernel_doc::LogicalHeldV1::FRAME;
+                    let code = self.exe.code(frame.code);
+                    let mut add =
+                        |value: &lash_kernel_doc::Value| -> Result<(), HeapFault> {
+                            local = local.checked_add(arena.logical_local(value)?).ok_or_else(
+                                || HeapFault::Malformed("frame holding cost overflow".into()),
+                            )?;
+                            Ok(())
+                        };
+                    for (at, slot) in frame.slots.values.iter().enumerate() {
+                        match slot {
+                            super::SlotState::Value(value) => add(value)?,
+                            super::SlotState::Cell(cell)
+                                if !code
+                                    .captures
+                                    .iter()
+                                    .any(|capture| capture.inner_at as usize == at) =>
+                            {
+                                add(&lash_kernel_doc::Value::ObjectRef(*cell))?;
+                            }
+                            super::SlotState::Cell(_) | super::SlotState::Empty => {}
+                        }
+                    }
+                    if let Some(pending) = frame.pending.peek() {
+                        for role in &pending.roles {
+                            add(&role.value)?;
+                        }
+                    }
                     let mut problem = None;
-                    frame.each_value(&mut |value| match arena.logical_local(value).and_then(|n| {
-                        local.checked_add(n).ok_or_else(|| {
-                            HeapFault::Malformed("frame holding cost overflow".into())
-                        })
-                    }) {
-                        Ok(n) => local = n,
-                        Err(e) => problem = Some(e),
+                    frame.visit_held(&mut |value| match add(value) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            problem = Some(e);
+                            false
+                        }
                     });
                     if let Some(e) = problem {
                         return Err(e);
