@@ -39,7 +39,11 @@ impl Meter {
             ),
             started: Instant::now(),
             closed: std::sync::atomic::AtomicBool::new(false),
-            rounds: args.rounds,
+            rounds: if matches!(args.phase, super::Phase::IdlePopulation) {
+                args.idle.history_turns
+            } else {
+                args.rounds
+            },
             bytes: args.payload_bytes,
             every: args.checkpoint_every,
             previous: Mutex::new(None),
@@ -169,7 +173,7 @@ impl Meter {
             "allocation_scope":"cumulative traffic, not temporary live bytes or unique payload bytes"}))
     }
 }
-pub(super) fn store(path: &std::path::Path) -> Result<Value> {
+fn store(path: &std::path::Path) -> Result<Value> {
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(std::time::Duration::from_secs(15))?;
     // One read transaction makes all store quantities describe the same head.
@@ -251,7 +255,7 @@ fn process(pid: u32, role: &str) -> Result<Value> {
         "descriptors":count("fd")?, "threads":count("task")?}),
     )
 }
-pub(super) fn processes() -> Result<Vec<Value>> {
+fn processes() -> Result<Vec<Value>> {
     let host = std::process::id();
     let mut rows = vec![process(host, "host")?];
     // Children can be spawned by any Tokio thread, so inspect every task's

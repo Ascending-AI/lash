@@ -37,7 +37,7 @@ pub(super) struct Options {
     idle_protocol: Protocol,
     /// Completed turns per session, each with two model calls and one tool round.
     #[arg(long, default_value_t = 20)]
-    history_turns: usize,
+    pub(super) history_turns: usize,
     /// Build this many sessions before each population sample.
     #[arg(long, default_value_t = 25)]
     wave_size: usize,
@@ -108,7 +108,7 @@ fn provider(protocol: Protocol, counts: Arc<ScriptCounts>) -> lash_core::provide
                 m.role == LlmRole::User && m.blocks.iter().any(|b| matches!(b, LlmContentBlock::Text { .. }))
             }).unwrap_or(0);
             let messages = &request.messages[current..];
-            let result = messages.iter().flat_map(|m| &m.blocks)
+            let result = messages.iter().flat_map(|m| m.blocks.iter())
                 .any(|b| matches!(b, LlmContentBlock::ToolResult { .. }));
             let pending = messages.first().is_some_and(|m| m.blocks.iter().any(|b| {
                 matches!(b, LlmContentBlock::Text { text, .. } if text.as_ref() == "idlepop-pending")
@@ -346,8 +346,7 @@ pub(super) async fn run(args: &Args, meter: &measure::Meter) -> Result<()> {
         .filter(|n| *n == 0 || n.is_multiple_of(args.idle.wave_size) || *n == args.sessions)
     {
         for ordinal in previous_count + 1..=count {
-            let session = core
-                .session(id(ordinal)?)
+            core.session(id(ordinal)?)
                 .create(lash::SessionCreation::root(lash::SessionSpec::new(
                     MODEL,
                     lash::TurnBudget::Unbounded,
@@ -355,6 +354,7 @@ pub(super) async fn run(args: &Args, meter: &measure::Meter) -> Result<()> {
                     lash::NoProgressBudget::bounded(12),
                 )))
                 .await?;
+            let session = core.session(id(ordinal)?).open().await?;
             for _ in 0..args.idle.history_turns {
                 finished(
                     session
@@ -363,6 +363,7 @@ pub(super) async fn run(args: &Args, meter: &measure::Meter) -> Result<()> {
                 )
                 .await?;
             }
+            drop(session.observe().snapshot().await?);
             match args.idle.idle_mode {
                 Mode::Held => held.push(session),
                 Mode::Parked => {
