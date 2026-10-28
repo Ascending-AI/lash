@@ -53,7 +53,7 @@ fn source_frame_costs_distinguish_owned_values_captures_and_formula_mirrors() {
             )
             .unwrap();
     }
-    assert_eq!(frame.bindings.cost(), 16 + 0 + 48);
+    assert_eq!(frame.bindings.cost(), 16 + 48);
     for (at, (value, expected)) in [
         (tuple.clone(), 48),
         (PageValue::List(list), 16),
