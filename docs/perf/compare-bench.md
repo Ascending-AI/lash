@@ -187,57 +187,72 @@ equal and no higher charges. Full evidence is in
 
 ## Monty comparison
 
-The FIG-7485 second-pass snapshot on 2026-10-28 uses full optimized source
-`861eb0f84e1e2c83cb0b73345a7c92e02b7016e6`, based on main
-`13c6be0c63b44e5ccb9d3d56be912ef6b474f1f5`. It includes pymonty-coll,
-triage29 and FIG-7510's shared admission implementation. Every numeric row
-below comes from this single snapshot. The fresh starting baseline was
-`1ed410899125068dfd653cd9546cf1accaaa73c6`.
+The combined FIG-7484 second-pass snapshot on 2026-10-28 uses full optimized
+implementation `59de4bf4a3f7`, based on main `fc858ca10f04`.
+It includes FIG-7485's resident-text installation change and FIG-7510's shared
+admission implementation, plus FIG-7513's unpaid-region replay repair.
+Every numeric row below comes from this snapshot.
+The fresh starting baseline is `1ed410899125`.
 
-All 85 engine/workload rows and 850 samples passed independent source,
-result, reference identity, trip and work-unit checks. Five low/high pairs,
-one warmup and factor 20 ran on CPU 0 with observation off, exact charge
-and held-byte accounting, and an 8 GiB address-space cap. All 340 scoped
-Lash and 510 reference instruction windows qualified at >=99% PMU running
-time. Values are median incremental instructions/op. Python and TS retain
-their separate work denominators. Shared-host wall time is unclaimed.
+All 85 engine/workload rows and 510 samples passed source, result, reference
+identity, trip and work-unit checks. Three low/high pairs, one warmup and
+factor 20 ran on CPU 0 with observation off, exact charge and held-byte
+accounting, and an 8 GiB address-space cap. All 204 scoped Lash and 306 reference
+PMU windows ran at 100%; all 102 Monty outputs matched CPython. No Lash row
+regressed more than 1% against either the fresh baseline or the landed
+FIG-7485 snapshot. Every TS/QuickJS row meets 10x. Values are median
+incremental instructions/op; Python and TS retain their separate denominators.
+Shared-host wall time is unclaimed. These completed receipts are reused after
+clean delivery rebases under lane-mechanics.md section 3.
 
-No Lash row regressed more than 1% against the fresh baseline; the maximum
-was +0.4940% for TS prop_write. Every TS/QuickJS instruction ratio is <=10x,
-with a maximum of 9.8761x for prop_read. string_build1 fell 9.8925%, from
-2481.42 to 2235.94 instructions/append. templating fell 4.0298%, from
-1112375.05 to 1067548.11 instructions/trip. int_to_string is unchanged.
+Collection lowering now normalizes private comprehension bindings in their
+own region. JSON numbers borrow validated token spans, inline integer output
+reuses the existing formatter, and member results reuse register assignment
+destinations. The completed 383-source census records 14 charge reductions
+and no increases; all outcomes equal the fresh baseline.
+
+The collection rows remain above parity, so FIG-7484 stays open. Memory-off
+net deltas do not explain the full gaps; changed execution censuses are
+excluded from causal intrinsic-cost attribution. No complete intrinsic floor
+is claimed. Current raw results, source/executable identities, counters and
+correctness receipts are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-coll2.evidence/`, especially
+`qualified-full.json`, `qualified-full-verification.json`, `qualified-full-assessment.json`,
+`final-charge-verification.json`, `delivery-proof.json` and
+`semantic-costs.json`.
 
 | Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
 |---|---:|---:|---:|---:|
-| object_sort | 15244.98 | 7769.02 | 1.9623x | 8.8736x |
-| map_set_string | 6135.30 | 5409.23 | 1.1342x | 6.7391x |
-| records | 37882815.26 | 20827404.95 | 1.8189x | 8.5195x |
-| sort_bench | 7545993.00 | 5577089.84 | 1.3530x | 7.2184x |
-| json_transform | 2694601.74 | 1599345.53 | 1.6848x | 1.7970x |
-| string_build1 | 2235.94 | 1242.44 | 1.7996x | 7.6102x |
-| templating | 1067548.11 | 565598.68 | 1.8875x | 3.0844x |
-| empty_loop | 319.96 | 193.43 | 1.6541x | 3.4335x |
-| prop_write | 1164.25 | 742.01 | 1.5691x | 9.6392x |
-| func_closure_call | 2485.26 | 1771.87 | 1.4026x | 6.9931x |
-| object_build | 5184.42 | 3767.55 | 1.3761x | 1.8991x |
-| array_read | 880.70 | 695.25 | 1.2667x | 8.6916x |
-| func_call | 1050.25 | 902.57 | 1.1636x | 2.9593x |
-| prop_read | 1105.26 | 1023.27 | 1.0801x | 9.8761x |
-| int_to_string | 1207.91 | 1470.95 | 0.8212x | 3.4683x |
-| int_arith | 526.98 | 720.68 | 0.7312x | 2.4364x |
-| float_arith | 608.26 | 1251.32 | 0.4861x | 2.3623x |
+| object_sort | 15071.72 | 7769.01 | 1.9400x | 8.8169x |
+| map_set_string | 6042.77 | 5409.96 | 1.1170x | 6.6950x |
+| records | 34366589.63 | 20827336.37 | 1.6501x | 8.4153x |
+| sort_bench | 7478126.47 | 5576355.37 | 1.3410x | 7.0596x |
+| json_transform | 2526136.84 | 1599915.89 | 1.5789x | 1.7472x |
+| string_build1 | 2211.86 | 1242.32 | 1.7804x | 7.5155x |
+| templating | 1058323.00 | 565783.37 | 1.8705x | 3.0608x |
+| empty_loop | 320.01 | 193.49 | 1.6539x | 3.4343x |
+| prop_write | 1141.99 | 741.96 | 1.5392x | 9.5514x |
+| func_closure_call | 2465.00 | 1771.85 | 1.3912x | 6.9359x |
+| object_build | 5119.22 | 3767.59 | 1.3588x | 1.8696x |
+| array_read | 877.60 | 695.26 | 1.2623x | 8.6492x |
+| func_call | 1042.00 | 902.55 | 1.1545x | 2.9363x |
+| prop_read | 1098.99 | 1023.26 | 1.0740x | 9.8161x |
+| int_to_string | 1195.92 | 1479.97 | 0.8081x | 3.4446x |
+| int_arith | 526.93 | 720.52 | 0.7313x | 2.4359x |
+| float_arith | 608.27 | 1251.38 | 0.4861x | 2.3621x |
 
-Resident text construction now installs its known metadata directly.
+The landed FIG-7485 change installs resident text metadata directly.
 Owned append already transfers the String and chunk buffer. Its new immutable
 header no longer walks generic body members, cold chunks or flat collection
 summaries, or replaces Facts already cleared when their slot was released.
 Resident joins and concatenations use the same installer in both dialects.
 Tokens, zero-list membership, residency, old operand summaries, work admission,
-charge formulas and rollback remain unchanged. All seven matched charge and
-held-byte probes equal the baseline. Workloads, prices and budgets are unchanged.
+charge formulas and rollback remain unchanged. The original seven matched
+charge and held-byte probes equalled that lane's baseline. Workloads, prices
+and budgets are unchanged.
 
-A controlled full optimized ablation removes only the formula-bound refusal,
+An archived FIG-7485 full optimized ablation removes only the formula-bound
+refusal,
 keeping exact-mode executor flags, formula evaluation, charge totals and memory
 admission. Five 1/500-trip pairs preserve outputs and execution census; all
 adapter resource totals agree, and the source is restored afterward. Removing
@@ -248,12 +263,12 @@ These are effects of one check implementation, not an intrinsic lower bound.
 The larger unexplained residual remains. FIG-7485 stays open under the rule
 that an above-parity row needs a complete measured semantic explanation.
 
-Python 159/159, VM 216/216 and SQLite 14/14 passed on this integrated tree.
-Conformance passed 139/142; the exact three failures also execute and fail on
-plain parent main 13c6be0c63. Full conformance is not a passing gate.
+The completed lane proof covers 527 distinct tests, with 524 passes and
+three existing conformance failures. Full conformance is not a passing gate.
+The SQLite durability targets passed all 14 tests.
 
-Raw results, executable/source identities, per-window counters, the charge
-census, parent counterfactuals and the causal ablation are in
+The archived FIG-7485 executable/source identities, counters, charge census,
+parent counterfactuals and causal ablation are in
 `/workspace/notes/lash/tasks/lanes/r33/pymonty-str2.evidence/`, especially
 `after.json`, `verification.json`, `matrix-summary.json`, `charge-census.json`,
 `integrated-core-verdict.json`, `integrated-parent-verdict.json` and
@@ -268,6 +283,9 @@ suspensions and sleep; they do not expose Lash's deterministic formula budget.
 The exact tag and published source identity are retained in
 `monty-source-identity.json`. Full reference executable identities remain in
 `after.json` and `baseline-binaries.sha256`.
+
+The combined Lash executable SHA-256 is
+`0285bf05a9c7bc723400aa7bf6a07fc97ea8cd26605fc571bb7a4198d5eaa42b`.
 
 `--profile <directory>` performs a separate `perf record` run per selected lash
 workload and dialect, writing perf data, perf-script stacks, and Inferno folded
