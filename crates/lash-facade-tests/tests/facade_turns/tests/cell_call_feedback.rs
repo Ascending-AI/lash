@@ -25,6 +25,62 @@ fn message_strings<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
     }
 }
 
+#[derive(Default)]
+struct ReceiptTools {
+    pages: StdMutex<Vec<serde_json::Value>>,
+}
+
+fn receipt_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
+        format!("tool:{name}"),
+        format!("tools.{name}"),
+        "Write a fixture page.",
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object"}),
+    )
+    .expect("receipt tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+}
+
+#[async_trait]
+impl ToolProvider for ReceiptTools {
+    fn tool_manifests(
+        &self,
+        config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
+        let mut manifests = AppTools.tool_manifests(config)?;
+        manifests
+            .extend(["create_page", "reject_page"].map(|name| receipt_definition(name).manifest()));
+        Ok(manifests)
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
+        match name {
+            "tools.create_page" => Some(Arc::new(receipt_definition("create_page").contract())),
+            "tools.reject_page" => Some(Arc::new(receipt_definition("reject_page").contract())),
+            _ => AppTools.resolve_contract(name, config),
+        }
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.name().as_str() {
+            "tools.create_page" => {
+                self.pages.lock_recover().push(call.args.clone());
+                lash_core::ToolOutcome::ok(call.args.clone()).into()
+            }
+            "tools.reject_page" => lash_core::ToolOutcome::err_fmt("page write rejected").into(),
+            _ => AppTools.execute(call).await,
+        }
+    }
+}
+
 /// A core whose sessions are created under `presentation`, answering from
 /// `responses` and recording each request's messages in `requests`.
 fn core(
@@ -79,7 +135,7 @@ fn core_with_feedback(
             lash_core::testing::tool_spec(
                 "tools",
                 lash::tool_provider_key!("tools"),
-                Arc::new(AppTools),
+                Arc::new(ReceiptTools::default()),
             ),
         )));
     let builder = if let Some(feedback) = feedback {
@@ -183,13 +239,9 @@ async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> 
     Ok(())
 }
 
-/// FIG-6293: a TypeScript and a Python cell each complete one host call and
-/// then fail. The model's next request lists that call by its recorded tool
-/// path, the durable id of the turn's ledger record and a bounded summary of
-/// its committed result, and says a completed call stays completed. Opened
-/// again by another core, configured with other presentation cuts, the
-/// session renders the same observation byte for byte, from the cuts it
-/// recorded.
+/// FIG-7530: a failed cell starts with its error, then names a completed
+/// write by its whole receipt beyond the old 512-byte prefix. A later failed
+/// call stays separate. Reopening renders the same recorded observation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> {
     for dialect in [
@@ -198,10 +250,19 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
     ] {
         {
             let case = format!("{} native", dialect.name());
+            let path = format!("wiki/{}", "receipt-".repeat(12));
+            let receipt = serde_json::json!({"body": "poem ".repeat(110), "path": path});
+            let input = serde_json::to_string(&receipt)?;
+            assert!(input.find(&path).expect("fixture path") > 512);
+            let failure = "x1 failure after committed write";
             let code = if dialect.name() == "python" {
-                "found = await tools.app_lookup({})\nraise ValueError('after the lookup')"
+                format!(
+                    "found = await tools.create_page({input})\ntry:\n    await tools.reject_page({{}})\nexcept Exception:\n    pass\nprint('printed after calls')\nraise ValueError('{failure}')"
+                )
             } else {
-                "const found = await tools.appLookup({});\nthrow new Error(\"after the lookup\");"
+                format!(
+                    "const found = await tools.createPage({input});\ntry {{ await tools.rejectPage({{}}); }} catch (error) {{}}\nconsole.log('printed after calls');\nthrow new Error(\"{failure}\");"
+                )
             };
             let responses: Responses = Arc::new(tokio::sync::Mutex::new(
                 [
@@ -233,8 +294,8 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                     .await;
             let lookup = output_tool_calls
                 .iter()
-                .find(|record| record.tool == "tools.app_lookup")
-                .unwrap_or_else(|| panic!("{case}: the turn's ledger holds the lookup"));
+                .find(|record| record.tool == "tools.create_page")
+                .unwrap_or_else(|| panic!("{case}: the turn's ledger holds the write"));
             let transcript = committed(&session)
                 .await
                 .transcript()
@@ -247,23 +308,64 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                 })
                 .unwrap_or_else(|| panic!("{case}: the failed cell is committed"));
             assert!(cell.result.is_failed(), "{case}: {:?}", cell.result);
-            let [call] = cell.calls.as_slice() else {
-                panic!("{case}: one completed call: {:?}", cell.calls);
+            let [call, rejected] = cell.calls.as_slice() else {
+                panic!("{case}: a completed and a failed call: {:?}", cell.calls);
             };
             assert_eq!(call.call_id.as_ref(), Some(&lookup.call_id), "{case}");
+            assert_eq!(lookup.args, receipt, "the write used the fixture receipt");
+            let failed_record = output_tool_calls
+                .iter()
+                .find(|record| record.tool == "tools.reject_page")
+                .expect("the rejected write is recorded");
+            assert_eq!(rejected.call_id.as_ref(), Some(&failed_record.call_id));
+            assert!(!failed_record.output.is_success());
 
             let observation = calls_observation(&requests.lock_recover()[1]);
-            // The row's members in their rendered order.
-            let block = format!(
-                "{{\"completed_calls\":[{{\"tool\":{},\"call_id\":{},\"outcome\":\"ok\",\"result_summary\":{{\"text\":\"{{\\\"ok\\\":true}}\",\"truncated\":false}}}}],\"omitted\":{{\"ok\":0,\"err\":0}}}}",
-                serde_json::to_string(&call.operation)?,
-                serde_json::to_string(&lookup.call_id)?,
-            );
-            assert!(observation.contains(&block), "{case}: {observation}");
+            let lash_core::CellOutcome::Failed(recorded_failure) = &cell.result else {
+                panic!("fixture cell must fail");
+            };
+            assert!(recorded_failure.message.contains(failure));
+            let error_first = observation.starts_with(&recorded_failure.message);
+            let whole_identifier = observation.contains(&path);
             assert!(
-                call.operation.ends_with("app_lookup"),
-                "{case}: {}",
-                call.operation
+                error_first && whole_identifier,
+                "{case}: error first={error_first}, whole identifier={whole_identifier}: {observation}"
+            );
+            let block = observation
+                .split("Calls:\n")
+                .nth(1)
+                .expect("calls")
+                .split("\n\n")
+                .next()
+                .expect("calls block");
+            let block: serde_json::Value = serde_json::from_str(block)?;
+            assert_eq!(
+                block["completed_calls"]
+                    .as_array()
+                    .expect("completed calls")
+                    .len(),
+                1
+            );
+            assert_eq!(block["completed_calls"][0]["tool"], "tools.create_page");
+            assert_eq!(
+                block["completed_calls"][0]["call_id"],
+                serde_json::json!(lookup.call_id)
+            );
+            assert_eq!(
+                block["failed_calls"]
+                    .as_array()
+                    .expect("failed calls")
+                    .len(),
+                1
+            );
+            assert_eq!(
+                block["failed_calls"][0]["call_id"],
+                serde_json::json!(failed_record.call_id)
+            );
+            assert_eq!(block["failed_calls"][0]["outcome"], "err");
+            assert!(
+                observation.find("Calls:").expect("calls")
+                    < observation.find("Output:").expect("prints")
             );
             assert!(
                 observation.contains(
@@ -277,8 +379,11 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
             // Another core, whose live cuts would omit every call.
             let mut live = lash::rlm::RlmPresentationConfig::standard();
             live.prompt_max_tool_calls = 0;
-            live.call_feedback =
-                lash::rlm::CallFeedbackPolicy::new(0, 0).expect("zero cuts are valid");
+            live.call_feedback = lash::rlm::CallFeedbackPolicy::new(
+                0,
+                lash::rlm::CallFeedbackPolicy::MIN_BLOCK_BYTES,
+            )
+            .expect("minimum block is valid");
             responses
                 .lock()
                 .await

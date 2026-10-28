@@ -25,20 +25,22 @@ pub struct ExecutedCall {
     /// source of truth: the [`ToolCallRecord`] under `call_id` is. The
     /// protocol that commits the cell's record derives it from that record,
     /// in the same commit, and never again. `None` in an executor's
-    /// response, and for a dispatch with no committed host record.
+    /// response, for a dispatch with no committed host record, or when the
+    /// recorded presentation has a zero result budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_summary: Option<CallResultSummary>,
 }
 
-/// A bounded prefix of a committed call result's canonical compact JSON,
-/// cut at a UTF-8 boundary, as a cell's next prompt shows it.
+/// A bounded structural preview of a committed call result. Scalar leaves
+/// stay whole; long strings carry a length marker, and containers name how
+/// many members they elide. This presentation text need not be valid JSON.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
 pub struct CallResultSummary {
     pub text: String,
-    /// Whether `text` is a cut prefix of the whole result.
+    /// Whether the preview shortened or elided any of the result.
     pub truncated: bool,
 }
 

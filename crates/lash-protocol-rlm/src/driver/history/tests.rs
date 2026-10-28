@@ -283,18 +283,19 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     let messages = render(&[crate::driver::tests::native_context(&event), event]);
     let observation = observation_text(&messages[1]);
 
-    let id =
-        serde_json::to_string(&lash_core::ToolCallId::fixture("module-ok")).expect("an id encodes");
+    let completed = serde_json::json!({
+        "tool": "module.ok", "call_id": lash_core::ToolCallId::fixture("module-ok"),
+        "outcome": "ok", "result_summary": {"text": "{\"item_id\":\"i-1\"}", "truncated": false},
+    });
+    let failed = serde_json::json!({
+        "tool": "module.fail", "call_id": null, "outcome": "err", "result_summary": null,
+    });
     assert_eq!(
         observation,
         format!(
-            "Calls:\n\
-             {{\"completed_calls\":[\
-             {{\"tool\":\"module.ok\",\"call_id\":{id},\"outcome\":\"ok\",\"result_summary\":{{\"text\":\"{{\\\"item_id\\\":\\\"i-1\\\"}}\",\"truncated\":false}}}},\
-             {{\"tool\":\"module.fail\",\"call_id\":null,\"outcome\":\"err\",\"result_summary\":null}}\
-             ],\"omitted\":{{\"ok\":0,\"err\":0}}}}\n\n\
-             read failed at secret.txt; cache failed at .cache/lash/state\n\n\
+            "read failed at secret.txt; cache failed at .cache/lash/state\n\n\
              Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.\n\n\
+             Calls:\n{{\"completed_calls\":[{completed}],\"failed_calls\":[{failed}],\"omitted\":{{\"ok\":0,\"err\":0}}}}\n\n\
              The completed calls above remain completed even though this cell failed. Do not repeat successful effecting calls when repairing the cell. A failed or interrupted call may still have produced effects; inspect its recorded outcome before deciding to retry."
         )
     );

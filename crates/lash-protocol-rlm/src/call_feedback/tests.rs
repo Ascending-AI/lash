@@ -1,4 +1,4 @@
-use super::{CallFeedbackPolicy, CallFeedbackPolicyError, framing, summarize, write_calls_block};
+use super::{CallFeedbackPolicy, CallFeedbackPolicyError, summarize, write_calls_block};
 
 fn call(operation: &str, ok: bool, id: &str, text: Option<&str>) -> lash_core::ExecutedCall {
     lash_core::ExecutedCall {
@@ -19,10 +19,6 @@ fn call(operation: &str, ok: bool, id: &str, text: Option<&str>) -> lash_core::E
     }
 }
 
-fn row(call: &lash_core::ExecutedCall) -> String {
-    serde_json::to_string(&super::Row::of(call)).expect("a row encodes")
-}
-
 fn block(calls: &[lash_core::ExecutedCall], max_calls: usize, max_block_bytes: usize) -> String {
     let policy = CallFeedbackPolicy::new(0, max_block_bytes).expect("a valid policy");
     let mut out = String::new();
@@ -30,94 +26,148 @@ fn block(calls: &[lash_core::ExecutedCall], max_calls: usize, max_block_bytes: u
     out
 }
 
-/// FIG-6293: a cell's calls block keeps whole rows, successful ones first,
-/// lists them in admission order, and counts exactly what it leaves out at
-/// each byte and count edge. Below its fixed framing it omits every call.
+/// FIG-7530: row and byte bounds never silently lose a completed call.
+/// Names fit whole or the notice reports the full earliest/latest ids.
 #[test]
 fn calls_block_budget_edges_render_exact_omission_counts() {
-    let calls = [
-        call("inbox.send_item", true, "a", Some("{\"item_id\":\"i-1\"}")),
-        call(
-            "inbox.fail_with_a_long_tool_path",
-            false,
-            "b",
-            Some("{\"error\":\"refused\"}"),
-        ),
-        call("inbox.read", true, "c", None),
-    ];
-    let [first, failed, last] = [row(&calls[0]), row(&calls[1]), row(&calls[2])];
-    assert!(failed.len() > last.len(), "the failed row is the widest");
-    let framed = framing(calls.len()).len();
+    let calls = (0..129)
+        .map(|index| {
+            call(
+                &format!("inbox.write_{index}"),
+                true,
+                &format!("write-{index}"),
+                None,
+            )
+        })
+        .collect::<Vec<_>>();
+    let rendered = block(&calls, 128, CallFeedbackPolicy::MAX_BLOCK_BYTES);
+    let (listing, notice) = rendered.split_once('\n').expect("omission notice");
+    let listing: serde_json::Value = serde_json::from_str(listing).expect("calls JSON");
     assert_eq!(
-        framing(calls.len()),
-        "{\"completed_calls\":[],\"omitted\":{\"ok\":3,\"err\":3}}"
+        listing["completed_calls"]
+            .as_array()
+            .expect("completed")
+            .len(),
+        128
     );
-    let both_ok = framed + first.len() + 1 + last.len();
+    assert_eq!(listing["omitted"]["ok"], 1);
+    assert!(notice.starts_with("Omitted 1 completed calls:"));
+    assert!(notice.contains("inbox.write_128"));
+    assert!(notice.contains(calls[128].call_id.as_ref().expect("id").as_str()));
 
-    // Exactly both successful rows fit: the earlier failure is skipped.
-    let rendered = block(&calls, 128, both_ok);
-    assert_eq!(
-        rendered,
-        format!("{{\"completed_calls\":[{first},{last}],\"omitted\":{{\"ok\":0,\"err\":1}}}}")
-    );
-    assert!(rendered.len() <= both_ok);
-    assert!(last.contains("\"result_summary\":null"), "{last}");
-
-    // One byte less: the last successful row no longer fits, nor the wider failure.
-    assert_eq!(
-        block(&calls, 128, both_ok - 1),
-        format!("{{\"completed_calls\":[{first}],\"omitted\":{{\"ok\":1,\"err\":1}}}}")
-    );
-
-    // Room for everything restores admission order.
-    assert_eq!(
-        block(&calls, 128, 16 * 1024),
-        format!(
-            "{{\"completed_calls\":[{first},{failed},{last}],\"omitted\":{{\"ok\":0,\"err\":0}}}}"
-        )
-    );
-
-    // The count cut keeps the first successful row alone.
-    assert_eq!(
-        block(&calls, 1, 16 * 1024),
-        format!("{{\"completed_calls\":[{first}],\"omitted\":{{\"ok\":1,\"err\":1}}}}")
-    );
-
-    // Below the framing, and at zero, every call is counted as omitted.
-    for cut in [framed - 1, 0] {
-        assert_eq!(
-            block(&calls, 128, cut),
-            "{\"completed_calls\":[],\"omitted\":{\"ok\":2,\"err\":1}}"
-        );
+    // With no rows, the standard budget fits every whole operation and id.
+    let rendered = block(&calls, 0, 16 * 1024);
+    let (_, notice) = rendered.split_once('\n').expect("all names notice");
+    for call in &calls {
+        assert!(notice.contains(&format!("\"{}\"", call.operation)));
+        assert!(notice.contains(call.call_id.as_ref().expect("id").as_str()));
     }
+
+    let minimum = CallFeedbackPolicy::MIN_BLOCK_BYTES;
+    for budget in [minimum, minimum + super::row(&calls[0]).len() + 1] {
+        let rendered = block(&calls, 128, budget);
+        assert!(rendered.len() <= budget, "{} > {budget}", rendered.len());
+        let (listing, notice) = rendered.split_once('\n').expect("endpoint notice");
+        let listing: serde_json::Value = serde_json::from_str(listing).expect("calls JSON");
+        let kept = listing["completed_calls"]
+            .as_array()
+            .expect("completed")
+            .len();
+        assert_eq!(listing["omitted"]["ok"], calls.len() - kept);
+        assert!(notice.contains(&format!("Omitted {} completed calls;", calls.len() - kept)));
+        assert!(
+            notice.contains(
+                calls[kept]
+                    .call_id
+                    .as_ref()
+                    .expect("first omitted")
+                    .as_str()
+            )
+        );
+        assert!(notice.contains(calls[128].call_id.as_ref().expect("last omitted").as_str()));
+    }
+
+    // Failure stays outside completed_calls even when admission order interleaves it.
+    let mixed = [
+        calls[0].clone(),
+        call("inbox.fail", false, "failed", None),
+        calls[1].clone(),
+    ];
+    let rendered = block(&mixed, 128, 16 * 1024);
+    let listing: serde_json::Value = serde_json::from_str(&rendered).expect("no omissions");
     assert_eq!(
-        block(&calls, 0, 16 * 1024),
-        "{\"completed_calls\":[],\"omitted\":{\"ok\":2,\"err\":1}}"
+        listing["completed_calls"]
+            .as_array()
+            .expect("completed")
+            .len(),
+        2
     );
+    assert_eq!(listing["failed_calls"][0]["outcome"], "err");
+    assert_eq!(listing["omitted"], serde_json::json!({"ok": 0, "err": 0}));
 }
 
-/// FIG-6293: a summary is the result's canonical compact JSON, its keys in
-/// byte order and its escapes intact, cut at a UTF-8 boundary and marked
-/// truncated only when cut.
+/// FIG-7530: structural shortening preserves whole scalar leaves and escape
+/// sequences, marks string lengths and container counts, and obeys every
+/// result budget, including zero. No prefix can masquerade as an identity.
 #[test]
-fn result_summaries_are_canonical_and_cut_on_a_character_boundary() {
+fn result_summaries_elide_structure_without_splitting_scalar_leaves() {
     let value = serde_json::json!({"b": [1, 2.5, null], "a": "é\"\n"});
     let whole = "{\"a\":\"é\\\"\\n\",\"b\":[1,2.5,null]}";
     assert_eq!(
         summarize(&value, whole.len()),
         lash_core::CallResultSummary {
-            text: whole.to_string(),
+            text: whole.into(),
             truncated: false,
         }
     );
-    // `{"a":"é` with é's second byte cut away.
-    assert_eq!(
-        summarize(&value, 7),
-        lash_core::CallResultSummary {
-            text: "{\"a\":\"".to_string(),
-            truncated: true,
-        }
+    let path = format!("wiki/{}", "receipt-".repeat(12));
+    let body = "é\"\n".repeat(300);
+    let receipt = serde_json::json!({"body": body, "path": path});
+    let summary = summarize(&receipt, 512);
+    assert!(summary.truncated);
+    assert!(summary.text.contains(&path));
+    assert!(
+        summary
+            .text
+            .contains(&format!("{} characters", body.chars().count()))
     );
+    assert!(!summary.text.contains(&body[..6]));
+
+    let items = (0..50)
+        .map(|i| serde_json::json!(format!("id-{i:02}")))
+        .collect::<Vec<_>>();
+    let array = summarize(&serde_json::json!(items), 128);
+    assert!(array.text.contains("\"id-00\""));
+    assert!(array.text.contains("items elided"));
+    let object = serde_json::Value::Object(
+        (0..50)
+            .map(|i| (format!("key-{i:02}"), serde_json::json!(i)))
+            .collect(),
+    );
+    let preview = summarize(&object, 128);
+    assert!(preview.text.contains("\"key-00\":0"));
+    assert!(preview.text.contains("members elided"));
+    let identifier = serde_json::json!(path);
+    let whole_identifier = identifier.to_string();
+    for budget in 0..=512 {
+        for value in [&receipt, &serde_json::json!(items), &object] {
+            assert!(summarize(value, budget).text.len() <= budget);
+        }
+        let shortened = summarize(&identifier, budget);
+        assert!(shortened.text == whole_identifier || !shortened.text.contains("wiki/"));
+    }
+    let zero = super::with_result_summaries(
+        vec![call("inbox.write", true, "zero-result", Some("previous"))],
+        &[lash_core::ToolCallRecord {
+            call_id: lash_core::ToolCallId::fixture("zero-result"),
+            provider_call_id: None,
+            tool: "inbox.write".into(),
+            args: serde_json::json!({}),
+            output: lash_core::ToolCallOutput::success(receipt),
+        }],
+        0,
+    );
+    assert!(zero[0].result_summary.is_none());
     assert_eq!(summarize(&value, 0).text, "");
 }
 
@@ -127,7 +177,28 @@ fn result_summaries_are_canonical_and_cut_on_a_character_boundary() {
 fn call_feedback_policy_refuses_cuts_outside_its_bounds() {
     let ceiling = CallFeedbackPolicy::MAX_BLOCK_BYTES;
     assert!(CallFeedbackPolicy::new(ceiling, ceiling).is_ok());
-    assert!(CallFeedbackPolicy::new(0, 0).is_ok());
+    let minimum = CallFeedbackPolicy::MIN_BLOCK_BYTES;
+    let id = lash_core::ToolCallId::fixture("maximum-width");
+    assert_eq!(id.as_str().len(), lash_core::ToolCallId::ENCODED_BYTES);
+    let count = usize::MAX;
+    let largest_notice = format!(
+        "{{\"completed_calls\":[],\"failed_calls\":[],\"omitted\":{{\"ok\":{count},\"err\":{count}}}}}\nOmitted {count} completed calls; earliest call_id={id}; latest call_id={id}."
+    );
+    assert_eq!(minimum, largest_notice.len());
+    assert!(CallFeedbackPolicy::new(0, minimum).is_ok());
+    for max_block_bytes in [0, minimum - 1] {
+        let expected = CallFeedbackPolicyError::BlockBelowMinimum {
+            max_block_bytes,
+            minimum,
+        };
+        assert_eq!(CallFeedbackPolicy::new(0, max_block_bytes), Err(expected));
+        assert!(
+            serde_json::from_value::<CallFeedbackPolicy>(serde_json::json!({
+                "max_result_bytes": 0, "max_block_bytes": max_block_bytes,
+            }))
+            .is_err()
+        );
+    }
     assert_eq!(
         CallFeedbackPolicy::new(0, ceiling + 1),
         Err(CallFeedbackPolicyError::BlockExceedsCeiling {

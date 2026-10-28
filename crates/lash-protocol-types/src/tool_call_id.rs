@@ -285,6 +285,9 @@ impl fmt::Display for InvalidToolCallId {
 impl std::error::Error for InvalidToolCallId {}
 
 impl ToolCallId {
+    /// Exact byte width of every issued id: its prefix and BLAKE3 hex digest.
+    pub const ENCODED_BYTES: usize = TOOL_CALL_ID_PREFIX.len() + DIGEST_HEX_LEN;
+
     /// Derives the id of the call at `positions` inside `root`, in the
     /// deployment `namespace` (ADR 0111; empty for the default namespace).
     pub fn derive(

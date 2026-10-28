@@ -33,9 +33,17 @@ the consumed cell; only the original typed request and output remain.
 through the protocol's offline transcript decoder, without a live session.
 `RlmPresentationConfig::prompt_max_tool_calls` bounds only how many calls the
 next prompt lists (128 by default). Each listed call names its operation,
-outcome and `call_id`, with a result summary: a bounded prefix of the committed
-record's canonical JSON. The summary is projected once, when the cell's record
-commits, and cut by the session's recorded `CallFeedbackPolicy` (FIG-6293). It
+outcome and `call_id`, with a structural result preview. Scalar leaves remain
+whole. Long strings carry their character count instead of a partial value;
+containers keep their first members and report the elided count. The preview
+is projected once when the cell commits, under the session's recorded
+`CallFeedbackPolicy` (FIG-6293, FIG-7530). Failed-cell observations begin with
+the failure, then separate completed calls from failed/interrupted calls,
+followed by prints, images and bindings. A bounded omission notice names
+every omitted completed call by operation and id, or gives the count and
+whole earliest/latest ids when the names cannot fit. The policy refuses a
+block too small for that mandatory notice; a zero result budget remains
+valid and omits result previews. It
 is presentation, never the body: the scalar accounting truncator and durable
 omission summaries stay deleted, and the record under the `call_id` is the only
 home of the body.

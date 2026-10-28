@@ -505,16 +505,33 @@ fn message_text(
     out
 }
 
-/// The user observation message for a step: printed outputs, images,
-/// executed calls (with ids and result summaries after failure), what the cell did to the session's
-/// variables, error, and final value, each under a plain header. Never empty.
+/// The cell observation used by live exchange and durable replay. A failure
+/// comes first, followed by its calls and repair guidance, then output,
+/// images and bindings. Successful cells keep their concise call feedback.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     entry: &lash_core::CellRecord,
     presentation: crate::RlmPresentationConfig,
 ) -> String {
     let mut out = String::new();
+    if let lash_core::CellOutcome::Failed(failure) = &entry.result {
+        out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
+        if !entry.calls.is_empty() {
+            out.push_str("\n\nCalls:\n");
+            crate::call_feedback::write_calls_block(
+                &mut out,
+                &entry.calls,
+                presentation.prompt_max_tool_calls,
+                presentation.call_feedback,
+            );
+            out.push_str("\n\n");
+            out.push_str(crate::call_feedback::FAILED_CELL_CALLS_GUIDANCE);
+        }
+    }
     if !entry.prints.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
         out.push_str("Output:");
         for item in &entry.prints {
             out.push('\n');
@@ -522,6 +539,9 @@ pub(crate) fn step_output_text(
         }
     }
     if let Some(archive) = &entry.prints_retained {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
         let _ = write!(
             out,
             "Output:\n{}\n{}",
@@ -540,18 +560,7 @@ pub(crate) fn step_output_text(
             let _ = write!(out, "\n- {rendered}");
         }
     }
-    if entry.result.is_failed() && !entry.calls.is_empty() {
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        out.push_str("Calls:\n");
-        crate::call_feedback::write_calls_block(
-            &mut out,
-            &entry.calls,
-            presentation.prompt_max_tool_calls,
-            presentation.call_feedback,
-        );
-    } else if !entry.result.is_failed() {
+    if !entry.result.is_failed() {
         let omitted = entry
             .calls
             .len()
@@ -594,18 +603,7 @@ pub(crate) fn step_output_text(
         }
     }
     match &entry.result {
-        // The entry records the typed failure; its recovery guidance is
-        // prompt text, rendered here in this dialect's words.
-        lash_core::CellOutcome::Failed(failure) => {
-            if !out.is_empty() {
-                out.push_str("\n\n");
-            }
-            out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
-            if !entry.calls.is_empty() {
-                out.push_str("\n\n");
-                out.push_str(crate::call_feedback::FAILED_CELL_CALLS_GUIDANCE);
-            }
-        }
+        lash_core::CellOutcome::Failed(_) => {}
         lash_core::CellOutcome::Controlled {
             control:
                 lash_core::CellControl::Finish {
