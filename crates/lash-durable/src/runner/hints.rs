@@ -79,6 +79,19 @@ impl WakeSink {
         })
     }
 
+    /// The local owner's completed idle passes, for serial fixtures that
+    /// already witnessed a command's admission before waiting for its readback.
+    #[cfg(feature = "testing")]
+    pub fn actor_idle_generation_for_testing(&self, actor: &ActorKey) -> Option<u64> {
+        self.nodes().iter().find_map(|(_, hints)| {
+            hints
+                .slots()
+                .by_actor
+                .get(actor)
+                .and_then(|slot| slot.idle.map(|_| slot.idle_generation))
+        })
+    }
+
     /// Whether every attached local node has no busy activation of `actor`.
     /// This is a fixture observation, not evidence that a turn committed.
     #[cfg(feature = "testing")]
@@ -624,6 +637,8 @@ impl Hints {
                 hint: Arc::clone(&hint),
                 order,
                 idle: None,
+                #[cfg(feature = "testing")]
+                idle_generation: 0,
                 yielding: false,
             },
         );
@@ -707,6 +722,10 @@ impl Hints {
             return false;
         }
         slot.idle = Some(since);
+        #[cfg(feature = "testing")]
+        {
+            slot.idle_generation += 1;
+        }
         if owed {
             self.inner.claim.notify_one();
         }
@@ -773,6 +792,8 @@ struct Slot {
     order: u64,
     /// Since when its owner has had nothing to do, while it waits idle.
     idle: Option<Instant>,
+    #[cfg(feature = "testing")]
+    idle_generation: u64,
     /// The node asked it for its slot: it releases its actor at its next
     /// idle pass.
     yielding: bool,

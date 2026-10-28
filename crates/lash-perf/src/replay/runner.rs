@@ -1142,12 +1142,35 @@ async fn send(
 /// Compact `lane`'s context after turn `after`, keyed so a retry is one
 /// compaction.
 async fn compact(lane: &Lane, after: usize) -> Result<()> {
+    let idle_before = lane
+        .idle
+        .as_ref()
+        .and_then(|(sink, actor)| sink.actor_idle_generation_for_testing(actor));
     let admin = lane.session.admin();
-    let opened = admin
+    let mutation = admin
         .state()
         .compact_context(None, format!("replay-compact-{}-{after}", lane.index))
         .await
-        .map_err(|error| anyhow::anyhow!("compact after turn {after}: {error}"))?
+        .map_err(|error| anyhow::anyhow!("compact after turn {after}: {error}"))?;
+    if matches!(mutation, lash::AdminMutation::Pending(_))
+        && let Some((sink, actor)) = &lane.idle
+    {
+        let deadline = Instant::now() + ROUND_WATCHDOG;
+        loop {
+            if sink
+                .actor_idle_generation_for_testing(actor)
+                .is_some_and(|generation| Some(generation) != idle_before)
+            {
+                break;
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "compaction owner never became idle"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+    let opened = mutation
         .settle_with(&admin.commands(), lash::testing::admin_fixture_outcome)
         .await
         .map_err(|error| anyhow::anyhow!("settle the compaction after turn {after}: {error}"))?;
