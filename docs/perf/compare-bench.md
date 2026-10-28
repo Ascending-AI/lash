@@ -187,56 +187,61 @@ equal and no higher charges. Full evidence is in
 
 ## Monty comparison
 
-The table retains separately qualified full optimized receipts on 2026-10-28.
-The nine FIG-7486 core rows use source
-`8f5ffec04e12135e4bcd7a31d94283621acf5b59`, based on main `8b523e6b88`.
-The other eight rows retain FIG-7484's source `59de4bf4a3f7`, based on main
-`fc858ca10f04`. Each row's Monty and TS/QuickJS figures come from that row's
-selected receipt. Both snapshots include FIG-7510's shared admission,
-FIG-7485's resident text installer and FIG-7513's unpaid-region repair.
-Completed receipts are reused after clean delivery rebases under
-lane-mechanics.md sections 3 and 6.
+The table is the ordinary optimized control captured at main
+`671e8c038fb4` on 2026-10-28 for FIG-7526. Each of the 85 engine/workload
+rows ran one low/high pair, one warmup and factor 20, with exact charge and
+memory metering, CPU pinning and an 8 GiB address-space cap. All 68 scoped
+Lash and 102 reference PMU windows ran at 100%; all 34 Monty outputs matched
+CPython. The largest control TS/QuickJS ratio was 9.8257x. This is a
+reference snapshot. Shared-host wall time is unclaimed.
 
-FIG-7486 ran all 85 engine/workload rows once: 170 measured samples, one
-low/high pair, one warmup and factor 20 on CPU 0, with exact charge and
-held-byte accounting and an 8 GiB address-space cap. Source, result,
-reference identity, trip and work-unit checks passed. All 68 scoped Lash and
-102 reference PMU windows ran at 100%; all 34 Monty outputs matched CPython.
-No Lash row regressed more than 1% against the starting baseline at
-`1ed410899125`: the maximum was +0.4559% for Python array_read. Every
-TS/QuickJS ratio met 10x; the maximum was 9.8769x for prop_read.
-
-FIG-7484's earlier full receipt covers 85 rows and 510 samples, with three
-low/high pairs, one warmup and factor 20. Its 204 scoped Lash and 306 reference
-PMU windows ran at 100%; all 102 Monty outputs matched CPython. Every Lash
-row met the 1% regression guard against its starting and landed string
-controls, and every TS/QuickJS row met 10x. Those earlier observations are
-reused rather than repeated. Values are incremental user instructions/op;
-Python and TS retain separate denominators. Shared-host wall time is unclaimed.
-
-empty_loop fell 63.44%, from 320.03 to 116.99 instructions/op; prop_write
-fell 19.75%, from 1164.25 to 934.25. int_arith fell 7.40% and float_arith
-fell 8.22% in the FIG-7486 snapshot.
+Three operand/result experiments were rejected by the unchanged 1% all-row
+guard. Fixed member operands, short heap/call windows and heap destinations
+regressed seven Lash rows. Direct integer size-bit projection regressed
+three. Compiled native-arity facts with short native argument windows
+regressed eight. Every experiment kept TS/QuickJS at most 10x. No experimental
+Rust or test change was retained, and no performance baseline or ceiling was
+changed. Over one fixed high-minus-low interval for each of the 13 initially
+above-parity Python rows, the experiments increased instructions by
+18.294, 10.082 and 17.916 million respectively.
+Operation units are not averaged.
 
 | Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
 |---|---:|---:|---:|---:|
-| object_sort | 15071.72 | 7769.01 | 1.9400x | 8.8169x |
-| map_set_string | 6042.77 | 5409.96 | 1.1170x | 6.6950x |
-| records | 34366589.63 | 20827336.37 | 1.6501x | 8.4153x |
-| sort_bench | 7478126.47 | 5576355.37 | 1.3410x | 7.0596x |
-| json_transform | 2526136.84 | 1599915.89 | 1.5789x | 1.7472x |
-| string_build1 | 2211.86 | 1242.32 | 1.7804x | 7.5155x |
-| templating | 1058323.00 | 565783.37 | 1.8705x | 3.0608x |
-| empty_loop | 116.99 | 193.40 | 0.6049x | 3.3562x |
-| prop_write | 934.25 | 742.01 | 1.2591x | 9.5445x |
-| func_closure_call | 2480.25 | 1771.84 | 1.3998x | 6.9790x |
-| object_build | 5197.35 | 3768.06 | 1.3793x | 1.9094x |
-| array_read | 880.70 | 695.26 | 1.2667x | 8.6916x |
-| func_call | 1052.23 | 902.53 | 1.1659x | 2.9649x |
-| prop_read | 1105.23 | 1023.25 | 1.0801x | 9.8769x |
-| int_to_string | 1195.92 | 1479.97 | 0.8081x | 3.4446x |
-| int_arith | 488.02 | 720.58 | 0.6773x | 2.3010x |
-| float_arith | 558.29 | 1251.46 | 0.4461x | 2.1848x |
+| object_sort | 15046.15 | 7769.55 | 1.9366x | 8.7687x |
+| templating | 1075221.47 | 565511.21 | 1.9013x | 3.0837x |
+| string_build1 | 2219.00 | 1242.21 | 1.7863x | 7.5343x |
+| records | 33885515.11 | 20827938.00 | 1.6269x | 8.3870x |
+| json_transform | 2521087.84 | 1597183.84 | 1.5785x | 1.7484x |
+| func_closure_call | 2452.23 | 1771.85 | 1.3840x | 6.9086x |
+| object_build | 5141.67 | 3767.63 | 1.3647x | 1.8813x |
+| sort_bench | 7472487.79 | 5577326.42 | 1.3398x | 7.0578x |
+| array_read | 883.08 | 695.25 | 1.2702x | 8.6540x |
+| prop_write | 913.24 | 741.95 | 1.2309x | 9.4877x |
+| func_call | 1039.22 | 902.56 | 1.1514x | 2.9257x |
+| map_set_string | 6068.71 | 5408.18 | 1.1221x | 6.7022x |
+| prop_read | 1105.22 | 1023.23 | 1.0801x | 9.8257x |
+| int_to_string | 1197.58 | 1470.98 | 0.8141x | 3.4535x |
+| int_arith | 487.86 | 720.59 | 0.6770x | 2.3006x |
+| empty_loop | 116.93 | 193.36 | 0.6047x | 3.3587x |
+| float_arith | 558.24 | 1251.26 | 0.4461x | 2.1850x |
+
+No row newly reached parity in these experiments. The 13 above-parity Python
+rows remain open without a measured intrinsic floor, and FIG-7526 remains
+open. The next locations are the study's measured operand/destination,
+member-result and native/call paths; the failed transformations establish no
+minimum cost for them. Lookup changes still require integration of FIG-7520.
+Raw per-row deltas, fixed-interval totals, next profile sites, source/binary
+identities, counter receipts and restored patches are retained in
+`/workspace/notes/lash/tasks/lanes/r33/pymattr1.evidence/report.md`.
+
+The first rejected candidate's VM unit proof passed 218/218. Conformance
+executed 142 cases with 137 passes and five identity/link/caption failures;
+no conformance pass is claimed. Destination, integer-zero-size and native
+arity mutations were rejected by the existing register/reference differential.
+Their production restorations and probe limits are recorded in the lane
+report. No parent or main tests were run for comparison. Earlier optimization
+receipts and their qualified limits are retained below.
 
 Scalar assignment/test pairs now fuse during compilation. Verified recurrences
 with one changing scalar and ordered copies execute checked kernels, exact fee
