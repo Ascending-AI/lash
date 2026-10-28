@@ -313,6 +313,7 @@ pub(super) async fn carry(
             &start(successor),
             &plan.rewritten,
             &envelope.environment.retained_code,
+            &envelope.environment.authored,
             &uses,
         )
         .await

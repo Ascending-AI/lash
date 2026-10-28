@@ -142,6 +142,7 @@ impl KernelProcessEngine {
                 successor,
                 rewritten,
                 retained,
+                &Default::default(),
                 uses,
             )
             .await?;
@@ -177,6 +178,8 @@ impl KernelProcessEngine {
     }
     /// The single linked checkpoint preparation used by process and session
     /// succession. All pages remain private until the embedding owner's commit.
+    /// Authored source roots remain closure inputs independently of executable
+    /// reach, as they do when a session cold-loads its retained definitions.
     #[expect(
         clippy::too_many_arguments,
         reason = "one authenticated checkpoint succession"
@@ -190,6 +193,7 @@ impl KernelProcessEngine {
         successor: &super::InlineRequest,
         rewritten: &Rewritten,
         retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
+        authored: &std::collections::BTreeSet<lash_kernel_value::LinkId>,
         uses: &lash_execution_contracts::process::UseCorrespondence,
     ) -> Result<PreparedCheckpointCarry, CarryFault> {
         let (predecessor, _) = predecessor_code
@@ -307,6 +311,14 @@ impl KernelProcessEngine {
         next_content
             .documents
             .extend(prior.content.documents.clone());
+        for link in authored {
+            if !next_content.links.contains_key(link) {
+                let held = carry_snapshot(&self.documents, *link).await?;
+                next_content.documents.extend(held.documents);
+                next_content.links.extend(held.links);
+                next_content.packages.extend(held.packages);
+            }
+        }
         let selected = self
             .documents
             .inspect(
@@ -345,6 +357,15 @@ impl KernelProcessEngine {
             successor_link,
             &self.helpers,
         );
+        let mut closure_functions = selected.functions.clone();
+        for link in authored {
+            let ordinary = next_content
+                .inspect_ordinary(*link, &lash_kernel_package::ReachSelection::AllExports)
+                .map_err(|error| refused(error.to_string()))?;
+            for (link, functions) in ordinary.functions {
+                closure_functions.entry(link).or_default().extend(functions);
+            }
+        }
         let assembled = lash_vm_broker::kernel::loader::declare_reach(
             &rewritten.document,
             &next_content
@@ -352,7 +373,7 @@ impl KernelProcessEngine {
                 .iter()
                 .map(|(id, doc)| (*id, Arc::clone(doc)))
                 .collect(),
-            &selected.functions,
+            &closure_functions,
             &selected.machine,
             &self.functions,
             &self.helpers,
