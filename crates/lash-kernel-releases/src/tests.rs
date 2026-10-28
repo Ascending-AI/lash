@@ -533,8 +533,8 @@ fn helper_claims_use_the_first_generation_and_join_at_the_maximum() {
     let lineage = archive.releases[0].library.identity;
     assert_eq!(release.helpers.claim_generations()[&old_id].generation, 1);
     assert_eq!(release.helpers.claim_generations()[&new_id].generation, 2);
-    assert_eq!(required.helpers.archives, [(lineage, 2)].into());
-    assert!(required.helpers.outside.is_empty());
+    assert_eq!(*required.helpers.archives(), [(lineage, 2)].into());
+    assert!(required.helpers.outside().is_empty());
     assert_eq!(
         required.libraries,
         [archive.releases[0].libraries["fixture"].identity].into()

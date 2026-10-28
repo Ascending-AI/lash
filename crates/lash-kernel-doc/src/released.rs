@@ -631,10 +631,10 @@ impl BuildHelpers {
         &self.generations
     }
     pub fn claim_capabilities(&self) -> lash_kernel_value::claims::HelperRequirements {
-        lash_kernel_value::claims::HelperRequirements {
-            archives: self.archives.clone(),
-            outside: Default::default(),
-        }
+        lash_kernel_value::claims::HelperRequirements::new(
+            self.archives.clone(),
+            Default::default(),
+        )
     }
 
     /// Classify and project one helper through the installed membership index.
@@ -655,7 +655,7 @@ impl BuildHelpers {
             } = claim;
             required
                 .helpers
-                .archives
+                .archives_mut()
                 .entry(*archive)
                 .and_modify(|held| *held = (*held).max(*generation))
                 .or_insert(*generation);
@@ -663,7 +663,7 @@ impl BuildHelpers {
         } else {
             required
                 .helpers
-                .outside
+                .outside_mut()
                 .entry(self.current)
                 .or_default()
                 .insert(function);

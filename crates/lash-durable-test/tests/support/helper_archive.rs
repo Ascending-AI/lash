@@ -468,7 +468,7 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
         ..Default::default()
     };
     assert_eq!(
-        requirements.machine.helpers.outside,
+        *requirements.machine.helpers.outside(),
         [(
             fixture.old.helpers.current_identity(),
             [fixture.helper].into()
@@ -532,10 +532,10 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
     assert_eq!(claimed[0].actor, actor);
     let mut tx = store.begin(&actor, claimed[0].epoch).await.unwrap();
     let archive = lash_kernel_value::HelperLibraryId::of_members([fixture.helper]);
-    requirements.machine.helpers = lash_kernel_value::claims::HelperRequirements {
-        archives: [(archive, 2)].into(),
-        outside: Default::default(),
-    };
+    requirements.machine.helpers = lash_kernel_value::claims::HelperRequirements::new(
+        [(archive, 2)].into(),
+        Default::default(),
+    );
     tx.set_requires(requirements.tokens().collect())
         .give_up(Release::Ready);
     store
@@ -543,7 +543,7 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
         .await
         .unwrap();
     let mut previous = capabilities(&fixture.upgraded());
-    previous.machine.helpers.archives = [(archive, 1)].into();
+    *previous.machine.helpers.archives_mut() = [(archive, 1)].into();
     let previous = store
         .register_node(&node("generation-one", previous))
         .await
@@ -554,11 +554,11 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
             .unmet_by(&previous.capabilities)
             .machine
             .helpers
-            .archives,
+            .archives(),
         [(archive, 2)].into()
     );
     let mut next = capabilities(&fixture.upgraded());
-    next.machine.helpers.archives = [(archive, 3)].into();
+    *next.machine.helpers.archives_mut() = [(archive, 3)].into();
     let next = store
         .register_node(&node("generation-three", next))
         .await

@@ -39,6 +39,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 schemars = { workspace = true }
+serde-transcode = "=1.1.1"
 
 [dev-dependencies]
 proptest = "1"

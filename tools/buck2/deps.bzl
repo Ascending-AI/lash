@@ -5,8 +5,8 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_provider_fixtures": "//crates/lash-provider-fixtures:lash-provider-fixtures",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -28,13 +28,13 @@ PACKAGE_DEPS = {
             "rmcp": "//third-party/rust:p0282",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_stream": "//third-party/rust:p0384",
-            "tracing_subscriber": "//third-party/rust:p0399",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_stream": "//third-party/rust:p0385",
+            "tracing_subscriber": "//third-party/rust:p0400",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "codex-host-auth": {
@@ -48,40 +48,40 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "reqwest": "//third-party/rust:p0280",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "dataframe": {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "lash": "//crates/lash:lash",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "delegation": {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "lash": "//crates/lash:lash",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "e2e-consumer": {
         "build": {},
         "dev": {
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -94,8 +94,8 @@ PACKAGE_DEPS = {
             "opentelemetry_sdk": "//third-party/rust:p0226",
             "reqwest": "//third-party/rust:p0280",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "integrator-contract": {
@@ -103,7 +103,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "lash": "//crates/lash:lash",
@@ -167,9 +167,9 @@ PACKAGE_DEPS = {
             "ruff_python_parser": "//third-party/rust:p0287",
             "ruff_text_size": "//third-party/rust:p0290",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "unicode_ident": "//third-party/rust:p0409",
-            "unicode_normalization": "//third-party/rust:p0410"
+            "serde_json": "//third-party/rust:p0321",
+            "unicode_ident": "//third-party/rust:p0410",
+            "unicode_normalization": "//third-party/rust:p0411"
         }
     },
     "lash-dialect-typescript": {
@@ -192,9 +192,9 @@ PACKAGE_DEPS = {
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "libc": "//third-party/rust:p0188",
             "serde": "//third-party/rust:p0315",
-            "serde_yaml": "//third-party/rust:p0324",
-            "sha2": "//third-party/rust:p0326",
-            "stats_alloc": "//third-party/rust:p0349"
+            "serde_yaml": "//third-party/rust:p0325",
+            "sha2": "//third-party/rust:p0327",
+            "stats_alloc": "//third-party/rust:p0350"
         },
         "normal": {
             "lash_dialect_conventions": "//crates/lash-dialect-conventions:lash-dialect-conventions",
@@ -207,16 +207,16 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "ryu_js": "//third-party/rust:p0304",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "swc_common": "//third-party/rust:p0359",
-            "swc_ecma_ast": "//third-party/rust:p0360",
-            "swc_ecma_parser": "//third-party/rust:p0361"
+            "serde_json": "//third-party/rust:p0321",
+            "swc_common": "//third-party/rust:p0360",
+            "swc_ecma_ast": "//third-party/rust:p0361",
+            "swc_ecma_parser": "//third-party/rust:p0362"
         }
     },
     "lash-e2e": {
         "build": {},
         "dev": {
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -229,9 +229,9 @@ PACKAGE_DEPS = {
             "libc": "//third-party/rust:p0188",
             "reqwest": "//third-party/rust:p0280",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-ext-date-ecma": {
@@ -274,7 +274,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-ext-py-helpers": {
@@ -296,7 +296,7 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_regress": "//crates/lash-regress:lash-regress",
             "num_traits": "//third-party/rust:p0219",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-ext-ts-core": {
@@ -308,7 +308,7 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-ext-ts-helpers": {
@@ -328,7 +328,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
-            "url": "//third-party/rust:p0417"
+            "url": "//third-party/rust:p0418"
         }
     },
     "lash-facade-failover": {
@@ -337,8 +337,8 @@ PACKAGE_DEPS = {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -347,9 +347,9 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sqlx": "//third-party/rust:p0340",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "sqlx": "//third-party/rust:p0341",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-checkpoint-encoder": {
@@ -361,7 +361,7 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-internal-conformance": {
@@ -388,10 +388,10 @@ PACKAGE_DEPS = {
             "proptest": "//third-party/rust:p0250",
             "rmp_serde": "//third-party/rust:p0285",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-core": {
@@ -401,9 +401,9 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tracing_subscriber": "//third-party/rust:p0400"
         },
         "normal": {
             "arc_swap": "//third-party/rust:p0013",
@@ -426,12 +426,12 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-core-effect": {
@@ -443,7 +443,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-core-execution": {
@@ -454,9 +454,9 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_trace": "//crates/lash-trace:lash-trace",
-            "syn": "//third-party/rust:p0365",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "syn": "//third-party/rust:p0366",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -477,20 +477,20 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395",
-            "tracing_subscriber": "//third-party/rust:p0399",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396",
+            "tracing_subscriber": "//third-party/rust:p0400",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-core-ids": {
         "build": {},
         "dev": {
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -502,12 +502,12 @@ PACKAGE_DEPS = {
             "rustix": "//third-party/rust:p0294",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396",
+            "tracing_subscriber": "//third-party/rust:p0400"
         }
     },
     "lash-internal-core-llm": {
@@ -515,7 +515,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -529,10 +529,10 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-core-store": {
@@ -543,7 +543,7 @@ PACKAGE_DEPS = {
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
             "lash_render": "//crates/lash-render:lash-render",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -558,12 +558,12 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_bytes": "//third-party/rust:p0316",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_bytes": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-core-worker": {
@@ -579,9 +579,9 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-durable": {
@@ -599,10 +599,10 @@ PACKAGE_DEPS = {
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-durable-test": {
@@ -632,11 +632,11 @@ PACKAGE_DEPS = {
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sqlx": "//third-party/rust:p0340",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
+            "serde_json": "//third-party/rust:p0321",
+            "sqlx": "//third-party/rust:p0341",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
             "workflow_corpus": "//examples/workflows:workflows"
         },
         "normal": {
@@ -650,7 +650,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-execution-contracts": {
@@ -670,11 +670,11 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio_util": "//third-party/rust:p0386",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio_util": "//third-party/rust:p0387",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-facade-tests": {
@@ -699,9 +699,9 @@ PACKAGE_DEPS = {
             "opentelemetry_sdk": "//third-party/rust:p0226",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "thiserror": "//third-party/rust:p0373",
-            "tracing": "//third-party/rust:p0395",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "thiserror": "//third-party/rust:p0374",
+            "tracing": "//third-party/rust:p0396",
+            "tracing_subscriber": "//third-party/rust:p0400"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -717,16 +717,16 @@ PACKAGE_DEPS = {
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "serde_json": "//third-party/rust:p0320",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-http-transport": {
         "build": {},
         "dev": {
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -736,14 +736,14 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "reqwest": "//third-party/rust:p0280",
             "rustls": "//third-party/rust:p0295",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-llm-tools": {
         "build": {},
         "dev": {
             "lash_core": "//crates/lash-core:lash-core",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -753,7 +753,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-llm-transport": {
@@ -761,7 +761,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "proptest": "//third-party/rust:p0250",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -773,8 +773,8 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "proptest": "//third-party/rust:p0250",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-plugin-mcp": {
@@ -785,9 +785,9 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "rmcp": "//third-party/rust:p0282",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tracing_subscriber": "//third-party/rust:p0400"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -809,12 +809,12 @@ PACKAGE_DEPS = {
             "libc": "//third-party/rust:p0188",
             "rmcp": "//third-party/rust:p0282",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-plugin-process-controls": {
@@ -822,7 +822,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -833,7 +833,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-plugin-standard-compaction": {
@@ -842,7 +842,7 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -852,7 +852,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-postgres-store": {
@@ -867,9 +867,9 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tracing_subscriber": "//third-party/rust:p0400"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -886,19 +886,19 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "serde_path_to_error": "//third-party/rust:p0321",
-            "sqlx": "//third-party/rust:p0340",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "serde_path_to_error": "//third-party/rust:p0322",
+            "sqlx": "//third-party/rust:p0341",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-postgres-workers": {
         "build": {},
         "dev": {
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -915,9 +915,9 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sqlx": "//third-party/rust:p0340",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "sqlx": "//third-party/rust:p0341",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-protocol-rlm": {
@@ -970,10 +970,10 @@ PACKAGE_DEPS = {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-protocol-standard": {
@@ -986,8 +986,8 @@ PACKAGE_DEPS = {
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "mutants": "//third-party/rust:p0208",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1003,7 +1003,7 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-protocol-types": {
@@ -1018,8 +1018,9 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "serde_transcode": "//third-party/rust:p0316",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-internal-provider-anthropic": {
@@ -1028,7 +1029,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1039,14 +1040,14 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "reqwest": "//third-party/rust:p0280",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-provider-fixtures": {
         "build": {},
         "dev": {
             "lash_core": "//crates/lash-core:lash-core",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1060,8 +1061,8 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-provider-google": {
@@ -1071,7 +1072,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_provider_google": "//crates/lash-provider-google:lash-provider-google",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1086,9 +1087,9 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "reqwest": "//third-party/rust:p0280",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-provider-openai": {
@@ -1100,7 +1101,7 @@ PACKAGE_DEPS = {
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1115,10 +1116,10 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "reqwest": "//third-party/rust:p0280",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_tungstenite": "//third-party/rust:p0385",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_tungstenite": "//third-party/rust:p0386",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-render": {
@@ -1126,7 +1127,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-rlm-types": {
@@ -1142,7 +1143,7 @@ PACKAGE_DEPS = {
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-s3-store": {
@@ -1151,7 +1152,7 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1160,7 +1161,7 @@ PACKAGE_DEPS = {
             "lash_execution_contracts": "//crates/lash-execution-contracts:lash-execution-contracts",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "object_store": "//third-party/rust:p0221",
-            "url": "//third-party/rust:p0417"
+            "url": "//third-party/rust:p0418"
         }
     },
     "lash-internal-sansio": {
@@ -1173,7 +1174,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-sqlite-store": {
@@ -1188,8 +1189,8 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "rusqlite": "//third-party/rust:p0291",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1205,12 +1206,12 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "serde_bytes": "//third-party/rust:p0316",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_rusqlite": "//third-party/rust:p0382",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_bytes": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_rusqlite": "//third-party/rust:p0383",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-store-sql": {
@@ -1228,8 +1229,8 @@ PACKAGE_DEPS = {
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-internal-tool-presenter-python": {
@@ -1242,7 +1243,7 @@ PACKAGE_DEPS = {
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-tool-presenter-standard": {
@@ -1255,7 +1256,7 @@ PACKAGE_DEPS = {
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-tool-presenter-typescript": {
@@ -1268,7 +1269,7 @@ PACKAGE_DEPS = {
             "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-tool-shape": {
@@ -1277,14 +1278,14 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-tool-support": {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1294,7 +1295,7 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "lash-internal-trace": {
@@ -1303,7 +1304,7 @@ PACKAGE_DEPS = {
             "jsonschema": "//third-party/rust:p0184",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "opentelemetry_sdk": "//third-party/rust:p0226",
-            "serde_yaml": "//third-party/rust:p0324"
+            "serde_yaml": "//third-party/rust:p0325"
         },
         "normal": {
             "chrono": "//third-party/rust:p0048",
@@ -1314,12 +1315,12 @@ PACKAGE_DEPS = {
             "opentelemetry_sdk": "//third-party/rust:p0226",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "strum": "//third-party/rust:p0354",
-            "thiserror": "//third-party/rust:p0373",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "strum": "//third-party/rust:p0355",
+            "thiserror": "//third-party/rust:p0374",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-internal-transport-failure": {
@@ -1328,7 +1329,7 @@ PACKAGE_DEPS = {
         "normal": {
             "httpdate": "//third-party/rust:p0152",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-internal-vm-broker": {
@@ -1338,8 +1339,8 @@ PACKAGE_DEPS = {
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1356,10 +1357,10 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387"
         }
     },
     "lash-internal-vm-client": {
@@ -1384,17 +1385,17 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_bytes": "//third-party/rust:p0316",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395"
+            "serde_bytes": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-vm-protocol": {
         "build": {},
         "dev": {
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         },
         "normal": {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
@@ -1402,8 +1403,8 @@ PACKAGE_DEPS = {
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_bytes": "//third-party/rust:p0316",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_bytes": "//third-party/rust:p0317",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-internal-vm-runtime": {
@@ -1413,7 +1414,7 @@ PACKAGE_DEPS = {
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1442,11 +1443,11 @@ PACKAGE_DEPS = {
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396"
         }
     },
     "lash-internal-vm-worker": {
@@ -1469,13 +1470,13 @@ PACKAGE_DEPS = {
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "rmp_serde": "//third-party/rust:p0285",
-            "serde_bytes": "//third-party/rust:p0316",
-            "sha2": "//third-party/rust:p0326",
-            "sqlx": "//third-party/rust:p0340",
-            "stats_alloc": "//third-party/rust:p0349",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386"
+            "serde_bytes": "//third-party/rust:p0317",
+            "sha2": "//third-party/rust:p0327",
+            "sqlx": "//third-party/rust:p0341",
+            "stats_alloc": "//third-party/rust:p0350",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1504,9 +1505,9 @@ PACKAGE_DEPS = {
             "libc": "//third-party/rust:p0188",
             "rmp_serde": "//third-party/rust:p0285",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lash-internal-vocabulary": {
@@ -1520,8 +1521,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-check": {
@@ -1532,8 +1533,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-conformance": {
@@ -1573,8 +1574,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-dialect": {
@@ -1587,8 +1588,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-doc": {
@@ -1602,9 +1603,9 @@ PACKAGE_DEPS = {
             "num_traits": "//third-party/rust:p0219",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-edit": {
@@ -1618,8 +1619,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-engine": {
@@ -1644,14 +1645,14 @@ PACKAGE_DEPS = {
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-exec": {
         "build": {},
         "dev": {},
         "normal": {
-            "thiserror": "//third-party/rust:p0373"
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-labels": {
@@ -1659,8 +1660,8 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "serde_path_to_error": "//third-party/rust:p0321"
+            "serde_json": "//third-party/rust:p0321",
+            "serde_path_to_error": "//third-party/rust:p0322"
         }
     },
     "lash-kernel-lib": {
@@ -1675,8 +1676,8 @@ PACKAGE_DEPS = {
             "libm": "//third-party/rust:p0189",
             "num_bigint": "//third-party/rust:p0213",
             "num_traits": "//third-party/rust:p0219",
-            "serde_json": "//third-party/rust:p0320",
-            "unicode_normalization": "//third-party/rust:p0410"
+            "serde_json": "//third-party/rust:p0321",
+            "unicode_normalization": "//third-party/rust:p0411"
         }
     },
     "lash-kernel-migrate": {
@@ -1691,8 +1692,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-package": {
@@ -1704,8 +1705,8 @@ PACKAGE_DEPS = {
             "lash_kernel_labels": "//crates/lash-kernel-labels:lash-kernel-labels",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-releases": {
@@ -1723,8 +1724,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         },
         "dev": {
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
@@ -1740,8 +1741,8 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-services": {
@@ -1761,8 +1762,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-value": {
@@ -1773,8 +1774,8 @@ PACKAGE_DEPS = {
             "jsonschema": "//third-party/rust:p0184",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-view": {
@@ -1790,8 +1791,8 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-kernel-vm": {
@@ -1814,15 +1815,15 @@ PACKAGE_DEPS = {
             "num_traits": "//third-party/rust:p0219",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374"
         }
     },
     "lash-perf": {
         "build": {},
         "dev": {
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -1875,14 +1876,14 @@ PACKAGE_DEPS = {
             "rusqlite": "//third-party/rust:p0291",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "sqlx": "//third-party/rust:p0340",
-            "stats_alloc": "//third-party/rust:p0349",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_metrics": "//third-party/rust:p0381",
-            "tokio_util": "//third-party/rust:p0386",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "sqlx": "//third-party/rust:p0341",
+            "stats_alloc": "//third-party/rust:p0350",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_metrics": "//third-party/rust:p0382",
+            "tokio_util": "//third-party/rust:p0387",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-regress": {
@@ -1909,11 +1910,11 @@ PACKAGE_DEPS = {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "opentelemetry_sdk": "//third-party/rust:p0226",
             "rusqlite": "//third-party/rust:p0291",
-            "sqlx": "//third-party/rust:p0340",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379",
-            "tracing_subscriber": "//third-party/rust:p0399",
-            "trybuild": "//third-party/rust:p0402"
+            "sqlx": "//third-party/rust:p0341",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380",
+            "tracing_subscriber": "//third-party/rust:p0400",
+            "trybuild": "//third-party/rust:p0403"
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
@@ -1961,13 +1962,13 @@ PACKAGE_DEPS = {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sqlx": "//third-party/rust:p0340",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_util": "//third-party/rust:p0386",
-            "tracing": "//third-party/rust:p0395",
-            "uuid": "//third-party/rust:p0420"
+            "serde_json": "//third-party/rust:p0321",
+            "sqlx": "//third-party/rust:p0341",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_util": "//third-party/rust:p0387",
+            "tracing": "//third-party/rust:p0396",
+            "uuid": "//third-party/rust:p0421"
         }
     },
     "lash-sim": {
@@ -2015,11 +2016,11 @@ PACKAGE_DEPS = {
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "sqlx": "//third-party/rust:p0340",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "sqlx": "//third-party/rust:p0341",
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "lashctl": {
@@ -2027,8 +2028,8 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
-            "sqlx": "//third-party/rust:p0340",
-            "uuid": "//third-party/rust:p0420"
+            "sqlx": "//third-party/rust:p0341",
+            "uuid": "//third-party/rust:p0421"
         },
         "normal": {
             "lash": "//crates/lash:lash",
@@ -2036,16 +2037,16 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "mcp-events": {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "tempfile": "//third-party/rust:p0370",
-            "tokio": "//third-party/rust:p0379"
+            "tempfile": "//third-party/rust:p0371",
+            "tokio": "//third-party/rust:p0380"
         },
         "normal": {
             "blake3": "//third-party/rust:p0032",
@@ -2054,9 +2055,9 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "rusqlite": "//third-party/rust:p0291",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "provider-signatures": {
@@ -2069,7 +2070,7 @@ PACKAGE_DEPS = {
     "rlm-smoke-host": {
         "build": {},
         "dev": {
-            "tempfile": "//third-party/rust:p0370"
+            "tempfile": "//third-party/rust:p0371"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
@@ -2078,8 +2079,8 @@ PACKAGE_DEPS = {
             "lash": "//crates/lash:lash",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "tokio": "//third-party/rust:p0379"
+            "serde_json": "//third-party/rust:p0321",
+            "tokio": "//third-party/rust:p0380"
         }
     },
     "toolbench": {
@@ -2095,11 +2096,11 @@ PACKAGE_DEPS = {
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "reqwest": "//third-party/rust:p0280",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "sha2": "//third-party/rust:p0326",
-            "tokio": "//third-party/rust:p0379",
-            "tracing": "//third-party/rust:p0395",
-            "tracing_subscriber": "//third-party/rust:p0399"
+            "serde_json": "//third-party/rust:p0321",
+            "sha2": "//third-party/rust:p0327",
+            "tokio": "//third-party/rust:p0380",
+            "tracing": "//third-party/rust:p0396",
+            "tracing_subscriber": "//third-party/rust:p0400"
         }
     },
     "transcript-contract": {
@@ -2108,7 +2109,7 @@ PACKAGE_DEPS = {
             "insta": "//third-party/rust:p0171"
         },
         "normal": {
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "workflow-corpus": {
@@ -2134,7 +2135,7 @@ PACKAGE_DEPS = {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0321"
         }
     },
     "workflow-graph-roundtrip": {
@@ -2150,11 +2151,11 @@ PACKAGE_DEPS = {
             "chrono": "//third-party/rust:p0048",
             "lash": "//crates/lash:lash",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320",
-            "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379",
-            "tokio_stream": "//third-party/rust:p0384",
-            "uuid": "//third-party/rust:p0420",
+            "serde_json": "//third-party/rust:p0321",
+            "thiserror": "//third-party/rust:p0374",
+            "tokio": "//third-party/rust:p0380",
+            "tokio_stream": "//third-party/rust:p0385",
+            "uuid": "//third-party/rust:p0421",
             "workflow_corpus": "//examples/workflows:workflows"
         }
     }

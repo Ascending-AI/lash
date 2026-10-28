@@ -692,7 +692,7 @@ fn helper_native_debt_keeps_unarchived_hashes_under_their_release() {
         .inspect(&content, root, &selector, &helpers)
         .unwrap();
     assert_eq!(
-        reach.machine.helpers.outside,
+        *reach.machine.helpers.outside(),
         [(helpers.current_identity(), [function].into())].into()
     );
     assert!(reach.machine.libraries.is_empty());
@@ -717,10 +717,10 @@ fn helper_native_debt_keeps_unarchived_hashes_under_their_release() {
         .inspect(&content, root, &selector, &archived)
         .unwrap();
     assert_eq!(
-        archived_reach.machine.helpers.archives,
+        *archived_reach.machine.helpers.archives(),
         [(helpers.identity(), 1)].into()
     );
-    assert!(archived_reach.machine.helpers.outside.is_empty());
+    assert!(archived_reach.machine.helpers.outside().is_empty());
     assert_eq!(
         inspections
             .inspect(&content, root, &selector, &helpers)

@@ -25,7 +25,7 @@ pub enum CommittedUse {
     Ready(ResolutionRecord),
     Parked {
         record: ResolutionRecord,
-        unmet: Box<ClaimRequirements>,
+        unmet: ClaimRequirements,
     },
 }
 
@@ -220,7 +220,7 @@ impl FirstUse<'_> {
                     definition,
                     route,
                     mode: OperationMode::Waited,
-                    requirements: Box::new(requirements),
+                    requirements: requirements.into(),
                 };
                 match entry.validate() {
                     Ok(()) => Ok(entry),
@@ -250,10 +250,7 @@ impl FirstUse<'_> {
         if unmet.is_empty() {
             Ok(CommittedUse::Ready(record))
         } else {
-            Ok(CommittedUse::Parked {
-                record,
-                unmet: Box::new(unmet),
-            })
+            Ok(CommittedUse::Parked { record, unmet })
         }
     }
 }

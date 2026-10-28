@@ -33,7 +33,7 @@ pub enum ResolutionEntry {
         contract: ContractId,
         route: Box<OperationRoute>,
         mode: OperationMode,
-        requirements: Box<ClaimRequirements>,
+        requirements: std::sync::Arc<ClaimRequirements>,
     },
     Refused {
         note: String,

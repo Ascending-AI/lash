@@ -62,10 +62,10 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     let archive = lash_kernel_value::HelperLibraryId::of_members([function(40)]);
     let record = ClaimRequirements {
         machine: NodeRequirements {
-            helpers: lash_kernel_value::claims::HelperRequirements {
-                archives: [(archive, 2)].into(),
-                outside: Default::default(),
-            },
+            helpers: lash_kernel_value::claims::HelperRequirements::new(
+                [(archive, 2)].into(),
+                Default::default(),
+            ),
             libraries: Default::default(),
             natives: [reached].into(),
             kernels: [1].into(),
@@ -82,10 +82,10 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     let lacking = NodeCapabilities {
         machine: NodeRequirements {
             kernels: [1].into(),
-            helpers: lash_kernel_value::claims::HelperRequirements {
-                archives: [(archive, 1)].into(),
-                outside: Default::default(),
-            },
+            helpers: lash_kernel_value::claims::HelperRequirements::new(
+                [(archive, 1)].into(),
+                Default::default(),
+            ),
             ..NodeRequirements::default()
         },
         providers: [provider()].into(),
@@ -95,10 +95,10 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     let capable = NodeCapabilities {
         machine: NodeRequirements {
             natives: [reached, function(42)].into(),
-            helpers: lash_kernel_value::claims::HelperRequirements {
-                archives: [(archive, 3)].into(),
-                outside: Default::default(),
-            },
+            helpers: lash_kernel_value::claims::HelperRequirements::new(
+                [(archive, 3)].into(),
+                Default::default(),
+            ),
             ..lacking.machine.clone()
         },
         codecs: [(provider(), FormatVersion::ONE), (provider(), format_two())]
@@ -479,7 +479,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             definition: Box::new(definition),
             route: Box::new(route),
             mode: OperationMode::Waited,
-            requirements: Box::new(target.clone()),
+            requirements: target.clone().into(),
         },
     };
     let stale_revision = ResolutionOwner {

@@ -49,7 +49,22 @@ fn encode(value: &serde_json::Value) -> String {
     reason = "encoded payloads passed the same decoder at construction"
 )]
 fn decode(text: &str) -> serde_json::Value {
+    #[cfg(test)]
+    DECODE_CALLS.with(|calls| calls.set(calls.get() + 1));
     serde_json::from_str(text).expect("validated payload JSON decodes")
+}
+
+fn decodable(text: &str) -> bool {
+    serde_transcode::transcode(
+        &mut serde_json::Deserializer::from_str(text),
+        &mut serde_json::Serializer::new(std::io::sink()),
+    )
+    .is_ok()
+}
+
+#[cfg(test)]
+thread_local! {
+    static DECODE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 impl PayloadJson {
@@ -83,7 +98,7 @@ impl ProtocolPayload {
         let text = encode(&value);
         // A programmatically constructed Value can exceed serde_json's text
         // decoder depth. Keep that value intact rather than narrowing the API.
-        let json = if serde_json::from_str::<serde_json::Value>(&text).is_ok() {
+        let json = if decodable(&text) {
             PayloadJson::Encoded {
                 text: text.into(),
                 parsed: OnceLock::new(),
@@ -180,18 +195,77 @@ impl std::fmt::Debug for ProtocolPayload {
 
 impl std::fmt::Display for ProtocolPayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let PayloadJson::Encoded { text, .. } = &self.0.json
+            && !f.alternate()
+        {
+            return f.write_str(text);
+        }
         std::fmt::Display::fmt(self.0.json.transient().as_ref(), f)
     }
 }
 
 impl serde::Serialize for ProtocolPayload {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.json.transient().serialize(serializer)
+        match &self.0.json {
+            PayloadJson::Encoded { text, parsed } => match parsed.get() {
+                Some(value) => value.serialize(serializer),
+                None => serde_transcode::transcode(
+                    &mut serde_json::Deserializer::from_str(text),
+                    serializer,
+                ),
+            },
+            PayloadJson::Value(value) => value.serialize(serializer),
+        }
     }
 }
 
 impl<'de> serde::Deserialize<'de> for ProtocolPayload {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         serde_json::Value::deserialize(deserializer).map(Self::new)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7519: publishing an immutable meter receipt must not rebuild its
+    /// JSON tree for every serialization, or retain one as a side effect.
+    #[test]
+    fn serializing_encoded_protocol_json_does_not_rebuild_a_tree() {
+        let value = serde_json::json!({
+            "consumption": [{"resource":"charges", "consumed":7, "limit":40}],
+            "text": "line\nwith quotes \" and Unicode λ",
+            "values": [null, true, -2, 1.5]
+        });
+        let payload = ProtocolPayload::new(value.clone());
+        let before = DECODE_CALLS.with(std::cell::Cell::get);
+        assert_eq!(
+            serde_json::to_string(&payload).unwrap(),
+            serde_json::to_string(&value).unwrap()
+        );
+        assert_eq!(DECODE_CALLS.with(std::cell::Cell::get), before);
+        assert_eq!(serde_json::to_value(&payload).unwrap(), value);
+        let PayloadJson::Encoded { parsed, .. } = &payload.0.json else {
+            panic!("the receipt is shallow JSON");
+        };
+        assert!(parsed.get().is_none());
+        assert_eq!(payload.value(), &value);
+        assert_eq!(DECODE_CALLS.with(std::cell::Cell::get), before + 1);
+    }
+
+    /// Constructed JSON beyond the text decoder's depth retains its value.
+    #[test]
+    fn deep_constructed_protocol_json_keeps_its_serialization() {
+        let mut value = serde_json::Value::Null;
+        for _ in 0..150 {
+            value = serde_json::Value::Array(vec![value]);
+        }
+        let payload = ProtocolPayload::new(value.clone());
+        assert_eq!(
+            serde_json::to_string(&payload).unwrap(),
+            serde_json::to_string(&value).unwrap()
+        );
+        assert_eq!(payload.value(), &value);
     }
 }

@@ -160,7 +160,7 @@ impl ObligationToken {
                 requirements
                     .machine
                     .helpers
-                    .archives
+                    .archives_mut()
                     .entry(archive)
                     .and_modify(|held| *held = (*held).max(generation))
                     .or_insert(generation);
@@ -168,7 +168,7 @@ impl ObligationToken {
                 requirements
                     .machine
                     .helpers
-                    .outside
+                    .outside_mut()
                     .entry(release)
                     .or_default()
                     .extend(functions);
@@ -337,7 +337,7 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
             requirements
                 .machine
                 .helpers
-                .archives
+                .archives()
                 .iter()
                 .map(|(archive, generation)| {
                     ObligationToken(format!("{ARCHIVE}{archive}:{generation:010}"))
@@ -347,7 +347,7 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
             requirements
                 .machine
                 .helpers
-                .outside
+                .outside()
                 .iter()
                 .map(|(release, functions)| {
                     let functions = functions
@@ -493,6 +493,42 @@ impl lash_kernel_value::tokens::TokenCodec for ClaimRequirements {
 mod tests {
     use super::*;
 
+    /// Reusing a generation's claim debt shares its helper map; adding reach
+    /// to a later generation must preserve the earlier debt.
+    #[test]
+    fn generation_claim_snapshots_share_helper_debt_until_reach_changes() {
+        let archive = lash_kernel_value::HelperLibraryId::of_members([]);
+        let debt = |generation| ClaimRequirements {
+            machine: NodeRequirements {
+                helpers: lash_kernel_value::claims::HelperRequirements::new(
+                    [(archive, generation)].into(),
+                    Default::default(),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let original = debt(1);
+        let wire = serde_json::json!({"archives": {archive.to_string(): 1}, "outside": {}});
+        assert_eq!(
+            serde_json::to_value(&original.machine.helpers).unwrap(),
+            wire
+        );
+        let schema = serde_json::to_value(schemars::schema_for!(
+            lash_kernel_value::claims::HelperRequirements
+        ))
+        .unwrap();
+        assert!(jsonschema::is_valid(&schema, &wire));
+        let mut reused = original.clone();
+        assert!(std::ptr::eq(
+            original.machine.helpers.archives().get(&archive).unwrap(),
+            reused.machine.helpers.archives().get(&archive).unwrap(),
+        ));
+        reused.extend(&debt(2));
+        assert_eq!(original.machine.helpers.archives()[&archive], 1);
+        assert_eq!(reused.machine.helpers.archives()[&archive], 2);
+    }
+
     /// Archive generations are monotone; outside hashes keep their exact release coverage.
     #[test]
     fn helper_claims_compare_generations_and_retain_outside_hashes() {
@@ -501,20 +537,20 @@ mod tests {
         let release = lash_kernel_value::HelperLibraryId::of_members([function]);
         let requirements = ClaimRequirements {
             machine: NodeRequirements {
-                helpers: lash_kernel_value::claims::HelperRequirements {
-                    archives: [(archive, 2)].into(),
-                    outside: [(release, [function].into())].into(),
-                },
+                helpers: lash_kernel_value::claims::HelperRequirements::new(
+                    [(archive, 2)].into(),
+                    [(release, [function].into())].into(),
+                ),
                 ..Default::default()
             },
             ..Default::default()
         };
         let mut node = NodeCapabilities {
             machine: NodeRequirements {
-                helpers: lash_kernel_value::claims::HelperRequirements {
-                    archives: [(archive, 3)].into(),
-                    outside: Default::default(),
-                },
+                helpers: lash_kernel_value::claims::HelperRequirements::new(
+                    [(archive, 3)].into(),
+                    Default::default(),
+                ),
                 libraries: [release].into(),
                 ..Default::default()
             },
@@ -535,7 +571,7 @@ mod tests {
                 .all(|token| ObligationToken::is_served(token, &served))
         );
         assert!(requirements.met_by(&node));
-        node.machine.helpers.archives.insert(archive, 1);
+        node.machine.helpers.archives_mut().insert(archive, 1);
         let served: Vec<_> = ObligationToken::for_capabilities(&node)
             .map(String::from)
             .collect();
@@ -544,7 +580,7 @@ mod tests {
             &served
         ));
         assert_eq!(
-            requirements.unmet_by(&node).machine.helpers.archives,
+            *requirements.unmet_by(&node).machine.helpers.archives(),
             [(archive, 2)].into()
         );
         assert!(!ObligationToken::is_served(
@@ -553,7 +589,7 @@ mod tests {
         ));
         node.machine.libraries.clear();
         assert_eq!(
-            requirements.unmet_by(&node).machine.helpers.outside,
+            *requirements.unmet_by(&node).machine.helpers.outside(),
             [(release, [function].into())].into()
         );
     }

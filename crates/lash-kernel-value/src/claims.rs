@@ -31,70 +31,119 @@ impl crate::tokens::TokenCodec for HelperGeneration {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+/// One generation floor per archive lineage, with exact code outside those archives.
+pub struct HelperRequirements(std::sync::Arc<HelperRequirementData>);
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// One generation floor per archive lineage, with exact code outside those archives.
-pub struct HelperRequirements {
-    pub archives: BTreeMap<crate::HelperLibraryId, u32>,
-    pub outside: BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>>,
+#[schemars(rename = "HelperRequirements")]
+struct HelperRequirementData {
+    archives: BTreeMap<crate::HelperLibraryId, u32>,
+    outside: BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>>,
+}
+
+impl Default for HelperRequirements {
+    fn default() -> Self {
+        static EMPTY: std::sync::OnceLock<std::sync::Arc<HelperRequirementData>> =
+            std::sync::OnceLock::new();
+        Self(std::sync::Arc::clone(EMPTY.get_or_init(Default::default)))
+    }
 }
 
 impl HelperRequirements {
+    pub fn new(
+        archives: BTreeMap<crate::HelperLibraryId, u32>,
+        outside: BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>>,
+    ) -> Self {
+        if archives.is_empty() && outside.is_empty() {
+            Self::default()
+        } else {
+            Self(std::sync::Arc::new(HelperRequirementData {
+                archives,
+                outside,
+            }))
+        }
+    }
+
+    pub fn archives(&self) -> &BTreeMap<crate::HelperLibraryId, u32> {
+        &self.0.archives
+    }
+    pub fn archives_mut(&mut self) -> &mut BTreeMap<crate::HelperLibraryId, u32> {
+        &mut std::sync::Arc::make_mut(&mut self.0).archives
+    }
+    pub fn outside(&self) -> &BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>> {
+        &self.0.outside
+    }
+    pub fn outside_mut(&mut self) -> &mut BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>> {
+        &mut std::sync::Arc::make_mut(&mut self.0).outside
+    }
+
     pub fn extend(&mut self, other: &Self) {
-        for (archive, generation) in &other.archives {
-            self.archives
+        if other.is_empty() || std::sync::Arc::ptr_eq(&self.0, &other.0) {
+            return;
+        }
+        if self.is_empty() {
+            self.0 = std::sync::Arc::clone(&other.0);
+            return;
+        }
+        let data = std::sync::Arc::make_mut(&mut self.0);
+        for (archive, generation) in &other.0.archives {
+            data.archives
                 .entry(*archive)
                 .and_modify(|held| *held = (*held).max(*generation))
                 .or_insert(*generation);
         }
-        for (release, functions) in &other.outside {
-            self.outside.entry(*release).or_default().extend(functions);
+        for (release, functions) in &other.0.outside {
+            data.outside.entry(*release).or_default().extend(functions);
         }
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.archives.is_empty() && self.outside.is_empty()
+        self.0.archives.is_empty() && self.0.outside.is_empty()
     }
 
     pub fn unmet_by(&self, node: &Self, libraries: &BTreeSet<crate::HelperLibraryId>) -> Self {
-        Self {
-            archives: self
+        Self::new(
+            self.0
                 .archives
                 .iter()
                 .filter_map(|(archive, generation)| {
                     (node
+                        .0
                         .archives
                         .get(archive)
                         .is_none_or(|held| held < generation))
                     .then_some((*archive, *generation))
                 })
                 .collect(),
-            outside: self
+            self.0
                 .outside
                 .iter()
                 .filter(|(release, _)| !libraries.contains(release))
                 .map(|(release, functions)| (*release, functions.clone()))
                 .collect(),
-        }
+        )
     }
 }
 
 impl crate::tokens::TokenCodec for HelperRequirements {
     fn encode(&self, out: &mut crate::tokens::TokenWriter) {
         out.seq(2);
-        self.archives.encode(out);
-        self.outside.encode(out);
+        self.0.archives.encode(out);
+        self.0.outside.encode(out);
     }
 
     fn decode(
         input: &mut crate::tokens::TokenReader<'_>,
     ) -> Result<Self, crate::tokens::TokenError> {
         input.expect_struct(2)?;
-        Ok(Self {
-            archives: BTreeMap::decode(input)?,
-            outside: BTreeMap::decode(input)?,
-        })
+        Ok(Self::new(
+            BTreeMap::decode(input)?,
+            BTreeMap::decode(input)?,
+        ))
     }
 }
 
