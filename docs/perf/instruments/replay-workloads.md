@@ -797,7 +797,7 @@ The combined ordinary population has these host allocation medians:
 | ts-codemode | 11,088,014 B | 11,983,899 B |
 | py-codemode | 8,275,273 B | 8,256,481 B |
 
-Five ordinary captures at clean `b17d886f7e` matched every counted summary
+Five ordinary captures at clean `4b2f81964d` matched every counted summary
 and every turn/compaction record across four workloads: 1,280 turns and
 15 compactions. Their executable digest is identical and no diagnostic
 probe or attribution mode is enabled. The refresh uses the measured
@@ -809,8 +809,17 @@ normal blessing guard and all determinism assertions remain unchanged.
 Main's subsequent `c8680459bd` collects unreachable arena cycles before
 terminal release under memory metering. A source-isolated comparison adds
 160 worker bytes and four allocations to every measured code-mode turn,
-with no other counted record changes. The final refresh attributes four
+with no other counted record changes. The terminal refresh attributes four
 worker medians to that required cleanup, preserving all tighter slopes.
+Main's `aa63937487` then shares dialect construction declarations,
+expression recipes and paired statement/note buffers. Python now builds
+one `Vec<Emitted>` and splits it into statements and notes; expression
+recipes clone input expressions and collect call arguments. The isolated
+current-main population increases the TypeScript worker median by 20,028 B
+and 23 allocations, and Python worker bytes by 9,048 B. Host, IPC, SQL and
+other counted medians agree. The final refresh attributes these three
+worker medians to the new construction machinery. It does not assign the
+individual numerical contributions to each internal mechanism.
 The original full-path law separately checks the compiled baseline.
 
 The counted SQLite fixture uses a serial inline queue. Production retains

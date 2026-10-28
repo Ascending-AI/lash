@@ -1,6 +1,6 @@
 {
   "format": "lash-perf-replay-baseline/1",
-  "blessed_from": "b17d886f7e17e5914add19ca7805636b516d8cc3",
+  "blessed_from": "4b2f81964d74af83624a300bf93d4fe48e0b41a9",
   "build": "debug",
   "build_profile": "PROFILE=;OPT_LEVEL=0;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"console\",\"default\",\"dhat-heap\"))\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=true",
   "allocator": "stats_alloc",
@@ -226,7 +226,7 @@
         "sql_writes": 113.0,
         "store_bytes_written": 1822720.0,
         "tool_bodies": 2.0,
-        "worker_allocated_bytes": 4349536.0,
+        "worker_allocated_bytes": 4358584.0,
         "worker_allocations": 10812.0,
         "worker_executions": 1.0,
         "workers_killed": 0.0
@@ -284,7 +284,7 @@
         "sql_writes": 113.0,
         "store_bytes_written": 1822720.0,
         "tool_bodies": 2.0,
-        "worker_allocated_bytes": 4349536.0,
+        "worker_allocated_bytes": 4358584.0,
         "worker_allocations": 10812.0,
         "worker_executions": 1.0,
         "workers_killed": 0.0
@@ -346,8 +346,8 @@
         "sql_writes": 113.0,
         "store_bytes_written": 1822720.0,
         "tool_bodies": 2.0,
-        "worker_allocated_bytes": 7861747.0,
-        "worker_allocations": 27648.0,
+        "worker_allocated_bytes": 7881775.0,
+        "worker_allocations": 27671.0,
         "worker_executions": 1.0,
         "workers_killed": 0.0
       },
@@ -404,8 +404,8 @@
         "sql_writes": 113.0,
         "store_bytes_written": 1822720.0,
         "tool_bodies": 2.0,
-        "worker_allocated_bytes": 7861747.0,
-        "worker_allocations": 27648.0,
+        "worker_allocated_bytes": 7881775.0,
+        "worker_allocations": 27671.0,
         "worker_executions": 1.0,
         "workers_killed": 0.0
       },
