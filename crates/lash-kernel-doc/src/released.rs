@@ -434,6 +434,7 @@ pub struct BuildHelpers {
     functions: crate::FunctionRegistry,
     members: std::collections::HashMap<FunctionId, HelperMember>,
     member_order: BTreeSet<FunctionId>,
+    resolver_roots: BTreeSet<FunctionId>,
 }
 
 #[derive(Clone, Debug)]
@@ -465,7 +466,7 @@ impl BuildHelpers {
         }
         crate::document_work::note_helper(|work| work.identity_hashes += 1);
         let identity = lash_kernel_value::HelperLibraryId::of_members(callees.keys().copied());
-        let member_order = callees.keys().copied().collect();
+        let member_order: BTreeSet<_> = callees.keys().copied().collect();
         let members = callees
             .into_iter()
             .map(|(id, callees)| {
@@ -487,6 +488,7 @@ impl BuildHelpers {
             archives: Default::default(),
             functions,
             members,
+            resolver_roots: member_order.clone(),
             member_order,
         })
     }
@@ -507,6 +509,7 @@ impl BuildHelpers {
                 functions: crate::FunctionRegistry::declarations(),
                 members: Default::default(),
                 member_order: Default::default(),
+                resolver_roots: Default::default(),
             })
         }))
     }
@@ -560,8 +563,27 @@ impl BuildHelpers {
                     )
                 })
                 .collect(),
+            resolver_roots: members.clone(),
             member_order: members,
         })
+    }
+
+    /// Choose the current source helpers without excluding archived execution code.
+    pub fn with_resolver_roots(
+        mut self,
+        roots: impl IntoIterator<Item = FunctionId>,
+    ) -> Result<Self, HelperUnavailable> {
+        let roots: BTreeSet<_> = roots.into_iter().collect();
+        for function in &roots {
+            if !self.contains(function) {
+                return Err(HelperUnavailable {
+                    reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                    function: *function,
+                });
+            }
+        }
+        self.resolver_roots = roots;
+        Ok(self)
     }
 
     /// Historical manifests authenticated by the installing parent and covered
@@ -755,9 +777,12 @@ impl BuildHelpers {
 }
 impl crate::FunctionCatalog for BuildHelpers {
     fn named_helper(&self, name: &str) -> Option<FunctionId> {
-        self.functions
-            .named_helper(name)
-            .filter(|id| self.contains(id))
+        let mut found = self
+            .functions
+            .named(name)
+            .filter(|id| self.resolver_roots.contains(id));
+        let id = found.next()?;
+        found.next().is_none().then_some(id)
     }
 
     fn helper_library(&self) -> Option<&Self> {

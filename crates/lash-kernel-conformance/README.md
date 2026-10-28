@@ -51,7 +51,9 @@ their limits or cleanup oracles.
 `--document-identities` refreshes declarations and their exact references after
 projection entered canonical function encoding. It also refreshes identity-based
 coordinates and guard names. It preserves source order, refusal cases, values,
-charges and work bounds. Review the identity-only diff before committing.
+charges and work bounds. `--contract-identities` refreshes the exact document
+identity vectors after a document grammar change. Review the identity-only diff
+before committing.
 
 `environment` defaults to no host reads or deliveries, a charge bound of
 1,000,000, 16 MiB of memory, call depth 64, and 128 live tasks, requests per

@@ -9,6 +9,10 @@ use lash_durable_test::{OffClockWork, SimClock};
 use lash_execution_contracts::backend::StoreSet;
 use lash_postgres_store::testing::IsolatedDatabase;
 
+// Two 32-cell matrices share the service's 400 connections. Four per cell
+// leave room for fixture setup and retirement without reducing cell concurrency.
+const CELL_CONNECTIONS: u32 = 4;
+
 #[derive(Clone, Copy)]
 pub enum Tier {
     SqliteMemory,
@@ -43,7 +47,7 @@ pub async fn open(
             .expect("an isolated database opens");
             let pool = WaitedOutPool::open(isolated.url());
             clock.wait_out(Arc::clone(&pool) as _);
-            let mut config = lash_postgres_store::testing::work_pool_of(16);
+            let mut config = lash_postgres_store::testing::work_pool_of(CELL_CONNECTIONS);
             // The matrix's clock owns leases. Server statement guards must
             // not inject an unscripted fault while parallel cells use the pool.
             config.guards.renewal.statement = lash_postgres_store::host::ServerTimeout::Disabled;
@@ -75,7 +79,7 @@ impl WaitedOutPool {
         let released = Arc::new(AtomicUsize::new(0));
         let counted = Arc::clone(&released);
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(16)
+            .max_connections(CELL_CONNECTIONS)
             .min_connections(0)
             .after_release(move |_, _| {
                 counted.fetch_add(1, Ordering::SeqCst);

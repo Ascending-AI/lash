@@ -391,6 +391,10 @@ fn an_orphan_document_keeps_its_identity_and_archived_body() {
         &old
     );
     assert_eq!(release.resolver_roots(), [current_id].into());
+    assert_eq!(
+        lash_kernel_doc::FunctionCatalog::named_helper(release.helpers.as_ref(), "helper"),
+        Some(current_id)
+    );
 }
 
 fn run_document(

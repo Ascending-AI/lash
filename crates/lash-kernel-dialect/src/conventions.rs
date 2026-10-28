@@ -498,7 +498,7 @@ impl Conventions {
         catalog: &dyn FunctionCatalog,
     ) -> Result<(k::Document, BTreeMap<FunctionId, FunctionId>), crate::PrintError> {
         let library = admission::CatalogLibrary::new(catalog, document);
-        let canonical = if let Some(language) = self.language {
+        let mut canonical = if let Some(language) = self.language {
             match self.inverse {
                 Inverse::Checked(verify) => verify(document, &library)?,
                 Inverse::Unavailable => {
@@ -514,21 +514,29 @@ impl Conventions {
         } else {
             document.clone()
         };
-        let identities = if canonical.canonical_bytes() == document.canonical_bytes() {
-            document.functions.keys().map(|id| (*id, *id)).collect()
-        } else {
-            crate::normalization::module(document, &canonical, &library)
-                .ok_or_else(|| crate::PrintError::Unprintable {
-                    site: lash_kernel_value::sites::Site::new(
-                        lash_kernel_value::sites::Unit::Main,
-                        vec![],
-                    ),
-                    reason: crate::UnprintableReason::ReadbackMismatch,
-                })?
-                .into_iter()
-                .map(|(new, old)| (old, new))
-                .collect()
-        };
+        let identities: BTreeMap<FunctionId, FunctionId> =
+            if canonical.canonical_bytes() == document.canonical_bytes() {
+                document.functions.keys().map(|id| (*id, *id)).collect()
+            } else {
+                crate::normalization::module(document, &canonical, &library)
+                    .ok_or_else(|| crate::PrintError::Unprintable {
+                        site: lash_kernel_value::sites::Site::new(
+                            lash_kernel_value::sites::Unit::Main,
+                            vec![],
+                        ),
+                        reason: crate::UnprintableReason::ReadbackMismatch,
+                    })?
+                    .into_iter()
+                    .map(|(new, old)| (old, new))
+                    .collect()
+            };
+        // Readback proves the same authored code, but its source locations are
+        // printer output. Keep the original policy facts for the copied code.
+        canonical.source_evidence = document
+            .source_evidence
+            .iter()
+            .filter_map(|(id, facts)| identities.get(id).map(|new| (*new, facts.clone())))
+            .collect();
         Ok((canonical, identities))
     }
 

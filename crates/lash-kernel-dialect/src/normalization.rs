@@ -89,8 +89,21 @@ pub fn module(
         }
         at
     };
+    let mut available = BTreeMap::new();
+    for node in before.nodes() {
+        if available
+            .insert(lexical_path(&before, node.id), node)
+            .is_some()
+        {
+            return None;
+        }
+    }
     for node in after.nodes() {
-        let old_node = before.node_at(&site(&node.site))?;
+        let path = lexical_path(&after, node.id)
+            .iter()
+            .map(&site)
+            .collect::<Vec<_>>();
+        let old_node = available.remove(&path)?;
         let old_refs = lash_kernel_check::binding_references(&old_node.kind);
         let new_refs = lash_kernel_check::binding_references(&node.kind);
         if old_refs.len() != new_refs.len() {
@@ -105,7 +118,11 @@ pub fn module(
                     let a = before.binding(*a);
                     let b = after.binding(*b);
                     if a.kind != b.kind
-                        || before.node(a.declared_at).site != site(&after.node(b.declared_at).site)
+                        || lexical_path(&before, a.declared_at)
+                            != lexical_path(&after, b.declared_at)
+                                .iter()
+                                .map(&site)
+                                .collect::<Vec<_>>()
                     {
                         return None;
                     }
@@ -115,8 +132,25 @@ pub fn module(
             }
         }
     }
+    if !available.is_empty() {
+        return None;
+    }
     Some(functions)
 }
+/// Code coordinates followed by their enclosing closure creation coordinates.
+fn lexical_path(graph: &lash_kernel_check::Graph, id: lash_kernel_check::NodeId) -> Vec<Site> {
+    let mut node = graph.node(id);
+    let mut path = vec![node.site.clone()];
+    while let Some(parent) = node.parent {
+        let parent = graph.node(parent);
+        if node.site.unit != parent.site.unit {
+            path.push(parent.site.clone());
+        }
+        node = parent;
+    }
+    path
+}
+
 fn one(
     old: &k::Document,
     old_id: FunctionId,

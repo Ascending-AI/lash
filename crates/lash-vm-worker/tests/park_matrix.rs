@@ -339,39 +339,56 @@ impl Projections for LawArgs {
 }
 
 /// The execution's latest root, read whole: its body and the graph beneath.
-async fn stored_root(database: &dyn DurableStore) -> Option<(ExecRoot, HydratedGraph)> {
-    let row = database.exec_root(&exec()).await.ok()??;
+async fn stored_root(database: &dyn DurableStore) -> Result<(ExecRoot, HydratedGraph), String> {
+    let row = database
+        .exec_root(&exec())
+        .await
+        .map_err(|error| format!("read execution root: {error:?}"))?
+        .ok_or_else(|| "execution has no stored root".to_owned())?;
     let graph = database
         .hydrate(RootOwner::Exec(exec()), Some(row.root), OWNER_READ_LIMITS)
         .await
-        .ok()?;
+        .map_err(|error| format!("hydrate execution root {:?}: {error:?}", row.root))?;
     let root = GraphDecoder::new(&graph, OWNER_READ_LIMITS)
         .decode(row.root, NodeKind::EXEC_ROOT)
-        .ok()?;
-    Some((root, graph))
+        .map_err(|error| format!("decode execution root {:?}: {error:?}", row.root))?;
+    Ok((root, graph))
 }
 
 /// Whether the latest root's membership names `operation`'s admission: the
 /// root and the admission commit in one transaction, so a root that names
 /// it means its admission stood.
-async fn admitted_in_root(database: &dyn DurableStore, operation: OperationId) -> bool {
-    let Some((root, graph)) = stored_root(database).await else {
-        return false;
-    };
-    let Some(membership) = root.effect_membership else {
-        return false;
-    };
+async fn admitted_in_root(
+    database: &dyn DurableStore,
+    operation: OperationId,
+) -> Result<(), String> {
+    let (root, graph) = stored_root(database).await?;
+    let membership = root
+        .effect_membership
+        .ok_or_else(|| format!("root {:?} has no effect membership", graph.root))?;
     let mut decoder = GraphDecoder::new(&graph, OWNER_READ_LIMITS);
-    EffectMembership::load(&mut decoder, membership, &exec(), &LawArgs).is_ok_and(
-        |(_, resolved)| {
-            resolved.values().any(|resolved| {
-                matches!(
-                    resolved.admission.disposition,
-                    Disposition::Execution { operation: admitted, .. } if admitted == operation
-                )
-            })
-        },
-    )
+    let (_, resolved) = EffectMembership::load(&mut decoder, membership, &exec(), &LawArgs)
+        .map_err(|error| {
+            format!(
+                "load root {:?} membership {membership:?}: {error:?}",
+                graph.root
+            )
+        })?;
+    if resolved.values().any(|resolved| {
+        matches!(resolved.admission.disposition,
+            Disposition::Execution { operation: admitted, .. } if admitted == operation)
+    }) {
+        Ok(())
+    } else {
+        Err(format!(
+            "root {:?} membership {membership:?} does not admit {operation:?}: {:?}",
+            graph.root,
+            resolved
+                .values()
+                .map(|resolved| &resolved.admission.disposition)
+                .collect::<Vec<_>>()
+        ))
+    }
 }
 
 struct NoReads;
@@ -391,7 +408,7 @@ struct Body {
     operation: OperationId,
     call: ToolCallId,
     token: u64,
-    admitted_first: bool,
+    admitted_first: Result<(), String>,
 }
 
 /// What every node's activations share.
@@ -526,9 +543,9 @@ impl Scenario for ParkScenario {
         let bodies = self.shared.bodies.lock().expect("bodies").clone();
         let mut runs: BTreeMap<OperationId, usize> = BTreeMap::new();
         for body in &bodies {
-            if !body.admitted_first {
+            if let Err(detail) = &body.admitted_first {
                 violations.push(format!(
-                    "P1: {:?} ran before the park admitting it committed",
+                    "P1: {:?} ran before the park admitting it committed: {detail}",
                     body.operation
                 ));
             }
@@ -596,11 +613,11 @@ impl Scenario for ParkScenario {
             }
         }
         match stored_root(nodes.database().as_ref()).await {
-            Some((root, _)) if root.status == ExecStatus::Ended => {}
-            Some((root, _)) => {
+            Ok((root, _)) if root.status == ExecStatus::Ended => {}
+            Ok((root, _)) => {
                 violations.push(format!("P5: the last root is {:?}, not ended", root.status));
             }
-            None => violations.push("P5: no last root reads".to_owned()),
+            Err(error) => violations.push(format!("P5: no last root reads: {error}")),
         }
         violations
     }

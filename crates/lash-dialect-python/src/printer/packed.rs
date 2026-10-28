@@ -137,10 +137,16 @@ impl Renderer<'_> {
             names.push(name.clone());
         }
         let body = &body[metadata.len() + 1..];
+        let mut authored = None;
         if let Some((condition, fast)) = fast.as_ref() {
-            let [k::Stmt::Return { value }] = body else {
+            let (k::Stmt::Return { value }, prefix) = body.split_last()? else {
                 return None;
             };
+            let value = lash_kernel_dialect::builder::BlockBuilder::from_parts(
+                prefix.to_vec(),
+                vec![Default::default(); prefix.len()],
+            )
+            .expression(value.clone(), 0)?;
             let [k::Stmt::Return { value: fast }] = fast.as_slice() else {
                 return None;
             };
@@ -207,10 +213,12 @@ impl Renderer<'_> {
                     actual = r#else;
                 }
             }
-            if actual != value {
+            if actual != &value {
                 return None;
             }
+            authored = Some(vec![k::Stmt::Return { value }]);
         }
+        let body = authored.as_deref().unwrap_or(body);
         if let Some(function) = self.direct_body(body) {
             let raw = self.document.functions.get(&function)?.body()?;
             Some((names, raw.block.clone(), function, 0))

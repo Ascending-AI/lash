@@ -175,6 +175,15 @@ impl Lifter<'_> {
         if let Some(method) = self.primitive_method(function, args)? {
             return Ok(method);
         }
+        if name == "text.concat"
+            && args.len() == 2
+            && args.iter().any(|part| {
+                matches!(part,
+                k::Expr::Call { function, .. } if self.is(function, "ts.to_string"))
+            })
+        {
+            return self.template(args);
+        }
         if self.style.operators
             && let Some(operator) = self.operator(&name, args)
         {

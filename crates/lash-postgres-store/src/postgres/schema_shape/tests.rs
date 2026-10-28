@@ -170,6 +170,29 @@ fn regeneration_path(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
+#[test]
+#[ignore = "regenerates version stamps in crates/lash-postgres-store/schema.sql"]
+fn regenerate_schema_version_stamps() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    let path = regeneration_path("schema.sql");
+    let schema = std::fs::read_to_string(&path).expect("read schema artifact");
+    let (header, body) = schema.split_once('\n').expect("schema header");
+    assert!(header.starts_with("-- lash-postgres-store schema, component version "));
+    let seed = body
+        .lines()
+        .find(|line| line.starts_with(&format!("VALUES ('{SCHEMA_COMPONENT}', ")))
+        .expect("schema compatibility seed");
+    let body = body.replace(
+        seed,
+        &format!("VALUES ('{SCHEMA_COMPONENT}', {SCHEMA_VERSION}, {SCHEMA_VERSION})"),
+    );
+    std::fs::write(
+        path,
+        format!("-- lash-postgres-store schema, component version {SCHEMA_VERSION}.\n{body}"),
+    )
+    .expect("rewrite schema version stamps");
+}
+
 /// A structural check cannot see a missing row, so the artifact has to carry the
 /// seeds itself — otherwise a host that copies it faithfully still ends up with a
 /// database lash refuses to open.

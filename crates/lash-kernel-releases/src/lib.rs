@@ -159,6 +159,8 @@ pub fn with_archive(
         BuildHelpers::new(functions.clone(), members)
             .map_err(LibraryError::new)?
             .with_library_identities(libraries)
+            .with_resolver_roots(current.roots.iter().copied())
+            .map_err(LibraryError::new)?
             .with_claim_generations(current.helpers.current_identity(), generations)
             .map_err(LibraryError::new)?,
     );
@@ -199,10 +201,9 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
         functions
             .register_released(image)
             .map_err(LibraryError::new)?;
-        let roots = serde_json::from_str(include_str!(concat!(
-            env!("OUT_DIR"),
-            "/helpers.roots.json"
-        )))
+        let roots: std::collections::BTreeSet<FunctionId> = serde_json::from_str(include_str!(
+            concat!(env!("OUT_DIR"), "/helpers.roots.json")
+        ))
         .map_err(LibraryError::new)?;
         let members = serde_json::from_str(include_str!(concat!(
             env!("OUT_DIR"),
@@ -228,6 +229,8 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
             )
             .map_err(LibraryError::new)?
             .with_library_identities(libraries)
+            .with_resolver_roots(roots.iter().copied())
+            .map_err(LibraryError::new)?
             .with_claim_generations(current, generations)
             .map_err(LibraryError::new)?,
         );

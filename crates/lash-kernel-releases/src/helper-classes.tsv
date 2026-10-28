@@ -19,6 +19,7 @@ py.bytes_len	total
 py.bytes_repr	total
 py.bytes_text	total
 py.call	operation
+py.call_target	total
 py.callable	total
 py.catch.matches	total
 py.chr	total

@@ -43,15 +43,7 @@ impl<'a> Values<'a> {
         Ok(())
     }
     fn helper(&mut self, name: &str, args: Vec<Expr>) -> Result<Expr, MaterializeRefusal> {
-        let id = self
-            .helpers
-            .functions()
-            .named(name)
-            .find(|id| self.helpers.contains(id))
-            .ok_or_else(|| MaterializeRefusal::ConstructionHelperMissing {
-                name: FunctionName::new(name)
-                    .unwrap_or_else(|_| unreachable!("qualified construction helper")),
-            })?;
+        let id = super::source::helper(self.helpers, name)?;
         self.library.insert(id);
         Ok(Expr::Call { function: id, args })
     }

@@ -4,9 +4,7 @@ use {lash_kernel_value::Param, lash_kernel_value::Signature, lash_kernel_value::
 
 pub(super) fn helper(helpers: &BuildHelpers, name: &str) -> Result<FunctionId, MaterializeRefusal> {
     helpers
-        .functions()
-        .named(name)
-        .find(|id| helpers.contains(id))
+        .named_helper(name)
         .ok_or_else(|| MaterializeRefusal::ConstructionHelperMissing {
             name: FunctionName::new(name)
                 .unwrap_or_else(|_| unreachable!("qualified construction helper")),
