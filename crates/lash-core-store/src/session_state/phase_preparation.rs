@@ -21,7 +21,7 @@ impl RuntimeCheckpointComponents {
     pub(super) fn load_phase_preparations(
         checkpoint: &HydratedSessionCheckpoint,
         manifest: &SessionCheckpoint,
-    ) -> Result<Option<(BlobRef, PhaseContentPreparations)>, StoreError> {
+    ) -> Result<Option<Arc<(BlobRef, PhaseContentPreparations)>>, StoreError> {
         let Some(descriptor) = manifest.components.get(COMPONENT) else {
             return Ok(None);
         };
@@ -37,7 +37,7 @@ impl RuntimeCheckpointComponents {
             DecodeLimits::within_total(1 << 32),
         )
         .map_err(|error| invalid(error.to_string()))?;
-        Ok(Some((descriptor.blob_ref.clone(), prepared)))
+        Ok(Some(Arc::new((descriptor.blob_ref.clone(), prepared))))
     }
 
     pub(super) fn stage_phase_preparations(
@@ -47,7 +47,7 @@ impl RuntimeCheckpointComponents {
         if matches!(
             self.entries.get(COMPONENT),
             Some(ResidentCheckpointComponent::Changed { .. })
-        ) && let Some((_, prepared)) = &self.phase_preparations
+        ) && let Some((_, prepared)) = self.phase_preparations.as_deref()
         {
             nodes.extend(prepared.to_graph().map_err(encoding)?.1);
         }
@@ -55,7 +55,7 @@ impl RuntimeCheckpointComponents {
     }
 
     pub(super) fn retain_phase_preparations(&mut self, manifest: &SessionCheckpoint) {
-        if self.phase_preparations.as_ref().is_some_and(|(root, _)| {
+        if self.phase_preparations.as_deref().is_some_and(|(root, _)| {
             manifest
                 .components
                 .get(COMPONENT)
@@ -77,7 +77,7 @@ impl RuntimeCheckpointComponents {
         }
         if self
             .phase_preparations
-            .as_ref()
+            .as_deref()
             .is_some_and(|(_, current)| *current == prepared)
         {
             return Ok(());
@@ -102,7 +102,7 @@ impl RuntimeCheckpointComponents {
                 body: PendingCheckpointComponentBody::Opaque(body),
             },
         );
-        self.phase_preparations = Some((BlobRef(root.to_hex()), prepared));
+        self.phase_preparations = Some(Arc::new((BlobRef(root.to_hex()), prepared)));
         Ok(())
     }
 }
@@ -112,7 +112,7 @@ impl RuntimeSessionState {
     pub fn phase_content_preparations(&self) -> Option<&PhaseContentPreparations> {
         self.checkpoint_components
             .phase_preparations
-            .as_ref()
+            .as_deref()
             .map(|(_, prepared)| prepared)
     }
 

@@ -105,10 +105,12 @@ pub struct RuntimeCheckpointComponents {
     #[serde(skip)]
     execution: ResidentExecution,
     #[serde(skip)]
-    phase_preparations: Option<(
-        crate::store::BlobRef,
-        crate::phase_preparation::PhaseContentPreparations,
-    )>,
+    phase_preparations: Option<
+        std::sync::Arc<(
+            crate::store::BlobRef,
+            crate::phase_preparation::PhaseContentPreparations,
+        )>,
+    >,
 }
 
 impl Default for RuntimeCheckpointComponents {
