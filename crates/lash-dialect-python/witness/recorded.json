@@ -489,7 +489,7 @@
   },
   {
    "name": "json_boundaries",
-   "source": "import json\n\nvalue = json.loads('{\"z\": [\"\\\\u00e9\", \"\\\\ud83d\\\\ude00\", -0.0], \"a\": 123456789012345678901234567890}')\nprint(list(value), value['z'], value['a'])\nprint(json.dumps(value, separators=(',', ':')))\nprint(json.dumps(value, ensure_ascii=False, separators=(',', ':')))\nprint(json.dumps({'z': 1, 'a': 2}, sort_keys=True))\nsource = '[' * 40 + '1' + ']' * 40\nvalue = json.loads(source)\nfor i in range(40):\n    value = value[0]\nprint(value)\nprint(await host.echo(json.dumps({'b': [True, None, 1.0, -0.0], 'a': 'é'})))\n\nprint(json.dumps({'text': '\\x7f\\n\"\\\\', 'numbers': [1.0, 1e-5, 1e16, -0.0]}, sort_keys=True))\nprint(json.dumps({'é': 1.0}, separators=(' / ', ' = ')))\nprint(json.dumps({1: 'one', None: 'null', False: 'false'}))\nprint(json.dumps([float('inf'), float('-inf'), float('nan')]))\ntry:\n    print(json.dumps(float('inf'), allow_nan=False))\nexcept ValueError:\n    print('nonfinite')\nprint(json.dumps([1, 2], indent=2))\ndef convert(value):\n    return 'converted'\nprint(json.dumps({1, 2}, default=convert))\ncycle = []\ncycle.append(cycle)\ntry:\n    print(json.dumps(cycle))\nexcept ValueError:\n    print('circular')\n\n# Token scanning preserves escapes and both sides of the inline integer range.\nprint(json.loads(json.dumps(['a\"b', 'a\\\\b', 'line\\nbreak', 'é'], ensure_ascii=False)))\nprint(json.loads('[0,-0,9223372036854775807,-9223372036854775808,9223372036854775808,-9223372036854775809]'))\n",
+   "source": "import json\n\nvalue = json.loads('{\"z\": [\"\\\\u00e9\", \"\\\\ud83d\\\\ude00\", -0.0], \"a\": 123456789012345678901234567890}')\nprint(list(value), value['z'], value['a'])\nprint(json.dumps(value, separators=(',', ':')))\nprint(json.dumps(value, ensure_ascii=False, separators=(',', ':')))\nprint(json.dumps({'z': 1, 'a': 2}, sort_keys=True))\nsource = '[' * 40 + '1' + ']' * 40\nvalue = json.loads(source)\nfor i in range(40):\n    value = value[0]\nprint(value)\nprint(await host.echo(json.dumps({'b': [True, None, 1.0, -0.0], 'a': 'é'})))\n\nprint(json.dumps({'text': '\\x7f\\n\"\\\\', 'numbers': [1.0, 1e-5, 1e16, -0.0]}, sort_keys=True))\nprint(json.dumps({'é': 1.0}, separators=(' / ', ' = ')))\nprint(json.dumps({1: 'one', None: 'null', False: 'false'}))\nprint(json.dumps([float('inf'), float('-inf'), float('nan')]))\ntry:\n    print(json.dumps(float('inf'), allow_nan=False))\nexcept ValueError:\n    print('nonfinite')\nprint(json.dumps([1, 2], indent=2))\ndef convert(value):\n    return 'converted'\nprint(json.dumps({1, 2}, default=convert))\ncycle = []\ncycle.append(cycle)\ntry:\n    print(json.dumps(cycle))\nexcept ValueError:\n    print('circular')\n\n# Token scanning preserves escapes and both sides of the inline integer range.\nprint(json.loads(json.dumps(['a\"b', 'a\\\\b', 'line\\nbreak', 'é'], ensure_ascii=False)))\nprint(json.loads('[0,-0,9223372036854775807,-9223372036854775808,9223372036854775808,-9223372036854775809]'))\nprint(json.loads('[1.0,1e0,-0.0,1E-9]'))\nfor invalid in ['01', '-01', '1.', '1e', '1e+', '+1', '.5']:\n    try:\n        json.loads(invalid)\n    except ValueError:\n        print('invalid number', invalid)\n",
    "deliveries": [],
    "epochs": [
     {
@@ -521,7 +521,15 @@
       "\"converted\"",
       "circular",
       "['a\"b', 'a\\\\b', 'line\\nbreak', 'é']",
-      "[0, 0, 9223372036854775807, -9223372036854775808, 9223372036854775808, -9223372036854775809]"
+      "[0, 0, 9223372036854775807, -9223372036854775808, 9223372036854775808, -9223372036854775809]",
+      "[1.0, 1.0, -0.0, 1e-09]",
+      "invalid number 01",
+      "invalid number -01",
+      "invalid number 1.",
+      "invalid number 1e",
+      "invalid number 1e+",
+      "invalid number +1",
+      "invalid number .5"
      ]
     }
    ],

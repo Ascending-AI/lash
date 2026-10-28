@@ -22,7 +22,7 @@ impl<'text> Parser<'text, '_, '_> {
     fn keep(&mut self, node: &Json<'_>, name: usize) -> Result<bool, NativeError> {
         let bytes = match node {
             Json::Text(text) => text.len(),
-            Json::Number(token) => token.as_str().len(),
+            Json::Number(token) => token.len(),
             _ => 0,
         };
         let bytes = room(bytes.saturating_add(name));
@@ -149,9 +149,10 @@ impl<'text> Parser<'text, '_, '_> {
                 }
                 let token =
                     std::str::from_utf8(&self.input[start..self.cursor]).map_err(|_| syntax())?;
-                NumberToken::new(token)
-                    .map(Json::Number)
-                    .map_err(|_| syntax())
+                if !NumberToken::is_valid(token) {
+                    return Err(syntax());
+                }
+                Ok(Json::Number(token))
             }
             Some(first) => {
                 let (word, value): (&[u8], Json<'text>) = match first {

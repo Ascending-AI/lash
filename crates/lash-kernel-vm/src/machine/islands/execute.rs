@@ -1076,6 +1076,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     args,
                     units,
                     reads,
+                    to,
                 } => {
                     let values = match reads {
                         Some(reads) => self.inputs::<2>(&frame.slots, reads.as_slice())?,
@@ -1086,13 +1087,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             island.heap_call(site, &values)
                         })
                     });
-                    regs[site.reg as usize] = answer.inspect_err(|_| {
+                    let value = answer.inspect_err(|_| {
                         for (source, value) in args.iter().zip(values) {
                             if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
                                 self.scratch.exit.regs.push((*source, value));
                             }
                         }
                     })?;
+                    return self.destination(frame, site.reg, value, to);
                 }
                 Op::Heap { site, args } => {
                     let mut values = [Value::Absent; MAX_ARGS];

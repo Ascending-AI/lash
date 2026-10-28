@@ -146,7 +146,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    fn destination(
+    pub(super) fn destination(
         &mut self,
         frame: &mut Frame<'e>,
         reg: u32,

@@ -202,6 +202,7 @@ pub(in crate::machine::islands) enum Op {
         args: Box<[u32]>,
         units: super::MemberAccess,
         reads: Option<Box<[Read; 2]>>,
+        to: Destination,
     },
     MemberStore {
         site: HeapSite,
@@ -1358,6 +1359,7 @@ impl<'e> Build<'e> {
                         args: args.clone(),
                         units,
                         reads: None,
+                        to: Destination::Register,
                     });
                     self.result(reg, &args);
                     return Some(());

@@ -205,6 +205,7 @@ impl Build<'_> {
                         args,
                         units,
                         reads: None,
+                        to: Destination::Register,
                     };
                 }
                 continue;

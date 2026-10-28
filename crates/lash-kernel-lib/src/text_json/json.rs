@@ -35,7 +35,7 @@ pub fn decode_number(
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    Ok(convert_number(token, expected, policy, new)?.store(new))
+    Ok(convert_number(token.as_str(), expected, policy, new)?.store(new))
 }
 
 /// A JSON number converted for its stated type, not yet stored.
@@ -57,14 +57,14 @@ impl Number {
 /// `decode_number`'s conversion. It builds nothing: `new` only reserves the
 /// digits an exponent adds.
 fn convert_number(
-    token: &NumberToken,
+    token: &str,
     expected: &Type,
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
 ) -> Result<Number, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
-            if policy == NumberPolicy::BySpelling && token.is_integer_spelling() {
+            if policy == NumberPolicy::BySpelling && !token.contains(['.', 'e', 'E']) {
                 &Type::Int
             } else {
                 &Type::Float
@@ -84,14 +84,13 @@ fn convert_number(
     };
     match selected {
         Type::Int => {
-            if let Ok(word) = token.as_str().parse::<i64>() {
+            if let Ok(word) = token.parse::<i64>() {
                 return Ok(Number::Int(Integer::from(word)));
             }
-            let integer = exact_integer(token.as_str(), new)?;
+            let integer = exact_integer(token, new)?;
             Ok(Number::Int(Integer::new(integer)))
         }
         Type::Float => token
-            .as_str()
             .parse::<f64>()
             .ok()
             .filter(|f| f.is_finite())
@@ -143,7 +142,7 @@ fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeErr
 enum Json<'text> {
     Null,
     Bool(bool),
-    Number(NumberToken),
+    Number(&'text str),
     Text(Cow<'text, str>),
     Array(Vec<Json<'text>>),
     Object(Vec<(Cow<'text, str>, Json<'text>)>),
@@ -802,11 +801,11 @@ fn decode_with_numbers(
 ) -> Result<Value, NativeError> {
     match json {
         Json::Number(token) if ieee => {
-            new.read_whole(token.as_str().len() as u64)?;
-            let value = token.as_str().parse::<f64>().map_err(|_| mismatch())?;
+            new.read_whole(token.len() as u64)?;
+            let value = token.parse::<f64>().map_err(|_| mismatch())?;
             Ok(Value::Float(Float::new(value)))
         }
-        Json::Number(token) => decode_number(token, numbers, policy, new),
+        Json::Number(token) => Ok(convert_number(token, numbers, policy, new)?.store(new)),
         Json::Array(items) => {
             let values = items
                 .iter()

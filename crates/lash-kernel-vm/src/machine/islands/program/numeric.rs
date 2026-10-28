@@ -64,6 +64,11 @@ impl Build<'_> {
                         to: Destination::Register,
                         ..
                     } => Some(site.reg),
+                    Op::MemberAccess {
+                        site,
+                        to: Destination::Register,
+                        ..
+                    } => Some(site.reg),
                     _ => None,
                 };
                 if let Some(reg) = candidate
@@ -81,9 +86,9 @@ impl Build<'_> {
                         unreachable!()
                     };
                     match &mut instruction.op {
-                        Op::Unary { to, .. } | Op::Binary { to, .. } => {
-                            *to = Destination::Write(write)
-                        }
+                        Op::Unary { to, .. }
+                        | Op::Binary { to, .. }
+                        | Op::MemberAccess { to, .. } => *to = Destination::Write(write),
                         _ => unreachable!(),
                     }
                 }

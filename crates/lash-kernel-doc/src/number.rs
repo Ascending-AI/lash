@@ -489,11 +489,17 @@ impl NumberToken {
     /// Accepts exactly the JSON number grammar (RFC 8259 §6).
     pub fn new(text: impl Into<String>) -> Result<Self, InvalidNumberToken> {
         let text = text.into();
-        if is_json_number(&text) {
+        if Self::is_valid(&text) {
             Ok(Self(text))
         } else {
             Err(InvalidNumberToken { text })
         }
+    }
+
+    /// Whether borrowed text follows exactly the JSON number grammar
+    /// (RFC 8259 §6), without allocating an owned token.
+    pub fn is_valid(text: &str) -> bool {
+        is_json_number(text)
     }
 
     pub fn as_str(&self) -> &str {
