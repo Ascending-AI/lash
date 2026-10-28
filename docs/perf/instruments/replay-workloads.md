@@ -731,3 +731,47 @@ that population; blessing also refuses those modes. No budget is relaxed.
 The text reader prints full producer/workload identities and each metric's
 steady-round and distinct-depth populations alongside round-average median,
 p95 and maximum diagnostics.
+
+### Replay full-run reconciliation (FIG-7499)
+
+The full-run triage reproduced stale corpus identities, ready-worker cold
+allocation, a restored tool/sleep race, workflow coverage/path disagreement
+and the counted replay failure on `613172eefb49`.
+
+The replay measurement now waits for local owner idle and complete renderer
+capture disposal. Attachment write tokens retain their random identity and
+32 lowercase hexadecimal digits, while UUID's stack encoder prevents the
+leading-zero formatter from adding two random allocation calls to a first
+code-mode turn. The earlier formatter came from `a2f2938d5e0`; a targeted
+allocator stack proved its 8-to-32-byte growth through SQLite attachment
+fencing. Cold fenced-read recovery introduced in `c166d5df16` is boxed only
+on the error branch, keeping that state out of successful read futures.
+
+The baseline refresh preserves intended feature changes since its prior
+calibration. `35ad2a50c3` replaced the batch wrapper's small untyped result
+schema with the complete tagged outcome schema, which is retained and
+serialized in the standard protocol's advertised contract. The standard
+workloads consequently write roughly 160 KB more SQL payload per turn and
+allocate roughly 4.76 MB more host bytes. Caching schema construction showed
+no steady benefit and was removed. `613172eefb` replaced source locations
+with a tagged, validated representation, changing code-mode transport and
+stored source-map sizes. `519c8530f0` preserves typed saved-definition
+refusals, while `3bc885f086` prunes source catalogues and preserves typed
+worker restart causes; those current-main contracts remain intact.
+
+Calibration uses five ordinary captures from one clean committed tree. Every
+counted summary and every turn/compaction metric must be identical before
+refreshing medians. The refresh sets zero measured noise, retains the tighter
+of the previous and observed depth slopes, and leaves `budgets.json`, its
+hard ceilings, tolerances, known-breach policy, the normal blessing guard
+and the determinism assertions unchanged. The lane explicitly authorizes
+this attributed refresh for intended feature changes; it does not change the
+normal blessing command's refusal to raise ceilings.
+
+The final five-capture population at `926db355d4` matched every counted
+summary and every turn/compaction record. It refreshes 26 per-turn medians
+across four workloads with zero measured noise. The counted store uses a
+fixed queue allocated before the turns, and compaction settlement reads only
+after the owner has applied the command and returned idle. The evidence
+retains all earlier populations rejected for nondeterminism. The final
+ordinary replay law must still pass against the compiled baseline.
