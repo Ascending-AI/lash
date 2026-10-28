@@ -504,7 +504,7 @@ fn equal_helper_library_restore_does_no_compatibility_work() {
 }
 /// Active and saved not-yet-called helpers refuse before worker preparation.
 #[test]
-fn a_changed_pinned_helper_is_refused_before_resume() {
+fn a_helper_absent_from_the_local_universe_is_refused_before_resume() {
     let fixture = fixture();
     let valid = fixture
         .selection(&fixture.image(&["parent", "dead"], true))
@@ -512,7 +512,7 @@ fn a_changed_pinned_helper_is_refused_before_resume() {
     for name in ["twice", "saved", "child"] {
         let image = fixture.image(&["parent", "dead", name], true);
         let error = fixture.selection(&image).unwrap_err();
-        let missing = |outcome| matches!(outcome, InfrastructureOutcome::RunRefused { refusal: RunRefusal::Restore { refusal: KernelRestoreRefusal::MissingHelper { function } } } if function == fixture.ids[name]);
+        let missing = |outcome| matches!(outcome, InfrastructureOutcome::RunRefused { refusal: RunRefusal::Restore { refusal: KernelRestoreRefusal::HelperUnavailable { reason: lash_kernel_value::HelperUnavailableReason::Unknown, function } } } if function == fixture.ids[name]);
         assert!(missing(error.into_outcome()));
         let embedding = embed(&image);
         let config =
@@ -778,7 +778,7 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     let lash_kernel_check::WorkflowDocumentError::Refused(refused) = error else {
         panic!("fresh admission refuses unavailable helper identity: {error}");
     };
-    assert!(refused.errors.iter().any(|error| matches!(&error.reason, lash_kernel_check::RefusalReason::Invalid(lash_kernel_doc::InvalidReason::FunctionNotResolved { function }) if *function == fixture.ids["dead"])), "{refused:#?}");
+    assert!(refused.errors.iter().any(|error| matches!(&error.reason, lash_kernel_check::RefusalReason::Invalid(lash_kernel_doc::InvalidReason::HelperUnavailable { function, reason: lash_kernel_value::HelperUnavailableReason::Unknown }) if *function == fixture.ids["dead"])), "{refused:#?}");
     assert!(!document.functions.contains_key(&fixture.ids["dead"]));
     let embedding = embed(&image);
     finish(resume(&fixture, &embedding, &selection), fixture.wait);

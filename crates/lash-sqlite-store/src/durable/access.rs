@@ -109,6 +109,17 @@ lash_store_sql::statements! {
                          WHERE NOT EXISTS (
                              SELECT 1 FROM json_each(?5) s
                              WHERE s.value = r.value OR (
+                                 substr(r.value, 1, 15) = 'helper-archive:'
+                                 AND length(r.value) = 90 AND length(s.value) = 90
+                                 AND substr(r.value, 1, 80) = substr(s.value, 1, 80)
+                                 AND substr(r.value, 81) NOT GLOB '*[^0-9]*'
+                                 AND substr(s.value, 81) NOT GLOB '*[^0-9]*'
+                                 AND substr(r.value, 81) <= '4294967295'
+                                 AND substr(s.value, 81) <= '4294967295'
+                                 AND substr(s.value, 81) >= substr(r.value, 81)) OR (
+                                 substr(r.value, 1, 15) = 'helper-outside:'
+                                 AND length(r.value) >= 80
+                                 AND s.value = 'helper-library:' || substr(r.value, 16, 64)) OR (
                                  substr(r.value, 1, 9) = 'callback:'
                                  AND substr(s.value, -1) = '/'
                                  AND substr(r.value, 1, length(s.value)) = s.value

@@ -1225,18 +1225,21 @@ fn helper_compatibility_refusal(
 ) -> PoolError {
     match error {
         lash_kernel_state::paged::HelperCompatibilityError::Heap(fault) => heap_fault(fault),
-        lash_kernel_state::paged::HelperCompatibilityError::MissingHelper { function } => {
-            PoolError::refused(RunRefusal::Restore {
-                refusal: KernelRestoreRefusal::MissingHelper { function },
-            })
-        }
+        lash_kernel_state::paged::HelperCompatibilityError::HelperUnavailable {
+            reason,
+            function,
+        } => PoolError::refused(RunRefusal::Restore {
+            refusal: KernelRestoreRefusal::HelperUnavailable { reason, function },
+        }),
     }
 }
 
 /// The kernel's refusal of a root as the protocol carries it.
 fn restore_refusal(error: OpenError) -> KernelRestoreRefusal {
     match error {
-        OpenError::MissingHelper { function } => KernelRestoreRefusal::MissingHelper { function },
+        OpenError::HelperUnavailable { reason, function } => {
+            KernelRestoreRefusal::HelperUnavailable { reason, function }
+        }
         OpenError::MissingFunction { function } => KernelRestoreRefusal::DefinitionRefused {
             function: function.to_string(),
             problem: "the worker's library lacks it".to_owned(),

@@ -83,15 +83,32 @@ pub fn package(path: &str) -> Option<&'static BuiltPackage> {
 /// Why lash's packages could not be assembled: a defect of the build,
 /// never of a document.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("lash's packages do not assemble: {message}")]
-pub struct LibraryError {
-    message: String,
+pub enum LibraryError {
+    #[error("lash's packages do not assemble: {message}")]
+    Library { message: String },
+    #[error("helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        function: FunctionId,
+        reason: lash_kernel_value::HelperUnavailableReason,
+    },
 }
 
 impl LibraryError {
     pub fn new(message: impl std::fmt::Display) -> Self {
-        Self {
+        Self::Library {
             message: message.to_string(),
+        }
+    }
+
+    fn archive(error: archive::ArchiveError) -> Self {
+        match error {
+            archive::ArchiveError::Hash(function) | archive::ArchiveError::Duplicate(function) => {
+                Self::HelperUnavailable {
+                    function,
+                    reason: lash_kernel_value::HelperUnavailableReason::Corrupt,
+                }
+            }
+            error => Self::new(error),
         }
     }
 }
@@ -111,6 +128,56 @@ impl HelperRelease {
     }
 }
 
+/// Retain authenticated historical code for the packages this host installs.
+pub fn with_archive(
+    current: HelperRelease,
+    archive: &archive::Archive,
+    packages: &std::collections::BTreeSet<String>,
+) -> Result<HelperRelease, LibraryError> {
+    let functions = archive
+        .install(current.functions, packages)
+        .map_err(LibraryError::archive)?;
+    let members: std::collections::BTreeSet<_> = current
+        .helpers
+        .members()
+        .copied()
+        .chain(archive.members(packages))
+        .collect();
+    let libraries = current
+        .helpers
+        .library_identities()
+        .iter()
+        .copied()
+        .chain(archive.library_identities(&members));
+    let mut generations = current.helpers.claim_generations().clone();
+    generations.extend(
+        archive
+            .claim_generations(&members)
+            .map_err(LibraryError::archive)?,
+    );
+    let helpers = Arc::new(
+        BuildHelpers::new(functions.clone(), members)
+            .map_err(LibraryError::new)?
+            .with_library_identities(libraries)
+            .with_claim_generations(current.helpers.current_identity(), generations)
+            .map_err(LibraryError::new)?,
+    );
+    let mut labels = current.labels;
+    for release in &archive.releases {
+        for (id, label) in &release.labels {
+            if helpers.contains(id) {
+                labels.entry(*id).or_insert_with(|| label.to_string());
+            }
+        }
+    }
+    Ok(HelperRelease {
+        functions,
+        helpers,
+        labels,
+        roots: current.roots,
+    })
+}
+
 fn standard_in(
     slot: &OnceLock<Result<Arc<HelperRelease>, LibraryError>>,
     assemble: impl FnOnce() -> Result<Arc<HelperRelease>, LibraryError>,
@@ -124,13 +191,14 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
     static STANDARD: OnceLock<Result<Arc<HelperRelease>, LibraryError>> = OnceLock::new();
     standard_in(&STANDARD, || {
         let mut functions = FunctionRegistry::declarations();
-        for built in PACKAGES {
-            let image =
-                lash_kernel_doc::ReleasedFunctions::read(built.image).map_err(LibraryError::new)?;
-            functions
-                .register_released(image)
-                .map_err(LibraryError::new)?;
-        }
+        let image = lash_kernel_doc::ReleasedFunctions::read(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/helpers.archive.bin"
+        )))
+        .map_err(LibraryError::new)?;
+        functions
+            .register_released(image)
+            .map_err(LibraryError::new)?;
         let roots = serde_json::from_str(include_str!(concat!(
             env!("OUT_DIR"),
             "/helpers.roots.json"
@@ -141,12 +209,26 @@ pub fn helper_release() -> Result<Arc<HelperRelease>, LibraryError> {
             "/helpers.members.json"
         )))
         .map_err(LibraryError::new)?;
+        let libraries: std::collections::BTreeSet<lash_kernel_value::HelperLibraryId> =
+            serde_json::from_str(include_str!(concat!(
+                env!("OUT_DIR"),
+                "/helpers.libraries.json"
+            )))
+            .map_err(LibraryError::new)?;
+        let (current, generations) = serde_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/helpers.generations.json"
+        )))
+        .map_err(LibraryError::new)?;
         let helpers = Arc::new(
             BuildHelpers::from_frame(
                 include!(concat!(env!("OUT_DIR"), "/helpers.identity.rs")),
                 functions.clone(),
                 members,
             )
+            .map_err(LibraryError::new)?
+            .with_library_identities(libraries)
+            .with_claim_generations(current, generations)
             .map_err(LibraryError::new)?,
         );
         let labels: BTreeMap<FunctionId, serde_json::Value> = serde_json::from_str(include_str!(
@@ -176,7 +258,7 @@ pub fn helper_archive() -> Result<archive::Archive, LibraryError> {
         ledger: serde_json::from_str(include_str!("../archive/ledger.json"))
             .map_err(LibraryError::new)?,
     };
-    let _ = archive.validate().map_err(LibraryError::new)?;
+    let _ = archive.validate().map_err(LibraryError::archive)?;
     Ok(archive)
 }
 

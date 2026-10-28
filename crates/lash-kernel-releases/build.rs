@@ -333,18 +333,7 @@ fn write_helper_library(
         )?;
     }
     let helpers = lash_kernel_doc::BuildHelpers::new(registry, roots.iter().copied())?;
-    std::fs::write(
-        out.join("helpers.identity.rs"),
-        format!(
-            "lash_kernel_value::HelperLibraryId::from_bytes({:?})",
-            helpers.identity().as_bytes()
-        ),
-    )?;
     std::fs::write(out.join("helpers.roots.json"), serde_json::to_vec(&roots)?)?;
-    std::fs::write(
-        out.join("helpers.members.json"),
-        serde_json::to_vec(&helpers.members().collect::<Vec<_>>())?,
-    )?;
     let mut labels = BTreeMap::<FunctionId, serde_json::Value>::new();
     for source in [
         include_str!("labels/kernel.json"),
@@ -366,10 +355,6 @@ fn write_helper_library(
             }
         }
     }
-    std::fs::write(
-        out.join("helpers.labels.json"),
-        serde_json::to_vec(&labels)?,
-    )?;
     write_archive_candidate(out, &helpers, packages, labels, natives)?;
     Ok(())
 }
@@ -392,6 +377,57 @@ fn write_archive_candidate(
         ledger: serde_json::from_str(include_str!("archive/ledger.json"))?,
     };
     let _ = archive.validate()?;
+    let enabled = packages.iter().map(|(path, _)| path.clone()).collect();
+    let runtime = archive.install(helpers.functions().clone(), &enabled)?;
+    let members: BTreeSet<_> = helpers
+        .members()
+        .copied()
+        .chain(archive.members(&enabled))
+        .collect();
+    let mut libraries = archive.library_identities(&members);
+    libraries.insert(helpers.current_identity());
+    std::fs::write(
+        out.join("helpers.generations.json"),
+        serde_json::to_vec(&(
+            helpers.current_identity(),
+            archive.claim_generations(&members)?,
+        ))?,
+    )?;
+    libraries.insert(lash_kernel_value::HelperLibraryId::of_members(
+        members.iter().copied(),
+    ));
+    std::fs::write(
+        out.join("helpers.libraries.json"),
+        serde_json::to_vec(&libraries)?,
+    )?;
+    std::fs::write(
+        out.join("helpers.archive.bin"),
+        runtime
+            .to_image_with_census(&|definition| lash_kernel_vm::body_census(definition, &runtime)),
+    )?;
+    std::fs::write(
+        out.join("helpers.members.json"),
+        serde_json::to_vec(&members)?,
+    )?;
+    std::fs::write(
+        out.join("helpers.identity.rs"),
+        format!(
+            "lash_kernel_value::HelperLibraryId::from_bytes({:?})",
+            lash_kernel_value::HelperLibraryId::of_members(members.iter().copied()).as_bytes()
+        ),
+    )?;
+    let mut runtime_labels = labels.clone();
+    for release in &archive.releases {
+        for (id, label) in &release.labels {
+            if members.contains(id) {
+                runtime_labels.entry(*id).or_insert_with(|| label.clone());
+            }
+        }
+    }
+    std::fs::write(
+        out.join("helpers.labels.json"),
+        serde_json::to_vec(&runtime_labels)?,
+    )?;
     let definitions: BTreeMap<_, _> = helpers
         .functions()
         .iter()

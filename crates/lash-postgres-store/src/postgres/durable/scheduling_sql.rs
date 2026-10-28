@@ -36,6 +36,17 @@ lash_store_sql::statements! {
                                  WHERE NOT EXISTS (
                                      SELECT 1 FROM unnest(?7::text[]) s(value)
                                      WHERE s.value = r.value OR (
+                                         left(r.value, 15) = 'helper-archive:'
+                                         AND length(r.value) = 90 AND length(s.value) = 90
+                                         AND left(r.value, 80) = left(s.value, 80)
+                                         AND substr(r.value, 81) ~ '^[0-9]{10}$'
+                                         AND substr(s.value, 81) ~ '^[0-9]{10}$'
+                                         AND substr(r.value, 81) <= '4294967295'
+                                         AND substr(s.value, 81) <= '4294967295'
+                                         AND substr(s.value, 81) >= substr(r.value, 81)) OR (
+                                         left(r.value, 15) = 'helper-outside:'
+                                         AND length(r.value) >= 80
+                                         AND s.value = 'helper-library:' || substr(r.value, 16, 64)) OR (
                                          left(r.value, 9) = 'callback:'
                                          AND right(s.value, 1) = '/'
                                          AND left(r.value, length(s.value)) = s.value

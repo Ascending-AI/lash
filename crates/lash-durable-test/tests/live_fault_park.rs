@@ -854,3 +854,33 @@ tiered_laws!(
     a_turn_wedged_in_its_tools_phase_by_a_pass_loop_park_finishes_at_the_next_boot,
     a_session_parked_by_the_ordinal_miss_finishes_its_cell_at_the_next_boot
 );
+
+#[path = "support/helper_archive.rs"]
+mod helper_archive;
+
+mod archive_laws {
+    use super::{Tier, helper_archive, served};
+
+    /// FIG-7512 law 3: a callback parked under old code resumes from durable pages
+    /// under the next release with identical results and cumulative charges.
+    async fn a_parked_helper_callback_completes_on_archived_code(tier: Tier) {
+        Box::pin(helper_archive::run_across_deploy(tier)).await;
+    }
+
+    /// FIG-7512 law 6: a retry before its first park retains accepted exact code.
+    async fn a_crash_before_first_park_keeps_the_accepted_helper_hashes(tier: Tier) {
+        helper_archive::crash_before_first_park(tier).await;
+    }
+
+    /// FIG-7512 law 7: a node missing a reached helper cannot claim the run.
+    async fn a_node_without_an_archived_helper_leaves_the_run_claimable(tier: Tier) {
+        helper_archive::rolling_nodes(tier).await;
+    }
+
+    // Kernel page ports are thread-local; these laws never move a machine between threads.
+    crate::tiered_laws!(current_thread:
+        a_parked_helper_callback_completes_on_archived_code,
+        a_crash_before_first_park_keeps_the_accepted_helper_hashes,
+        a_node_without_an_archived_helper_leaves_the_run_claimable
+    );
+}

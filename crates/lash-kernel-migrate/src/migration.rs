@@ -52,7 +52,7 @@ impl Rewritten {
 
 /// Why a document is not rewritten for the next version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
-#[serde(rename_all = "snake_case", tag = "reason")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 #[non_exhaustive]
 pub enum DocumentRefusal {
     #[error("the document is written for kernel version {found}; the migration starts at {from}")]
@@ -79,7 +79,7 @@ pub enum DocumentRefusal {
 
 /// Why a parked run is not carried onto a rewritten document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
-#[serde(rename_all = "snake_case", tag = "reason")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 #[non_exhaustive]
 pub enum ParkedRefusal {
     #[error("helper {function} cannot carry operation slot {slot:?} onto another contract")]
@@ -87,8 +87,9 @@ pub enum ParkedRefusal {
         function: FunctionId,
         slot: lash_kernel_value::ImportSlot,
     },
-    #[error("build helper {function} is missing")]
-    MissingHelper {
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
         function: lash_kernel_value::FunctionId,
     },
     #[error("the run was parked under kernel version {found}; the migration starts at {from}")]
@@ -157,15 +158,18 @@ impl KernelMigrationRefusal {
             lash_kernel_package::LinkRefusal::DocumentValidation(refusal) => {
                 Self::NotAdmitted { document, refusal }
             }
-            lash_kernel_package::LinkRefusal::MissingHelper { function } => Self::NotAdmitted {
-                document,
-                refusal: lash_kernel_doc::Invalid {
-                    site: None,
-                    reason: Box::new(lash_kernel_doc::InvalidReason::FunctionNotResolved {
-                        function,
-                    }),
-                },
-            },
+            lash_kernel_package::LinkRefusal::HelperUnavailable { reason, function } => {
+                Self::NotAdmitted {
+                    document,
+                    refusal: lash_kernel_doc::Invalid {
+                        site: None,
+                        reason: Box::new(lash_kernel_doc::InvalidReason::HelperUnavailable {
+                            function,
+                            reason,
+                        }),
+                    },
+                }
+            }
             refusal => Self::Succession {
                 document,
                 reason: refusal.to_string(),

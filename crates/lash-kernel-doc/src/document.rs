@@ -642,7 +642,10 @@ pub fn validate_restored_document_with_limits(
     crate::validate_document_structure_with_limits(document, limits)?;
     let missing = |function| crate::Invalid {
         site: None,
-        reason: Box::new(crate::InvalidReason::FunctionNotResolved { function }),
+        reason: Box::new(crate::InvalidReason::HelperUnavailable {
+            function,
+            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+        }),
     };
     struct Pinned<'a> {
         catalog: &'a dyn crate::FunctionCatalog,

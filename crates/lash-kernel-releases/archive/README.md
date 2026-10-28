@@ -51,3 +51,11 @@ is a prefix, and updates the ledger and explicit include list. Never edit an
 old release file to make a check pass. Reset the pre-1.0 archive at the 1.0 cut,
 as specified by ADR 0149. A future removed package must appear as a release
 without its bindings so that the ledger records its tombstones.
+
+Runtime metadata includes the authenticated union of current and historical
+members for the packages enabled by the build. Public resolver roots remain
+current. The build emits this union as a lazy binary image, not as a JSON
+archive a worker must parse. The engine generates exact native constructor
+rows from current declarations and all retained native bindings. Worker plans
+are filtered to present exact bodies; other archived bodies interpret.
+See `docs/perf/helper-archive-loading.md` for the cache bounds and measurements.

@@ -33,10 +33,29 @@ pub fn install(
 ) -> Result<Installed, InstallError> {
     let mut registry = FunctionRegistry::over_frame(image)?;
     registry.bind_native_tables(positions, crate::native_tables::native_tables(), natives)?;
+    #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
+    let members: BTreeSet<_> = lash_kernel_doc::ReleasedFunctions::over_frame(image)
+        .map_err(|error| InstallError::Library(error.to_string()))?
+        .ids()
+        .collect();
     #[cfg(feature = "dialect-typescript")]
-    registry.bind_frame_plans(positions, lash_ext_ts_core::PLANS)?;
+    registry.bind_frame_plans(
+        positions,
+        &lash_ext_ts_core::PLANS
+            .iter()
+            .copied()
+            .filter(|plan| members.contains(&plan.function))
+            .collect::<Vec<_>>(),
+    )?;
     #[cfg(feature = "dialect-python")]
-    registry.bind_frame_plans(positions, lash_ext_py_core::PLANS)?;
+    registry.bind_frame_plans(
+        positions,
+        &lash_ext_py_core::PLANS
+            .iter()
+            .copied()
+            .filter(|plan| members.contains(&plan.function))
+            .collect::<Vec<_>>(),
+    )?;
     let registry = Arc::new(registry);
     let names = NamedLibrary::resolving(&registry, |id| roots.contains(id))
         .map_err(|e| InstallError::Library(e.to_string()))?;

@@ -63,7 +63,7 @@ pub use lash_vm_client::service::{Service as WorkerService, SourceServiceError};
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
 pub use lash_kernel_releases::{HelperRelease, helper_release};
-pub use lash_kernel_value::HelperLibraryId;
+pub use lash_kernel_value::{HelperLibraryId, HelperUnavailableReason};
 pub use lash_protocol_types::engine_fault::WorkerLibraryRefusal;
 pub use lash_vm_client::packages::WorkerLibrary;
 /// Host-selected worker entry, pool bounds, a cell's lifetime caps,

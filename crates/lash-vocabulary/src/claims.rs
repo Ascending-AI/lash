@@ -40,6 +40,9 @@ impl RegistryKind {
 /// and codec obligations (FIG-6993, FIG-7266).
 const NATIVE: &str = "native:";
 
+const ARCHIVE: &str = "helper-archive:";
+const OUTSIDE: &str = "helper-outside:";
+
 const LIBRARY: &str = "helper-library:";
 
 const KERNEL: &str = "kernel:";
@@ -53,6 +56,33 @@ const CODEC: &str = "codec:";
 /// deployment serves to refuse a retired owner's outstanding callbacks.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ObligationToken(String);
+
+fn archive_token(token: &str) -> Option<(lash_kernel_value::HelperLibraryId, u32)> {
+    let (archive, generation) = token.strip_prefix(ARCHIVE)?.split_once(':')?;
+    let archive = archive.parse().ok()?;
+    let parsed: u32 = generation.parse().ok()?;
+    (generation == format!("{parsed:010}")).then_some((archive, parsed))
+}
+
+fn outside_token(
+    token: &str,
+) -> Option<(
+    lash_kernel_value::HelperLibraryId,
+    BTreeSet<lash_kernel_value::FunctionId>,
+)> {
+    let (release, functions) = token.strip_prefix(OUTSIDE)?.split_once(':')?;
+    let release = release.parse().ok()?;
+    let functions = if functions.is_empty() {
+        BTreeSet::new()
+    } else {
+        functions
+            .split(',')
+            .map(lash_kernel_value::FunctionId::parse)
+            .collect::<Result<_, _>>()
+            .ok()?
+    };
+    Some((release, functions))
+}
 
 impl ObligationToken {
     /// The token of `callback`, resolved through `kind`'s registry:
@@ -78,6 +108,16 @@ impl ObligationToken {
     #[must_use]
     pub fn is_served(required: &str, serves: &[String]) -> bool {
         serves.iter().any(|served| served == required)
+            || archive_token(required).is_some_and(|(archive, generation)| {
+                serves
+                    .iter()
+                    .filter_map(|served| archive_token(served))
+                    .any(|(held, available)| held == archive && available >= generation)
+            })
+            || outside_token(required).is_some_and(|(release, _)| {
+                let token = format!("{LIBRARY}{release}");
+                serves.iter().any(|served| served == &token)
+            })
             || required
                 .strip_prefix("callback:")
                 .and_then(|_| required.rsplit_once('/'))
@@ -116,7 +156,23 @@ impl ObligationToken {
     pub fn requirements_of<'a>(tokens: impl IntoIterator<Item = &'a str>) -> ClaimRequirements {
         let mut requirements = ClaimRequirements::default();
         for token in tokens {
-            if let Some(function) = token.strip_prefix(NATIVE) {
+            if let Some((archive, generation)) = archive_token(token) {
+                requirements
+                    .machine
+                    .helpers
+                    .archives
+                    .entry(archive)
+                    .and_modify(|held| *held = (*held).max(generation))
+                    .or_insert(generation);
+            } else if let Some((release, functions)) = outside_token(token) {
+                requirements
+                    .machine
+                    .helpers
+                    .outside
+                    .entry(release)
+                    .or_default()
+                    .extend(functions);
+            } else if let Some(function) = token.strip_prefix(NATIVE) {
                 if let Ok(function) = lash_kernel_value::FunctionId::parse(function) {
                     requirements.machine.natives.insert(function);
                 }
@@ -280,6 +336,31 @@ fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
         .chain(
             requirements
                 .machine
+                .helpers
+                .archives
+                .iter()
+                .map(|(archive, generation)| {
+                    ObligationToken(format!("{ARCHIVE}{archive}:{generation:010}"))
+                }),
+        )
+        .chain(
+            requirements
+                .machine
+                .helpers
+                .outside
+                .iter()
+                .map(|(release, functions)| {
+                    let functions = functions
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    ObligationToken(format!("{OUTSIDE}{release}:{functions}"))
+                }),
+        )
+        .chain(
+            requirements
+                .machine
                 .libraries
                 .iter()
                 .map(|id| ObligationToken(format!("{LIBRARY}{id}"))),
@@ -345,6 +426,10 @@ impl ClaimRequirements {
         }
         Self {
             machine: NodeRequirements {
+                helpers: self
+                    .machine
+                    .helpers
+                    .unmet_by(&node.machine.helpers, &node.machine.libraries),
                 libraries: missing(&self.machine.libraries, &node.machine.libraries),
                 natives: missing(&self.machine.natives, &node.machine.natives),
                 kernels: missing(&self.machine.kernels, &node.machine.kernels),
@@ -407,6 +492,71 @@ impl lash_kernel_value::tokens::TokenCodec for ClaimRequirements {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Archive generations are monotone; outside hashes keep their exact release coverage.
+    #[test]
+    fn helper_claims_compare_generations_and_retain_outside_hashes() {
+        let archive = lash_kernel_value::HelperLibraryId::of_members([]);
+        let function = lash_kernel_value::FunctionId::from_bytes([81; 32]);
+        let release = lash_kernel_value::HelperLibraryId::of_members([function]);
+        let requirements = ClaimRequirements {
+            machine: NodeRequirements {
+                helpers: lash_kernel_value::claims::HelperRequirements {
+                    archives: [(archive, 2)].into(),
+                    outside: [(release, [function].into())].into(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut node = NodeCapabilities {
+            machine: NodeRequirements {
+                helpers: lash_kernel_value::claims::HelperRequirements {
+                    archives: [(archive, 3)].into(),
+                    outside: Default::default(),
+                },
+                libraries: [release].into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let required: Vec<_> = requirements.tokens().collect();
+        assert_eq!(required.len(), 2);
+        assert_eq!(
+            ObligationToken::requirements_of(required.iter().map(String::as_str)),
+            requirements
+        );
+        let served: Vec<_> = ObligationToken::for_capabilities(&node)
+            .map(String::from)
+            .collect();
+        assert!(
+            required
+                .iter()
+                .all(|token| ObligationToken::is_served(token, &served))
+        );
+        assert!(requirements.met_by(&node));
+        node.machine.helpers.archives.insert(archive, 1);
+        let served: Vec<_> = ObligationToken::for_capabilities(&node)
+            .map(String::from)
+            .collect();
+        assert!(!ObligationToken::is_served(
+            &format!("helper-archive:{archive}:0000000002"),
+            &served
+        ));
+        assert_eq!(
+            requirements.unmet_by(&node).machine.helpers.archives,
+            [(archive, 2)].into()
+        );
+        assert!(!ObligationToken::is_served(
+            &format!("helper-archive:{archive}:000000000x"),
+            &served
+        ));
+        node.machine.libraries.clear();
+        assert_eq!(
+            requirements.unmet_by(&node).machine.helpers.outside,
+            [(release, [function].into())].into()
+        );
+    }
 
     /// RETIRED-PROVIDER-DEBT (FIG-7266): retirement admits only the exact
     /// registry owner's provider and codec debts, so recovery can refuse

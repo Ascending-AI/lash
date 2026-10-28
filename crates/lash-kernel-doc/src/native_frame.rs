@@ -318,7 +318,6 @@ impl FunctionRegistry {
     }
 
     /// Editing a frozen registry first gives that editor its own registrations.
-    /// Workers never take this authoring path.
     pub(super) fn materialize(&mut self) {
         if self.frame.is_none() {
             return;
@@ -326,11 +325,12 @@ impl FunctionRegistry {
         let functions: Vec<_> = (0..self.len())
             .filter_map(|at| self.at(at).cloned())
             .collect();
-        let image = self
+        let frame = self
             .frame
             .as_ref()
-            .unwrap_or_else(|| unreachable!("frozen registry"))
-            .image();
+            .unwrap_or_else(|| unreachable!("frozen registry"));
+        let image = frame.image();
+        let buckets = (!frame.buckets.is_empty()).then(|| frame.buckets.iter().copied().collect());
         let names = (0..image.len())
             .map(|rank| {
                 let at = image.name_order(rank);
@@ -343,7 +343,10 @@ impl FunctionRegistry {
         self.functions = Arc::new(functions);
         self.names = Arc::new(names);
         self.frame = None;
-        self.index_buckets();
+        self.buckets = buckets;
+        if self.buckets.is_none() {
+            self.index_buckets();
+        }
     }
 }
 

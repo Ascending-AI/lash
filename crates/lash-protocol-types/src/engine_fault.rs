@@ -163,8 +163,9 @@ pub enum CheckpointRefusal {
 #[serde(rename_all = "snake_case")]
 pub enum KernelRestoreRefusal {
     /// A live continuation needs an exact build helper absent from this image.
-    #[error("build helper {function} is missing")]
-    MissingHelper {
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
         function: lash_kernel_value::FunctionId,
     },
     #[error("the document is not admitted: {reason}")]

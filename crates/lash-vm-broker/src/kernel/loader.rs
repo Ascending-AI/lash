@@ -451,6 +451,7 @@ pub fn requirements<'a>(
 ) -> lash_vocabulary::claims::ClaimRequirements {
     let mut requirements = lash_vocabulary::claims::ClaimRequirements {
         machine: lash_kernel_value::claims::NodeRequirements {
+            helpers: Default::default(),
             libraries: Default::default(),
             natives: closure
                 .body()
@@ -541,12 +542,17 @@ fn dependency_order(
 /// Libraries this node assembled, by the closure they were assembled for,
 /// at most `bound` of them: a closure names exactly its definitions, and
 /// the natives and plans a node binds to them are fixed for its life, so
-/// one closure assembles one library.
+/// one closure and exact helper member set assemble one library.
 #[derive(Debug)]
 pub struct Libraries<L> {
-    held: Mutex<VecDeque<(lash_core_store::checkpoint_graph::NodeId, L)>>,
+    held: Mutex<VecDeque<(LibraryKey, L)>>,
     bound: usize,
 }
+
+type LibraryKey = (
+    lash_core_store::checkpoint_graph::NodeId,
+    lash_kernel_value::HelperLibraryId,
+);
 
 impl<L: Clone> Libraries<L> {
     /// A cache that keeps at most `bound` libraries.
@@ -566,8 +572,10 @@ impl<L: Clone> Libraries<L> {
     pub fn get_or_try<E>(
         &self,
         closure: lash_core_store::checkpoint_graph::NodeId,
+        helpers: lash_kernel_value::HelperLibraryId,
         make: impl FnOnce() -> Result<L, E>,
     ) -> Result<L, E> {
+        let closure = (closure, helpers);
         {
             let mut held = self
                 .held

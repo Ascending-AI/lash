@@ -661,10 +661,10 @@ fn materialize_values_exposes_frozen_initializers() {
     assert!(opened.document.functions.values().any(|definition| definition.body().is_some_and(|body| body.block.iter().any(|stmt| matches!(stmt, Stmt::Let { value: Rhs::Expr(Expr::Literal(Literal::Int(value))), .. } if value == &7.into())))), "MATERIALIZE-VALUES: capture 7 must live in the ordinary document");
 }
 
-/// L-CLAIM-LIBRARY: helper native debt is one exact image identity,
+/// FIG-7512: helper native debt names the exact reached definition,
 /// while an ordinary native retains its own capability token.
 #[test]
-fn helper_native_debt_is_owned_by_its_exact_library_manifest() {
+fn helper_native_debt_keeps_unarchived_hashes_under_their_release() {
     let definition =
         parse_definition("function helper.required() -> Null\nkernel 1\ncharge 1\nnative").unwrap();
     let function = definition.identity();
@@ -686,11 +686,48 @@ fn helper_native_debt_is_owned_by_its_exact_library_manifest() {
         links: [(root, link)].into(),
         ..Default::default()
     };
-    let reach = content
-        .inspect(root, &ReachSelection::Start(StartSelector::Main), &helpers)
+    let inspections = crate::Inspections::default();
+    let selector = ReachSelection::Start(StartSelector::Main);
+    let reach = inspections
+        .inspect(&content, root, &selector, &helpers)
         .unwrap();
-    assert_eq!(reach.machine.libraries, [helpers.identity()].into());
+    assert_eq!(
+        reach.machine.helpers.outside,
+        [(helpers.current_identity(), [function].into())].into()
+    );
+    assert!(reach.machine.libraries.is_empty());
     assert!(reach.machine.natives.is_empty());
+    let archived = helpers
+        .clone()
+        .with_claim_generations(
+            helpers.current_identity(),
+            [(
+                function,
+                lash_kernel_value::claims::HelperGeneration {
+                    archive: helpers.identity(),
+                    generation: 1,
+                    package: helpers.identity(),
+                },
+            )]
+            .into(),
+        )
+        .unwrap();
+    assert_eq!(archived.identity(), helpers.identity());
+    let archived_reach = inspections
+        .inspect(&content, root, &selector, &archived)
+        .unwrap();
+    assert_eq!(
+        archived_reach.machine.helpers.archives,
+        [(helpers.identity(), 1)].into()
+    );
+    assert!(archived_reach.machine.helpers.outside.is_empty());
+    assert_eq!(
+        inspections
+            .inspect(&content, root, &selector, &helpers)
+            .unwrap()
+            .machine,
+        reach.machine
+    );
 }
 
 /// FIG-7354: racing inspections through one owned memo share only exact

@@ -109,7 +109,7 @@ pub(super) fn claim_within(
     use lash_durable::{ClaimCause, ClaimPurpose, Claimed};
     let owner = &lease.owner;
     let formats = super::formats_json(&lease.decodes);
-    let serves = serde_json::Value::from(lease.serves.clone()).to_string();
+    let serves = lease.serves.as_json();
     let candidates = tx
         .prepare_cached(SQL.sqlite.claimable.sql())?
         .query_map(

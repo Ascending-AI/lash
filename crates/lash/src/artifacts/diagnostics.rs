@@ -115,7 +115,7 @@ fn engine_refused(
                 AdmissionRefusal::MissingMain => "missing_main",
                 AdmissionRefusal::NotFunction { .. } => "not_function",
                 AdmissionRefusal::NotDataOnly { .. } => "not_data_only",
-                AdmissionRefusal::MissingHelper { .. } => "missing_helper",
+                AdmissionRefusal::HelperUnavailable { .. } => "helper_unavailable",
                 AdmissionRefusal::DocumentValidation(_) => "document_validation",
                 AdmissionRefusal::DocumentCheck(_) => "document_check",
                 AdmissionRefusal::InvalidDocument { .. } => "invalid_document",

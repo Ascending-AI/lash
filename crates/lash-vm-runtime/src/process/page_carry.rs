@@ -223,10 +223,10 @@ impl KernelProcessEngine {
             lash_vm_broker::kernel::KernelFailure::Worker {
                 outcome: lash_protocol_types::engine_fault::InfrastructureOutcome::RunRefused {
                     refusal: lash_protocol_types::engine_fault::RunRefusal::Restore {
-                        refusal: lash_protocol_types::engine_fault::KernelRestoreRefusal::MissingHelper { function },
+                        refusal: lash_protocol_types::engine_fault::KernelRestoreRefusal::HelperUnavailable { reason, function },
                     },
                 },
-            } => CarryFault::Refused(ParkedRefusal::MissingHelper { function }),
+            } => CarryFault::Refused(ParkedRefusal::HelperUnavailable { reason, function }),
             other => refused(other.to_string()),
         })?;
         let prior = self
@@ -613,9 +613,10 @@ pub(super) async fn leased_pages(
 fn carry_helper_refusal(error: lash_kernel_state::paged::HelperCompatibilityError) -> CarryFault {
     match error {
         lash_kernel_state::paged::HelperCompatibilityError::Heap(fault) => CarryFault::Heap(fault),
-        lash_kernel_state::paged::HelperCompatibilityError::MissingHelper { function } => {
-            CarryFault::Refused(ParkedRefusal::MissingHelper { function })
-        }
+        lash_kernel_state::paged::HelperCompatibilityError::HelperUnavailable {
+            reason,
+            function,
+        } => CarryFault::Refused(ParkedRefusal::HelperUnavailable { reason, function }),
     }
 }
 

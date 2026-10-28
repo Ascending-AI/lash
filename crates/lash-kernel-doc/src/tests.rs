@@ -618,9 +618,8 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
 #[test]
 fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
     use crate::{
-        BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue,
-        LibraryDependencies, MissingHelper, NumberPolicy, RestoreSelection, Selection,
-        StartConvention,
+        BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue, HelperUnavailable,
+        LibraryDependencies, NumberPolicy, RestoreSelection, Selection, StartConvention,
     };
     use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
     let child = definition("law.saved_child", false);
@@ -684,7 +683,8 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
     assert!(helpers.admits(&mixed, &child_id));
     assert_eq!(
         helpers.reach(&mixed),
-        Err(MissingHelper {
+        Err(HelperUnavailable {
+            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
             function: parent_id
         })
     );
@@ -696,7 +696,10 @@ fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
     assert!(!selection.admits_helper(&callable, &document.library, &absent));
     assert_eq!(
         absent.reach(&LibraryDependencies([child_id].into())),
-        Err(MissingHelper { function: child_id })
+        Err(HelperUnavailable {
+            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+            function: child_id
+        })
     );
     assert!(
         value

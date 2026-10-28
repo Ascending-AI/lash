@@ -549,7 +549,7 @@ async fn unserved_law(
         owner: Some(candidate.owner.clone()),
         observed_at: store.now().await?,
         decodes: candidate.decodes.clone(),
-        serves: candidate.serves.iter().cloned().collect(),
+        serves: candidate.serves.as_ref().iter().cloned().collect(),
         inventory: None,
     };
     let explanation = harness

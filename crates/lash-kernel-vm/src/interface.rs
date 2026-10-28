@@ -401,7 +401,7 @@ impl Program {
                 .requires
                 .libraries
                 .iter()
-                .any(|library| *library != self.helpers().identity())
+                .any(|library| !self.helpers().supports_library(library))
             {
                 return Err(invalid("required helper library is not installed"));
             }

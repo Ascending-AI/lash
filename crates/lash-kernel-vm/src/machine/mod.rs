@@ -289,7 +289,7 @@ struct LibraryCall {
 struct Storage {
     #[expect(clippy::vec_box, reason = "reuse the frame allocation across calls")]
     frames: Vec<Box<Frame>>,
-    entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
+    entry_sites: std::collections::BTreeMap<CodeId, lash_kernel_state::paged::SiteRef>,
     /// Each closure code's site, which every closure of it shares.
     /// A spent closure call's capture buffer, which the next one's cells
     /// are copied into.

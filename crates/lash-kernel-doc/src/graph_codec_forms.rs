@@ -907,7 +907,11 @@ impl TokenCodec for Document {
         self.exports.encode(out);
         self.main.encode(out);
         self.functions.encode(out);
-        self.requires.encode(out);
+        // Claim-time helper availability is derived from reach, outside document identity.
+        out.seq(3);
+        self.requires.libraries.encode(out);
+        self.requires.natives.encode(out);
+        self.requires.kernels.encode(out);
         self.numbers.encode(out);
         self.private_bindings.encode(out);
     }
@@ -922,7 +926,15 @@ impl TokenCodec for Document {
             exports: BTreeMap::decode(input)?,
             main: Option::decode(input)?,
             functions: BTreeMap::decode(input)?,
-            requires: NodeRequirements::decode(input)?,
+            requires: {
+                input.expect_struct(3)?;
+                NodeRequirements {
+                    libraries: BTreeSet::decode(input)?,
+                    natives: BTreeSet::decode(input)?,
+                    kernels: BTreeSet::decode(input)?,
+                    helpers: Default::default(),
+                }
+            },
             numbers: NumberPolicy::decode(input)?,
             private_bindings: BTreeSet::decode(input)?,
         })

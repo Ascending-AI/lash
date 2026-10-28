@@ -921,6 +921,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/live_fault_park.rs",
+        "tests/support/helper_archive.rs",
         "tests/support/packages.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs",

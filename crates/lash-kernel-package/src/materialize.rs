@@ -31,8 +31,11 @@ pub enum MaterializeRefusal {
         limit: u64,
         actual: u64,
     },
-    #[error("missing build helper {function}")]
-    MissingHelper { function: FunctionId },
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
+        function: FunctionId,
+    },
     #[error("missing construction helper {name}")]
     ConstructionHelperMissing { name: FunctionName },
     #[error(transparent)]
@@ -488,8 +491,8 @@ pub fn materialize_workflow(
     document.library.0.extend(used_helpers);
     lash_kernel_doc::library_requirements(&mut document, helpers).map_err(
         |refusal| match refusal {
-            lash_kernel_doc::LibraryRequirementRefusal::MissingHelper { function } => {
-                MaterializeRefusal::MissingHelper { function }
+            lash_kernel_doc::LibraryRequirementRefusal::HelperUnavailable { reason, function } => {
+                MaterializeRefusal::HelperUnavailable { reason, function }
             }
         },
     )?;

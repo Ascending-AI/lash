@@ -1303,6 +1303,41 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "HelperRequirements": {
+      "additionalProperties": false,
+      "description": "One generation floor per archive lineage, with exact code outside those archives.",
+      "properties": {
+        "archives": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "outside": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "items": {
+                "$ref": "#/$defs/FunctionId"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "archives",
+        "outside"
+      ],
+      "type": "object"
+    },
     "Implementation": {
       "description": "How a library function is implemented.",
       "oneOf": [
@@ -1763,6 +1798,10 @@
       "additionalProperties": false,
       "description": "Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.",
       "properties": {
+        "helpers": {
+          "$ref": "#/$defs/HelperRequirements",
+          "description": "Cached availability debt of reached helpers, including interpreted bodies."
+        },
         "kernels": {
           "items": {
             "format": "uint32",

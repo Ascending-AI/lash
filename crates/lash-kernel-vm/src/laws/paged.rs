@@ -1005,7 +1005,7 @@ fn a_completed_helper_call_does_not_pin_but_an_enclosing_loop_does() {
         );
         if looping {
             assert!(
-                matches!(checked, Err(HelperCompatibilityError::MissingHelper { function }) if function == helper)
+                matches!(checked, Err(HelperCompatibilityError::HelperUnavailable { reason: lash_kernel_value::HelperUnavailableReason::Unknown, function }) if function == helper)
             );
         } else {
             let (source, selection) = checked.expect("a completed call outside a loop is dead");

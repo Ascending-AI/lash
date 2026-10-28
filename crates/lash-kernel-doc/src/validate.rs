@@ -138,6 +138,16 @@ fn validate_document_in(
             },
         ));
     };
+    if !document.requires.helpers.is_empty() {
+        return Err(invalid(
+            None,
+            InvalidReason::Document {
+                message:
+                    "helper claim requirements are derived from reach, not stored in a Document"
+                        .to_owned(),
+            },
+        ));
+    }
     for function in document.library.iter() {
         if document.functions.contains_key(function) {
             return Err(invalid(
@@ -151,8 +161,9 @@ fn validate_document_in(
             if catalog.header(function).is_none() {
                 return Err(invalid(
                     None,
-                    InvalidReason::FunctionNotResolved {
+                    InvalidReason::HelperUnavailable {
                         function: *function,
+                        reason: lash_kernel_value::HelperUnavailableReason::Unknown,
                     },
                 ));
             }
@@ -179,7 +190,10 @@ fn validate_document_in(
         } else {
             return Err(invalid(
                 None,
-                InvalidReason::FunctionNotResolved { function },
+                InvalidReason::HelperUnavailable {
+                    function,
+                    reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                },
             ));
         };
         pending.extend(callees);

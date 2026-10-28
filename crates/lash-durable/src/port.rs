@@ -112,9 +112,9 @@ pub struct NodeLease {
     pub decodes: Vec<FormatSet>,
     /// The claim requirements it serves: its registrations' and its
     /// capabilities' ([`NodeSpec::served`]).
-    pub serves: Vec<String>,
+    pub serves: crate::ServedClaims,
     /// What it offers running code.
-    pub capabilities: crate::NodeCapabilities,
+    pub capabilities: std::sync::Arc<crate::NodeCapabilities>,
     /// How long one heartbeat keeps the lease, in milliseconds.
     pub ttl_millis: i64,
     /// When the lease expires unless renewed, as of the registration.
@@ -187,7 +187,7 @@ impl ClaimPurpose {
     pub fn of(node: &NodeLease, formats: &str, requires: &[String]) -> Self {
         if node.decodes.iter().any(|set| set.as_str() == formats)
             && requires.iter().all(|required| {
-                lash_vocabulary::claims::ObligationToken::is_served(required, &node.serves)
+                lash_vocabulary::claims::ObligationToken::is_served(required, node.serves.as_ref())
             })
         {
             Self::Run

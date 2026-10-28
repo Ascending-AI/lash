@@ -93,7 +93,7 @@ fn chain(step: i64) -> Outcome<(lash_kernel_doc::FunctionRegistry, FunctionId)> 
         };
         let uses = top.map_or_else(String::new, |id| format!("use w.f{} = @{id}\n", at - 1));
         let definition = lash_kernel_doc::parse_definition(&format!(
-            "{uses}function w.f{at}(n: Int) -> Any\nkernel 1\ncharge 1\nbody {{ {body} }}\n"
+            "function w.f{at}(n: Int) -> Any\nkernel 1\ncharge 1\n{uses}body {{ {body} }}\n"
         ))?;
         top = Some(registry.register(definition, None)?);
     }
@@ -162,7 +162,12 @@ const BOUNDS: lash_kernel_vm::Bounds = lash_kernel_vm::Bounds {
     reason = "a measurement binary takes its mode from its command line"
 )]
 fn main() -> Outcome<()> {
-    let mode = std::env::args().nth(1).ok_or("mode: loader or registry")?;
+    let mode = std::env::args()
+        .nth(1)
+        .ok_or("mode: loader, registry, current or archive")?;
+    if matches!(mode.as_str(), "archive" | "current") {
+        return archived(&mode);
+    }
     let (writer, top) = chain(1)?;
     let (reader, _) = chain(2)?;
     let node = match mode.as_str() {
@@ -277,6 +282,178 @@ fn main() -> Outcome<()> {
         "coldload mode={mode} closure={} stored={} instructions={instructions} result={result:?}",
         closure.body().functions().len(),
         stored.len()
+    );
+    Ok(())
+}
+
+/// FIG-7512: a parent authenticates the historical set before it sends the
+/// worker a frame. Measure worker frame installation separately from that work.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "measurement reads its own Linux resident memory"
+)]
+fn resident_kib() -> Outcome<u64> {
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    let row = status
+        .lines()
+        .find(|line| line.starts_with("VmRSS:"))
+        .ok_or("VmRSS missing")?;
+    Ok(row
+        .split_whitespace()
+        .nth(1)
+        .ok_or("VmRSS value missing")?
+        .parse()?)
+}
+fn archived(mode: &str) -> Outcome<()> {
+    use lash_kernel_doc::BuildHelpers;
+    use lash_kernel_releases::archive::{Archive, Binding, HelperId, Library, Release};
+    use std::collections::BTreeSet;
+    let base = lash_kernel_releases::helper_release()?;
+    let (old, old_top) = chain(1)?;
+    let (current, current_top) = chain(2)?;
+    let definitions: BTreeMap<_, _> = old
+        .iter()
+        .filter(|(id, _)| !base.helpers.contains(id))
+        .map(|(id, registered)| (*id, registered.definition().as_ref().clone()))
+        .collect();
+    let library = Library {
+        identity: lash_kernel_value::HelperLibraryId::of_members(definitions.keys().copied()),
+        members: definitions.keys().copied().collect(),
+        roots: [old_top].into(),
+    };
+    let contract = lash_kernel_releases::archive::contract(old_top, &definitions, &BTreeMap::new())
+        .ok_or("contract reach")?;
+    let archive = Archive::default().append(Release {
+        library: library.clone(),
+        definitions,
+        libraries: [("fixture".to_owned(), library)].into(),
+        bindings: [(
+            HelperId(format!("fixture:w.f{}", CHAIN - 1)),
+            Binding {
+                revision: contract.revision(),
+                function: old_top,
+            },
+        )]
+        .into(),
+        ..Default::default()
+    })?;
+    let mut roots = base.resolver_roots();
+    roots.insert(current_top);
+    let helpers = BuildHelpers::new(current.clone(), current.iter().map(|(id, _)| *id))?
+        .with_library_identities(base.helpers.library_identities().iter().copied());
+    let current_identity = helpers.current_identity();
+    let helpers = helpers
+        .with_claim_generations(current_identity, base.helpers.claim_generations().clone())?;
+    let release = lash_kernel_releases::HelperRelease {
+        helpers: Arc::new(helpers),
+        functions: current,
+        roots,
+        labels: BTreeMap::new(),
+    };
+    let parent_started = std::time::Instant::now();
+    let release = if mode == "archive" {
+        lash_kernel_releases::with_archive(
+            release,
+            &archive,
+            &BTreeSet::from(["fixture".to_owned()]),
+        )?
+    } else {
+        release
+    };
+    let parent_us = parent_started.elapsed().as_micros();
+    let image = WorkerLibrary::with_helpers(
+        &release.functions,
+        release.resolver_roots(),
+        &BTreeMap::new(),
+        Arc::clone(&release.helpers),
+    )?;
+    let image_bytes = image.frame().len();
+    let top = if mode == "archive" {
+        old_top
+    } else {
+        current_top
+    };
+    let document = parse_document(&format!(
+        "kernel 1\nnumbers float\nlibrary @{top}\nmain {{ let value = invoke @{top}(5) return value }}"
+    ))?;
+    let counter = Counter::open()?;
+    let resident_before = resident_kib()?;
+    let started = std::time::Instant::now();
+    let (install_instructions, embedding) = counter.once(|| {
+        let received = WorkerLibrary::from_frame(image.frame())?;
+        lash_vm_worker::Embedder::new()
+            .dialect(lash_vm_worker::typescript(
+                &lash_vm_client::WorkerTuning::standard(),
+            )?)?
+            .finish(&received)
+    })?;
+    let embedding = embedding?;
+    let install_us = started.elapsed().as_micros();
+    let resident_after = resident_kib()?;
+    assert_eq!(
+        embedding.library_image().helpers().claim_generations(),
+        release.helpers.claim_generations()
+    );
+    let (run_instructions, result) = counter.once(|| -> Outcome<lash_kernel_doc::Datum> {
+        let (library, closure) = lash_vm_worker::core_support::library_for(
+            &embedding,
+            &document,
+            &[],
+            lash_kernel_value::KernelDataLimits::standard(),
+            &lash_kernel_doc::Selection::Fresh,
+        )?
+        .map_err(|error| error.to_string())?;
+        let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
+            document: document.identity(),
+            fills: BTreeMap::new(),
+        };
+        let program = lash_kernel_vm::Program::prepare(
+            link.identity(),
+            [(document.identity(), Arc::new(document.clone()))].into(),
+            &[(link.identity(), link)].into(),
+            PageId(closure.reference().0),
+            library,
+            lash_kernel_doc::Selection::Fresh,
+        )?;
+        let mut machine = lash_kernel_vm::KernelMachine::start(
+            program,
+            BOUNDS,
+            lash_kernel_vm::CellStart {
+                owner: PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<Pages>::default(),
+        )?;
+        loop {
+            match machine.run(&mut World, u64::MAX)? {
+                lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(done)) => {
+                    return Ok(done.result);
+                }
+                lash_kernel_vm::Step::Slice => {}
+                other => return Err(format!("unexpected {other:?}").into()),
+            }
+        }
+    })?;
+    let result = result?;
+    let expected_step = if mode == "archive" { 1 } else { 2 };
+    assert_eq!(
+        result,
+        lash_kernel_doc::Datum::List(vec![
+            lash_kernel_doc::Datum::Int(5.into()),
+            lash_kernel_doc::Datum::Int(expected_step.into())
+        ])
+    );
+    println!(
+        "archive-load mode={mode} historical_members={} members={} generation_members={} image_bytes={image_bytes} parent_us={parent_us} install_us={install_us} resident_delta_kib={} install_instructions={install_instructions} run_instructions={run_instructions} result={result:?}",
+        if mode == "archive" { CHAIN } else { 0 },
+        release.helpers.members().len(),
+        release.helpers.claim_generations().len(),
+        resident_after.saturating_sub(resident_before)
     );
     Ok(())
 }

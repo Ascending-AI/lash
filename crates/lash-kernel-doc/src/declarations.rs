@@ -218,6 +218,7 @@ impl CheckedDeclarations {
     #[must_use]
     pub fn requirements(&self, document: &Document) -> lash_kernel_value::claims::NodeRequirements {
         lash_kernel_value::claims::NodeRequirements {
+            helpers: Default::default(),
             libraries: Default::default(),
             natives: self
                 .held

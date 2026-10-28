@@ -6,41 +6,47 @@
  */
 export type ParkedRefusal = ({
   "function": FunctionId;
-  "reason": "helper_operation_context";
+  "kind": "helper_operation_context";
   "slot": ImportSlot;
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "reason": "missing_helper";
+  "kind": "helper_unavailable";
+  "reason": HelperUnavailableReason;
   [key: string]: unknown;
 } | {
   "found": number;
   "from": number;
-  "reason": "version";
+  "kind": "version";
   [key: string]: unknown;
 } | {
+  "kind": "document";
   "parked": DocumentId;
-  "reason": "document";
   "rewritten": DocumentId;
   [key: string]: unknown;
 } | {
   "held": string;
-  "reason": "site_not_carried";
+  "kind": "site_not_carried";
   "site": Site;
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "reason": "function_not_carried";
+  "kind": "function_not_carried";
   [key: string]: unknown;
 } | {
   "detail": string;
-  "reason": "state_not_carried";
+  "kind": "state_not_carried";
   [key: string]: unknown;
 });
 
 export type DocumentId = string;
 
 export type FunctionId = string;
+
+/**
+ * Why an exact helper cannot execute on this node.
+ */
+export type HelperUnavailableReason = ("retired" | "unknown" | "corrupt");
 
 /**
  * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.

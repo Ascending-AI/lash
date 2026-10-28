@@ -981,7 +981,7 @@ pub mod policy {
                                     contract: contract.clone(),
                                     route: Box::new(target),
                                     mode: *mode,
-                                    requirements,
+                                    requirements: Box::new(requirements),
                                 }
                             }
                             entry => entry.clone(),

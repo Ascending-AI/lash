@@ -6,8 +6,11 @@ use {
 pub enum LinkRefusal {
     #[error(transparent)]
     DocumentValidation(#[from] lash_kernel_doc::Invalid),
-    #[error("missing build helper {function}")]
-    MissingHelper { function: FunctionId },
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
+        function: FunctionId,
+    },
     #[error(transparent)]
     SignatureRequired(Box<lash_kernel_doc::SignatureRequired>),
     #[error("Import {slot:?} ({name:?}) has no member")]

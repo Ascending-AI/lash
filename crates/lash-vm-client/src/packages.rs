@@ -54,8 +54,17 @@ impl WorkerLibrary {
             .members()
             .filter(|id| functions.get(id).is_some())
             .copied();
-        let helpers = Arc::new(BuildHelpers::new(functions.clone(), members).map_err(malformed)?);
-        Self::with_helpers(functions, roots, documents, helpers)
+        let mut helpers = BuildHelpers::new(functions.clone(), members).map_err(malformed)?;
+        if helpers.members().eq(release.helpers.members()) {
+            helpers = helpers
+                .with_library_identities(release.helpers.library_identities().iter().copied())
+                .with_claim_generations(
+                    release.helpers.current_identity(),
+                    release.helpers.claim_generations().clone(),
+                )
+                .map_err(malformed)?;
+        }
+        Self::with_helpers(functions, roots, documents, Arc::new(helpers))
     }
 
     /// Install an exact closed helper image independently of host-authored Documents.
@@ -82,8 +91,14 @@ impl WorkerLibrary {
                     .iter()
                     .filter_map(|(from, to)| helpers.contains(from).then_some(*to)),
             );
-            let helpers =
-                Arc::new(BuildHelpers::new(registry.clone(), members).map_err(malformed)?);
+            let current = lash_kernel_value::HelperLibraryId::of_members(members.clone());
+            let helpers = Arc::new(
+                BuildHelpers::new(registry.clone(), members)
+                    .map_err(malformed)?
+                    .with_library_identities(helpers.library_identities().iter().copied())
+                    .with_claim_generations(current, helpers.claim_generations().clone())
+                    .map_err(malformed)?,
+            );
             let native_roots: BTreeMap<_, _> =
                 pairs.into_iter().map(|(from, to)| (to, from)).collect();
             (registry, helpers, native_roots)
@@ -100,13 +115,16 @@ impl WorkerLibrary {
             }
         }
         let mut metadata = TokenWriter::new();
-        metadata.seq(2);
+        metadata.seq(5);
         metadata.bytes(helpers.identity().as_bytes());
         helpers
             .members()
             .copied()
             .collect::<std::collections::BTreeSet<_>>()
             .encode(&mut metadata);
+        helpers.library_identities().encode(&mut metadata);
+        helpers.current_identity().encode(&mut metadata);
+        helpers.claim_generations().encode(&mut metadata);
         let metadata = metadata.into_bytes();
         let roots: std::collections::BTreeSet<_> = roots.into_iter().collect();
         let root_bytes = lash_kernel_value::tokens::encode_body(&roots);
@@ -169,7 +187,7 @@ impl WorkerLibrary {
         let roots = lash_kernel_value::tokens::decode_body(roots).map_err(malformed)?;
         let registry = Arc::new(FunctionRegistry::over_frame(image).map_err(malformed)?);
         let mut reader = TokenReader::new(metadata);
-        reader.expect_struct(2).map_err(malformed)?;
+        reader.expect_struct(5).map_err(malformed)?;
         let identity = lash_kernel_value::HelperLibraryId::from_bytes(
             reader
                 .bytes()
@@ -180,9 +198,19 @@ impl WorkerLibrary {
         let members =
             std::collections::BTreeSet::<lash_kernel_value::FunctionId>::decode(&mut reader)
                 .map_err(malformed)?;
+        let libraries =
+            std::collections::BTreeSet::<lash_kernel_value::HelperLibraryId>::decode(&mut reader)
+                .map_err(malformed)?;
+        let current = lash_kernel_value::HelperLibraryId::decode(&mut reader).map_err(malformed)?;
+        let generations = BTreeMap::decode(&mut reader).map_err(malformed)?;
         reader.finish().map_err(malformed)?;
-        let helpers =
-            Arc::new(BuildHelpers::new(registry.as_ref().clone(), members).map_err(malformed)?);
+        let helpers = Arc::new(
+            BuildHelpers::new(registry.as_ref().clone(), members)
+                .map_err(malformed)?
+                .with_library_identities(libraries)
+                .with_claim_generations(current, generations)
+                .map_err(malformed)?,
+        );
         if helpers.identity() != identity {
             return Err(malformed(
                 "helper library identity differs from image membership",

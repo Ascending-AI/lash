@@ -285,6 +285,7 @@ fn hard(requirements: &lash_vocabulary::claims::ClaimRequirements) -> Vec<String
 fn record() -> lash_vocabulary::claims::ClaimRequirements {
     lash_vocabulary::claims::ClaimRequirements {
         machine: lash_kernel_value::claims::NodeRequirements {
+            helpers: Default::default(),
             libraries: Default::default(),
             natives: [lash_kernel_value::FunctionId::from_bytes([3; 32])].into(),
             kernels: [1].into(),

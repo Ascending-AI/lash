@@ -38,6 +38,47 @@ pub(super) enum Cursor {
 }
 
 impl Cursor {
+    /// Preview one resident collection step without changing the saved cursor.
+    #[inline(always)]
+    pub(super) fn resident_step(
+        &self,
+        arena: &mut Arena,
+    ) -> Option<Result<(Self, Option<Value>), NativeError>> {
+        Some(match self {
+            Self::List(items, position) => arena.item(*items, *position as u64).map(|value| {
+                (
+                    Self::List(*items, *position + usize::from(value.is_some())),
+                    value,
+                )
+            }),
+            Self::Tuple(items, position) => arena.item(*items, *position as u64).map(|value| {
+                (
+                    Self::Tuple(*items, *position + usize::from(value.is_some())),
+                    value,
+                )
+            }),
+            Self::Map(id, last) => arena.table_next(*id, last.map(|last| last.0)).map(|next| {
+                (
+                    Self::Map(
+                        *id,
+                        next.map(|(sequence, _)| TableCursor(sequence)).or(*last),
+                    ),
+                    next.map(|(_, key)| key),
+                )
+            }),
+            Self::Set(id, last) => arena.table_next(*id, last.map(|last| last.0)).map(|next| {
+                (
+                    Self::Set(
+                        *id,
+                        next.map(|(sequence, _)| TableCursor(sequence)).or(*last),
+                    ),
+                    next.map(|(_, key)| key),
+                )
+            }),
+            _ => return None,
+        })
+    }
+
     /// What the loop walks, which the frame holds.
     pub(super) fn walked(&self) -> Option<Value> {
         Some(match self {
@@ -139,18 +180,14 @@ impl Cursor {
     /// The loop's own cursor steps to its next element, or is exhausted
     /// (`K-ITER-002`, `K-ITER-003`). A cursor a protocol steps has none.
     pub(super) fn step(&mut self, arena: &mut Arena) -> Result<Option<Value>, NativeError> {
+        if let Some(next) = self.resident_step(arena) {
+            let (cursor, value) = next?;
+            *self = cursor;
+            return Ok(value);
+        }
         Ok(match self {
-            Self::List(items, position) | Self::Tuple(items, position) => {
-                let element = arena.item(*items, *position as u64)?;
-                *position += usize::from(element.is_some());
-                element
-            }
-            Self::Map(id, last) | Self::Set(id, last) => {
-                let next = arena.table_next(*id, last.map(|last| last.0))?;
-                next.map(|(sequence, key)| {
-                    *last = Some(TableCursor(sequence));
-                    key
-                })
+            Self::List(..) | Self::Tuple(..) | Self::Map(..) | Self::Set(..) => {
+                unreachable!("resident collection step handled above")
             }
             Self::Text(cursor) => cursor.next(arena)?.map(|point| {
                 let mut buffer = [0; 4];

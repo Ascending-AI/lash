@@ -651,8 +651,8 @@ pub(crate) fn check_program_helpers(
     };
     checked.map_err(|error| match error {
         HelperCompatibilityError::Heap(fault) => OpenError::Heap(fault),
-        HelperCompatibilityError::MissingHelper { function } => {
-            OpenError::MissingHelper { function }
+        HelperCompatibilityError::HelperUnavailable { reason, function } => {
+            OpenError::HelperUnavailable { reason, function }
         }
     })
 }

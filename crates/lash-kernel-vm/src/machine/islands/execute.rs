@@ -718,22 +718,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         else {
                             return Err(self.halt(fault("a for header has no cursor")));
                         };
-                        if *item_hook
-                            || guard.is_some()
-                            || !matches!(
-                                cursor,
-                                Cursor::List(..)
-                                    | Cursor::Tuple(..)
-                                    | Cursor::Map(..)
-                                    | Cursor::Set(..)
-                            )
-                        {
+                        if *item_hook || guard.is_some() {
                             self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                             return Err(Stop);
                         }
-                        let mut cursor = cursor.clone();
-                        match cursor.step(self.arena) {
-                            Ok(value) => Some((*at, cursor, value)),
+                        let Some(next) = cursor.resident_step(self.arena) else {
+                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                            return Err(Stop);
+                        };
+                        match next {
+                            Ok((cursor, value)) => Some((*at, cursor, value)),
                             _ => {
                                 self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
                                 #[cfg(any(test, feature = "perf-witness"))]

@@ -1,7 +1,7 @@
 //! Live worker compatibility. Crate versions are diagnostic only.
 use lash_protocol_types::engine_fault::ProtocolVersionRefusal;
 
-/// Wire shapes change in place at version 1 until the 1.0 freeze ends.
+/// A changed wire witness requires matching parent and worker binaries.
 ///
 /// version_guard(
 ///     shapes(
@@ -23,12 +23,12 @@ use lash_protocol_types::engine_fault::ProtocolVersionRefusal;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "coexist"
 /// format_outside_manifest = "live worker admission; not a parked VM format"
-pub const WORKER_PROTOCOL_VERSION: u32 = 1;
+pub const WORKER_PROTOCOL_VERSION: u32 = 2;
 /// Acceptance builds advertise N+1 before admitting any guest work.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "coexist"
 /// format_outside_manifest = "live worker admission; not a parked VM format"
-pub const WORKER_PROTOCOL_VERSION: u32 = 2;
+pub const WORKER_PROTOCOL_VERSION: u32 = 3;
 /// Oldest worker wire version the parent can read.
 pub const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION: u32 = WORKER_PROTOCOL_VERSION;
 

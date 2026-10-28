@@ -8,6 +8,15 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "HelperUnavailableReason": {
+      "description": "Why an exact helper cannot execute on this node.",
+      "enum": [
+        "retired",
+        "unknown",
+        "corrupt"
+      ],
+      "type": "string"
+    },
     "ImportSlot": {
       "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
       "format": "uint32",
@@ -85,7 +94,7 @@
         "function": {
           "$ref": "#/$defs/FunctionId"
         },
-        "reason": {
+        "kind": {
           "const": "helper_operation_context",
           "type": "string"
         },
@@ -94,7 +103,7 @@
         }
       },
       "required": [
-        "reason",
+        "kind",
         "function",
         "slot"
       ],
@@ -105,12 +114,16 @@
         "function": {
           "$ref": "#/$defs/FunctionId"
         },
-        "reason": {
-          "const": "missing_helper",
+        "kind": {
+          "const": "helper_unavailable",
           "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/HelperUnavailableReason"
         }
       },
       "required": [
+        "kind",
         "reason",
         "function"
       ],
@@ -128,13 +141,13 @@
           "minimum": 0,
           "type": "integer"
         },
-        "reason": {
+        "kind": {
           "const": "version",
           "type": "string"
         }
       },
       "required": [
-        "reason",
+        "kind",
         "found",
         "from"
       ],
@@ -142,19 +155,19 @@
     },
     {
       "properties": {
-        "parked": {
-          "$ref": "#/$defs/DocumentId"
-        },
-        "reason": {
+        "kind": {
           "const": "document",
           "type": "string"
+        },
+        "parked": {
+          "$ref": "#/$defs/DocumentId"
         },
         "rewritten": {
           "$ref": "#/$defs/DocumentId"
         }
       },
       "required": [
-        "reason",
+        "kind",
         "parked",
         "rewritten"
       ],
@@ -166,7 +179,7 @@
         "held": {
           "type": "string"
         },
-        "reason": {
+        "kind": {
           "const": "site_not_carried",
           "type": "string"
         },
@@ -175,7 +188,7 @@
         }
       },
       "required": [
-        "reason",
+        "kind",
         "site",
         "held"
       ],
@@ -186,13 +199,13 @@
         "function": {
           "$ref": "#/$defs/FunctionId"
         },
-        "reason": {
+        "kind": {
           "const": "function_not_carried",
           "type": "string"
         }
       },
       "required": [
-        "reason",
+        "kind",
         "function"
       ],
       "type": "object"
@@ -202,13 +215,13 @@
         "detail": {
           "type": "string"
         },
-        "reason": {
+        "kind": {
           "const": "state_not_carried",
           "type": "string"
         }
       },
       "required": [
-        "reason",
+        "kind",
         "detail"
       ],
       "type": "object"

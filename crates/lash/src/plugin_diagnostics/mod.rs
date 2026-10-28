@@ -39,7 +39,9 @@ impl PluginDiagnostics {
             decodes: lease
                 .as_ref()
                 .map_or_else(Vec::new, |lease| lease.decodes.clone()),
-            serves: lease.map_or_else(BTreeSet::new, |lease| lease.serves.into_iter().collect()),
+            serves: lease.map_or_else(BTreeSet::new, |lease| {
+                lease.serves.as_ref().iter().cloned().collect()
+            }),
             // One inventory has one registry scope; installed() supplies each
             // scope separately rather than mislabeling a node-wide union.
             inventory: None,

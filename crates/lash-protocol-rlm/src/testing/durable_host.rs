@@ -371,7 +371,7 @@ async fn claim(
             .into_iter()
             .filter(|(owner, _)| owner == actor)
             .flat_map(|(_, required)| required)
-            .filter(|required| !lease.serves.contains(required))
+            .filter(|required| !lease.serves.as_ref().contains(required))
             .collect::<Vec<_>>();
         panic!("the law's session actor is not claimable; unserved: {missing:?}");
     };

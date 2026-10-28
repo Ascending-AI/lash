@@ -327,9 +327,13 @@ impl LinkedContent {
                             message: format!("unproved helper {function}"),
                         });
                     }
-                    let registered = catalog
-                        .registered(&function)
-                        .ok_or(LinkRefusal::MissingHelper { function })?;
+                    let registered =
+                        catalog
+                            .registered(&function)
+                            .ok_or(LinkRefusal::HelperUnavailable {
+                                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                                function,
+                            })?;
                     pending.extend(registered.callees());
                     required
                         .functions
@@ -410,15 +414,11 @@ impl LinkedContent {
             reach.machine.libraries.extend(&document.requires.libraries);
             for function in required.functions.keys() {
                 if let Some(helpers) = catalog.helper_library()
-                    && helpers.contains(function)
+                    && helpers.require(*function, &mut reach.machine)
                 {
-                    if catalog
-                        .header(function)
-                        .is_some_and(|header| header.has_native() && !header.has_body())
-                    {
-                        reach.machine.libraries.insert(helpers.identity());
-                    }
-                } else if document.requires.natives.contains(function)
+                    continue;
+                }
+                if document.requires.natives.contains(function)
                     || document
                         .functions
                         .get(function)
@@ -589,13 +589,19 @@ impl Inspections {
         helpers: &lash_kernel_doc::BuildHelpers,
     ) -> Result<LinkedReach, LinkRefusal> {
         let artifacts = content.retain_reach(root)?;
-        self.slot(content, root, selector, helpers.identity(), &artifacts)
-            .get_or_init(|| {
-                content.inspect_retained(root, selector, helpers, &artifacts, |document| {
-                    self.documents.check(document, helpers)
-                })
+        self.slot(
+            content,
+            root,
+            selector,
+            helpers.claim_identity(),
+            &artifacts,
+        )
+        .get_or_init(|| {
+            content.inspect_retained(root, selector, helpers, &artifacts, |document| {
+                self.documents.check(document, helpers)
             })
-            .clone()
+        })
+        .clone()
     }
 
     fn slot(

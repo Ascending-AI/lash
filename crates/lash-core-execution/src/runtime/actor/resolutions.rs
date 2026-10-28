@@ -25,7 +25,7 @@ pub enum CommittedUse {
     Ready(ResolutionRecord),
     Parked {
         record: ResolutionRecord,
-        unmet: ClaimRequirements,
+        unmet: Box<ClaimRequirements>,
     },
 }
 
@@ -220,7 +220,7 @@ impl FirstUse<'_> {
                     definition,
                     route,
                     mode: OperationMode::Waited,
-                    requirements,
+                    requirements: Box::new(requirements),
                 };
                 match entry.validate() {
                     Ok(()) => Ok(entry),
@@ -250,7 +250,10 @@ impl FirstUse<'_> {
         if unmet.is_empty() {
             Ok(CommittedUse::Ready(record))
         } else {
-            Ok(CommittedUse::Parked { record, unmet })
+            Ok(CommittedUse::Parked {
+                record,
+                unmet: Box::new(unmet),
+            })
         }
     }
 }
@@ -389,7 +392,7 @@ pub fn validate_seeds(
         {
             let mut expected = validate(grant, name, definition, route, environment.registry)?;
             expected.extend(recorded);
-            if &expected != recorded {
+            if &expected != recorded.as_ref() {
                 return Err(refused(
                     "initial resolution omits validated target debt".into(),
                 ));

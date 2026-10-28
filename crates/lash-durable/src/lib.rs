@@ -51,6 +51,9 @@ pub use labels::CommitCapacity;
 pub mod environment;
 #[cfg(feature = "testing")]
 pub mod laws;
+mod node_claims;
+#[cfg(test)]
+mod node_claims_laws;
 pub mod node_wake_payload;
 mod node_wakes;
 pub mod packages;
@@ -74,6 +77,7 @@ pub use ids::{
     ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailKind,
     MailSeq, NodeId, StateRevision,
 };
+pub use node_claims::ServedClaims;
 pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 pub use packages::{ClaimRequirements, NodeCapabilities, NodeCapability};
 pub mod resolutions;

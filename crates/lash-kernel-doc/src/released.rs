@@ -414,9 +414,10 @@ impl ValidatedFunctions {
     schemars::JsonSchema,
     thiserror::Error,
 )]
-#[error("build helper {function} is unavailable")]
+#[error("build helper {function} is unavailable: {reason}")]
 #[serde(deny_unknown_fields)]
-pub struct MissingHelper {
+pub struct HelperUnavailable {
+    pub reason: lash_kernel_value::HelperUnavailableReason,
     pub function: FunctionId,
 }
 
@@ -425,9 +426,20 @@ pub struct MissingHelper {
 #[derive(Clone, Debug)]
 pub struct BuildHelpers {
     identity: lash_kernel_value::HelperLibraryId,
+    library_identities: BTreeSet<lash_kernel_value::HelperLibraryId>,
+    current: lash_kernel_value::HelperLibraryId,
+    claim_identity: lash_kernel_value::HelperLibraryId,
+    generations: std::sync::Arc<BTreeMap<FunctionId, lash_kernel_value::claims::HelperGeneration>>,
+    archives: BTreeMap<lash_kernel_value::HelperLibraryId, u32>,
     functions: crate::FunctionRegistry,
-    members: std::collections::HashSet<FunctionId>,
-    callees: std::collections::BTreeMap<FunctionId, BTreeSet<FunctionId>>,
+    members: std::collections::HashMap<FunctionId, HelperMember>,
+    member_order: BTreeSet<FunctionId>,
+}
+
+#[derive(Clone, Debug)]
+struct HelperMember {
+    generation: Option<lash_kernel_value::claims::HelperGeneration>,
+    callees: BTreeSet<FunctionId>,
 }
 
 impl BuildHelpers {
@@ -436,26 +448,46 @@ impl BuildHelpers {
     pub fn new(
         functions: crate::FunctionRegistry,
         roots: impl IntoIterator<Item = FunctionId>,
-    ) -> Result<Self, MissingHelper> {
+    ) -> Result<Self, HelperUnavailable> {
         let mut pending: Vec<_> = roots.into_iter().collect();
         let mut callees = std::collections::BTreeMap::new();
         while let Some(function) = pending.pop() {
             if callees.contains_key(&function) {
                 continue;
             }
-            let registered = functions.get(&function).ok_or(MissingHelper { function })?;
+            let registered = functions.get(&function).ok_or(HelperUnavailable {
+                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                function,
+            })?;
             let children: BTreeSet<_> = registered.listed().into_iter().map(|(id, _)| id).collect();
             pending.extend(children.iter().copied());
             callees.insert(function, children);
         }
         crate::document_work::note_helper(|work| work.identity_hashes += 1);
         let identity = lash_kernel_value::HelperLibraryId::of_members(callees.keys().copied());
-        let members = callees.keys().copied().collect();
+        let member_order = callees.keys().copied().collect();
+        let members = callees
+            .into_iter()
+            .map(|(id, callees)| {
+                (
+                    id,
+                    HelperMember {
+                        generation: None,
+                        callees,
+                    },
+                )
+            })
+            .collect();
         Ok(Self {
             identity,
+            library_identities: BTreeSet::from([identity]),
+            current: identity,
+            claim_identity: identity,
+            generations: Default::default(),
+            archives: Default::default(),
             functions,
             members,
-            callees,
+            member_order,
         })
     }
 
@@ -465,16 +497,23 @@ impl BuildHelpers {
         std::sync::Arc::clone(EMPTY.get_or_init(|| {
             std::sync::Arc::new(Self {
                 identity: lash_kernel_value::HelperLibraryId::of_members([]),
+                library_identities: BTreeSet::from([
+                    lash_kernel_value::HelperLibraryId::of_members([]),
+                ]),
+                current: lash_kernel_value::HelperLibraryId::of_members([]),
+                claim_identity: lash_kernel_value::HelperLibraryId::of_members([]),
+                generations: Default::default(),
+                archives: Default::default(),
                 functions: crate::FunctionRegistry::declarations(),
                 members: Default::default(),
-                callees: Default::default(),
+                member_order: Default::default(),
             })
         }))
     }
 
     /// The install-validated member universe, in canonical order.
     pub fn members(&self) -> impl ExactSizeIterator<Item = &FunctionId> {
-        self.callees.keys()
+        self.member_order.iter()
     }
 
     /// Opens metadata whose identity and closure were checked by the installing
@@ -483,36 +522,171 @@ impl BuildHelpers {
         identity: lash_kernel_value::HelperLibraryId,
         functions: crate::FunctionRegistry,
         members: BTreeSet<FunctionId>,
-    ) -> Result<Self, MissingHelper> {
+    ) -> Result<Self, HelperUnavailable> {
         let mut callees = std::collections::BTreeMap::new();
         for function in &members {
-            let registered = functions.get(function).ok_or(MissingHelper {
+            let registered = functions.get(function).ok_or(HelperUnavailable {
+                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
                 function: *function,
             })?;
             let children: BTreeSet<_> = registered.listed().into_iter().map(|(id, _)| id).collect();
             for child in &children {
                 if !members.contains(child) {
-                    return Err(MissingHelper { function: *child });
+                    return Err(HelperUnavailable {
+                        reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                        function: *child,
+                    });
                 }
             }
             callees.insert(*function, children);
         }
         Ok(Self {
             identity,
+            library_identities: BTreeSet::from([identity]),
+            current: identity,
+            claim_identity: identity,
+            generations: Default::default(),
+            archives: Default::default(),
             functions,
-            members: members.into_iter().collect(),
-            callees,
+            members: callees
+                .into_iter()
+                .map(|(id, callees)| {
+                    (
+                        id,
+                        HelperMember {
+                            generation: None,
+                            callees,
+                        },
+                    )
+                })
+                .collect(),
+            member_order: members,
         })
+    }
+
+    /// Historical manifests authenticated by the installing parent and covered
+    /// by this exact member universe. These are availability claims only.
+    pub fn with_library_identities(
+        mut self,
+        identities: impl IntoIterator<Item = lash_kernel_value::HelperLibraryId>,
+    ) -> Self {
+        self.library_identities.extend(identities);
+        self
+    }
+
+    /// Bind the authenticated first-generation index once, before serving runs.
+    pub fn with_claim_generations(
+        mut self,
+        current: lash_kernel_value::HelperLibraryId,
+        generations: BTreeMap<FunctionId, lash_kernel_value::claims::HelperGeneration>,
+    ) -> Result<Self, HelperUnavailable> {
+        use lash_kernel_value::tokens::TokenCodec as _;
+        self.archives.clear();
+        self.members
+            .values_mut()
+            .for_each(|member| member.generation = None);
+        for (function, claim) in &generations {
+            let lash_kernel_value::claims::HelperGeneration {
+                archive,
+                generation,
+                package,
+            } = claim;
+            if !self.contains(function) || *generation == 0 || !self.supports_library(package) {
+                return Err(HelperUnavailable {
+                    function: *function,
+                    reason: lash_kernel_value::HelperUnavailableReason::Corrupt,
+                });
+            }
+            self.members
+                .get_mut(function)
+                .unwrap_or_else(|| unreachable!("checked member"))
+                .generation = Some(*claim);
+            self.archives
+                .entry(*archive)
+                .and_modify(|held| *held = (*held).max(*generation))
+                .or_insert(*generation);
+        }
+        let mut tokens = lash_kernel_value::tokens::TokenWriter::new();
+        tokens.bytes(b"helper-claim-index");
+        self.identity.encode(&mut tokens);
+        current.encode(&mut tokens);
+        generations.encode(&mut tokens);
+        self.claim_identity = lash_kernel_value::HelperLibraryId::from_bytes(
+            lash_kernel_value::tokens::logical_digest(&tokens.into_bytes()),
+        );
+        self.current = current;
+        self.generations = std::sync::Arc::new(generations);
+        Ok(self)
+    }
+
+    pub fn current_identity(&self) -> lash_kernel_value::HelperLibraryId {
+        self.current
+    }
+    pub fn claim_identity(&self) -> lash_kernel_value::HelperLibraryId {
+        self.claim_identity
+    }
+    pub fn claim_generations(
+        &self,
+    ) -> &BTreeMap<FunctionId, lash_kernel_value::claims::HelperGeneration> {
+        &self.generations
+    }
+    pub fn claim_capabilities(&self) -> lash_kernel_value::claims::HelperRequirements {
+        lash_kernel_value::claims::HelperRequirements {
+            archives: self.archives.clone(),
+            outside: Default::default(),
+        }
+    }
+
+    /// Classify and project one helper through the installed membership index.
+    /// Called by the identity-keyed inspection cache, never by claim admission.
+    pub fn require(
+        &self,
+        function: FunctionId,
+        required: &mut lash_kernel_value::claims::NodeRequirements,
+    ) -> bool {
+        let Some(claim) = self.members.get(&function) else {
+            return false;
+        };
+        if let Some(claim) = &claim.generation {
+            let lash_kernel_value::claims::HelperGeneration {
+                archive,
+                generation,
+                package,
+            } = claim;
+            required
+                .helpers
+                .archives
+                .entry(*archive)
+                .and_modify(|held| *held = (*held).max(*generation))
+                .or_insert(*generation);
+            required.libraries.insert(*package);
+        } else {
+            required
+                .helpers
+                .outside
+                .entry(self.current)
+                .or_default()
+                .insert(function);
+        }
+        true
+    }
+
+    pub fn library_identities(&self) -> &BTreeSet<lash_kernel_value::HelperLibraryId> {
+        &self.library_identities
+    }
+
+    pub fn supports_library(&self, identity: &lash_kernel_value::HelperLibraryId) -> bool {
+        self.library_identities.contains(identity)
     }
 
     pub fn identity(&self) -> lash_kernel_value::HelperLibraryId {
         self.identity
     }
     pub fn contains(&self, function: &FunctionId) -> bool {
-        self.members.contains(function)
+        self.members.contains_key(function)
     }
     pub fn callees(&self, function: &FunctionId) -> Option<&BTreeSet<FunctionId>> {
-        let callees = self.callees.get(function);
+        let callees = self.members.get(function).map(|member| &member.callees);
         #[cfg(any(test, feature = "perf-witness"))]
         ADMISSION_EDGES
             .with(|count| count.set(count.get() + callees.map_or(0, |edges| edges.len() as u64)));
@@ -533,14 +707,17 @@ impl BuildHelpers {
     pub fn reach(
         &self,
         roots: &crate::LibraryDependencies,
-    ) -> Result<BTreeSet<FunctionId>, MissingHelper> {
+    ) -> Result<BTreeSet<FunctionId>, HelperUnavailable> {
         let mut pending: Vec<_> = roots.iter().copied().collect();
         let mut reached = BTreeSet::new();
         while let Some(function) = pending.pop() {
             if reached.insert(function) {
                 pending.extend(
                     self.callees(&function)
-                        .ok_or(MissingHelper { function })?
+                        .ok_or(HelperUnavailable {
+                            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                            function,
+                        })?
                         .iter()
                         .copied(),
                 );
@@ -603,8 +780,11 @@ impl crate::FunctionCatalog for BuildHelpers {
 /// Why a document's build-library closure cannot be projected.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LibraryRequirementRefusal {
-    #[error("missing build helper {function}")]
-    MissingHelper { function: FunctionId },
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
+        function: FunctionId,
+    },
 }
 
 /// Project the kernel versions of the exact helper closure, without copying
@@ -657,7 +837,10 @@ fn helper_closure(
         if !seen.insert(function) {
             continue;
         }
-        let missing = || LibraryRequirementRefusal::MissingHelper { function };
+        let missing = || LibraryRequirementRefusal::HelperUnavailable {
+            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+            function,
+        };
         let header = catalog.header(&function).ok_or_else(missing)?;
         let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
             (registered.callees().clone(), registered.imports().clone())

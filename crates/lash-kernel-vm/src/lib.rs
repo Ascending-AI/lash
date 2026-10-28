@@ -72,7 +72,7 @@
 //! accepts a completed checkpoint, returns a typed `CarryFault` (including
 //! `ParkedRefusal`), and its owner calls [`validate_foreign_checkpoint`]
 //! before publication. Open/admission returns [`OpenError`] (including
-//! `MissingHelper`, `MissingFunction`, identity errors and `Heap` for
+//! `HelperUnavailable`, `MissingFunction`, identity errors and `Heap` for
 //! malformed continuation data); diagnostic strings describe these typed
 //! failures, not an accepted pause. An ended machine refuses `run` with
 //! [`MachineError::Ended`] and `seal` with [`SealError::Ended`]. Heap or

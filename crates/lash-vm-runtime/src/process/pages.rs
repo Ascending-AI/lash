@@ -392,11 +392,13 @@ pub(super) fn helper_refusal(
         HelperCompatibilityError::Heap(fault) => {
             KernelFailure::Open(lash_kernel_vm::OpenError::Heap(fault))
         }
-        HelperCompatibilityError::MissingHelper { function } => KernelFailure::Worker {
+        HelperCompatibilityError::HelperUnavailable { reason, function } => KernelFailure::Worker {
             outcome: lash_protocol_types::engine_fault::RunRefusal::Restore {
-                refusal: lash_protocol_types::engine_fault::KernelRestoreRefusal::MissingHelper {
-                    function,
-                },
+                refusal:
+                    lash_protocol_types::engine_fault::KernelRestoreRefusal::HelperUnavailable {
+                        reason,
+                        function,
+                    },
             }
             .into(),
         },

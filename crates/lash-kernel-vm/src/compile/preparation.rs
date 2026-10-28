@@ -341,7 +341,8 @@ impl PreparedLibrary {
                             return Err(Refused::Invalid(lash_kernel_doc::Invalid {
                                 site: None,
                                 reason: Box::new(
-                                    lash_kernel_doc::InvalidReason::FunctionNotResolved {
+                                    lash_kernel_doc::InvalidReason::HelperUnavailable {
+                                        reason: lash_kernel_value::HelperUnavailableReason::Unknown,
                                         function: *function,
                                     },
                                 ),

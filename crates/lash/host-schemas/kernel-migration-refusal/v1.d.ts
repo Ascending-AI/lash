@@ -59,34 +59,39 @@ export type DocumentId = string;
 export type DocumentRefusal = ({
   "found": number;
   "from": number;
-  "reason": "version";
+  "kind": "version";
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "reason": "function_not_held";
+  "kind": "function_not_held";
   [key: string]: unknown;
 } | {
   "function": FunctionId;
+  "kind": "function_retired";
   "name": FunctionName;
-  "reason": "function_retired";
   [key: string]: unknown;
 } | {
+  "kind": "operation_contract_changed";
   "operation": FunctionName;
-  "reason": "operation_contract_changed";
   [key: string]: unknown;
 } | {
   "detail": string;
-  "reason": "form_not_carried";
+  "kind": "form_not_carried";
   "site": Site;
   [key: string]: unknown;
 } | {
-  "reason": "correspondence";
+  "kind": "correspondence";
   [key: string]: unknown;
 });
 
 export type FunctionId = string;
 
 export type FunctionName = string;
+
+/**
+ * Why an exact helper cannot execute on this node.
+ */
+export type HelperUnavailableReason = ("retired" | "unknown" | "corrupt");
 
 /**
  * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
@@ -153,6 +158,11 @@ export type InvalidReason = (("empty_name" | "limit_measures_result" | "empty_fo
 } | {
   "function_not_resolved": {
     "function": FunctionId;
+  };
+} | {
+  "helper_unavailable": {
+    "function": FunctionId;
+    "reason": HelperUnavailableReason;
   };
 } | {
   "call_arity": {
@@ -237,35 +247,36 @@ export type Name = string;
  */
 export type ParkedRefusal = ({
   "function": FunctionId;
-  "reason": "helper_operation_context";
+  "kind": "helper_operation_context";
   "slot": ImportSlot;
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "reason": "missing_helper";
+  "kind": "helper_unavailable";
+  "reason": HelperUnavailableReason;
   [key: string]: unknown;
 } | {
   "found": number;
   "from": number;
-  "reason": "version";
+  "kind": "version";
   [key: string]: unknown;
 } | {
+  "kind": "document";
   "parked": DocumentId;
-  "reason": "document";
   "rewritten": DocumentId;
   [key: string]: unknown;
 } | {
   "held": string;
-  "reason": "site_not_carried";
+  "kind": "site_not_carried";
   "site": Site;
   [key: string]: unknown;
 } | {
   "function": FunctionId;
-  "reason": "function_not_carried";
+  "kind": "function_not_carried";
   [key: string]: unknown;
 } | {
   "detail": string;
-  "reason": "state_not_carried";
+  "kind": "state_not_carried";
   [key: string]: unknown;
 });
 

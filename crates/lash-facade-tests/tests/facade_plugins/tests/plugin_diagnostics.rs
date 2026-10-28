@@ -14,7 +14,7 @@ fn node_snapshot(lease: &NodeLease) -> NodeServingSnapshot {
         owner: Some(lease.owner.clone()),
         observed_at: lease.expires_at,
         decodes: lease.decodes.clone(),
-        serves: lease.serves.iter().cloned().collect(),
+        serves: lease.serves.as_ref().iter().cloned().collect(),
         inventory: None,
     }
 }

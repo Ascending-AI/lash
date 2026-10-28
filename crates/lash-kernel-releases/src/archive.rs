@@ -237,6 +237,142 @@ pub fn contract(
 }
 
 impl Archive {
+    pub(crate) fn members(&self, packages: &BTreeSet<String>) -> BTreeSet<FunctionId> {
+        self.releases
+            .iter()
+            .flat_map(|release| {
+                release
+                    .libraries
+                    .iter()
+                    .filter(|(package, _)| packages.contains(*package))
+                    .flat_map(|(_, library)| library.members.iter().copied())
+            })
+            .collect()
+    }
+
+    /// Earliest containing generation and package coverage for each installed member.
+    /// The first release identifies the append-only lineage, independently of features.
+    pub(crate) fn claim_generations(
+        &self,
+        members: &BTreeSet<FunctionId>,
+    ) -> Result<BTreeMap<FunctionId, lash_kernel_value::claims::HelperGeneration>, ArchiveError>
+    {
+        let Some(first) = self.releases.first() else {
+            return Ok(BTreeMap::new());
+        };
+        let mut packages = BTreeMap::new();
+        let mut generations = BTreeMap::new();
+        for (sequence, release) in self.releases.iter().enumerate() {
+            let generation = u32::try_from(sequence + 1)
+                .map_err(|_| ArchiveError::Closure("archive generation exceeds u32".to_owned()))?;
+            for (name, library) in &release.libraries {
+                packages.entry(name.clone()).or_insert(library.identity);
+            }
+            for function in release
+                .definitions
+                .keys()
+                .filter(|function| members.contains(function))
+            {
+                let (name, _) = release
+                    .libraries
+                    .iter()
+                    .filter(|(_, library)| library.members.contains(function))
+                    .min_by_key(|(name, library)| (library.members.len(), *name))
+                    .ok_or_else(|| ArchiveError::Closure(format!("no package owns {function}")))?;
+                generations.entry(*function).or_insert(
+                    lash_kernel_value::claims::HelperGeneration {
+                        archive: first.library.identity,
+                        generation,
+                        package: packages[name],
+                    },
+                );
+            }
+        }
+        Ok(generations)
+    }
+
+    /// Old binary feature combinations and package manifests whose complete
+    /// membership is locally available. Exact installed identity stays separate.
+    pub(crate) fn library_identities(
+        &self,
+        members: &BTreeSet<FunctionId>,
+    ) -> BTreeSet<HelperLibraryId> {
+        let mut identities = BTreeSet::new();
+        for release in &self.releases {
+            for library in std::iter::once(&release.library).chain(release.libraries.values()) {
+                if library.members.is_subset(members) {
+                    identities.insert(library.identity);
+                }
+            }
+            // The four combinations of the shipped dialect features. Package
+            // libraries include their dependencies; every binary also holds kernel.
+            let shapes: [&[&str]; 4] = [
+                &["kernel"],
+                &["kernel", "python"],
+                &[
+                    "kernel",
+                    "regex.ecma",
+                    "date.ecma",
+                    "url.whatwg",
+                    "typescript",
+                ],
+                &[
+                    "kernel",
+                    "regex.ecma",
+                    "date.ecma",
+                    "url.whatwg",
+                    "typescript",
+                    "python",
+                ],
+            ];
+            for shape in shapes {
+                let Some(libraries) = shape
+                    .iter()
+                    .map(|package| release.libraries.get(*package))
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    continue;
+                };
+                let reached: BTreeSet<_> = libraries
+                    .into_iter()
+                    .flat_map(|library| library.members.iter().copied())
+                    .collect();
+                if reached.is_subset(members) {
+                    identities.insert(HelperLibraryId::of_members(reached));
+                }
+            }
+        }
+        identities
+    }
+
+    /// Authenticate the entire archive before installing any historical member.
+    /// Only explicitly installed packages contribute executable definitions.
+    pub fn install(
+        &self,
+        mut registry: lash_kernel_doc::FunctionRegistry,
+        packages: &BTreeSet<String>,
+    ) -> Result<lash_kernel_doc::FunctionRegistry, ArchiveError> {
+        let mut definitions = self.validate()?;
+        let members = self.members(packages);
+        definitions.retain(|id, _| members.contains(id) && registry.get(id).is_none());
+        while !definitions.is_empty() {
+            let next = definitions
+                .iter()
+                .find(|(_, definition)| {
+                    definition.body().is_none_or(|body| {
+                        body.functions.keys().all(|id| registry.get(id).is_some())
+                    })
+                })
+                .map(|(id, _)| *id)
+                .ok_or_else(|| ArchiveError::Closure("cyclic archive".to_owned()))?;
+            let definition = definitions.remove(&next).ok_or(ArchiveError::Hash(next))?;
+            registry
+                .register(definition, None)
+                .map_err(|error| ArchiveError::Closure(error.to_string()))?;
+        }
+        Ok(registry)
+    }
+
     /// Authenticate every definition before following any of its edges, then
     /// check each historical closed library and its full-ledger contract binding.
     pub fn validate(&self) -> Result<Definitions, ArchiveError> {

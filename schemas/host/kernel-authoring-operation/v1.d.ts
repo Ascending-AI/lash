@@ -493,6 +493,14 @@ export type Guard = {
 export type HelperLibraryId = string;
 
 /**
+ * One generation floor per archive lineage, with exact code outside those archives.
+ */
+export type HelperRequirements = {
+  "archives": Record<string, number>;
+  "outside": Record<string, Array<FunctionId>>;
+};
+
+/**
  * How a library function is implemented.
  */
 export type Implementation = ({
@@ -621,6 +629,10 @@ export type Name = string;
  * Exact helper manifests, ordinary natives and kernel versions required by selected executable reach.
  */
 export type NodeRequirements = {
+  /**
+   * Cached availability debt of reached helpers, including interpreted bodies.
+   */
+  "helpers"?: HelperRequirements;
   "kernels": Array<number>;
   /**
    * Exact build-owned helper manifests, each discharging its native debt.

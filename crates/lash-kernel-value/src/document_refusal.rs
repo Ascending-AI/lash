@@ -96,6 +96,11 @@ pub enum InvalidReason {
         "library function {function} has no definition here, so a call of it cannot be checked"
     )]
     FunctionNotResolved { function: FunctionId },
+    #[error("helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        function: FunctionId,
+        reason: HelperUnavailableReason,
+    },
     #[error("`{name}` takes at most {accepted} argument(s) and at least {required}; {given} given")]
     CallArity {
         name: String,
@@ -172,4 +177,26 @@ pub enum InvalidReason {
     /// `K-CLO-004`: a token holds its tag first and its callable after it.
     #[error("a start adapter's token has an empty tag or holds its callable in slot 0")]
     StartToken,
+}
+
+/// Why an exact helper cannot execute on this node.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    thiserror::Error,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum HelperUnavailableReason {
+    #[error("retired")]
+    Retired,
+    #[error("unknown")]
+    Unknown,
+    #[error("corrupt")]
+    Corrupt,
 }

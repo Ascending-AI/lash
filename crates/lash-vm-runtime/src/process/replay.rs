@@ -330,7 +330,7 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
         } => match refusal {
             RunRefusal::Restore {
                 refusal:
-                    KernelRestoreRefusal::MissingHelper { .. }
+                    KernelRestoreRefusal::HelperUnavailable { .. }
                     | KernelRestoreRefusal::MissingNative { .. }
                     | KernelRestoreRefusal::DefinitionRefused { .. },
             } => unreplayable(Unreplayable::FunctionMissing),

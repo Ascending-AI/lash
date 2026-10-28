@@ -616,6 +616,7 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
+            "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
@@ -1729,7 +1730,9 @@ PACKAGE_DEPS = {
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine",
-            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",

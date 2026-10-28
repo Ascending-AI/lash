@@ -164,8 +164,9 @@ pub enum MachineError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpenError {
-    #[error("build helper {function} is missing")]
-    MissingHelper {
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
         function: lash_kernel_value::FunctionId,
     },
     #[error("the registry has no function {function}, which the checkpoint pins")]

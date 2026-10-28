@@ -1059,8 +1059,8 @@ impl DurableStore for PostgresDurableStore {
                     Ok(NodeLease {
                         owner: lease_owner,
                         decodes: spec.decodes.clone(),
-                        serves: spec.served(),
-                        capabilities: spec.capabilities.clone(),
+                        serves: spec.served().into(),
+                        capabilities: spec.capabilities.clone().into(),
                         ttl_millis: spec.ttl_millis,
                         expires_at,
                     })
@@ -1151,7 +1151,7 @@ impl DurableStore for PostgresDurableStore {
                         .bind(&formats)
                         .bind(limit)
                         .bind(lash_durable::domain::CANCEL_MAIL)
-                        .bind(&node.serves)
+                        .bind(node.serves.as_ref())
                         .bind(lash_durable::domain::SESSION_CLOSE_MAIL)
                         .fetch_all(crate::observed_sql::executor(&mut **tx))
                         .await

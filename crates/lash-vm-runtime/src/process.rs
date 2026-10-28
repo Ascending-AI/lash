@@ -667,7 +667,8 @@ impl KernelProcessEngine {
     }
     pub(crate) fn machine_requirements(&self) -> lash_kernel_value::claims::NodeRequirements {
         lash_kernel_value::claims::NodeRequirements {
-            libraries: [self.documents.helpers().identity()].into(),
+            helpers: self.helpers.claim_capabilities(),
+            libraries: self.helpers.library_identities().clone(),
             natives: self
                 .functions
                 .iter()

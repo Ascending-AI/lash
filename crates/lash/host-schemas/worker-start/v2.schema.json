@@ -1882,7 +1882,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/worker-start/v1",
+  "$id": "https://lash.dev/schemas/worker-start/v2",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "How a new run starts ([`lash_kernel_vm::CellStart`], less its owner\nbinding, which the protocol's `Start` carries), and the effects it\nperforms as reads ([`EffectModes`]).",
@@ -1939,6 +1939,6 @@
   ],
   "title": "StartWire",
   "type": "object",
-  "x-lash-schema-version": 1,
+  "x-lash-schema-version": 2,
   "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
 }

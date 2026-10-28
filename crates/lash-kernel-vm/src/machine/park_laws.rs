@@ -3,6 +3,32 @@
 use crate::laws::embedder::{Embedder, ROOMY, Setup};
 use crate::{Bounds, Layout, Step};
 
+/// ENTRY-SITE-RETENTION: uncalled library code reserves no run-local entry slots.
+#[test]
+fn entry_site_storage_grows_only_with_activated_code() {
+    let base = crate::laws::embedder::library_with(true, None);
+    let mut registry = base.registry.as_ref().clone();
+    registry
+        .register(
+            lash_kernel_doc::parse_definition(
+                "function uncalled() -> Int\nkernel 1\ncharge 1\nbody { return 99 }\n",
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let library = crate::PreparedLibrary::new(std::sync::Arc::new(registry));
+    let mut run = Embedder::try_over("main { return 7 }", Setup::default(), Some(library)).unwrap();
+    assert!(matches!(run.run(), Step::Ended(crate::End::Finished(_))));
+    let active = run.machine.storage.activation_sites.len();
+    assert!(active > 0);
+    assert!(
+        run.machine.storage.entry_sites.len() <= active,
+        "{} entry slots for {active} activated bodies",
+        run.machine.storage.entry_sites.len(),
+    );
+}
+
 /// K-TASK-024 / K-MACH-007: a thousand-way fan-out reports its requests,
 /// accepts one delivery per cold reopen and completes every child once.
 #[test]

@@ -74,8 +74,10 @@ provider and tool per operation (ADR 0141 §5).
 
 A parked root records its HelperLibraryId. An equal installed identity requires
 no compatibility walk; a changed identity checks exact saved helper reach.
-ADR 0149 replaces missing-current-helper refusal with archive availability once
-phase 2 installs archive loading. Phase 1 retains the existing runtime refusal.
+ADR 0149 replaces missing-current-helper refusal with archive availability.
+Current and archived exact hashes share the authenticated helper frame;
+unsupported hashes retain typed availability refusals. Source lookup still
+selects current public roots.
 
 For each construct a front end picks the first tier that applies: a kernel form or
 library function with the same meaning, the difference compiled in as kernel

@@ -182,6 +182,19 @@ fn archive_authenticates_members_and_requires_closed_libraries() {
         corrupt.validate(),
         Err(ArchiveError::Hash(definition.identity()))
     );
+    let empty = HelperRelease {
+        helpers: BuildHelpers::empty(),
+        functions: FunctionRegistry::declarations(),
+        roots: BTreeSet::new(),
+        labels: BTreeMap::new(),
+    };
+    assert_eq!(
+        with_archive(empty, &corrupt, &["fixture".to_owned()].into()).unwrap_err(),
+        LibraryError::HelperUnavailable {
+            function: definition.identity(),
+            reason: lash_kernel_value::HelperUnavailableReason::Corrupt
+        }
+    );
     let mut dangling = definition;
     match &mut dangling.implementation {
         lash_kernel_doc::Implementation::Guest { body, .. } => {
@@ -322,4 +335,217 @@ fn checked_archive_covers_current_release_and_native_implementations() {
     archive
         .check_natives(&available)
         .expect("all archived native versions remain implemented in Rust");
+}
+
+/// FIG-7512 law 1: an unchanged document resolves an archived helper after its
+/// current body changes. Source lookup still chooses the current definition.
+#[test]
+fn an_orphan_document_keeps_its_identity_and_archived_body() {
+    let old = definition_fixture();
+    let old_id = old.identity();
+    let archive = Archive::default()
+        .append(archive_fixture(old.clone()))
+        .unwrap();
+    let current = lash_kernel_doc::parse_definition_with_locals(
+        "function helper(value: Int) -> Int\nkernel 1\ncharge 1\nbody { return 99 }\n",
+    )
+    .unwrap()
+    .0;
+    let mut registry = FunctionRegistry::declarations();
+    let current_id = registry.register(current, None).unwrap();
+    let release = with_archive(
+        HelperRelease {
+            helpers: Arc::new(BuildHelpers::new(registry.clone(), [current_id]).unwrap()),
+            functions: registry,
+            roots: [current_id].into(),
+            labels: Default::default(),
+        },
+        &archive,
+        &["fixture".to_owned()].into(),
+    )
+    .unwrap();
+    let mut document = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\ndefinition {}\nmain {{ let answer = invoke helper(7) return answer }}",
+        serde_json::to_string("function helper(value: Int) -> Int\nkernel 1\ncharge 1\nbody { return value }\n").unwrap()
+    )).unwrap();
+    document.functions.remove(&old_id);
+    document.library = lash_kernel_doc::LibraryDependencies([old_id].into());
+    document
+        .requires
+        .libraries
+        .insert(archive.releases[0].library.identity);
+    let identity = document.identity();
+    lash_kernel_doc::validate_document(&document, release.helpers.as_ref()).unwrap();
+    assert_eq!(document.identity(), identity);
+    assert_eq!(
+        run_document(document.clone(), &release),
+        lash_kernel_doc::Datum::Int(7.into())
+    );
+    assert_eq!(
+        release
+            .helpers
+            .registered(&old_id)
+            .unwrap()
+            .definition()
+            .as_ref(),
+        &old
+    );
+    assert_eq!(release.resolver_roots(), [current_id].into());
+}
+
+fn run_document(
+    document: lash_kernel_doc::Document,
+    release: &HelperRelease,
+) -> lash_kernel_doc::Datum {
+    use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+    use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+    use lash_kernel_vm::{Machine as _, Step};
+    #[derive(Default)]
+    struct Pages(BTreeMap<PageId, PageAnswer>);
+    impl PageSource for Pages {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            Ok(pages
+                .iter()
+                .map(|page| {
+                    self.0
+                        .get(&page.id)
+                        .cloned()
+                        .ok_or(HeapFault::Missing { page: page.id })
+                })
+                .collect())
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            let mut bytes = body.kind.0.to_be_bytes().to_vec();
+            bytes.extend_from_slice(&body.tokens);
+            let page = PageRef {
+                id: PageId(lash_kernel_doc::heap_values::key_digest(&bytes)),
+                grant: PageGrant::NONE,
+            };
+            self.0.insert(
+                page.id,
+                PageAnswer {
+                    page,
+                    kind: body.kind,
+                    tokens: body.tokens.into(),
+                    children: body.children,
+                },
+            );
+            Ok(page)
+        }
+    }
+    struct Host;
+    impl lash_kernel_vm::Host for Host {
+        fn print(&mut self, _: &lash_kernel_doc::Datum) {
+            panic!("no prints")
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
+        document: document.identity(),
+        fills: BTreeMap::new(),
+    };
+    let program = lash_kernel_vm::Program::prepare(
+        link.identity(),
+        [(document.identity(), Arc::new(document))].into(),
+        &[(link.identity(), link)].into(),
+        PageId([0; 32]),
+        lash_kernel_vm::PreparedLibrary::with_helpers(
+            Arc::new(release.functions.clone()),
+            Arc::clone(&release.helpers),
+        ),
+        lash_kernel_doc::Selection::Fresh,
+    )
+    .unwrap();
+    let mut machine = lash_kernel_vm::KernelMachine::start(
+        program,
+        lash_kernel_vm::Bounds {
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 1_000_000,
+            memory: 64 << 20,
+            call_depth: 100,
+            live_tasks: 100,
+            requests_per_park: 100,
+            join_members: 100,
+        },
+        lash_kernel_vm::CellStart {
+            owner: PageId([9; 32]),
+            target: lash_kernel_vm::Target::Main,
+            args: vec![],
+            session: None,
+            modes: Default::default(),
+            host: vec![],
+        },
+        Box::<Pages>::default(),
+    )
+    .unwrap();
+    match machine.run(&mut Host, u64::MAX).unwrap() {
+        Step::Ended(lash_kernel_vm::End::Finished(done)) => done.result,
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// A cached reach records the maximum first generation, not a token for each helper.
+#[test]
+fn helper_claims_use_the_first_generation_and_join_at_the_maximum() {
+    let old = definition_fixture();
+    let newer = lash_kernel_doc::parse_definition(
+        "function helper(value: Int) -> Int\nkernel 1\ncharge 1\nbody { return 99 }\n",
+    )
+    .unwrap();
+    let old_id = old.identity();
+    let new_id = newer.identity();
+    let archive = Archive::default()
+        .append(archive_fixture(old))
+        .unwrap()
+        .append(archive_fixture(newer))
+        .unwrap();
+    let release = with_archive(
+        HelperRelease {
+            helpers: BuildHelpers::empty(),
+            functions: FunctionRegistry::declarations(),
+            roots: BTreeSet::new(),
+            labels: BTreeMap::new(),
+        },
+        &archive,
+        &["fixture".to_owned()].into(),
+    )
+    .unwrap();
+    let mut required = lash_kernel_value::claims::NodeRequirements::default();
+    release.helpers.require(new_id, &mut required);
+    release.helpers.require(old_id, &mut required);
+    let lineage = archive.releases[0].library.identity;
+    assert_eq!(release.helpers.claim_generations()[&old_id].generation, 1);
+    assert_eq!(release.helpers.claim_generations()[&new_id].generation, 2);
+    assert_eq!(required.helpers.archives, [(lineage, 2)].into());
+    assert!(required.helpers.outside.is_empty());
+    assert_eq!(
+        required.libraries,
+        [archive.releases[0].libraries["fixture"].identity].into()
+    );
+    assert!(
+        required
+            .helpers
+            .unmet_by(
+                &release.helpers.claim_capabilities(),
+                release.helpers.library_identities()
+            )
+            .is_empty()
+    );
+    let extra = lash_kernel_doc::parse_definition(
+        "function additional(value: Int) -> Int\nkernel 1\ncharge 1\nbody { return value }\n",
+    )
+    .unwrap();
+    let extra_id = extra.identity();
+    let additional = Archive::default().append(archive_fixture(extra)).unwrap();
+    let combined = with_archive(release, &additional, &["fixture".to_owned()].into()).unwrap();
+    assert_eq!(combined.helpers.claim_generations()[&old_id].generation, 1);
+    assert_eq!(combined.helpers.claim_generations()[&new_id].generation, 2);
+    assert!(combined.helpers.claim_generations().contains_key(&extra_id));
 }

@@ -305,6 +305,15 @@
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
+    "HelperUnavailableReason": {
+      "description": "Why an exact helper cannot execute on this node.",
+      "enum": [
+        "retired",
+        "unknown",
+        "corrupt"
+      ],
+      "type": "string"
+    },
     "ImportSlot": {
       "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
       "format": "uint32",
@@ -582,6 +591,31 @@
           },
           "required": [
             "function_not_resolved"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "helper_unavailable": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "reason": {
+                  "$ref": "#/$defs/HelperUnavailableReason"
+                }
+              },
+              "required": [
+                "function",
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "helper_unavailable"
           ],
           "type": "object"
         },

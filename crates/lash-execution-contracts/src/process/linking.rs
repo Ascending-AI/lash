@@ -123,7 +123,8 @@ pub struct LoadedContent {
 pub enum AdmissionRefusal {
     DocumentValidation(lash_kernel_value::Invalid),
     DocumentCheck(lash_kernel_value::CheckRefusal),
-    MissingHelper {
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
         function: lash_kernel_value::FunctionId,
     },
     CallableIdentity {

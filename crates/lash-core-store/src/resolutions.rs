@@ -33,7 +33,7 @@ pub enum ResolutionEntry {
         contract: ContractId,
         route: Box<OperationRoute>,
         mode: OperationMode,
-        requirements: ClaimRequirements,
+        requirements: Box<ClaimRequirements>,
     },
     Refused {
         note: String,
@@ -93,7 +93,7 @@ impl ResolutionEntry {
         route.require(&mut target);
         let mut supplied = target.clone();
         supplied.extend(requirements);
-        if supplied != *requirements {
+        if supplied != **requirements {
             return Err("deferred resolution omits target claim requirements".into());
         }
         Ok(())

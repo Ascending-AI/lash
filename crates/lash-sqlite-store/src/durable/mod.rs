@@ -996,9 +996,9 @@ impl DurableStore for SqliteDurableStore {
                 )?;
                 commit(NodeLease {
                     owner: lease_owner,
-                    serves: spec.served(),
+                    serves: spec.served().into(),
                     decodes: spec.decodes,
-                    capabilities: spec.capabilities.clone(),
+                    capabilities: spec.capabilities.clone().into(),
                     ttl_millis: spec.ttl_millis,
                     expires_at,
                 })

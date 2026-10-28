@@ -127,8 +127,8 @@ pub use number::{
     Float, Integer, InvalidFloat, InvalidInteger, InvalidNumberToken, NumberPolicy, NumberToken,
 };
 pub use released::{
-    BodyCensus, BuildHelpers, DocumentChecks, ImageError, LibraryRequirementRefusal, MissingHelper,
-    ReleasedFunctions, helper_imports, library_requirements,
+    BodyCensus, BuildHelpers, DocumentChecks, HelperUnavailable, ImageError,
+    LibraryRequirementRefusal, ReleasedFunctions, helper_imports, library_requirements,
 };
 
 pub use text::{

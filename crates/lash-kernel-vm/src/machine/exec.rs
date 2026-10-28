@@ -806,20 +806,16 @@ impl KernelMachine {
         code_id: CodeId,
     ) -> Result<Box<Frame>, Halt> {
         let code = exe.code(code_id);
-        let at = code_id.0 as usize;
-        if self.storage.entry_sites.len() <= at {
-            self.storage.entry_sites.resize_with(at + 1, || None);
-        }
-        if self.storage.entry_sites[at].is_none() {
-            let entry =
-                lash_kernel_state::paged::SiteRef::new(&code.site.child(0), self.heap.pages())?;
-            #[cfg(test)]
-            self.storage.activation_sites.push(code_id);
-            self.storage.entry_sites[at] = Some(entry);
-        }
-        let entry = self.storage.entry_sites[at]
-            .as_ref()
-            .ok_or_else(|| fault("a prepared body has no entry site"))?;
+        let entry = match self.storage.entry_sites.entry(code_id) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                let site =
+                    lash_kernel_state::paged::SiteRef::new(&code.site.child(0), self.heap.pages())?;
+                #[cfg(test)]
+                self.storage.activation_sites.push(code_id);
+                entry.insert(site)
+            }
+        };
         Ok(match self.storage.frames.pop() {
             Some(mut frame) => {
                 frame.link = self.program.link;

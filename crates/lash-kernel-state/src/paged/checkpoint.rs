@@ -86,8 +86,9 @@ pub struct HelperPins(pub std::collections::BTreeSet<lash_kernel_value::Function
 pub enum HelperCompatibilityError {
     #[error(transparent)]
     Heap(#[from] HeapFault),
-    #[error("build helper {function} is missing")]
-    MissingHelper {
+    #[error("build helper {function} is unavailable: {reason}")]
+    HelperUnavailable {
+        reason: lash_kernel_value::HelperUnavailableReason,
         function: lash_kernel_value::FunctionId,
     },
 }
@@ -115,7 +116,10 @@ fn check_pins(
         #[cfg(any(test, feature = "perf-witness"))]
         helper_compatibility_work::update(|work| work.membership_probes += 1);
         if !build.contains(&function) {
-            return Err(HelperCompatibilityError::MissingHelper { function });
+            return Err(HelperCompatibilityError::HelperUnavailable {
+                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                function,
+            });
         }
     }
     Ok(())

@@ -572,7 +572,10 @@ fn check_helper_operation_context(
         }
         let registered = helpers
             .registered(&function)
-            .ok_or(ParkedRefusal::MissingHelper { function })?;
+            .ok_or(ParkedRefusal::HelperUnavailable {
+                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
+                function,
+            })?;
         for (slot, import) in registered.imports() {
             let key = lash_kernel_value::OperationSlot::Helper(
                 lash_kernel_value::HelperOperationId::of_import(import),

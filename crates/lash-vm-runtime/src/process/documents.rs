@@ -260,7 +260,9 @@ pub fn map_link_refusal(error: LinkRefusal) -> EnginePortError {
                 artifact: link_artifact(link),
             };
         }
-        LinkRefusal::MissingHelper { function } => AdmissionRefusal::MissingHelper { function },
+        LinkRefusal::HelperUnavailable { reason, function } => {
+            AdmissionRefusal::HelperUnavailable { reason, function }
+        }
         LinkRefusal::DocumentValidation(refusal) => AdmissionRefusal::DocumentValidation(refusal),
         LinkRefusal::InvalidDocument { message } => AdmissionRefusal::InvalidDocument { message },
     };

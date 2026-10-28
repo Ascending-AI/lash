@@ -62,10 +62,13 @@ The archive starts with this change during pre-1.0 development. Reset it at the
 ## Consequences
 
 Phase 1 records the archive, ledger and release checks, and adds versioned
-native construction. It changes no runtime archive lookup or upgrade behavior.
-Until phase 2 installs historical definitions in parent, worker and broker,
-the existing MissingHelper refusal remains. Phase 3 implements explicit
-publication and run upgrades. Helper operation imports are a separate change.
+native construction. Phase 2 installs authenticated current and historical
+definitions in the parent, worker and broker. Claims name exact reached helper
+hashes; derived worker caches also name the installed member identity.
+Source lookup keeps current roots. The restore reach walk remains the
+availability check, and unsupported hashes refuse with a typed
+HelperUnavailable reason. Phase 3 implements explicit publication and run
+upgrades. Helper operation imports are a separate change.
 
 Definitions deduplicate by exact FunctionId. A changed callee can change many
 caller hashes, so release evidence measures added definitions and compressed

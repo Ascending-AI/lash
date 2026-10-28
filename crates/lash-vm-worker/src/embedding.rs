@@ -196,13 +196,17 @@ pub fn library_for(
     }
     let library = embedding
         .loaded
-        .get_or_try::<std::convert::Infallible>(assembled.closure.reference(), || {
-            Ok(PreparedLibrary::with_charge(
-                Arc::clone(&assembled.registry),
-                lash_kernel_vm::Charge::Exact,
-            )
-            .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
-        })
+        .get_or_try::<std::convert::Infallible>(
+            assembled.closure.reference(),
+            embedding.library_image().helpers().identity(),
+            || {
+                Ok(PreparedLibrary::with_charge(
+                    Arc::clone(&assembled.registry),
+                    lash_kernel_vm::Charge::Exact,
+                )
+                .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
+            },
+        )
         .unwrap_or_else(|never| match never {});
     Ok(Ok((library, assembled.closure)))
 }
@@ -263,13 +267,17 @@ pub(crate) fn linked_library_for(
     }
     let library = embedding
         .loaded
-        .get_or_try::<std::convert::Infallible>(assembled.closure.reference(), || {
-            Ok(PreparedLibrary::with_charge(
-                Arc::clone(&assembled.registry),
-                lash_kernel_vm::Charge::Exact,
-            )
-            .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
-        })
+        .get_or_try::<std::convert::Infallible>(
+            assembled.closure.reference(),
+            embedding.library_image().helpers().identity(),
+            || {
+                Ok(PreparedLibrary::with_charge(
+                    Arc::clone(&assembled.registry),
+                    lash_kernel_vm::Charge::Exact,
+                )
+                .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
+            },
+        )
         .unwrap_or_else(|never| match never {});
     Ok(Ok((library, assembled.closure)))
 }
@@ -581,6 +589,264 @@ pub(crate) mod tests {
         ) if id == function && name.as_str() == original.name));
     }
 
+    /// FIG-7512: the worker's derived cache distinguishes the same authored
+    /// document under L, L-prime and L, and reuses L on its third request.
+    #[test]
+    fn a_worker_cache_keeps_l_then_l_prime_then_l_distinct() {
+        let image = |answer| {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function law.helper() -> Any\nkernel 1\ncharge 1\nbody {{ return {answer} }}"
+            ))
+            .unwrap();
+            let mut functions = FunctionRegistry::declarations();
+            let id = functions.register(definition, None).unwrap();
+            let helpers =
+                Arc::new(lash_kernel_doc::BuildHelpers::new(functions.clone(), [id]).unwrap());
+            (
+                id,
+                WorkerLibrary::with_helpers(&functions, [id], &BTreeMap::new(), helpers).unwrap(),
+            )
+        };
+        let (old_id, old) = image(7);
+        let (new_id, new) = image(99);
+        let mut embedding = Embedder::new()
+            .dialect(python())
+            .unwrap()
+            .finish(&old)
+            .unwrap();
+        let document = lash_kernel_doc::parse_document(
+            "kernel 1\nnumbers by_spelling\ndefinition \"function law.authored() -> Any\\nkernel 1\\ncharge 1\\nbody { return 7 }\"\nmain { let value = invoke law.authored() return value }"
+        ).unwrap();
+        let mut first = None;
+        for (id, image) in [(old_id, &old), (new_id, &new), (old_id, &old)] {
+            // Switch the selected immutable image while retaining the worker's caches.
+            let selected = Embedder::new()
+                .dialect(python())
+                .unwrap()
+                .finish(image)
+                .unwrap();
+            embedding.written = selected.written;
+            embedding.prepared = selected.prepared;
+            embedding.held = selected.held;
+            embedding.library = selected.library;
+            let (loaded, _) = library_for(
+                &embedding,
+                &document,
+                &[],
+                lash_kernel_value::KernelDataLimits::standard(),
+                &lash_kernel_doc::Selection::Fresh,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(loaded.helpers().identity(), image.helpers().identity());
+            assert!(loaded.registry().get(&id).is_some());
+            if let Some(previous) = &first {
+                if id == old_id {
+                    assert!(Arc::ptr_eq(previous, loaded.registry()));
+                }
+            } else {
+                first = Some(Arc::clone(loaded.registry()));
+            }
+            assert_eq!(
+                execute(document.clone(), loaded).0,
+                lash_kernel_doc::Datum::Int(7.into())
+            );
+        }
+    }
+
+    #[derive(Default)]
+    struct LawPages(BTreeMap<lash_kernel_doc::heap::PageId, lash_kernel_state::paged::PageAnswer>);
+    impl lash_kernel_state::paged::PageSource for LawPages {
+        fn read(
+            &mut self,
+            pages: &[lash_kernel_doc::heap::PageRef],
+        ) -> Result<
+            Vec<Result<lash_kernel_state::paged::PageAnswer, lash_kernel_doc::heap::HeapFault>>,
+            lash_kernel_doc::heap::HeapFault,
+        > {
+            Ok(pages
+                .iter()
+                .map(|page| {
+                    self.0
+                        .get(&page.id)
+                        .cloned()
+                        .ok_or(lash_kernel_doc::heap::HeapFault::Missing { page: page.id })
+                })
+                .collect())
+        }
+        fn seal(
+            &mut self,
+            body: lash_kernel_state::paged::PageBody,
+        ) -> Result<lash_kernel_doc::heap::PageRef, lash_kernel_doc::heap::HeapFault> {
+            let mut tokens = body.kind.0.to_be_bytes().to_vec();
+            tokens.extend_from_slice(&body.tokens);
+            let page = lash_kernel_doc::heap::PageRef {
+                id: lash_kernel_doc::heap::PageId(lash_kernel_doc::heap_values::key_digest(
+                    &tokens,
+                )),
+                grant: lash_kernel_doc::heap::PageGrant::NONE,
+            };
+            self.0.insert(
+                page.id,
+                lash_kernel_state::paged::PageAnswer {
+                    page,
+                    kind: body.kind,
+                    tokens: body.tokens.into(),
+                    children: body.children,
+                },
+            );
+            Ok(page)
+        }
+    }
+    struct LawHost;
+    impl lash_kernel_vm::Host for LawHost {
+        fn print(&mut self, _: &lash_kernel_doc::Datum) {
+            panic!("no prints")
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    fn execute(
+        document: lash_kernel_doc::Document,
+        library: PreparedLibrary,
+    ) -> (lash_kernel_doc::Datum, u64) {
+        use lash_kernel_vm::Machine as _;
+        let program = linked(document, library);
+        let mut machine = lash_kernel_vm::KernelMachine::start(
+            program,
+            lash_kernel_vm::Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: lash_kernel_vm::Charge::Exact,
+                charge_limit: 1_000_000,
+                memory: 64 << 20,
+                call_depth: 100,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<LawPages>::default(),
+        )
+        .unwrap();
+        match machine.run(&mut LawHost, u64::MAX).unwrap() {
+            lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(done)) => {
+                (done.result, machine.meters().charged.unwrap())
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// FIG-7512: an archive-only native declaration binds its retained Rust
+    /// version while its own historical formula controls the charge.
+    #[test]
+    fn an_archived_native_keeps_its_implementation_and_charge() {
+        let archive = lash_kernel_releases::helper_archive().unwrap();
+        let definitions = archive.validate().unwrap();
+        let (id, definition) = definitions
+            .iter()
+            .find(|(_, definition)| definition.name.as_str() == "same")
+            .unwrap();
+        let mut current = definition.clone();
+        current.implementation = lash_kernel_doc::Implementation::Native {
+            charge: lash_kernel_doc::Formula::Constant(999),
+        };
+        let current_id = current.identity();
+        let mut functions = FunctionRegistry::declarations();
+        functions.register(current, None).unwrap();
+        let release = lash_kernel_releases::with_archive(
+            lash_kernel_releases::HelperRelease {
+                helpers: Arc::new(
+                    lash_kernel_doc::BuildHelpers::new(functions.clone(), [current_id]).unwrap(),
+                ),
+                functions,
+                roots: [current_id].into(),
+                labels: Default::default(),
+            },
+            &archive,
+            &["kernel".to_owned()].into(),
+        )
+        .unwrap();
+        let image = WorkerLibrary::with_helpers(
+            &release.functions,
+            release.resolver_roots(),
+            &BTreeMap::new(),
+            Arc::clone(&release.helpers),
+        )
+        .unwrap();
+        let expected_claims = image.helpers().claim_generations().clone();
+        let expected_current = image.helpers().current_identity();
+        let image = WorkerLibrary::from_frame(image.frame()).unwrap();
+        assert_eq!(image.helpers().claim_generations(), &expected_claims);
+        assert_eq!(image.helpers().current_identity(), expected_current);
+        assert!(
+            image
+                .helpers()
+                .supports_library(&archive.releases[0].libraries["kernel"].identity)
+        );
+        let native = lash_kernel_engine::embedding::native_implementation(
+            ("kernel", "same", 1),
+            current_id,
+            &[],
+            &release.functions,
+        )
+        .unwrap();
+        let embedding = Embedder::new()
+            .native(current_id, native)
+            .unwrap()
+            .dialect(python())
+            .unwrap()
+            .finish(&image)
+            .unwrap();
+        let document = |id| {
+            lash_kernel_doc::parse_document(&format!(
+            "kernel 1\nnumbers by_spelling\nlibrary @{id}\nmain {{ let value = invoke @{id}(7, 7) return value }}"
+        )).unwrap()
+        };
+        let (old_library, _) = library_for(
+            &embedding,
+            &document(id),
+            &[],
+            lash_kernel_value::KernelDataLimits::standard(),
+            &lash_kernel_doc::Selection::Fresh,
+        )
+        .unwrap()
+        .unwrap();
+        let old = execute(document(id), old_library);
+        let (new_library, _) = library_for(
+            &embedding,
+            &document(&current_id),
+            &[],
+            lash_kernel_value::KernelDataLimits::standard(),
+            &lash_kernel_doc::Selection::Fresh,
+        )
+        .unwrap()
+        .unwrap();
+        let new = execute(document(&current_id), new_library);
+        assert_eq!(old.0, lash_kernel_doc::Datum::Bool(true));
+        assert_eq!(old.0, new.0);
+        assert!(
+            new.1 > old.1 + 900,
+            "historical charge must not become current charge: {old:?}, {new:?}"
+        );
+        assert_eq!(
+            embedding
+                .library_image()
+                .helpers()
+                .registered(id)
+                .unwrap()
+                .definition()
+                .as_ref(),
+            definition
+        );
+    }
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> WorkerLibrary {
         let release = lash_kernel_releases::helper_release().expect("helper release");

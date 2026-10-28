@@ -45,7 +45,7 @@ pub use types::*;
 pub mod kernel_internals;
 
 mod document_refusal;
-pub use document_refusal::{Invalid, InvalidReason, StatementForm};
+pub use document_refusal::{HelperUnavailableReason, Invalid, InvalidReason, StatementForm};
 
 mod document_check;
 pub use document_check::{CheckFailure, CheckReason, CheckRefusal};
