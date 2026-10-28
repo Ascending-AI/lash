@@ -721,6 +721,20 @@ fn result_items(
     Ok(items)
 }
 impl NativeFunction for Native {
+    fn prepare_collection_length(&self) -> Option<lash_kernel_doc::ValueKind> {
+        use lash_kernel_doc::ValueKind;
+        if !matches!(self.op, Op::Len) {
+            return None;
+        }
+        Some(match self.kind {
+            Kind::List => ValueKind::List,
+            Kind::Tuple => ValueKind::Tuple,
+            Kind::Map => ValueKind::Map,
+            Kind::Set => ValueKind::Set,
+            Kind::Record => ValueKind::Record,
+        })
+    }
+
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         if let Some(result) = self.read(&args) {
@@ -1016,6 +1030,36 @@ impl NativeFunction for SortByKeys {
         }
         let n = listed.len();
         let mut sorted: Vec<usize> = (0..n).collect();
+        // Homogeneous resident keys have a total, infallible order. Their
+        // comparisons are unobservable. Cache integer keys once while
+        // retaining stable ties and the same completion formula.
+        if !self.utf16 && ranks.iter().all(|rank| matches!(rank, Value::Int(_))) {
+            let key = |at: &usize| match ranks[*at] {
+                Value::Int(value) => value,
+                _ => unreachable!("the complete key list was checked"),
+            };
+            if *descending {
+                sorted.sort_by_cached_key(|at| std::cmp::Reverse(key(at)));
+            } else {
+                sorted.sort_by_cached_key(key);
+            }
+            return Ok(call.new.allocate(NewObject::List(
+                sorted.into_iter().map(|at| listed[at]).collect(),
+            )));
+        }
+        if !self.utf16 && ranks.iter().all(|rank| matches!(rank, Value::Text(_))) {
+            sorted.sort_by(|first, second| {
+                let (Value::Text(first), Value::Text(second)) = (ranks[*first], ranks[*second])
+                else {
+                    unreachable!("the complete key list was checked")
+                };
+                let order = first.as_bytes().cmp(second.as_bytes());
+                if *descending { order.reverse() } else { order }
+            });
+            return Ok(call.new.allocate(NewObject::List(
+                sorted.into_iter().map(|at| listed[at]).collect(),
+            )));
+        }
         let mut out = vec![0; n];
         let mut width = 1;
         while width < n {
@@ -1037,6 +1081,10 @@ impl NativeFunction for SortByKeys {
                             &ranks[second],
                             &args,
                         )?)
+                    } else if let Some(order) =
+                        crate::comparison::scalar_compare(&ranks[first], &ranks[second])
+                    {
+                        order?
                     } else {
                         crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)?
                     };

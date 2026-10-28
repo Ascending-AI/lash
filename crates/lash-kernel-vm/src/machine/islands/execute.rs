@@ -151,6 +151,7 @@ pub(super) struct Frame<'e> {
     resident: bool,
     handoff: bool,
     recovery: bool,
+    boundary: Option<crate::compile::LibId>,
 }
 
 impl crate::compile::Slots for Frame<'_> {
@@ -207,6 +208,7 @@ impl<'e> Frame<'e> {
             resident: false,
             handoff: false,
             recovery: false,
+            boundary: None,
         }
     }
 }
@@ -355,7 +357,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             match next {
                 Ok(Next::Continue) => {}
                 Ok(Next::Return(value)) => {
-                    if !active.callee.plan.charged
+                    if (!active.callee.plan.charged || active.boundary.is_some())
                         && let Err(stop) = self.complete_library(active, callers.last(), value)
                     {
                         return self.slow_exit(active, &mut callers, instruction, stop);
@@ -697,7 +699,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     cost,
                     metered,
                     at,
-                    hooked,
+                    item_hook,
                     otherwise,
                     ..
                 } => {
@@ -708,17 +710,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     // prefix and (for a cursor) the resident next item fit.
                     // A refusal resumes next_iteration in this same step.
                     let next = if let Some(at) = at {
-                        if *hooked {
-                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                            return Err(Stop);
-                        }
                         let Some(Position::Loop {
                             cursor: Some(cursor),
+                            guard,
                             ..
                         }) = frame.control.last()
                         else {
                             return Err(self.halt(fault("a for header has no cursor")));
                         };
+                        if *item_hook
+                            || guard.is_some()
+                            || !matches!(
+                                cursor,
+                                Cursor::List(..)
+                                    | Cursor::Tuple(..)
+                                    | Cursor::Map(..)
+                                    | Cursor::Set(..)
+                            )
+                        {
+                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
+                            return Err(Stop);
+                        }
                         let mut cursor = cursor.clone();
                         match cursor.step(self.arena) {
                             Ok(value) => Some((*at, cursor, value)),
@@ -1198,6 +1210,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     if let Some(leaves) = finish {
                         return self.finish_statement(frame, *leaves, None);
                     }
+                }
+                Op::Remove { target, index, pc } => {
+                    self.remove(regs[*target as usize], regs[*index as usize])
+                        .ok_or_else(|| self.at(*pc))?;
                 }
                 Op::Unit { site, src } => {
                     regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {

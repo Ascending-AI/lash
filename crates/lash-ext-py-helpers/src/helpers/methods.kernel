@@ -337,9 +337,13 @@ charge sum(8, product(4, size(self)))
 body {
   if same(kind(self), "list") {
     let ordered = invoke py.sorted(self, key, reverse)
-    do invoke list.clear(self)
+    let position = 0
     for item in ordered metered 2 {
-      set self[list.len(self)] = item
+      set self[position] = item
+      set position = add(position, 1)
+    }
+    while lt(position, list.len(self)) metered 2 {
+      remove self[sub(list.len(self), 1)]
     }
     return null
   }

@@ -14,6 +14,26 @@ pub(super) struct CallableOptions {
     pub(super) skip_required_check: bool,
 }
 
+fn fixed_parameters(metadata: &[Expr]) -> Option<Vec<bool>> {
+    metadata
+        .iter()
+        .map(|param| {
+            let Expr::Tuple(parts) = param else {
+                return None;
+            };
+            let [
+                Expr::Literal(Literal::Text(_)),
+                Expr::Literal(Literal::Int(mode)),
+                Expr::Literal(Literal::Bool(default)),
+            ] = parts.as_slice()
+            else {
+                return None;
+            };
+            matches!(mode.word()?, 0 | 1).then_some(*default)
+        })
+        .collect()
+}
+
 impl Lowerer<'_> {
     pub(super) fn python_callable(
         &mut self,
@@ -89,6 +109,81 @@ impl Lowerer<'_> {
         let expression_body =
             body.len() == 1 && matches!(body.last_stmt(), Some(Stmt::Return { .. }));
         let mut packed_body = self.block(|this| {
+            if expression_body
+                && !skip_required_check
+                && let Some(fixed) = fixed_parameters(&metadata)
+                && let Some(Stmt::Return { value }) = body.last_stmt()
+            {
+                let mut fast_value = value.clone();
+                for (i, (param, fixed)) in params.iter().zip(&fixed).enumerate().rev() {
+                    if !*fixed && !skip_required_check {
+                        let missing = this.native(
+                            "same",
+                            vec![
+                                Expr::Variable(param.clone()),
+                                Expr::Literal(Literal::Absent),
+                            ],
+                        )?;
+                        let failure = this.invoke(
+                            "py.fail",
+                            &[
+                                Operand::text("TypeError"),
+                                Operand::text(format!(
+                                    "{name}() missing a required positional argument"
+                                )),
+                            ],
+                            Ty::Unknown,
+                        )?;
+                        fast_value = Expr::If {
+                            cond: Box::new(missing),
+                            then: Box::new(failure.expr),
+                            r#else: Box::new(fast_value),
+                        };
+                    }
+                    fast_value = Expr::Let {
+                        name: param.clone(),
+                        value: Box::new(Expr::Member(Box::new(Member::Index {
+                            target: Expr::Variable(positional.clone()),
+                            index: Expr::Literal(Literal::Int(
+                                i64::try_from(i).unwrap_or(i64::MAX).into(),
+                            )),
+                        }))),
+                        body: Box::new(fast_value),
+                    };
+                }
+                if let Some(fast_value) = this.branch_expression(&Buf::default(), fast_value) {
+                    let count =
+                        this.native("list.len", vec![Expr::Variable(positional.clone())])?;
+                    let exact = this.native(
+                        "same",
+                        vec![
+                            count,
+                            Expr::Literal(Literal::Int(
+                                i64::try_from(fixed.len()).unwrap_or(i64::MAX).into(),
+                            )),
+                        ],
+                    )?;
+                    let keyword_count =
+                        this.native("map.len", vec![Expr::Variable(keywords.clone())])?;
+                    let empty = this.native(
+                        "same",
+                        vec![keyword_count, Expr::Literal(Literal::Int(0.into()))],
+                    )?;
+                    let condition = Expr::If {
+                        cond: Box::new(exact),
+                        then: Box::new(empty),
+                        r#else: Box::new(Expr::Literal(Literal::Bool(false))),
+                    };
+                    this.emit_if(
+                        condition,
+                        Buf::one(
+                            Stmt::Return { value: fast_value },
+                            body.notes().next().cloned().unwrap_or_default(),
+                        ),
+                        Buf::default(),
+                    );
+                }
+            }
             let slots = this.invoke(
                 "py.bind",
                 &[
@@ -117,11 +212,34 @@ impl Lowerer<'_> {
         })?;
         if expression_body && let Some(Stmt::Return { value }) = packed_body.last_stmt().cloned() {
             let (statements, mut notes) = packed_body.clone().into_parts();
+            let fast = match statements.first() {
+                Some(Stmt::If {
+                    condition,
+                    then_block,
+                    else_block,
+                }) if else_block.is_empty() => match then_block.as_slice() {
+                    [Stmt::Return { value }] => Some((condition.clone(), value.clone())),
+                    _ => None,
+                },
+                _ => None,
+            };
             let prefix = Buf::from_parts(
-                statements[..statements.len() - 1].to_vec(),
-                notes[..notes.len() - 1].to_vec(),
+                statements[usize::from(fast.is_some())..statements.len() - 1].to_vec(),
+                notes[usize::from(fast.is_some())..notes.len() - 1].to_vec(),
             );
-            if let Some(value) = self.branch_expression(&prefix, value) {
+            if let Some(value) = self.branch_expression(&prefix, value)
+                && let Some(value) = self.branch_expression(
+                    &Buf::default(),
+                    match fast {
+                        Some((condition, fast)) => Expr::If {
+                            cond: Box::new(condition),
+                            then: Box::new(fast),
+                            r#else: Box::new(value),
+                        },
+                        None => value,
+                    },
+                )
+            {
                 let note = notes.pop().unwrap_or_default();
                 packed_body = Buf::one(Stmt::Return { value }, note);
             }

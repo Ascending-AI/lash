@@ -1,24 +1,25 @@
 //! JSON reads its text in place, without an input copy.
 use super::{Json, raise, room};
 use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
+use std::borrow::Cow;
 
-struct Parser<'a, 'call> {
-    input: &'a [u8],
+struct Parser<'text, 'read, 'call> {
+    input: &'text [u8],
     cursor: usize,
-    new: &'a mut Nursery<'call>,
+    new: &'read mut Nursery<'call>,
     depth_limit: usize,
     /// The room the first refused reservation asked for, and what the
     /// reservations after it would have added.
     refused: Option<(u64, u64)>,
 }
-impl Parser<'_, '_> {
+impl<'text> Parser<'text, '_, '_> {
     fn byte(&mut self) -> Result<Option<u8>, NativeError> {
         Ok(self.input.get(self.cursor).copied())
     }
     /// A memory refusal stops building the tree while syntax validation
     /// continues, counting the room the rest would take. Infrastructure
     /// causes end the read unchanged.
-    fn keep(&mut self, node: &Json, name: usize) -> Result<bool, NativeError> {
+    fn keep(&mut self, node: &Json<'_>, name: usize) -> Result<bool, NativeError> {
         let bytes = match node {
             Json::Text(text) => text.len(),
             Json::Number(token) => token.as_str().len(),
@@ -56,24 +57,32 @@ impl Parser<'_, '_> {
             Ok(false)
         }
     }
-    fn string(&mut self) -> Result<String, NativeError> {
+    fn string(&mut self) -> Result<Cow<'text, str>, NativeError> {
         self.whitespace()?;
         if !self.take(b'"')? {
             return Err(syntax());
         }
-        let mut token = vec![b'"'];
+        let start = self.cursor - 1;
         let mut escaped = false;
+        let mut plain = true;
         while let Some(byte) = self.byte()? {
             self.cursor += 1;
-            token.push(byte);
             if byte == b'"' && !escaped {
-                return serde_json::from_slice(&token).map_err(|_| syntax());
+                if plain {
+                    let text = std::str::from_utf8(&self.input[start + 1..self.cursor - 1])
+                        .map_err(|_| syntax())?;
+                    return Ok(Cow::Borrowed(text));
+                }
+                return serde_json::from_slice::<String>(&self.input[start..self.cursor])
+                    .map(Cow::Owned)
+                    .map_err(|_| syntax());
             }
+            plain &= byte >= 0x20 && byte != b'\\';
             escaped = byte == b'\\' && !escaped;
         }
         Err(syntax())
     }
-    fn value(&mut self, depth: usize) -> Result<Json, NativeError> {
+    fn value(&mut self, depth: usize) -> Result<Json<'text>, NativeError> {
         self.whitespace()?;
         if depth > self.depth_limit {
             return Err(raise(
@@ -107,7 +116,7 @@ impl Parser<'_, '_> {
             }
             Some(b'{') => {
                 self.cursor += 1;
-                let mut fields: Vec<(String, Json)> = Vec::new();
+                let mut fields: Vec<(Cow<'text, str>, Json<'text>)> = Vec::new();
                 if self.take(b'}')? {
                     return Ok(Json::Object(fields));
                 }
@@ -131,21 +140,21 @@ impl Parser<'_, '_> {
                 }
             }
             Some(b'-' | b'0'..=b'9') => {
-                let mut token = Vec::new();
+                let start = self.cursor;
                 while let Some(byte) = self.byte()? {
                     if !matches!(byte, b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') {
                         break;
                     }
-                    token.push(byte);
                     self.cursor += 1;
                 }
-                let token = std::str::from_utf8(&token).map_err(|_| syntax())?;
+                let token =
+                    std::str::from_utf8(&self.input[start..self.cursor]).map_err(|_| syntax())?;
                 NumberToken::new(token)
                     .map(Json::Number)
                     .map_err(|_| syntax())
             }
             Some(first) => {
-                let (word, value): (&[u8], Json) = match first {
+                let (word, value): (&[u8], Json<'text>) = match first {
                     b'n' => (b"null", Json::Null),
                     b't' => (b"true", Json::Bool(true)),
                     b'f' => (b"false", Json::Bool(false)),
@@ -168,11 +177,11 @@ pub(super) fn syntax() -> NativeError {
 }
 /// Reads strict JSON nesting at most `depth_limit` levels, reserving
 /// each node it keeps in `new`.
-pub(super) fn read(
-    text: &str,
+pub(super) fn read<'text>(
+    text: &'text str,
     depth_limit: usize,
     new: &mut Nursery<'_>,
-) -> Result<Json, NativeError> {
+) -> Result<Json<'text>, NativeError> {
     let mut parser = Parser {
         input: text.as_bytes(),
         cursor: 0,

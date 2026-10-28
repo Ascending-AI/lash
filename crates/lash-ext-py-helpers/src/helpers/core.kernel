@@ -1402,12 +1402,15 @@ function py.getitem(target: Any, index: Any) -> Any
 kernel 1
 charge sum(6, deep(index))
 body {
-  let iterator_token = invoke py.token(target, "py.iterator")
-  if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
-  let callable_token = invoke py.token(target, "py.function")
-  let slice_token = invoke py.token(target, "py.slice")
-  if callable_token { do invoke py.fail("TypeError", "function is not a container") }
-  if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+  let k = kind(target)
+  if same(k, "tuple") {
+    let iterator_token = invoke py.token(target, "py.iterator")
+    if iterator_token { do invoke py.fail("TypeError", "iterator is not a sequence") }
+    let callable_token = invoke py.token(target, "py.function")
+    let slice_token = invoke py.token(target, "py.slice")
+    if callable_token { do invoke py.fail("TypeError", "function is not a container") }
+    if slice_token { do invoke py.fail("TypeError", "slice is not a container") }
+  }
 
   if same(kind(index), "tuple") {
     if eq(tuple.len(index), 4) {
@@ -1417,7 +1420,6 @@ body {
       }
     }
   }
-  let k = kind(target)
   if same(k, "bytes") {
     let length = invoke py.bytes_len(target)
     let position = invoke py.index(index, length, "bytes", "")

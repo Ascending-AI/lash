@@ -741,6 +741,10 @@ impl KernelMachine {
         if let Some(call) = level.library {
             frame.library = Some(call);
         }
+        if let Some(lib) = level.boundary {
+            frame.convention = Some(lash_kernel_doc::StartConvention::Direct);
+            frame.public_result = Some(exe.lib(lib).header.signature.result.clone());
+        }
         frame.link = level.link;
         frame.control = level.control;
         if let Some(stmt) = action {

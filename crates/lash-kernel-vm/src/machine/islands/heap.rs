@@ -35,6 +35,19 @@ pub(super) struct HeapAnswer {
     events: Option<Vec<Weight>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Check {
+    None,
+    Full,
+    Result,
+}
+
+impl From<bool> for Check {
+    fn from(checked: bool) -> Self {
+        if checked { Self::Full } else { Self::None }
+    }
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// Keep the ordered event owner out of the scalar operator's live frame.
     #[inline(never)]
@@ -55,7 +68,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 site.lib,
                 args,
                 Some(deepest),
-                site.checked,
+                site.checked.into(),
                 before,
                 site.root.is_some() && self.accounting,
             )
@@ -79,7 +92,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             site.lib,
             &padded[..self.exe.lib(site.lib).arity],
             None,
-            false,
+            Check::None,
             0,
             false,
         ) else {
@@ -199,7 +212,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         lib: crate::compile::LibId,
         args: &[Value],
         deepest: Option<u32>,
-        checked: bool,
+        checked: Check,
         before: u64,
         strict: bool,
     ) -> Option<HeapAnswer> {
@@ -219,7 +232,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 return None;
             }
         }
-        if checked
+        if checked == Check::Full
             && (!signature.params.iter().zip(args).all(|(param, value)| {
                 (param.optional && matches!(value, Value::Absent))
                     || crate::compile::import_result_fits(&param.ty, *value)
@@ -227,13 +240,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return None;
         }
+        if let Some(answer) = self.lookup_answer(function, args, before)
+            && (checked == Check::None
+                || crate::compile::import_result_fits(&signature.result, answer.value))
+        {
+            return Some(answer);
+        }
         let answer = self.heap(before, strict, |cx| {
             let value = if operator && function.prepared.is_some() {
                 cx.operate_on(function, args, Fresh::default())
             } else {
                 cx.native_on(function, args, Fresh::default())
             }?;
-            (!checked || crate::compile::import_result_fits(&signature.result, value))
+            (checked == Check::None || crate::compile::import_result_fits(&signature.result, value))
                 .then_some(value)
         });
         if answer.is_some()
@@ -243,6 +262,73 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             watching.general_formula(self.charging);
         }
         answer
+    }
+
+    fn lookup_answer(
+        &self,
+        function: &crate::compile::Lib,
+        args: &[Value],
+        before: u64,
+    ) -> Option<HeapAnswer> {
+        let (entry, _) = function.prepared.as_ref()?;
+        use lash_kernel_doc::plan::Element;
+        let element = entry.element()?;
+        if !matches!(element, Element::ReadInt | Element::ReadMap)
+            || OBSERVING
+            || self.tight
+            || !self.resident_room(0)
+        {
+            return None;
+        }
+        #[cfg(test)]
+        if self.scratch.chilled {
+            return None;
+        }
+        let value = match (element, args) {
+            (Element::ReadInt, [Value::List(list), Value::Int(index)]) => {
+                let index = u64::try_from(*index).ok()?;
+                if index >= self.arena.len(*list).ok()? {
+                    return None;
+                }
+                self.arena.item(*list, index).ok()??
+            }
+            (Element::ReadMap, [Value::Map(map), Value::Text(key)]) => {
+                self.arena.table_get_text(*map, key).ok()??
+            }
+            _ => return None,
+        };
+        if self.arena.summary_of(&value).depth as usize > self.limits.value_depth() {
+            return None;
+        }
+        let units = if self.charging {
+            function
+                .charge
+                .immediate(args, Fresh::default(), &value)
+                .or_else(|| {
+                    crate::compile::measured_formula(
+                        self.arena,
+                        &function.charge,
+                        args,
+                        Some(&value),
+                    )
+                })?
+        } else {
+            0
+        };
+        if self.charged.checked_add(before)?.checked_add(units)? > self.bound {
+            return None;
+        }
+        Some(HeapAnswer {
+            value,
+            units,
+            events: self.tape.map(|_| {
+                if units == 0 {
+                    Vec::new()
+                } else {
+                    vec![Weight::Atomic(units)]
+                }
+            }),
+        })
     }
 
     pub(super) fn heap_call(&mut self, site: &HeapSite, args: &[Value]) -> Answer {
@@ -281,7 +367,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 Depth::Operation(extra) | Depth::Template(extra) => extra,
                 Depth::None => 0,
             }),
-            site.checked,
+            site.checked.into(),
             before,
             site.root.is_some() && self.accounting,
         ) else {
@@ -482,6 +568,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ))
         })
         .map(|answer| answer.value)
+    }
+
+    pub(super) fn remove(&mut self, target: Value, index: Value) -> Option<()> {
+        let Value::List(list) = target else {
+            return None;
+        };
+        let at = crate::compile::position(&index)?;
+        let length = self.arena.len(list).ok()?;
+        // Tail removal needs no allocation. Other removals and cold chunks
+        // retain the source handler's loading and compaction boundary.
+        if self.arena.any_cold() || at.checked_add(1)? != length {
+            return None;
+        }
+        self.arena.list_remove(list, at).ok()
     }
 
     #[inline(never)]

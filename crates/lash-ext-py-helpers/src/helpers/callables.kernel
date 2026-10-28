@@ -1,3 +1,4 @@
+use py.call_target
 use py.kw.put
 # Guest Python callables. Parameter metadata travels in the packed closure,
 # rather than in the caller's static facts. K-EVAL-001/003, K-CLO-004.
@@ -18,6 +19,7 @@ use list.sort_by_keys
 use map.keys
 use map.contains
 use text.join
+use text.concat
 use py.fail
 use py.to_list
 
@@ -75,33 +77,36 @@ body {
         set value = args[position]
         set position = add(position, 1)
       }
-    }
-    if same(mode, 1) {
-      if map.contains(kwargs, key) {
-        if bool.not(same(value, absent)) { do invoke py.fail("TypeError", text.join(["got multiple values for argument '", key, "'"], "")) }
-        set value = kwargs[key]
-        set used[key] = true
+      if same(mode, 1) {
+        if map.contains(kwargs, key) {
+          if bool.not(same(value, absent)) { do invoke py.fail("TypeError", text.join(["got multiple values for argument '", key, "'"], "")) }
+          set value = kwargs[key]
+          set used[key] = true
+        }
       }
-    }
-    if same(mode, 2) {
-      if map.contains(kwargs, key) { set value = kwargs[key]
-        set used[key] = true }
-    }
-    if same(mode, 3) {
-      set variadic = true
-      let rest = list.slice(args, position, list.len(args))
-      set value = invoke py.to_tuple(rest)
-    }
-    if same(mode, 4) {
-      set extra = true
-      set value = map{}
-      for key in map.keys(kwargs) metered 2 {
-        if bool.not(map.contains(used, key)) { set value[key] = kwargs[key] }
+    } else {
+      if same(mode, 2) {
+        if map.contains(kwargs, key) { set value = kwargs[key]
+          set used[key] = true }
+      } else {
+        if same(mode, 3) {
+          set variadic = true
+          let rest = list.slice(args, position, list.len(args))
+          set value = invoke py.to_tuple(rest)
+        } else {
+          if same(mode, 4) {
+            set extra = true
+            set value = map{}
+            for key in map.keys(kwargs) metered 2 {
+              if bool.not(map.contains(used, key)) { set value[key] = kwargs[key] }
+            }
+          }
+        }
       }
     }
     if same(value, absent) {
       if bool.not(param[2]) {
-        if bool.not(skip_required) { do invoke py.fail("TypeError", text.join([name, "() missing a required positional argument"], "")) }
+        if bool.not(skip_required) { do invoke py.fail("TypeError", text.concat(name, "() missing a required positional argument")) }
       }
     }
     set slots[list.len(slots)] = value
@@ -117,41 +122,46 @@ body {
   return slots
 }
 
-function py.call(callee: Any, args: List(Any), kwargs: Any, active?: Any, namespace?: Any) -> Any
+function py.call_target(callee: Any) -> Any
 kernel 1
-metering statements
+charge 4
 body {
   if same(kind(callee), "tuple") {
     if eq(tuple.len(callee), 5) {
-      if same(callee[0], "py.function") {
-        if same(callee[4], "py.builtin") {
-          if same(kind(namespace), "closure") {
-            if eq(list.len(args), 0) {
-              if eq(map.len(kwargs), 0) {
-                for name in ["locals", "vars", "dir"] {
-                  if same(callee[3], name) { let snapshot = apply namespace()
-                    set namespace = snapshot
-                    break }
-                }
-              }
-            }
-          }
-          if eq(list.len(args), 0) {
-            if eq(map.len(kwargs), 0) {
-              if same(callee[3], "locals") { return namespace }
-              if same(callee[3], "vars") { return namespace }
-              if same(callee[3], "dir") { return list.sort_by_keys(map.keys(namespace), map.keys(namespace), false) }
-            }
-          }
-        }
-        let packed = callee[1]
-        let output = apply packed(args, kwargs, active)
-        return output
-      }
+      if same(callee[0], "py.function") { return callee[1] }
     }
   }
   do invoke py.fail("TypeError", "object is not callable")
   return null
+}
+
+function py.call(callee: Any, args: List(Any), kwargs: Any, active?: Any, namespace?: Any) -> Any
+kernel 1
+metering statements
+body {
+  let packed = invoke py.call_target(callee)
+  if same(callee[4], "py.builtin") {
+    if same(kind(namespace), "closure") {
+      if eq(list.len(args), 0) {
+        if eq(map.len(kwargs), 0) {
+          for name in ["locals", "vars", "dir"] {
+            if same(callee[3], name) { let snapshot = apply namespace()
+              set namespace = snapshot
+              break }
+          }
+        }
+      }
+    }
+    if eq(list.len(args), 0) {
+      if eq(map.len(kwargs), 0) {
+        if same(callee[3], "locals") { return namespace }
+        if same(callee[3], "vars") { return namespace }
+        if same(callee[3], "dir") { return list.sort_by_keys(map.keys(namespace), map.keys(namespace), false) }
+      }
+    }
+  }
+  let output = apply packed(args, kwargs, active)
+  return output
 }
 
 function py.dict.extend(target: Any, value: Any) -> Null

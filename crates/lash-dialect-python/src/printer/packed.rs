@@ -68,6 +68,31 @@ impl Renderer<'_> {
             return None;
         }
         let stored = &definition.body()?.block;
+        let mut expression_fallback = Vec::new();
+        let (fast, stored) = match stored.first() {
+            Some(k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            }) if else_block.is_empty() => (Some((condition, then_block.clone())), &stored[1..]),
+            Some(k::Stmt::Return {
+                value: k::Expr::If { cond, then, r#else },
+            }) if stored.len() == 1 => {
+                expression_fallback.push(k::Stmt::Return {
+                    value: *r#else.clone(),
+                });
+                (
+                    Some((
+                        cond.as_ref(),
+                        vec![k::Stmt::Return {
+                            value: *then.clone(),
+                        }],
+                    )),
+                    expression_fallback.as_slice(),
+                )
+            }
+            _ => (None, stored.as_slice()),
+        };
         let expanded = lash_kernel_dialect::builder::expanded_return(stored).unwrap_or_default();
         let folded = expanded.len() > 1;
         let body = if folded { &expanded } else { stored };
@@ -112,6 +137,80 @@ impl Renderer<'_> {
             names.push(name.clone());
         }
         let body = &body[metadata.len() + 1..];
+        if let Some((condition, fast)) = fast.as_ref() {
+            let [k::Stmt::Return { value }] = body else {
+                return None;
+            };
+            let [k::Stmt::Return { value: fast }] = fast.as_slice() else {
+                return None;
+            };
+            let positional = &definition.signature.params[0].name;
+            let keywords = &definition.signature.params[1].name;
+            let k::Expr::If { cond, then, r#else } = condition else {
+                return None;
+            };
+            if **r#else != k::Expr::Literal(k::Literal::Bool(false))
+                || !self.exact_count(cond, "list.len", positional, metadata.len())
+                || !self.exact_count(then, "map.len", keywords, 0)
+            {
+                return None;
+            }
+            let mut actual = fast;
+            for (index, (name, metadata)) in names.iter().zip(metadata).enumerate() {
+                let k::Expr::Tuple(fields) = metadata else {
+                    return None;
+                };
+                let k::Expr::Let {
+                    name: bound,
+                    value: read,
+                    body,
+                } = actual
+                else {
+                    return None;
+                };
+                if bound != name
+                    || !matches!(read.as_ref(), k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Int(at)) } if target == positional && at == &k::Integer::from(i64::try_from(index).ok()?)))
+                {
+                    return None;
+                }
+                actual = body;
+                if fields.get(2) == Some(&k::Expr::Literal(k::Literal::Bool(false)))
+                    && call.args.get(4) == Some(&k::Expr::Literal(k::Literal::Bool(false)))
+                {
+                    let k::Expr::If { cond, then, r#else } = actual else {
+                        return None;
+                    };
+                    if !matches!(cond.as_ref(), k::Expr::Call { function, args } if self.operators.is(function, "same") && args == &vec![k::Expr::Variable(name.clone()), k::Expr::Literal(k::Literal::Absent)])
+                    {
+                        return None;
+                    }
+                    let k::Expr::Act(failure) = then.as_ref() else {
+                        return None;
+                    };
+                    if !matches!(&failure.kind, k::ActKind::Call(target) if super::task::target(target).is_some_and(|target| self.operators.is(&target, "py.fail")))
+                    {
+                        return None;
+                    }
+                    let k::Expr::Literal(k::Literal::Text(spelling)) = &parts[NAME] else {
+                        return None;
+                    };
+                    if failure.args
+                        != vec![
+                            k::Expr::Literal(k::Literal::Text("TypeError".into())),
+                            k::Expr::Literal(k::Literal::Text(format!(
+                                "{spelling}() missing a required positional argument"
+                            ))),
+                        ]
+                    {
+                        return None;
+                    }
+                    actual = r#else;
+                }
+            }
+            if actual != value {
+                return None;
+            }
+        }
         if let Some(function) = self.direct_body(body) {
             let raw = self.document.functions.get(&function)?.body()?;
             Some((names, raw.block.clone(), function, 0))
@@ -120,9 +219,17 @@ impl Renderer<'_> {
                 names,
                 body.to_vec(),
                 closure.function,
-                if folded { 0 } else { metadata.len() + 1 },
+                if folded {
+                    0
+                } else {
+                    metadata.len() + 1 + usize::from(fast.is_some())
+                },
             ))
         }
+    }
+
+    fn exact_count(&self, value: &k::Expr, length: &str, parameter: &Name, count: usize) -> bool {
+        matches!(value, k::Expr::Call { function, args } if self.operators.is(function, "same") && matches!(args.as_slice(), [k::Expr::Call { function, args }, k::Expr::Literal(k::Literal::Int(actual))] if self.operators.is(function, length) && args == &vec![k::Expr::Variable(parameter.clone())] && actual == &k::Integer::from(i64::try_from(count).unwrap_or(i64::MAX))))
     }
 
     pub(super) fn packed_definition(&mut self, statements: &[k::Stmt]) -> usize {

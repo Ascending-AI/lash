@@ -102,6 +102,74 @@ enum Fold {
 }
 
 impl Plan {
+    /// A size minimum capped at one needs no collection measurement when
+    /// every value is resident. Other terms still require immediate measures.
+    pub(crate) fn resident_minimum(&self, args: &[Value], result: &Value) -> Option<u64> {
+        let Some(Linear::Minimum { constant, at }) = self.linear else {
+            return None;
+        };
+        let value = |source: Source| match source {
+            Source::Arg(index) => args.get(index),
+            Source::Result => Some(result),
+            Source::Nothing => None,
+        };
+        let measured = |(source, measure): &(Source, doc::Measure)| match *source {
+            Source::Nothing => Some(0),
+            _ => immediate_measure(value(*source)?, *measure),
+        };
+        let positive = |(source, measure): &(Source, doc::Measure)| {
+            *measure == doc::Measure::Size && value(*source).is_some()
+        };
+        let (left, right) = (&self.measurements[at], &self.measurements[at + 1]);
+        match (measured(left), measured(right)) {
+            (Some(1), None) if positive(right) => {}
+            (None, Some(1)) if positive(left) => {}
+            _ => return None,
+        }
+        self.measurements[..at]
+            .iter()
+            .chain(&self.measurements[at + 2..])
+            .try_fold(constant.saturating_add(1), |sum, item| {
+                Some(sum.saturating_add(measured(item)?))
+            })
+    }
+
+    /// Evaluate the exact linear formula using measurements carried by
+    /// immediate values. Arena-dependent measurements retain the general path.
+    #[inline(always)]
+    pub(crate) fn immediate(&self, args: &[Value], fresh: Fresh, result: &Value) -> Option<u64> {
+        let measured = |(source, measure): &(Source, doc::Measure)| -> Option<u64> {
+            Some(match *source {
+                Source::Arg(index) if fresh.empty(index) => empty_measure(*measure),
+                Source::Arg(index) => match args.get(index) {
+                    Some(value) => immediate_measure(value, *measure)?,
+                    None => 0,
+                },
+                Source::Result => immediate_measure(result, *measure)?,
+                Source::Nothing => 0,
+            })
+        };
+        let measurements = &self.measurements;
+        match self.linear {
+            Some(Linear::Sum(constant)) => measurements.iter().try_fold(constant, |sum, item| {
+                Some(sum.saturating_add(measured(item)?))
+            }),
+            Some(Linear::Minimum { constant, at }) => {
+                let mut sum = constant;
+                for item in &measurements[..at] {
+                    sum = sum.saturating_add(measured(item)?);
+                }
+                let least = measured(&measurements[at])?.min(measured(&measurements[at + 1])?);
+                sum = sum.saturating_add(least);
+                for item in &measurements[at + 2..] {
+                    sum = sum.saturating_add(measured(item)?);
+                }
+                Some(sum)
+            }
+            None => None,
+        }
+    }
+
     /// Evaluate only when every measurement is an already known immediate.
     pub(crate) fn known_charge(
         &self,
@@ -652,49 +720,6 @@ impl Fast {
     /// The scalar charge table, when the formula has one.
     pub(crate) fn scalar(&self) -> Option<&ScalarTable> {
         self.scalar.as_ref()
-    }
-
-    /// What the formula charges a call with `args` that returned `result`
-    /// when it is a sum of measurements, optionally with one minimum pair
-    /// (`same`'s), and every value it measures carries its measurements:
-    /// one the arena holds nothing of ([`immediate_measure`]), or an
-    /// argument `fresh` names, a construction of no members
-    /// ([`empty_measure`]). Neither holds another value, so the shallow
-    /// formula computes for them what the formula does, combined as
-    /// [`Plan::evaluate`] combines it. `None` for another formula, or where
-    /// a measured value is one the arena measures.
-    #[inline(always)]
-    pub(crate) fn immediate(&self, args: &[Value], fresh: Fresh, result: &Value) -> Option<u64> {
-        let measured = |(source, measure): &(Source, doc::Measure)| -> Option<u64> {
-            Some(match *source {
-                Source::Arg(index) if fresh.empty(index) => empty_measure(*measure),
-                Source::Arg(index) => match args.get(index) {
-                    Some(value) => immediate_measure(value, *measure)?,
-                    None => 0,
-                },
-                Source::Result => immediate_measure(result, *measure)?,
-                Source::Nothing => 0,
-            })
-        };
-        let measurements = &self.shallow.measurements;
-        match self.shallow.linear {
-            Some(Linear::Sum(constant)) => measurements.iter().try_fold(constant, |sum, item| {
-                Some(sum.saturating_add(measured(item)?))
-            }),
-            Some(Linear::Minimum { constant, at }) => {
-                let mut sum = constant;
-                for item in &measurements[..at] {
-                    sum = sum.saturating_add(measured(item)?);
-                }
-                let least = measured(&measurements[at])?.min(measured(&measurements[at + 1])?);
-                sum = sum.saturating_add(least);
-                for item in &measurements[at + 2..] {
-                    sum = sum.saturating_add(measured(item)?);
-                }
-                Some(sum)
-            }
-            None => None,
-        }
     }
 
     /// How to charge a call with `args` that returned `result`: what

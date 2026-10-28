@@ -7,6 +7,25 @@ pub(in crate::machine::islands) enum CollectionStep {
     Place(Placement),
     Visit(Visit),
     ReadSlot(ReadSlot),
+    Reduce(Reduction),
+    Append(Append),
+}
+
+pub(in crate::machine::islands) struct Append {
+    pub(in crate::machine::islands) target: usize,
+    pub(in crate::machine::islands) item: usize,
+    pub(in crate::machine::islands) body: usize,
+}
+
+pub(in crate::machine::islands) struct Reduction {
+    pub(in crate::machine::islands) accumulator: usize,
+    pub(in crate::machine::islands) item: usize,
+    pub(in crate::machine::islands) body: usize,
+    pub(in crate::machine::islands) entry: Entry,
+    pub(in crate::machine::islands) pair: Option<lash_kernel_doc::scalar::Pair>,
+    pub(in crate::machine::islands) checked: Option<LibId>,
+    pub(in crate::machine::islands) reverse: bool,
+    pub(in crate::machine::islands) depth: Depth,
 }
 
 pub(in crate::machine::islands) struct ReadSlot {
@@ -31,8 +50,9 @@ pub(in crate::machine::islands) struct Placement {
     pub(in crate::machine::islands) target: usize,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) value: usize,
-    pub(in crate::machine::islands) list: usize,
+    pub(in crate::machine::islands) list: Option<usize>,
     pub(in crate::machine::islands) body: usize,
+    pub(in crate::machine::islands) statements: usize,
     pub(in crate::machine::islands) advance: Entry,
     pub(in crate::machine::islands) increment: Value,
 }
@@ -53,6 +73,30 @@ impl Build<'_> {
         for statement in &source.statements {
             match &statement.kind {
                 StatementKind::For { body, .. } => {
+                    if let Some(append) = self.append(statement, body) {
+                        let head = self.blocks[append.body].starts[0] - 1;
+                        if matches!(self.ops[head].op, Op::Open(block) if block == append.body) {
+                            let original =
+                                std::mem::replace(&mut self.ops[head].op, Op::Jump(head + 1));
+                            self.ops[head].op = Op::Collection {
+                                step: std::sync::Arc::new(CollectionStep::Append(append)),
+                                tail: false,
+                                original: Box::new(original),
+                            };
+                        }
+                    }
+                    if let Some(reduction) = self.reduction(statement, body) {
+                        let head = self.blocks[reduction.body].starts[0] - 1;
+                        if matches!(self.ops[head].op, Op::Open(block) if block == reduction.body) {
+                            let original =
+                                std::mem::replace(&mut self.ops[head].op, Op::Jump(head + 1));
+                            self.ops[head].op = Op::Collection {
+                                step: std::sync::Arc::new(CollectionStep::Reduce(reduction)),
+                                tail: false,
+                                original: Box::new(original),
+                            };
+                        }
+                    }
                     if let Some(merge) = self.merge(body) {
                         let head = self.blocks[merge.body].starts[0] - 1;
                         if !matches!(self.ops[head].op, Op::Open(block) if block == merge.body) {
@@ -135,6 +179,123 @@ impl Build<'_> {
                 _ => {}
             }
         }
+    }
+
+    fn append(&self, loop_: &Statement, body: &SourceBlock) -> Option<Append> {
+        let StatementKind::For { at: item, .. } = loop_.kind else {
+            return None;
+        };
+        body.declares.iter().all(|at| *at == item).then_some(())?;
+        let [write] = body.statements.as_ref() else {
+            return None;
+        };
+        write.root.is_none().then_some(())?;
+        let StatementKind::Store {
+            operands,
+            target,
+            index: Some(index),
+            value,
+            field: None,
+            ..
+        } = &write.kind
+        else {
+            return None;
+        };
+        let read = |reg| operands.iter().find(|expr| expr.reg == reg);
+        let target = local(read(*target)?)?;
+        (local(read(*value)?)? == item
+            && !self.shared[target as usize]
+            && !self.shared[item as usize])
+            .then_some(())?;
+        let Kind::Native { lib, args, .. } = &unpin(read(*index)?).kind else {
+            return None;
+        };
+        self.exe.lib(*lib).length_read()?;
+        let [sequence] = &**args else { return None };
+        (local(sequence)? == target).then_some(())?;
+        Some(Append {
+            target: target as usize,
+            item: item as usize,
+            body: self.blocks.iter().position(|block| block.id == body.id)?,
+        })
+    }
+
+    fn reduction(&self, loop_: &Statement, body: &SourceBlock) -> Option<Reduction> {
+        let StatementKind::For { at: item, .. } = loop_.kind else {
+            return None;
+        };
+        body.declares.iter().all(|at| *at == item).then_some(())?;
+        let [write] = body.statements.as_ref() else {
+            return None;
+        };
+        let StatementKind::Write {
+            close: None,
+            bind: false,
+            ..
+        } = write.kind
+        else {
+            return None;
+        };
+        let (accumulator, value) = assigned(write, false)?;
+        (item != accumulator && !self.shared[item as usize] && !self.shared[accumulator as usize])
+            .then_some(())?;
+        let value = unpin(value);
+        let (lib, args, checked) = match &value.kind {
+            Kind::Operator {
+                lib, args, invoke, ..
+            } => (*lib, &**args, invoke.is_some_and(|invoke| invoke.checked)),
+            Kind::Call { invoke, args, .. } => {
+                let lib = invoke
+                    .act
+                    .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
+                    .or_else(|| match &self.exe.stmt(write.id).form {
+                        crate::compile::Form::Action(action) => match &action.kind {
+                            crate::compile::ActionKind::Call { callee, .. } => callee.library(),
+                            _ => None,
+                        },
+                        _ => None,
+                    })?;
+                (lib, &**args, invoke.checked)
+            }
+            _ => return None,
+        };
+        let [first, second] = args else { return None };
+        let roles = [local(first)?, local(second)?];
+        let reverse = if roles == [accumulator, item] {
+            false
+        } else if roles == [item, accumulator] {
+            true
+        } else {
+            return None;
+        };
+        let function = self.exe.lib(lib);
+        function.limit.is_none().then_some(())?;
+        let (entry, _) = function.prepared.as_ref()?;
+        entry.immediate().then_some(())?;
+        let depth = match function.run {
+            LibRun::Body(_) => Depth::Template(super::super::answer_depth(self.exe, lib)?),
+            LibRun::Native { .. } => {
+                let extra = entry.depth();
+                if function.operation() {
+                    Depth::Operation(extra)
+                } else if extra > 0 {
+                    Depth::Template(extra)
+                } else {
+                    Depth::None
+                }
+            }
+            _ => return None,
+        };
+        Some(Reduction {
+            accumulator: accumulator as usize,
+            item: item as usize,
+            body: self.blocks.iter().position(|block| block.id == body.id)?,
+            entry: entry.clone(),
+            pair: entry.pair(),
+            checked: checked.then_some(lib),
+            reverse,
+            depth,
+        })
     }
 
     fn read_slot(&self, body: &SourceBlock) -> Option<ReadSlot> {
@@ -266,6 +427,9 @@ impl Build<'_> {
     }
 
     fn placement(&self, loop_: &Statement, body: &SourceBlock) -> Option<Placement> {
+        if let Some(place) = self.indexed_placement(loop_, body) {
+            return Some(place);
+        }
         let StatementKind::For { at: value, .. } = loop_.kind else {
             return None;
         };
@@ -328,10 +492,70 @@ impl Build<'_> {
             target: target as usize,
             index: index as usize,
             value: value as usize,
-            list: list as usize,
+            list: Some(list as usize),
             body: self.blocks.iter().position(|block| block.id == body.id)?,
+            statements: 4,
             advance,
             increment,
+        })
+    }
+
+    fn indexed_placement(&self, loop_: &Statement, body: &SourceBlock) -> Option<Placement> {
+        let StatementKind::For { at: value, .. } = loop_.kind else {
+            return None;
+        };
+        body.declares.iter().all(|at| *at == value).then_some(())?;
+        let [store, advance] = body.statements.as_ref() else {
+            return None;
+        };
+        store.root.is_none().then_some(())?;
+        let StatementKind::Store {
+            operands,
+            target,
+            index: Some(index),
+            value: item,
+            field: None,
+            ..
+        } = &store.kind
+        else {
+            return None;
+        };
+        let read = |reg| operands.iter().find(|expr| expr.reg == reg).and_then(local);
+        let (target, index) = (read(*target)?, read(*index)?);
+        (read(*item)? == value).then_some(())?;
+        let (to, addition) = assigned(advance, false)?;
+        let (lib, args) = match &unpin(addition).kind {
+            Kind::Operator { lib, args, .. } | Kind::Native { lib, args, .. } => (*lib, args),
+            _ => return None,
+        };
+        let [from, one] = args.as_ref() else {
+            return None;
+        };
+        (to == index && local(from)? == index && matches!(one.kind, Kind::Const(Value::Int(1))))
+            .then_some(())?;
+        let function = self.exe.lib(lib);
+        (function.limit.is_none()
+            && !function.operation()
+            && matches!(function.run, LibRun::Native { .. }))
+        .then_some(())?;
+        let advance = function.prepared.as_ref()?.0.clone();
+        (advance.depth() == 0
+            && advance.pair()?.ints == Some(lash_kernel_doc::scalar::ScalarOp::Add))
+        .then_some(())?;
+        let mut roles = [target, index, value];
+        roles.sort_unstable();
+        (roles.windows(2).all(|pair| pair[0] != pair[1])
+            && roles.iter().all(|at| !self.shared[*at as usize]))
+        .then_some(())?;
+        Some(Placement {
+            target: target as usize,
+            index: index as usize,
+            value: value as usize,
+            list: None,
+            body: self.blocks.iter().position(|block| block.id == body.id)?,
+            statements: 2,
+            advance,
+            increment: Value::Int(1),
         })
     }
 

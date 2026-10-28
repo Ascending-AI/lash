@@ -16,8 +16,8 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    AccessShape, AccessSite, CallInputs, CollectionStep, Destination, Instruction, Merge, Op,
-    Operand, Placement, Read, ReadSlot, Visit, WriteSite,
+    AccessShape, AccessSite, CallInputs, CollectionAppend, CollectionStep, Destination,
+    Instruction, Merge, Op, Operand, Placement, Read, ReadSlot, Reduction, Visit, WriteSite,
 };
 
 /// Heap text construction and operations the source handler must answer.
@@ -221,9 +221,8 @@ pub(super) struct NativeSite {
 /// A native whose answer an island reads from the arena.
 #[derive(Clone, Copy)]
 pub(super) enum Direct {
-    /// `list.len`, and what the call charges: a resident list's length
-    /// ([`crate::compile::Lib::length_read`]).
-    Length(u64),
+    /// A resident collection's length and constant native charge.
+    Length(lash_kernel_doc::ValueKind, u64),
     /// A resident sequence item, retaining the native formula.
     Item(lash_kernel_doc::ValueKind),
     /// The membership test of this table

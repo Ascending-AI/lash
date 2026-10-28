@@ -568,4 +568,27 @@ impl Build<'_> {
         source.extend(at..after);
         site.source = source.into();
     }
+
+    pub(super) fn reads(&mut self, args: &[Expr]) -> Option<Box<[Read]>> {
+        let reads = args
+            .iter()
+            .map(|arg| match arg.kind {
+                Kind::Const(value) => Some(Read::Literal {
+                    reg: arg.reg,
+                    value,
+                }),
+                Kind::Local { local, miss, .. } => Some(Read::Local {
+                    reg: arg.reg,
+                    at: local.at as usize,
+                    shared: self.shared[local.at as usize],
+                    miss,
+                }),
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()?;
+        for read in &reads {
+            self.registers = self.registers.max(read.reg() as usize + 1);
+        }
+        Some(reads)
+    }
 }

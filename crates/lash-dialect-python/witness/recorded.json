@@ -141,12 +141,14 @@
   },
   {
    "name": "collections",
-   "source": "xs = [5, 3, 8, 1]\nprint(xs[0], xs[-1], xs[1:3], xs[:2], xs[2:], xs[::-1], xs[::2], xs[-3:-1], xs[10:], xs[1:100], xs[3:0:-1])\ntext = \"hello world\"\nprint(text[0], text[-1], text[1:4], text[::-1], text[::3], len(text), \"lo\" in text, \"z\" not in text)\npair = (1, \"two\", 3.0)\nprint(pair[1], pair[-1], pair[:2], pair + (4,), len(pair), pair * 2, 3.0 in pair)\nxs.append(9)\nxs.extend([2, 2])\nxs.insert(1, 7)\nxs.insert(-100, 0)\nxs.insert(100, 6)\nprint(xs, xs.pop(), xs.pop(0), xs.index(8), xs.count(2), 2 in xs)\nxs.remove(2)\nxs.sort()\nys = xs\nys.reverse()\nprint(xs, ys is xs, sorted(xs), xs.copy() == xs, sum(xs), min(xs), max(xs))\nxs += [1]\nys = ys + [0]\nprint(xs, ys, [0] * 3, [1, 2] * 2, \"ab\" * 3, 2 * \"x\", [[0] * 2] * 2)\ntry:\n    xs[99]\nexcept IndexError as error:\n    print(error)\ntry:\n    xs.remove(1000)\nexcept ValueError as error:\n    print(error)\ntry:\n    (1, 2)[0] = 5\nexcept TypeError as error:\n    print(\"tuples are immutable\")\nd = {\"b\": 2, \"a\": 1}\nd[\"c\"] = 3\nd[\"b\"] = 20\nprint(d, list(d), list(d.keys()), list(d.values()), list(d.items()), len(d), \"a\" in d, 1 in d)\nprint(d.get(\"z\"), d.get(\"z\", 0), d.setdefault(\"z\", []), d.pop(\"a\"), d)\nd.update({\"b\": 0, \"y\": 1})\ndel d[\"z\"]\ne = dict(d)\ne[\"new\"] = True\nprint(d, e, d == {\"y\": 1, \"c\": 3, \"b\": 0}, {1: \"int\"}[1.0], {} == dict(), dict([(\"k\", \"v\")]))\nseen = []\ndef mark(label, value):\n    seen.append(label)\n    return value\nduplicates = {mark('first key', 1): mark('first value', 'one'), mark('second key', 1.0): mark('second value', 'float')}\nprint(duplicates, seen)\ntry:\n    invalid = {mark('valid key', 'a'): mark('valid value', 1), mark('invalid key', []): mark('invalid value', 2)}\nexcept TypeError:\n    print('unhashable key', seen)\ns = {3, 1, 2, 3}\ns.add(4)\ns.discard(1)\ns.discard(100)\nprint(sorted(s), len(s), 2 in s, sorted(s | {9}), sorted(s & {2, 3, 7}), sorted(s - {2}), sorted(s ^ {2, 5}), sorted(set(\"aab\")), set() == set([]), {1, 2} == {2, 1}, sorted(s.union([7])), sorted(s.intersection([2, 3])), sorted(s.difference([2])))\nprint([x * 2 for x in range(5) if x % 2], {x: x * x for x in range(3)}, sorted({x % 2 for x in range(5)}), [(x, y) for x in range(2) for y in \"ab\"])\nprint(list(zip([1, 2, 3], \"ab\")), list(enumerate([\"a\", \"b\"], 1)), list(reversed([1, 2, 3])), tuple([1, 2]), list((1, 2)), list(\"ab\"), sum(x for x in range(4)))\nmatrix = [[1, 2], [3, 4]]\nmatrix[0][1] = 20\nmatrix[1][0] += 5\nprint(matrix, [row[0] for row in matrix], [n for row in matrix for n in row], matrix[1][-1])\nprint(\"a,b,,c\".split(\",\"), \"  two  words \".split(), \" pad \".strip() + \"|\", \"Hello\".upper(), \"Hello\".lower(), \"hello\".replace(\"l\", \"L\"), \"hello\".find(\"l\"), \"hello\".find(\"z\"), \"hello\".startswith(\"he\"), \"hello\".endswith(\"lo\"), \"hello\".count(\"l\"), \", \".join(str(n) for n in range(3)))\nprint(str(1.0), str(None), str(True), repr(\"it's\"), repr('say \"hi\"'), repr(\"tab\\there\"), int(\"7\") + 1, float(3), str([1.5, \"x\"]), isinstance(1, int), isinstance(True, int), isinstance(1.0, (int, str)), isinstance(\"s\", str), type(1).__name__, type([]).__name__, type(None).__name__)\nprint(ord(\"a\"), chr(98), abs(-3.5), abs(4), len(\"\"), len([[], []]), bool(\"False\"), 10 in range(11), [1, 2] < [1, 3], (1, 2) < (1, 2, 0), \"abc\" < \"abd\", min(\"b\", \"a\"), max([1, 5, 3]))\n",
+   "source": "xs = [5, 3, 8, 1]\nprint(xs[0], xs[-1], xs[1:3], xs[:2], xs[2:], xs[::-1], xs[::2], xs[-3:-1], xs[10:], xs[1:100], xs[3:0:-1])\ntext = \"hello world\"\nprint(text[0], text[-1], text[1:4], text[::-1], text[::3], len(text), \"lo\" in text, \"z\" not in text)\npair = (1, \"two\", 3.0)\nprint(pair[1], pair[-1], pair[:2], pair + (4,), len(pair), pair * 2, 3.0 in pair)\nxs.append(9)\nxs.extend([2, 2])\nxs.insert(1, 7)\nxs.insert(-100, 0)\nxs.insert(100, 6)\nprint(xs, xs.pop(), xs.pop(0), xs.index(8), xs.count(2), 2 in xs)\nxs.remove(2)\nxs.sort()\nys = xs\nys.reverse()\nprint(xs, ys is xs, sorted(xs), xs.copy() == xs, sum(xs), min(xs), max(xs))\nxs += [1]\nys = ys + [0]\nprint(xs, ys, [0] * 3, [1, 2] * 2, \"ab\" * 3, 2 * \"x\", [[0] * 2] * 2)\ntry:\n    xs[99]\nexcept IndexError as error:\n    print(error)\ntry:\n    xs.remove(1000)\nexcept ValueError as error:\n    print(error)\ntry:\n    (1, 2)[0] = 5\nexcept TypeError as error:\n    print(\"tuples are immutable\")\nd = {\"b\": 2, \"a\": 1}\nd[\"c\"] = 3\nd[\"b\"] = 20\nprint(d, list(d), list(d.keys()), list(d.values()), list(d.items()), len(d), \"a\" in d, 1 in d)\nprint(d.get(\"z\"), d.get(\"z\", 0), d.setdefault(\"z\", []), d.pop(\"a\"), d)\nd.update({\"b\": 0, \"y\": 1})\ndel d[\"z\"]\ne = dict(d)\ne[\"new\"] = True\nprint(d, e, d == {\"y\": 1, \"c\": 3, \"b\": 0}, {1: \"int\"}[1.0], {} == dict(), dict([(\"k\", \"v\")]))\nseen = []\ndef mark(label, value):\n    seen.append(label)\n    return value\nduplicates = {mark('first key', 1): mark('first value', 'one'), mark('second key', 1.0): mark('second value', 'float')}\nprint(duplicates, seen)\ntry:\n    invalid = {mark('valid key', 'a'): mark('valid value', 1), mark('invalid key', []): mark('invalid value', 2)}\nexcept TypeError:\n    print('unhashable key', seen)\ns = {3, 1, 2, 3}\ns.add(4)\ns.discard(1)\ns.discard(100)\nprint(sorted(s), len(s), 2 in s, sorted(s | {9}), sorted(s & {2, 3, 7}), sorted(s - {2}), sorted(s ^ {2, 5}), sorted(set(\"aab\")), set() == set([]), {1, 2} == {2, 1}, sorted(s.union([7])), sorted(s.intersection([2, 3])), sorted(s.difference([2])))\nprint([x * 2 for x in range(5) if x % 2], {x: x * x for x in range(3)}, sorted({x % 2 for x in range(5)}), [(x, y) for x in range(2) for y in \"ab\"])\nprint(list(zip([1, 2, 3], \"ab\")), list(enumerate([\"a\", \"b\"], 1)), list(reversed([1, 2, 3])), tuple([1, 2]), list((1, 2)), list(\"ab\"), sum(x for x in range(4)))\nmatrix = [[1, 2], [3, 4]]\nmatrix[0][1] = 20\nmatrix[1][0] += 5\nprint(matrix, [row[0] for row in matrix], [n for row in matrix for n in row], matrix[1][-1])\nprint(\"a,b,,c\".split(\",\"), \"  two  words \".split(), \" pad \".strip() + \"|\", \"Hello\".upper(), \"Hello\".lower(), \"hello\".replace(\"l\", \"L\"), \"hello\".find(\"l\"), \"hello\".find(\"z\"), \"hello\".startswith(\"he\"), \"hello\".endswith(\"lo\"), \"hello\".count(\"l\"), \", \".join(str(n) for n in range(3)))\nprint(str(1.0), str(None), str(True), repr(\"it's\"), repr('say \"hi\"'), repr(\"tab\\there\"), int(\"7\") + 1, float(3), str([1.5, \"x\"]), isinstance(1, int), isinstance(True, int), isinstance(1.0, (int, str)), isinstance(\"s\", str), type(1).__name__, type([]).__name__, type(None).__name__)\nprint(ord(\"a\"), chr(98), abs(-3.5), abs(4), len(\"\"), len([[], []]), bool(\"False\"), 10 in range(11), [1, 2] < [1, 3], (1, 2) < (1, 2, 0), \"abc\" < \"abd\", min(\"b\", \"a\"), max([1, 5, 3]))\n\n# A native loop cursor reads the live list after a park and at exhaustion.\nwalked = [1, 2]\nseen = []\nfor item in walked:\n    seen.append(await host.echo(item))\n    if item == 1:\n        walked.append(3)\n    elif item == 2:\n        walked[2] = 4\nelse:\n    print('exhausted', seen)\nfor item in walked:\n    print(item)\n    walked.clear()\nelse:\n    print('cleared')\nfor pair in ((1, 2), (3, 4)):\n    print(await host.echo(pair[0]), pair[1])\n\n# Proven collection membership keeps numeric key equality and deep equality.\nkeys = {1: 'yes', (1, 2): 'pair'}\nprint(1.0 in keys, (1, 2) not in keys, 9 not in keys)\nmembers = {1, 2}\nprint(1.0 in members, 3 not in members)\nboxes = [[1], [2]]\nprint([1] in boxes, [3] not in boxes)\n\n# A sort callback keeps its default binding and captured writes.\nranks = []\ndef rank(item, offset=10):\n    ranks.append(item)\n    return offset - item\nordered = [3, 1, 2]\nordered.sort(key=rank)\nprint(ordered, ranks, rank(item=4), ranks)\n\n# Escaping fixed signatures retain positional-only, defaults and keyword errors.\ndef make_fixed():\n    def fixed(a, /, b=7):\n        return (a, b)\n    return fixed\nfixed = make_fixed()\nprint(fixed(2), fixed(3, b=8))\nfor args, kwargs in [([], {}), ([1, 2, 3], {}), ([1, 2], {\"b\": 3}), ([1], {\"a\": 2}), ([1], {\"other\": 2})]:\n    try:\n        fixed(*args, **kwargs)\n    except TypeError:\n        print('fixed argument error')\n\n# Dynamic integer indices keep negative and out-of-range Python behavior.\nfor index in (0, 1, -1, -3, 3):\n    try:\n        print([10, 20][index])\n    except IndexError:\n        print('dynamic index error')\n\n# Proven range indices use the same Python negative-index and bounds rules.\ndef read_by_range():\n    values = [10, 20]\n    for index in range(-3, 3):\n        try:\n            print(values[index])\n        except IndexError:\n            print('range index error')\nread_by_range()\nprint(sorted([], key=1), sorted([3, 11, 2], key=str))\ntry:\n    sorted([1], key=1)\nexcept TypeError:\n    print('invalid nonempty sort key')\nsummed = [[1], [2]]\nprint(sum(summed, []), summed, sum((1, 2, 3), 4))\n\n# A packed expression body can return a closure over its bound argument.\nfactory = lambda value: (lambda: value)\nreader = factory(await host.echo(17))\nawait host.echo('after binding')\nprint(reader())\n\n# Reused callback inputs cannot alias captured arguments or variadic tuples.\ndef capture_key(item, *rest, **keywords):\n    def captured():\n        return item\n    ranks.append((captured, rest, keywords))\n    return item\nranks = []\nprint(sorted([3, 1, 2], key=capture_key))\nawait host.echo('captured sort arguments')\nprint([(captured(), rest, keywords) for captured, rest, keywords in ranks])\nprint(sum([1, 2.5, 3]), sum([1, 2], 0.5))\ntry:\n    sum([1, 'bad'])\nexcept TypeError:\n    print('invalid sum item')\n\n# Membership must retain dynamic behavior when an annotation is inaccurate.\ndef membership_hint(items: dict):\n    return 2 in items\nprint(membership_hint([1, 2]))\n\n# In-place sorting preserves the receiver alias and stable equal-key order.\nstable_rows = [{'rank': 2, 'id': 'a'}, {'rank': 1, 'id': 'b'}, {'rank': 2, 'id': 'c'}]\nstable_alias = stable_rows\nstable_rows.sort(key=lambda row: row['rank'])\nprint([row['id'] for row in stable_rows], stable_alias is stable_rows)\nstable_rows.sort(key=lambda row: row['rank'], reverse=True)\nprint([row['id'] for row in stable_alias])\n",
    "deliveries": [],
    "epochs": [
     {
      "delivered": [],
-     "asked": [],
+     "asked": [
+      "host.echo:1"
+     ],
      "logged": [
       "5 1 [3, 8] [5, 3] [8, 1] [1, 8, 3, 5] [5, 8] [3, 8] [] [3, 8, 1] [1, 8, 3]",
       "h d ell dlrow olleh hlwl 11 True True",
@@ -169,6 +171,118 @@
       "['a', 'b', '', 'c'] ['two', 'words'] pad| HELLO hello heLLo 2 -1 True True 2 0, 1, 2",
       "1.0 None True \"it's\" 'say \"hi\"' 'tab\\there' 8 3.0 [1.5, 'x'] True True False True int list NoneType",
       "97 b 3.5 4 0 2 True True True True True a 5"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:1"
+     ],
+     "asked": [
+      "host.echo:2"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "host.echo:2"
+     ],
+     "asked": [
+      "host.echo:4"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "host.echo:4"
+     ],
+     "asked": [
+      "host.echo:1"
+     ],
+     "logged": [
+      "exhausted [1, 2, 4]",
+      "1",
+      "cleared"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:1"
+     ],
+     "asked": [
+      "host.echo:3"
+     ],
+     "logged": [
+      "1 2"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:3"
+     ],
+     "asked": [
+      "host.echo:17"
+     ],
+     "logged": [
+      "3 4",
+      "True False True",
+      "True True",
+      "True True",
+      "[3, 2, 1] [3, 1, 2, 4] 6 [3, 1, 2, 4]",
+      "(2, 7) (3, 8)",
+      "fixed argument error",
+      "fixed argument error",
+      "fixed argument error",
+      "fixed argument error",
+      "fixed argument error",
+      "10",
+      "20",
+      "20",
+      "dynamic index error",
+      "dynamic index error",
+      "range index error",
+      "10",
+      "20",
+      "10",
+      "20",
+      "range index error",
+      "[] [11, 2, 3]",
+      "invalid nonempty sort key",
+      "[1, 2] [[1], [2]] 10"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:17"
+     ],
+     "asked": [
+      "host.echo:after binding"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "host.echo:after binding"
+     ],
+     "asked": [
+      "host.echo:captured sort arguments"
+     ],
+     "logged": [
+      "17",
+      "[1, 2, 3]"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:captured sort arguments"
+     ],
+     "asked": [],
+     "logged": [
+      "[(3, (), {}), (1, (), {}), (2, (), {})]",
+      "6.5 3.5",
+      "invalid sum item",
+      "True",
+      "['b', 'a', 'c'] True",
+      "['a', 'c', 'b']"
      ]
     }
    ],
@@ -375,7 +489,7 @@
   },
   {
    "name": "json_boundaries",
-   "source": "import json\n\nvalue = json.loads('{\"z\": [\"\\\\u00e9\", \"\\\\ud83d\\\\ude00\", -0.0], \"a\": 123456789012345678901234567890}')\nprint(list(value), value['z'], value['a'])\nprint(json.dumps(value, separators=(',', ':')))\nprint(json.dumps(value, ensure_ascii=False, separators=(',', ':')))\nprint(json.dumps({'z': 1, 'a': 2}, sort_keys=True))\nsource = '[' * 40 + '1' + ']' * 40\nvalue = json.loads(source)\nfor i in range(40):\n    value = value[0]\nprint(value)\nprint(await host.echo(json.dumps({'b': [True, None, 1.0, -0.0], 'a': 'é'})))\n\nprint(json.dumps({'text': '\\x7f\\n\"\\\\', 'numbers': [1.0, 1e-5, 1e16, -0.0]}, sort_keys=True))\nprint(json.dumps({'é': 1.0}, separators=(' / ', ' = ')))\nprint(json.dumps({1: 'one', None: 'null', False: 'false'}))\nprint(json.dumps([float('inf'), float('-inf'), float('nan')]))\ntry:\n    print(json.dumps(float('inf'), allow_nan=False))\nexcept ValueError:\n    print('nonfinite')\nprint(json.dumps([1, 2], indent=2))\ndef convert(value):\n    return 'converted'\nprint(json.dumps({1, 2}, default=convert))\ncycle = []\ncycle.append(cycle)\ntry:\n    print(json.dumps(cycle))\nexcept ValueError:\n    print('circular')\n",
+   "source": "import json\n\nvalue = json.loads('{\"z\": [\"\\\\u00e9\", \"\\\\ud83d\\\\ude00\", -0.0], \"a\": 123456789012345678901234567890}')\nprint(list(value), value['z'], value['a'])\nprint(json.dumps(value, separators=(',', ':')))\nprint(json.dumps(value, ensure_ascii=False, separators=(',', ':')))\nprint(json.dumps({'z': 1, 'a': 2}, sort_keys=True))\nsource = '[' * 40 + '1' + ']' * 40\nvalue = json.loads(source)\nfor i in range(40):\n    value = value[0]\nprint(value)\nprint(await host.echo(json.dumps({'b': [True, None, 1.0, -0.0], 'a': 'é'})))\n\nprint(json.dumps({'text': '\\x7f\\n\"\\\\', 'numbers': [1.0, 1e-5, 1e16, -0.0]}, sort_keys=True))\nprint(json.dumps({'é': 1.0}, separators=(' / ', ' = ')))\nprint(json.dumps({1: 'one', None: 'null', False: 'false'}))\nprint(json.dumps([float('inf'), float('-inf'), float('nan')]))\ntry:\n    print(json.dumps(float('inf'), allow_nan=False))\nexcept ValueError:\n    print('nonfinite')\nprint(json.dumps([1, 2], indent=2))\ndef convert(value):\n    return 'converted'\nprint(json.dumps({1, 2}, default=convert))\ncycle = []\ncycle.append(cycle)\ntry:\n    print(json.dumps(cycle))\nexcept ValueError:\n    print('circular')\n\n# Token scanning preserves escapes and both sides of the inline integer range.\nprint(json.loads(json.dumps(['a\"b', 'a\\\\b', 'line\\nbreak', 'é'], ensure_ascii=False)))\nprint(json.loads('[0,-0,9223372036854775807,-9223372036854775808,9223372036854775808,-9223372036854775809]'))\n",
    "deliveries": [],
    "epochs": [
     {
@@ -405,7 +519,9 @@
       "nonfinite",
       "[\n  1,\n  2\n]",
       "\"converted\"",
-      "circular"
+      "circular",
+      "['a\"b', 'a\\\\b', 'line\\nbreak', 'é']",
+      "[0, 0, 9223372036854775807, -9223372036854775808, 9223372036854775808, -9223372036854775809]"
      ]
     }
    ],

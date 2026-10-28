@@ -118,6 +118,10 @@ impl NativeFunction for Concat {
 
 struct Len;
 impl NativeFunction for Len {
+    fn prepare_collection_length(&self) -> Option<lash_kernel_doc::ValueKind> {
+        Some(lash_kernel_doc::ValueKind::List)
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let Some(value) = call.args.get(0) else {
             return Err(type_error("list.len takes a collection"));

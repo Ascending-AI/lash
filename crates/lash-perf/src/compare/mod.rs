@@ -60,6 +60,12 @@ pub struct Args {
     /// Count work, publish context and record statement paths in timed cells.
     #[arg(long)]
     pub observe: bool,
+    /// Diagnostic ablation of exact charge accounting; never records history.
+    #[arg(long, conflicts_with = "history")]
+    pub no_charge: bool,
+    /// Diagnostic ablation of held-byte accounting; never records history.
+    #[arg(long, conflicts_with = "history")]
+    pub no_memory_meter: bool,
     /// Write perf.data and perf-script stacks for each lash workload/dialect.
     #[arg(long)]
     pub profile: Option<PathBuf>,
@@ -73,6 +79,25 @@ pub struct Args {
     pub dqts_hibernate: Option<PathBuf>,
     #[arg(long)]
     pub dqts_script: Option<PathBuf>,
+}
+
+impl Args {
+    fn kernel(&self) -> Result<kernel::Kernel> {
+        Ok(kernel::Kernel::new()
+            .map_err(anyhow::Error::from_boxed)?
+            .with_metering(
+                if self.no_charge {
+                    lash_kernel_vm::Charge::Off
+                } else {
+                    lash_kernel_vm::Charge::Exact
+                },
+                if self.no_memory_meter {
+                    lash_kernel_vm::MemoryMeter::Off
+                } else {
+                    lash_kernel_vm::MemoryMeter::On
+                },
+            ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,7 +347,7 @@ fn lash(
         }
     }
     let _observer = Observer;
-    let diagnostic_kernel = kernel::Kernel::new().map_err(anyhow::Error::from_boxed)?;
+    let diagnostic_kernel = args.kernel()?;
     let (diagnostic_program, _) = diagnostic_kernel
         .prepare(
             &if python {
@@ -423,13 +448,13 @@ pub fn run(args: &Args) -> Result<()> {
         cpu,
         load_before: load(),
         load_after: String::new(),
-        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":"exact","memory_meter":"on","memory_bytes":512<<20,"charge_limit":10_000_000_000_u64,"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","reference_instructions":"paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
+        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":if args.no_charge {"off"} else {"exact"},"memory_meter":if args.no_memory_meter {"off"} else {"on"},"memory_bytes":if args.no_memory_meter {None} else {Some(512_u64<<20)},"charge_limit":if args.no_charge {None} else {Some(10_000_000_000_u64)},"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","reference_instructions":"paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
         rows: Vec::new(),
         errors: Vec::new(),
         unsupported: Vec::new(),
         durable: Vec::new(),
     };
-    let kernel = kernel::Kernel::new().map_err(anyhow::Error::from_boxed)?;
+    let kernel = args.kernel()?;
     let references = reference::engines(args)?;
     for workload in workloads::ALL
         .iter()
@@ -573,6 +598,12 @@ pub fn run(args: &Args) -> Result<()> {
 }
 fn table(receipt: &Receipt) -> String {
     let mut text = python_table(receipt);
+    if receipt.geometry["charge"] != "exact" || receipt.geometry["memory_meter"] != "on" {
+        text = format!(
+            "Diagnostic accounting control: charge={}, memory_meter={}.\n\n{text}",
+            receipt.geometry["charge"], receipt.geometry["memory_meter"]
+        );
+    }
     text.push_str(
         "| Dialect | Workload | Engine | Min slope ns/op | Median slope ns/op | Fixed intercept ns | Lash/reference (median slope) |\n|---|---|---|---:|---:|---:|---|\n",
     );
@@ -809,6 +840,20 @@ mod tests {
             "ordinary measurements must not read or append a persistent history"
         );
         assert!(Cli::try_parse_from(["compare", "--out", "receipt.json", "--check"]).is_err());
+        for diagnostic in ["--no-charge", "--no-memory-meter"] {
+            assert!(
+                Cli::try_parse_from([
+                    "compare",
+                    "--out",
+                    "receipt.json",
+                    "--history",
+                    "baseline.jsonl",
+                    diagnostic,
+                ])
+                .is_err(),
+                "an accounting ablation must not become a regression baseline"
+            );
+        }
     }
 
     #[test]

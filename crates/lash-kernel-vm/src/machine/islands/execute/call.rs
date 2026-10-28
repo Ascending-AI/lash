@@ -120,7 +120,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             |(at, param)| {
                                 let value = inputs
                                     .as_ref()
-                                    .map_or_else(|| regs[args[at] as usize], |input| input.1[at]);
+                                    .map_or_else(
+                                        || args.get(at).map(|reg| regs[*reg as usize]),
+                                        |input| input.1.get(at).copied(),
+                                    )
+                                    .unwrap_or(Value::Absent);
                                 (param.optional && matches!(value, Value::Absent))
                                     || match (&param.ty, value) {
                                         (
@@ -215,7 +219,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 (frame.admitted, frame.swift, frame.covered) =
                     (self.admitted, self.swift, self.covered);
                 self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));
-                let inner = if let Some((callee, values)) = &inputs {
+                let mut inner = if let Some((callee, values)) = &inputs {
                     if let Some(callee) = callee {
                         regs[site.reg as usize] = *callee;
                     }
@@ -226,6 +230,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 } else {
                     self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]))
                 };
+                inner.boundary = site.library.filter(|_| site.checked);
                 *slots += inner.slots.len();
                 callers.push(std::mem::replace(frame, inner));
                 self.depth += 1;

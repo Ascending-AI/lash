@@ -17,7 +17,9 @@ mod guarded;
 mod merge;
 use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
-pub(in crate::machine::islands) use merge::{CollectionStep, Merge, Placement, ReadSlot, Visit};
+pub(in crate::machine::islands) use merge::{
+    Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
+};
 
 pub(in crate::machine::islands) struct Instruction {
     pub(in crate::machine::islands) op: Op,
@@ -112,9 +114,9 @@ pub(in crate::machine::islands) enum Op {
         cost: u64,
         metered: u64,
         at: Option<usize>,
-        /// Its protocol has a hook that runs at each step (`next`, `check`
-        /// or `item`): the source header steps the loop and runs it.
-        hooked: bool,
+        /// An item transform runs for every native cursor step. The active
+        /// cursor and guard decide whether `next` or `check` runs.
+        item_hook: bool,
         otherwise: usize,
         after: usize,
     },
@@ -243,6 +245,11 @@ pub(in crate::machine::islands) enum Op {
         pc: u32,
         inputs: Option<Box<StoreInputs>>,
         finish: Option<u32>,
+    },
+    Remove {
+        target: u32,
+        index: u32,
+        pc: u32,
     },
     Unit {
         site: UnitSite,
@@ -682,7 +689,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
-                    hooked: false,
+                    item_hook: false,
                     otherwise: 0,
                     after: 0,
                 });
@@ -724,7 +731,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: None,
-                    hooked: false,
+                    item_hook: false,
                     otherwise: exhausted,
                     after,
                 };
@@ -749,9 +756,7 @@ impl<'e> Build<'e> {
                     crate::compile::Form::For { via, .. } => *via,
                     _ => None,
                 };
-                let hooked = via.is_some_and(|via| {
-                    via.next.is_some() || via.check.is_some() || via.item.is_some()
-                });
+                let item_hook = via.is_some_and(|via| via.item.is_some());
                 self.expr(value)?;
                 self.close(*close, *reg);
                 self.open = None;
@@ -770,7 +775,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
-                    hooked,
+                    item_hook,
                     otherwise: 0,
                     after: 0,
                 });
@@ -794,7 +799,7 @@ impl<'e> Build<'e> {
                     cost: *cost,
                     metered: *metered,
                     at: Some(*at as usize),
-                    hooked,
+                    item_hook,
                     otherwise: exhausted,
                     after,
                 };
@@ -874,6 +879,29 @@ impl<'e> Build<'e> {
                     pc: *pc,
                     inputs: None,
                     finish: None,
+                });
+                self.emit(Op::Done {
+                    leaves: statement.leaves,
+                    empty: None,
+                });
+            }
+            StatementKind::Remove {
+                operands,
+                target,
+                index,
+                closes,
+                pc,
+            } => {
+                for operand in operands {
+                    self.expr(operand)?;
+                }
+                for close in closes {
+                    self.close(Some(*close), *index);
+                }
+                self.emit(Op::Remove {
+                    target: *target,
+                    index: *index,
+                    pc: *pc,
                 });
                 self.emit(Op::Done {
                     leaves: statement.leaves,
@@ -1216,19 +1244,20 @@ impl<'e> Build<'e> {
                     },
                     direct: {
                         let lib = self.exe.lib(*lib);
-                        (lib.length_read().map(Direct::Length))
-                            .or_else(|| lib.item_read().map(Direct::Item))
-                            .or_else(|| lib.membership().map(Direct::Member))
-                            .or_else(|| match &lib.run {
-                                LibRun::Native { native, .. }
-                                    if lib.arity == 2
-                                        && lib.limit.is_none()
-                                        && native.prepare_text_join() =>
-                                {
-                                    Some(Direct::TextJoin)
-                                }
-                                _ => None,
-                            })
+                        (lib.collection_length()
+                            .map(|(kind, units)| Direct::Length(kind, units)))
+                        .or_else(|| lib.item_read().map(Direct::Item))
+                        .or_else(|| lib.membership().map(Direct::Member))
+                        .or_else(|| match &lib.run {
+                            LibRun::Native { native, .. }
+                                if lib.arity == 2
+                                    && lib.limit.is_none()
+                                    && native.prepare_text_join() =>
+                            {
+                                Some(Direct::TextJoin)
+                            }
+                            _ => None,
+                        })
                     },
                 };
                 self.site(site.depth, false);
@@ -1342,7 +1371,9 @@ impl<'e> Build<'e> {
                         inputs: None,
                         root: self.root,
                         library,
-                        answers: library.and_then(|lib| super::answer_depth(self.exe, lib)),
+                        answers: library
+                            .filter(|lib| self.exe.lib(*lib).arity == args.len())
+                            .and_then(|lib| super::answer_depth(self.exe, lib)),
                         callee: declared,
                         close: closes.first().copied(),
                         pc,
@@ -1545,29 +1576,6 @@ impl<'e> Build<'e> {
             crate::compile::ActionKind::Cancel(_) => Op::Cancel(pc),
             crate::compile::ActionKind::Call { .. } => return Some(None),
         }))
-    }
-
-    fn reads(&mut self, args: &[Expr]) -> Option<Box<[Read]>> {
-        let reads = args
-            .iter()
-            .map(|arg| match arg.kind {
-                Kind::Const(value) => Some(Read::Literal {
-                    reg: arg.reg,
-                    value,
-                }),
-                Kind::Local { local, miss, .. } => Some(Read::Local {
-                    reg: arg.reg,
-                    at: local.at as usize,
-                    shared: self.shared[local.at as usize],
-                    miss,
-                }),
-                _ => None,
-            })
-            .collect::<Option<Box<[_]>>>()?;
-        for read in &reads {
-            self.registers = self.registers.max(read.reg() as usize + 1);
-        }
-        Some(reads)
     }
 
     fn root_checked(&self) -> bool {

@@ -584,7 +584,9 @@ impl Lowerer<'_> {
                 let place = self.operands(&[&subscript.value, &subscript.slice])?;
                 let container = self.pin(place[0].clone());
                 let index = self.pin(place[1].clone());
-                let current = self.getitem(kind, &[container.clone(), index.clone()])?;
+                let index_kind = self.subscript_kind(&subscript.slice);
+                let current =
+                    self.getitem(kind, index_kind, &[container.clone(), index.clone()])?;
                 let (aside, operand) = self.aside(|this| this.expr(&assign.value))?;
                 let current = if aside.is_empty() {
                     current

@@ -586,7 +586,7 @@ impl Cx<'_> {
         } else {
             fresh
         };
-        if let Some(units) = fast.immediate(args, fresh, &answer.value) {
+        if let Some(units) = function.charge.immediate(args, fresh, &answer.value) {
             return Some(units);
         }
         self.charge_of(function, fast, args, &answer.value)

@@ -35,13 +35,25 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return answer;
         }
         let length = match (site.direct, padded[0]) {
-            (Some(Direct::Length(units)), Value::List(list)) => {
-                self.arena.len(list).ok().map(|len| {
-                    (
-                        Value::Int(len as i64),
-                        if self.charging { units } else { 0 },
-                    )
-                })
+            (Some(Direct::Length(kind, units)), value)
+                if value.kind() == kind && !self.arena.any_cold() =>
+            {
+                let handle = match value {
+                    Value::List(handle)
+                    | Value::Tuple(handle)
+                    | Value::Map(handle)
+                    | Value::Set(handle)
+                    | Value::Record(handle) => Some(handle),
+                    _ => None,
+                };
+                handle
+                    .and_then(|handle| self.arena.len(handle).ok())
+                    .and_then(|len| {
+                        Some((
+                            Value::Int(i64::try_from(len).ok()?),
+                            if self.charging { units } else { 0 },
+                        ))
+                    })
             }
             _ => None,
         };

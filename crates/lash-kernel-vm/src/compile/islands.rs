@@ -149,6 +149,13 @@ pub(crate) enum Kind {
         closes: Box<[Close]>,
         pc: u32,
     },
+    Remove {
+        operands: Box<[Expr]>,
+        target: u32,
+        index: u32,
+        closes: Box<[Close]>,
+        pc: u32,
+    },
     /// A statement of an `if`'s block that no island runs: reaching it
     /// exits at its first op, which the reference runs as its step does.
     Cold,
@@ -651,14 +658,7 @@ impl Former<'_> {
                 | super::Callee::Import(_, Some(lib)) => {
                     let function = self.library.get_lib(*lib)?;
                     let body = match function.run {
-                        LibRun::Body(code)
-                            if (matches!(callee, super::Callee::Library(_))
-                                || (matches!(callee, super::Callee::CheckedHelper(_))
-                                    && function.collection_method()))
-                                && args.len() == function.arity =>
-                        {
-                            Some(code)
-                        }
+                        LibRun::Body(code) if function.body_arity(args.len()) => Some(code),
                         _ => None,
                     };
                     if let Some(code) = body.filter(|_| self.body_call(*lib, args.len())) {
@@ -742,7 +742,10 @@ impl Former<'_> {
             matches!(statement.form, Form::Action(_)),
         )?;
 
-        let close = if matches!(tree.last, Op::SetField { .. } | Op::SetIndex { .. }) {
+        let close = if matches!(
+            tree.last,
+            Op::SetField { .. } | Op::SetIndex { .. } | Op::RemoveIndex { .. }
+        ) {
             None
         } else {
             single(&tree.closes)?
@@ -755,18 +758,20 @@ impl Former<'_> {
             },
             (
                 Form::Plain | Form::Action(_),
-                Op::WriteLocal { local, src } | Op::Bind { local, src },
+                Op::WriteLocal { local, src }
+                | Op::Bind { local, src }
+                | Op::BindShared { local, src },
             ) if self.writable(local.slot) => {
                 let value = self.admitted(tree.take(src)?)?;
                 Kind::Write {
-                    accumulates: !matches!(tree.last, Op::Bind { .. })
+                    accumulates: !matches!(tree.last, Op::Bind { .. } | Op::BindShared { .. })
                         && self.accumulates(&value, local.at),
                     value,
                     close,
                     pc: end,
                     reg: src.0,
                     at: local.at,
-                    bind: matches!(tree.last, Op::Bind { .. }),
+                    bind: matches!(tree.last, Op::Bind { .. } | Op::BindShared { .. }),
                 }
             }
             (
@@ -798,6 +803,21 @@ impl Former<'_> {
                     index: None,
                     value: src.0,
                     field: Some(field.ix()),
+                    closes: tree.closes.clone(),
+                    pc: end,
+                }
+            }
+            (Form::Plain | Form::Action(_), Op::RemoveIndex { target }) => {
+                let index = Reg(target.0 + 1);
+                let mut operands = vec![tree.take(target)?, tree.take(index)?];
+                operands.sort_by_key(|expr| expr.pc);
+                for operand in &mut operands {
+                    self.admit(operand)?;
+                }
+                Kind::Remove {
+                    operands: operands.into(),
+                    target: target.0,
+                    index: index.0,
                     closes: tree.closes.clone(),
                     pc: end,
                 }
@@ -924,6 +944,9 @@ impl Former<'_> {
             } => self.reexecutable(*close, *pc, [value]),
             Kind::Discard { value, close, .. } => self.reexecutable(*close, end, [value]),
             Kind::Store {
+                operands, closes, ..
+            }
+            | Kind::Remove {
                 operands, closes, ..
             } => closes
                 .iter()
@@ -1139,9 +1162,8 @@ impl Former<'_> {
             closes,
         } = &mut expr.kind
             && let Some(function) = self.library.get_lib(*lib)
-            && (!invoke.checked || function.collection_method())
             && self.body_call(*lib, args.len())
-            && function.arity == args.len()
+            && function.body_arity(args.len())
             && let LibRun::Body(code) = function.run
         {
             expr.kind = ExprKind::Call {
@@ -1469,6 +1491,9 @@ fn verify_block(
                 verify_close(close.as_ref(), stream)?;
             }
             Kind::Store {
+                operands, closes, ..
+            }
+            | Kind::Remove {
                 operands, closes, ..
             } => {
                 for operand in operands {

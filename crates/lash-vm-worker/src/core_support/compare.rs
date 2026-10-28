@@ -36,6 +36,7 @@ pub struct PreparedCell(
     Program,
     lash_kernel_doc::SourceMap,
     BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
+    (lash_kernel_vm::Charge, lash_kernel_vm::MemoryMeter),
 );
 
 fn elapsed(at: std::time::Instant) -> f64 {
@@ -106,6 +107,7 @@ pub struct Kernel {
     registry: Arc<lash_kernel_doc::FunctionRegistry>,
     library: PreparedLibrary,
     pub setup_ns: f64,
+    metering: (lash_kernel_vm::Charge, lash_kernel_vm::MemoryMeter),
 }
 impl Kernel {
     /// Assemble the same natives and released helpers as Test262.
@@ -128,7 +130,21 @@ impl Kernel {
             registry,
             library,
             setup_ns: elapsed(at),
+            metering: (
+                lash_kernel_vm::Charge::Exact,
+                lash_kernel_vm::MemoryMeter::On,
+            ),
         })
+    }
+    /// Select accounting modes for a diagnostic comparison. Ordinary
+    /// comparisons retain exact charges and the conservative memory meter.
+    pub fn with_metering(
+        mut self,
+        charge: lash_kernel_vm::Charge,
+        memory: lash_kernel_vm::MemoryMeter,
+    ) -> Self {
+        self.metering = (charge, memory);
+        self
     }
     /// Lower and link a cell outside the measured execution interval.
     ///
@@ -222,7 +238,10 @@ impl Kernel {
         )
         .map_err(failure)?;
         drop(_scope);
-        Ok((PreparedCell(program, source_map, lowered.written), phases))
+        Ok((
+            PreparedCell(program, source_map, lowered.written, self.metering),
+            phases,
+        ))
     }
 }
 
@@ -335,8 +354,8 @@ fn start(program: &PreparedCell) -> Result<KernelMachine> {
             live_tasks: 1024,
             requests_per_park: 1024,
             join_members: 1024,
-            memory_meter: lash_kernel_vm::MemoryMeter::On,
-            charge: lash_kernel_vm::Charge::Exact,
+            memory_meter: program.3.1,
+            charge: program.3.0,
         },
         CellStart {
             owner: PageId([9; 32]),

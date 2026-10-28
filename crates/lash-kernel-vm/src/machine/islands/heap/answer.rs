@@ -76,7 +76,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             {
                 return Ok(false);
             }
-            if let Some(value) = prepared.call(args) {
+            if let Some(value) = prepared.call(args)
+                && (!site.checked
+                    || crate::compile::import_result_fits(&function.header.signature.result, value))
+            {
                 return self.finish_call_answer(site, regs, edge, |_| value);
             }
         }
@@ -93,7 +96,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         (before, occurrence): (u64, Option<usize>),
     ) -> Result<bool, Stop> {
         let answer = if self.accounting {
-            self.heap_answer(lib, args, Some(extra), false, before, false)
+            self.heap_answer(
+                lib,
+                args,
+                Some(extra),
+                if site.checked {
+                    Check::Result
+                } else {
+                    Check::None
+                },
+                before,
+                false,
+            )
         } else {
             let function = self.exe.lib(lib);
             let Some((prepared, _)) = function.prepared.as_ref() else {
@@ -106,6 +120,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             let recording = self.recorder.is_some();
             self.heap(0, true, |cx| {
                 let (value, charges) = cx.heap_paths(heap, callees, natives, args)?;
+                if site.checked
+                    && !crate::compile::import_result_fits(&function.header.signature.result, value)
+                {
+                    return None;
+                }
                 // The enclosing formula covers library calls, but ordinary
                 // closures and declared loop tests still bill their work.
                 // A recording retains their individual source events.

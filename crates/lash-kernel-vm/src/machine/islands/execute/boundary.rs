@@ -372,7 +372,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(LibraryCall {
             lib: site.library?,
             args: if self.exe.charging() && frame.callee.plan.charged {
-                args.iter().map(|reg| frame.regs[*reg as usize]).collect()
+                args.iter()
+                    .map(|reg| frame.regs[*reg as usize])
+                    .chain(std::iter::repeat(Value::Absent))
+                    .take(self.exe.lib(site.library?).arity)
+                    .collect()
             } else {
                 Box::default()
             },
@@ -388,6 +392,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         caller: Option<&Frame<'e>>,
         value: Value,
     ) -> Result<(), Stop> {
+        if let Some(lib) = frame.boundary
+            && !crate::compile::import_result_fits(
+                &self.exe.lib(lib).header.signature.result,
+                value,
+            )
+        {
+            return self.library_return(frame, value);
+        }
+        if frame.callee.plan.charged {
+            return Ok(());
+        }
         let Some(caller) =
             caller.filter(|caller| caller.callee.plan.charged && self.exe.charging())
         else {
@@ -402,7 +417,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let Some(lib) = site.library else {
             return Ok(());
         };
-        let args: Vec<_> = args.iter().map(|reg| caller.regs[*reg as usize]).collect();
+        let args: Vec<_> = args
+            .iter()
+            .map(|reg| caller.regs[*reg as usize])
+            .chain(std::iter::repeat(Value::Absent))
+            .take(self.exe.lib(lib).arity)
+            .collect();
         let units = measured_formula(self.arena, &self.exe.lib(lib).charge, &args, Some(&value));
         if let Some(units) = units.filter(|units| self.root_fits(0, *units, site.root.is_some())) {
             self.charged += units;
@@ -417,6 +437,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             self.scratch.exit.reason = Some(Reason::Charge);
         }
+        self.library_return(frame, value)
+    }
+
+    fn library_return(&mut self, frame: &Frame<'e>, value: Value) -> Result<(), Stop> {
         if let Some(id) = frame.statement {
             let pc = self.exe.stmt(id).ops.end() - 1;
             let reg = match &frame.callee.compiled.ops[frame.pc - 1].op {
@@ -453,6 +477,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             frame.callee.captured,
             &frame.slots,
             library.filter(|_| !frame.callee.plan.charged),
+            frame.boundary,
         );
     }
 }

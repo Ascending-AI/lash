@@ -48,6 +48,23 @@ pub(in crate::laws) fn helper_probes(
         "helper.arithmetic",
         registry.register(definition, None).unwrap(),
     ));
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper.reduce(values: List(Any)) -> Any\nkernel 1\ncharge sum(4, deep(values))\nuse flat.add = @{add}\nbody {{ let total = 0 for value in values metered 2 {{ set total = flat.add(total, value) }} return total }}"
+    )).unwrap();
+    out.push((
+        "helper.reduce",
+        registry.register(definition, None).unwrap(),
+    ));
+    let length = ids["list.len"];
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper.copy(values: List(Any)) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse list.len = @{length}\nbody {{ let out = [] for value in values metered 2 {{ set out[list.len(out)] = value }} return out }}"
+    )).unwrap();
+    out.push(("helper.copy", registry.register(definition, None).unwrap()));
+    let addition = add;
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper.place(values: List(Any), target: List(Any), position: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse flat.add = @{addition}\nbody {{ for value in values metered 2 {{ set target[position] = value set position = flat.add(position, 1) }} return (target, position) }}"
+    )).unwrap();
+    out.push(("helper.place", registry.register(definition, None).unwrap()));
     out.extend(
         [
             ("helper.open", "x: Any", "return x"),
@@ -73,6 +90,59 @@ pub(in crate::laws) fn helper_probes(
         .find(|(name, _)| *name == "helper.item")
         .unwrap()
         .1;
+    for (name, params, result, body) in [
+        ("helper.typed", "x: Int", "Int", "return x"),
+        ("helper.return_checked", "x: Any", "Int", "return x"),
+        ("helper.optional", "x: Int, y?: Any", "Any", "return (x, y)"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({params}) -> {result}\nkernel 1\nmetering statements\nbody {{ {body} }}"
+        )).unwrap();
+        out.push((name, registry.register(definition, None).unwrap()));
+    }
+    let definition = lash_kernel_doc::parse_definition(
+        "function helper.checked_answer(xs: List(Any), index: Int) -> Int\nkernel 1\ncharge 4\nbody { return xs[index] }",
+    ).unwrap();
+    let checked = registry.register(definition, None).unwrap();
+    out.push(("helper.checked_answer", checked));
+    let checked_plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
+        name: "helper.checked_answer",
+        function: checked,
+        callees: &[],
+        literals: &[],
+        fields: &[],
+        records: &[],
+        registers: 2,
+        slots: &[],
+        closures: &[],
+        sites: &[],
+        run: |ctx, _| {
+            ctx.begin()?;
+            ctx.param(0, 0)?;
+            ctx.param(1, 1)?;
+            ctx.index(0)?;
+            Ok(ctx.take(0))
+        },
+        template: Some(lash_kernel_doc::plan::HelperTemplate {
+            entry: None,
+            metered: None,
+            depth: 1,
+            callees: &[],
+            heap: Some(lash_kernel_doc::plan::HeapTemplate {
+                entry: |heap, args, _| match args {
+                    [target, key] => heap.index(*target, *key),
+                    _ => None,
+                },
+                callees: &[],
+                depth: 1,
+                writes: false,
+                element: None,
+                record_write: None,
+            }),
+            forwards: Default::default(),
+        }),
+    }));
+    registry.install_plans(&[checked_plan]).unwrap();
     // K-MACH-008: a partial prepared answer retains its ordinary body
     // continuation when another input declines the immediate path.
     let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
@@ -171,8 +241,13 @@ pub(in crate::laws) fn helper_probes(
         ("helper.element_map_any", "Map(Any, Any)"),
         ("helper.element_map_int", "Map(Text, Int)"),
     ] {
+        let charge = if name == "helper.element_map_any" {
+            "sum(4, nested(result))"
+        } else {
+            "4"
+        };
         let definition = lash_kernel_doc::parse_definition(&format!(
-            "function {name}(xs: {receiver}, index: Any) -> Any\nkernel 1\ncharge 4\nbody {{ try {{ return xs[index] }} catch failed {{ return absent }} }}",
+            "function {name}(xs: {receiver}, index: Any) -> Any\nkernel 1\ncharge {charge}\nbody {{ try {{ return xs[index] }} catch failed {{ return absent }} }}",
         )).unwrap();
         let element = registry.register(definition, None).unwrap();
         let plan = Box::leak(Box::new(lash_kernel_doc::plan::HelperPlan {
@@ -224,7 +299,8 @@ pub(in crate::laws) fn helper_probes(
                     callees: &[],
                     depth: 1,
                     writes: false,
-                    element: None,
+                    element: (receiver == "Map(Any, Any)")
+                        .then_some(lash_kernel_doc::plan::Element::ReadMap),
                     record_write: None,
                 }),
                 forwards: Default::default(),
@@ -233,6 +309,32 @@ pub(in crate::laws) fn helper_probes(
         registry.install_plans(&[plan]).unwrap();
         out.push((name, element));
     }
+    for (name, ty) in [
+        ("tuple.len", "Any"),
+        ("map.len", "Map(Any, Any)"),
+        ("set.len", "Set(Any)"),
+        ("record.len", "Record{..Any}"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}(xs: {ty}) -> Int\nkernel 1\ncharge 1\nnative\n"
+        ))
+        .unwrap();
+        out.push((
+            name,
+            registry
+                .register(definition, lash_kernel_lib::native(name))
+                .unwrap(),
+        ));
+    }
+    let definition = lash_kernel_doc::parse_definition(
+        "function helper.minimum(a: Any, b: Any) -> Bool\nkernel 1\ncharge sum(7, min(size(a), size(b)))\nnative\n",
+    ).unwrap();
+    out.push((
+        "helper.minimum",
+        registry
+            .register(definition, lash_kernel_lib::native("same"))
+            .unwrap(),
+    ));
     for (name, signature) in [
         ("text.utf16_compare", "(text: Text, other: Text) -> Int"),
         ("text.to_utf16_units", "(text: Text) -> List(Int)"),
@@ -269,13 +371,46 @@ main {
 }
 "#;
 
+const REDUCTION: &str = r#"main {
+    let values = [1, 2, 3, 4]
+    let copied = invoke helper.copy(values)
+    print invoke helper.place(values, [0, 0, 0, 0], 0)
+    print invoke helper.place(values, [], 0)
+    print invoke helper.place([], [], 0)
+    let first = invoke helper.reduce(values)
+    do perform 0(first) as Any
+    set values[0] = 5
+    print (first, invoke helper.reduce(values), invoke helper.reduce([]))
+    print (copied, invoke helper.copy(values), invoke helper.copy([]))
+    let overflow = null
+    try { set overflow = invoke helper.reduce([1, 9223372036854775807]) } catch err { set overflow = err.kind }
+    return overflow
+}"#;
+
 /// K-CHG-007 / K-MACH-008: helper and callback frames preserve every
 /// charge event and source continuation while entering the common loop.
 #[test]
 fn helper_frames_agree() {
     use crate::perf_witness::execution::{self, Owner};
+    let fixture = super::super::embedder::library_with(false, Some(helper_probes));
+    let helpers = std::sync::Arc::new(
+        lash_kernel_doc::BuildHelpers::new(
+            (*fixture.registry).clone(),
+            [
+                "helper.typed",
+                "helper.return_checked",
+                "helper.optional",
+                "helper.checked_answer",
+                "helper.element_map_any",
+            ]
+            .map(|name| fixture.ids[name]),
+        )
+        .unwrap(),
+    );
+    let prepared =
+        crate::PreparedLibrary::with_helpers(std::sync::Arc::clone(&fixture.registry), helpers);
     let run = |source: &str, layout, cold| {
-        let mut embedder = Embedder::with(
+        let mut embedder = Embedder::try_over(
             source,
             Setup {
                 native_twice: false,
@@ -284,13 +419,17 @@ fn helper_frames_agree() {
                 slice: if cold { 7 } else { u64::MAX },
                 ..Setup::default()
             },
-        );
+            Some(prepared.clone()),
+        )
+        .unwrap();
         if source == SORTS && layout == Layout(1) {
             embedder.machine.count_work();
         }
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
-        embedder.machine.count_execution();
+        if source != REDUCTION {
+            embedder.machine.count_execution();
+        }
         let mut checkpoints = Vec::new();
         let mut stops = Vec::new();
         let end = loop {
@@ -374,7 +513,21 @@ main { return call rooted() }
     const BODY_PARK: &str = r#"main { let d = {step: fn(x) { do perform 0("forward") as Any return 7 }} return invoke helper.forward_next(d) }"#;
     const ROOT_CALLBACK: &str =
         "main { let d = {step: fn(x) { return 7 }} return invoke helper.next(d) }";
-    for source in [
+    const CONTRACTS: [&str; 12] = [
+        REDUCTION,
+        r#"main { let data = map{"value": [1, 2]} let before = helper.minimum(data, absent) do perform 0(before) as Any return (before, helper.minimum(data, absent), helper.minimum("x", null)) }"#,
+        r#"main { let xs = [1] let pair = (1, 2) let entries = map{"a": 1} let members = set{1, 2} let record = {a: 1} let before = (list.len(xs), tuple.len(pair), map.len(entries), set.len(members), record.len(record)) do perform 0(before) as Any set xs[1] = 2 set entries["b"] = 2 try { print map.len(xs) } catch err { print err.kind } return (before, list.len(xs), map.len(entries), map.len(map{}), set.len(set{}), tuple.len(()), record.len({})) }"#,
+        r#"main { let xs = [1, 2, 3] let observe = fn() { return xs } remove xs[2] do perform 0(apply observe()) as Any remove xs[1] remove xs[0] return apply observe() }"#,
+        r#"main { let xs = [1, 2, 3] remove xs[0] try { remove xs[9] } catch err { return (xs, err.kind) } return xs }"#,
+        r#"main { let xs = map{"value": 1} let first = invoke helper.element_map_any(xs, "value") do perform 0(first) as Any set xs["value"] = 2 let second = invoke helper.element_map_any(xs, "value") let missing = invoke helper.element_map_any(xs, "missing") return (first, second, missing) }"#,
+        r#"main { let xs = map{"value": (1, [2])} let found = invoke helper.element_map_any(xs, "value") do perform 0(found) as Any return found }"#,
+        r#"main { try { return invoke helper.checked_answer(["bad"], 0) } catch err { return err.kind } }"#,
+        "main { return invoke helper.typed(7) }",
+        "main { return invoke helper.optional(7) }",
+        "main { try { return invoke helper.typed(false) } catch err { return err.kind } }",
+        "main { try { return invoke helper.return_checked(\"bad\") } catch err { return err.kind } }",
+    ];
+    for source in CONTRACTS.into_iter().chain([
         "main { return invoke pair.twice(21) }",
         ROOT_CALL,
         PAID_BODY,
@@ -394,18 +547,35 @@ main { return call rooted() }
         CHARGED_ROOT,
         HELPERS,
         SORTS,
-    ] {
+    ]) {
         for cold in [false, true] {
             let (actual, census) = run(source, Layout(0), cold);
+            if source == SORTS || CONTRACTS.contains(&source) {
+                let reference = run(
+                    source,
+                    if source == SORTS {
+                        Layout(1)
+                    } else {
+                        Layout(3)
+                    },
+                    cold,
+                )
+                .0;
+                assert_eq!(actual.0, reference.0, "helper result: {source}");
+                assert_eq!(actual.1, reference.1, "helper observations: {source}");
+                assert_eq!(actual.2, reference.2, "helper requests: {source}");
+                assert_eq!(actual.3, reference.3, "helper charge: {source}");
+                assert_eq!(actual.4, reference.4, "helper events: {source}");
+                assert_eq!(actual.5, reference.5, "helper checkpoints: {source}");
+                assert_eq!(
+                    actual.6, reference.6,
+                    "helper stops and held bytes: {source}"
+                );
+            }
+            if source.contains("helper.checked_answer(") {
+                assert_eq!(actual.0, format!("{:?}", text("entry_type_mismatch")));
+            }
             if source == SORTS {
-                let reference = run(source, Layout(1), cold).0;
-                assert_eq!(actual.0, reference.0, "sort result");
-                assert_eq!(actual.1, reference.1, "sort observations");
-                assert_eq!(actual.2, reference.2, "sort requests");
-                assert_eq!(actual.3, reference.3, "sort charge");
-                assert_eq!(actual.4, reference.4, "sort events");
-                assert_eq!(actual.5, reference.5, "sort checkpoints");
-                assert_eq!(actual.6, reference.6, "sort stops and held bytes");
                 assert_eq!(
                     actual.0,
                     format!(
@@ -425,7 +595,29 @@ main { return call rooted() }
                     )
                 );
             }
-            if !cold {
+            if source == REDUCTION {
+                assert_eq!(
+                    actual.1,
+                    vec![
+                        Datum::Tuple(vec![
+                            Datum::List(vec![int(1), int(2), int(3), int(4)]),
+                            int(4),
+                        ]),
+                        Datum::Tuple(vec![
+                            Datum::List(vec![int(1), int(2), int(3), int(4)]),
+                            int(4),
+                        ]),
+                        Datum::Tuple(vec![Datum::List(vec![]), int(0)]),
+                        Datum::Tuple(vec![int(10), int(14), int(0)]),
+                        Datum::Tuple(vec![
+                            Datum::List(vec![int(1), int(2), int(3), int(4)]),
+                            Datum::List(vec![int(5), int(2), int(3), int(4)]),
+                            Datum::List(vec![]),
+                        ]),
+                    ]
+                );
+            }
+            if !cold && source != REDUCTION {
                 if source == SORTS {
                     assert!(
                         census
@@ -480,6 +672,49 @@ main { return call rooted() }
                 );
             }
         }
+    }
+}
+
+/// A native's display name does not certify its collection semantics.
+#[test]
+fn collection_length_admission_uses_native_evidence() {
+    struct Lookalike;
+    impl lash_kernel_doc::NativeFunction for Lookalike {
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Ok(lash_kernel_doc::Value::Int(17))
+        }
+    }
+    fn probe(
+        registry: &mut lash_kernel_doc::FunctionRegistry,
+        _: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+        let definition = lash_kernel_doc::parse_definition(
+            "function map.len(xs: Any) -> Int\nkernel 1\ncharge 1\nnative\n",
+        )
+        .unwrap();
+        vec![(
+            "map.len",
+            registry
+                .register(definition, Some(std::sync::Arc::new(Lookalike)))
+                .unwrap(),
+        )]
+    }
+    for layout in [Layout(0), Layout(3)] {
+        let mut embedder = Embedder::with(
+            "main { return map.len(map{}) }",
+            Setup {
+                probes: Some(probe),
+                layout,
+                ..Setup::default()
+            },
+        );
+        let Step::Ended(end) = embedder.run() else {
+            panic!("a constant native finishes")
+        };
+        assert_eq!(result(end), int(17), "{layout:?}");
     }
 }
 

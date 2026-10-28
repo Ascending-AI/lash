@@ -1,3 +1,4 @@
+use py.call_target
 use py.show
 use py.iter
 use py.iterator.step
@@ -324,7 +325,8 @@ body {
   if bool.not(same(start, absent)) {
     set total = start
   }
-  let items = invoke py.to_list(values)
+  let items = values
+  if bool.not(same(kind(items), "list")) { set items = invoke py.to_list(values) }
   for item in items {
     set total = invoke py.add(total, item)
   }
@@ -346,8 +348,13 @@ body {
   let ranks = items
   if keyed {
     set ranks = []
+    let callback = absent
+    if lt(0, list.len(items)) { set callback = invoke py.call_target(key) }
+    let arguments = [absent]
+    let keywords = map{}
     for item in items metered 2 {
-      let rank = invoke py.call(key, [item], map{})
+      set arguments[0] = item
+      let rank = apply callback(arguments, keywords, absent)
       set ranks[list.len(ranks)] = rank
     }
   }

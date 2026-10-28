@@ -213,6 +213,23 @@ pub(crate) struct Comparison {
     pub inverse: &'static str,
     pub aliases: &'static [&'static str],
 }
+impl Comparison {
+    pub fn for_receiver(mut self, proven: Ty) -> Self {
+        if self.swapped {
+            let native = match proven {
+                Ty::Dict => Some("map.contains"),
+                Ty::Set => Some("set.contains"),
+                Ty::List => Some("list.contains"),
+                _ => None,
+            };
+            if let Some(helper) = native {
+                self.helper = helper;
+                self.native = true;
+            }
+        }
+        self
+    }
+}
 macro_rules! comparison {
     ($source:ident, $helper:literal, $native:literal, $swapped:literal, $negated:literal, $inverse:literal, [$($alias:literal),*]) => {
         Comparison { source: ruff_python_ast::CmpOp::$source, helper: $helper, native: $native, swapped: $swapped, negated: $negated, inverse: $inverse, aliases: &[$($alias),*] }

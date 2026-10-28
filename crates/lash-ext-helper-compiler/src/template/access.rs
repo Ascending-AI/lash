@@ -17,6 +17,11 @@ impl Evaluator<'_> {
         };
         let steps = &state.steps;
         match (&target.ty, &index.ty, &definition.signature.result) {
+            (Type::Any, Type::Any, Type::Any)
+                if kinds == ["Map(_)", "Text(_)"] && map_read(steps, value) =>
+            {
+                Some(Element::ReadMap)
+            }
             (Type::List(item), Type::Int, Type::Any)
                 if **item == Type::Any && self.integer_read(kinds, steps, value) =>
             {

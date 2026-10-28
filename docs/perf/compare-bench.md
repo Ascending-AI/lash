@@ -3,11 +3,16 @@
 `lash-perf compare` is a developer benchmark, outside the merge path. It runs
 fresh TypeScript and Python kernel cells using `built_embedding`'s production
 worker natives and the released helper library, just as Test262 does. Guest
-memory and exact charge metering stay on. It does not start the durable engine
-for compute measurements. The testing-only
+memory and exact charge metering stay on by default. It does not start the
+durable engine for compute measurements. The testing-only
 `lash_vm_worker::core_support::compare` adapter owns lowering, linking and
 fresh machines; the harness receives opaque prepared cells and measurements.
 Production hosts continue to submit runs through the worker service.
+
+`--no-charge` and `--no-memory-meter` are diagnostic ablations for attributing
+accounting cost. Their receipts record the actual modes and omit disabled
+bounds. Neither option can be combined with `--history`; these runs do not
+establish the normal metered performance target.
 
 Build and locate the optimized executable:
 
@@ -188,7 +193,8 @@ The full optimized FIG-7485 snapshot on 2026-10-28 uses source
 optimizations from FIG-7486. All 17 Python workloads ran on Monty 1.4.0,
 and all 170 measured Monty results equal CPython's. All 85 engine/workload
 rows and 850 measured samples passed source, result and geometry checks.
-This table replaces the previous mixed snapshots with this one run.
+That snapshot and its attribution remain archived. The table below uses the
+merged FIG-7484 measurement described next for every numeric row.
 
 There were five low/high pairs, one warmup and factor 20, pinned to CPU 0,
 with observation off and exact charge and memory metering enabled. All 340
@@ -197,30 +203,46 @@ PMU running time. The process had an 8 GiB address-space cap. Shared-host
 wall time is unclaimed. Values are median incremental instructions/op;
 the Python and TS units retain their separate denominators.
 
-The three owned string rows are at most 2x Monty. No Lash row regresses
-more than 1% against the fresh starting baseline `1c93dfa7cfd2`, and every
-TS/QuickJS row is at most 10x. Before this lane, templating, string_build1
+In the archived FIG-7485 run, the three owned string rows were at most 2x
+Monty. No Lash row regressed more than 1% against the fresh starting baseline
+`1c93dfa7cfd2`, and every TS/QuickJS row was at most 10x.
+Before the string lane, templating, string_build1
 and int_to_string were 6.113x, 1.999x and 1.201x Monty respectively.
+
+All numeric rows in the table, including `json_transform`, were refreshed for
+FIG-7484 on 2026-10-28 from the full optimized tree based on main
+`54b4f002b6d4`. All 85 engine/workload rows completed with unchanged sources
+and work units, using three low/high pairs, one warmup and factor 20.
+All 204 Lash and 306 reference PMU windows ran at 100%.
+All five owned rows meet 2x Monty. No Lash row regresses more than 1% against
+the fresh starting baseline
+`1c93dfa7cfd2`. Every TS/QuickJS row meets 10x. The same-binary memory-off
+diagnostic gives the net deltas in the table; it does not explain the complete
+above-parity gap. Charge-off changes optimization admission and is confounded.
+Intrinsic-cost attribution remains open. Raw full-build results, source proof,
+charge census and diagnostics are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-coll.evidence/`, especially
+`final-20.json`, `final-20-assessment.json` and `semantic-costs.md`.
 
 | Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
 |---|---:|---:|---:|---:|
-| object_sort | 89970.59 | 7769.01 | 11.581x | 8.875x |
-| map_set_string | 45762.21 | 5409.13 | 8.460x | 6.698x |
-| records | 171206042.11 | 20827330.32 | 8.220x | 8.542x |
-| sort_bench | 20383512.16 | 5577128.84 | 3.655x | 7.229x |
-| json_transform | 5595196.00 | 1599403.37 | 3.498x | 2.136x |
-| string_build1 | 2479.41 | 1242.45 | 1.996x | 8.385x |
-| templating | 1116073.00 | 565666.37 | 1.973x | 3.217x |
-| empty_loop | 320.03 | 193.51 | 1.654x | 3.424x |
-| prop_write | 1164.26 | 741.98 | 1.569x | 9.613x |
-| func_closure_call | 2487.26 | 1771.89 | 1.404x | 7.002x |
-| object_build | 5191.57 | 3767.55 | 1.378x | 1.896x |
-| array_read | 878.70 | 695.25 | 1.264x | 8.668x |
-| func_call | 1047.24 | 902.56 | 1.160x | 2.952x |
-| prop_read | 1103.25 | 1023.26 | 1.078x | 9.899x |
-| int_to_string | 1211.91 | 1470.98 | 0.824x | 3.466x |
-| int_arith | 527.01 | 720.53 | 0.731x | 2.431x |
-| float_arith | 608.30 | 1251.41 | 0.486x | 2.358x |
+| object_sort | 15231.73 | 7769.02 | 1.9606x | 8.8896x |
+| map_set_string | 6131.37 | 5409.13 | 1.1335x | 6.7173x |
+| records | 37817321.84 | 20827300.95 | 1.8158x | 8.5265x |
+| sort_bench | 7529471.16 | 5577154.89 | 1.3501x | 7.2242x |
+| json_transform | 2691128.79 | 1599389.74 | 1.6826x | 1.7981x |
+| string_build1 | 2481.39 | 1242.51 | 1.9971x | 8.4088x |
+| templating | 1113274.74 | 565627.21 | 1.9682x | 3.2221x |
+| empty_loop | 319.99 | 193.40 | 1.6545x | 3.4249x |
+| prop_write | 1164.25 | 742.02 | 1.5690x | 9.5913x |
+| func_closure_call | 2485.25 | 1771.84 | 1.4026x | 6.9930x |
+| object_build | 5184.43 | 3767.55 | 1.3761x | 1.9060x |
+| array_read | 876.70 | 695.25 | 1.2610x | 8.6670x |
+| func_call | 1050.25 | 902.55 | 1.1637x | 2.9594x |
+| prop_read | 1101.24 | 1023.26 | 1.0762x | 9.8980x |
+| int_to_string | 1207.91 | 1470.95 | 0.8212x | 3.4665x |
+| int_arith | 527.01 | 720.63 | 0.7313x | 2.4305x |
+| float_arith | 608.29 | 1251.39 | 0.4861x | 2.3582x |
 
 Typed integer/string formatting now shares ordinary conversion paths,
 and f-strings use the same list-and-join lowering as TS templates.

@@ -610,8 +610,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let charged = match (value, hole.floats) {
                 (Value::Float(_), Some(units)) => units,
                 _ => {
-                    let (_, fast) = self.exe.lib(hole.lib).prepared.as_ref()?;
-                    fast.immediate(
+                    let function = self.exe.lib(hole.lib);
+                    function.prepared.as_ref()?;
+                    function.charge.immediate(
                         &[value, Value::Absent],
                         Fresh::of(0b10),
                         &Value::Bool(false),

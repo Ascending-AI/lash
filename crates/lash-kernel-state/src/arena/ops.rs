@@ -172,11 +172,8 @@ impl Arena {
         value: Value,
     ) -> Result<(), NativeError> {
         self.warm(handle)?;
-        let len = match self.objects.get(handle) {
-            Some(Body::List(sequence)) => sequence.len,
-            _ => return Err(malformed("a list handle names another body")),
-        };
         let sequence = list_mut(&mut self.objects, handle)?;
+        let len = sequence.len;
         let mut old = None;
         if index < len {
             let (chunk, at) = sequence.locate(index);

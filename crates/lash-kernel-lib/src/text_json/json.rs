@@ -84,6 +84,9 @@ fn convert_number(
     };
     match selected {
         Type::Int => {
+            if let Ok(word) = token.as_str().parse::<i64>() {
+                return Ok(Number::Int(Integer::from(word)));
+            }
             let integer = exact_integer(token.as_str(), new)?;
             Ok(Number::Int(Integer::new(integer)))
         }
@@ -137,13 +140,13 @@ fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeErr
 }
 
 #[derive(Debug)]
-enum Json {
+enum Json<'text> {
     Null,
     Bool(bool),
     Number(NumberToken),
-    Text(String),
-    Array(Vec<Json>),
-    Object(Vec<(String, Json)>),
+    Text(Cow<'text, str>),
+    Array(Vec<Json<'text>>),
+    Object(Vec<(Cow<'text, str>, Json<'text>)>),
 }
 
 mod reader;
@@ -164,7 +167,7 @@ enum Checked<'j> {
 }
 
 fn check<'j>(
-    json: &'j Json,
+    json: &'j Json<'_>,
     ty: &Type,
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
@@ -179,7 +182,7 @@ fn check<'j>(
         }
         return Err(mismatch());
     }
-    let list = |items: &'j [Json], element: &Type, new: &mut Nursery<'_>| {
+    let list = |items: &'j [Json<'_>], element: &Type, new: &mut Nursery<'_>| {
         items
             .iter()
             .map(|item| check(item, element, policy, new))
@@ -190,7 +193,11 @@ fn check<'j>(
         (Json::Null, Type::Null | Type::Any) => Checked::Null,
         (Json::Bool(value), Type::Bool | Type::Any) => Checked::Bool(*value),
         (Json::Text(text), Type::Text | Type::Any) => Checked::Text(text),
-        (Json::Text(text), Type::Enum(members)) if members.contains(text) => Checked::Text(text),
+        (Json::Text(text), Type::Enum(members))
+            if members.iter().any(|member| member == text.as_ref()) =>
+        {
+            Checked::Text(text)
+        }
         (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => Checked::Tuple(
             items
                 .iter()
@@ -203,7 +210,7 @@ fn check<'j>(
         (Json::Object(fields), Type::Any) => Checked::Record(
             fields
                 .iter()
-                .map(|(name, value)| Ok((name.as_str(), check(value, &Type::Any, policy, new)?)))
+                .map(|(name, value)| Ok((name.as_ref(), check(value, &Type::Any, policy, new)?)))
                 .collect::<Result<_, NativeError>>()?,
         ),
         (Json::Object(fields), Type::Record(record)) => {
@@ -217,7 +224,10 @@ fn check<'j>(
                     .iter()
                     .filter(|(name, _)| {
                         !matches!(record.rest, lash_kernel_value::RecordRest::Drop)
-                            || record.fields.iter().any(|field| field.name == **name)
+                            || record
+                                .fields
+                                .iter()
+                                .any(|field| field.name == name.as_ref())
                     })
                     .map(|(name, value)| {
                         let ty = record
@@ -227,7 +237,7 @@ fn check<'j>(
                             .map(|field| &field.ty)
                             .or(record.rest.kept_type())
                             .ok_or_else(mismatch)?;
-                        Ok((name.as_str(), check(value, ty, policy, new)?))
+                        Ok((name.as_ref(), check(value, ty, policy, new)?))
                     })
                     .collect::<Result<_, NativeError>>()?,
             )
@@ -239,7 +249,7 @@ fn check<'j>(
                     if !key_fits(name, &map.key) {
                         return Err(mismatch());
                     }
-                    Ok((name.as_str(), check(value, &map.value, policy, new)?))
+                    Ok((name.as_ref(), check(value, &map.value, policy, new)?))
                 })
                 .collect::<Result<_, NativeError>>()?,
         ),
@@ -783,7 +793,7 @@ fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeEr
 }
 
 fn decode_with_numbers(
-    json: &Json,
+    json: &Json<'_>,
     numbers: &Type,
     policy: NumberPolicy,
     maps: bool,

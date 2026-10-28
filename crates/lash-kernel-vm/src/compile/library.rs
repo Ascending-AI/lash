@@ -23,6 +23,13 @@ pub(crate) struct Lib {
 }
 
 impl Lib {
+    pub(crate) fn body_arity(&self, given: usize) -> bool {
+        given <= self.arity
+            && self.header.signature.params[given..]
+                .iter()
+                .all(|p| p.optional)
+    }
+
     /// A function that may answer without its body reserves that body's
     /// depth unit before offering its native the call (K-BND-002).
     /// Body-only calls reserve their ordinary frame at entry.
@@ -88,13 +95,29 @@ impl Lib {
     /// of its formula, which measures nothing. `None` for every other
     /// function.
     pub(crate) fn length_read(&self) -> Option<u64> {
-        (self.header.name.as_str() == "list.len"
-            && matches!(self.run, LibRun::Native { .. })
-            && self.arity == 1
+        let (kind, units) = self.collection_length()?;
+        (kind == lash_kernel_doc::ValueKind::List).then_some(units)
+    }
+
+    /// A collection's primitive length and its constant native formula.
+    pub(crate) fn collection_length(&self) -> Option<(lash_kernel_doc::ValueKind, u64)> {
+        use lash_kernel_doc::ValueKind;
+        let LibRun::Native { native, .. } = &self.run else {
+            return None;
+        };
+        let kind = native.prepare_collection_length()?;
+        (matches!(
+            kind,
+            ValueKind::List
+                | ValueKind::Tuple
+                | ValueKind::Map
+                | ValueKind::Set
+                | ValueKind::Record
+        ) && self.arity == 1
             && self.limit.is_none()
             && self.prepared.is_none()
             && self.charge.measurements().is_empty())
-        .then(|| self.charge.evaluate(|_, _| 0))
+        .then(|| (kind, self.charge.evaluate(|_, _| 0)))
     }
 
     /// A sequence native whose successful answer is one resident item.

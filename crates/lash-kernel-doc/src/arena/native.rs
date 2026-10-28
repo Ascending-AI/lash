@@ -867,6 +867,15 @@ pub trait NativeFunction: Send + Sync {
         None
     }
 
+    /// Certifies a collection length read over List, Tuple, Map, Set or Record.
+    /// On that kind, when its length fits a word integer, `call` must return
+    /// that length without allocation, counter work or other side effects.
+    /// Other kinds and cold objects retain the ordinary native call. The
+    /// machine still charges the definition's actual completion formula.
+    fn prepare_collection_length(&self) -> Option<crate::ValueKind> {
+        None
+    }
+
     /// Certifies a UTF-16 relation over two texts for the register machine.
     /// It must equal `call` on every text pair, including heap text, and
     /// allocate nothing. Only comparison operators qualify. The machine

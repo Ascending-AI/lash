@@ -1,7 +1,9 @@
 //! The source-certified merge keeps its variables and callback in the
 //! common register frame. A cold read, tight boundary or detailed observer
 //! runs the original instructions at the same coordinate.
-use super::super::compiled::{CollectionStep, Merge, Placement, ReadSlot, Visit};
+use super::super::compiled::{
+    CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
+};
 use super::*;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
@@ -19,7 +21,90 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             CollectionStep::Place(place) => self.place_step(frame, place),
             CollectionStep::Visit(visit) => self.visit_step(frame, visit),
             CollectionStep::ReadSlot(read) => self.read_slot_step(frame, read),
+            CollectionStep::Reduce(reduction) => self.reduce_step(frame, reduction),
+            CollectionStep::Append(append) => self.append_step(frame, append),
         }
+    }
+
+    fn append_step(
+        &mut self,
+        frame: &mut Frame<'e>,
+        append: &CollectionAppend,
+    ) -> Option<Result<Next, Stop>> {
+        let (SlotState::Value(target @ Value::List(list)), SlotState::Value(value)) =
+            (frame.slots[append.target], frame.slots[append.item])
+        else {
+            return None;
+        };
+        let length = i64::try_from(self.arena.len(list).ok()?).ok()?;
+        self.resident_room(lash_kernel_state::arena::VALUE_BYTES)
+            .then_some(())?;
+        self.store(None, target, Value::Int(length), value)?;
+        self.end_statement(frame);
+        frame.control.push(Position::Block(append.body, 1));
+        frame.statement = None;
+        frame.pc = frame.callee.compiled.blocks[append.body].end;
+        if self.arena.boundary_due() {
+            Some(Err(Stop))
+        } else {
+            Some(Ok(Next::Continue))
+        }
+    }
+
+    fn reduce_step(
+        &mut self,
+        frame: &mut Frame<'e>,
+        reduction: &Reduction,
+    ) -> Option<Result<Next, Stop>> {
+        if !self.depth_fits(reduction.depth) {
+            return None;
+        }
+        let number = |at| match frame.slots[at] {
+            SlotState::Value(value @ (Value::Int(_) | Value::Float(_))) => Some(value),
+            _ => None,
+        };
+        let (accumulator, item) = (number(reduction.accumulator)?, number(reduction.item)?);
+        let values = if reduction.reverse {
+            [item, accumulator]
+        } else {
+            [accumulator, item]
+        };
+        let signature = reduction
+            .checked
+            .map(|lib| &self.exe.lib(lib).header.signature);
+        if signature.is_some_and(|signature| {
+            !signature
+                .params
+                .iter()
+                .zip(values)
+                .all(|(param, value)| crate::compile::import_result_fits(&param.ty, value))
+        }) {
+            return None;
+        }
+        let paired = reduction.pair.and_then(|pair| match values {
+            [Value::Int(left), Value::Int(right)] => {
+                lash_kernel_doc::scalar::ints(pair.ints?, left, right)
+            }
+            [Value::Float(left), Value::Float(right)] => {
+                lash_kernel_doc::scalar::floats(pair.floats?, left, right)
+            }
+            _ => None,
+        });
+        let answer = paired.or_else(|| reduction.entry.call(&values))?;
+        if !matches!(answer, Value::Int(_) | Value::Float(_)) {
+            return None;
+        }
+        if signature
+            .is_some_and(|signature| !crate::compile::import_result_fits(&signature.result, answer))
+        {
+            return None;
+        }
+        self.end_statement(frame);
+        frame.slots[reduction.accumulator] = SlotState::Value(answer);
+        frame.control.push(Position::Block(reduction.body, 1));
+        frame.statement = None;
+        frame.pc = frame.callee.compiled.blocks[reduction.body].end;
+        Some(Ok(Next::Continue))
     }
 
     fn visit_step(&mut self, frame: &mut Frame<'e>, visit: &Visit) -> Option<Result<Next, Stop>> {
@@ -138,9 +223,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             SlotState::Value(value) => Some(value),
             _ => None,
         };
-        let Value::Bool(true) = value(place.list)? else {
+        if let Some(list) = place.list
+            && !matches!(value(list)?, Value::Bool(true))
+        {
             return None;
-        };
+        }
         let Value::List(target) = value(place.target)? else {
             return None;
         };
@@ -156,7 +243,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let next = place.advance.call(&[index, place.increment])?;
         self.arena.list_set(target, at, item).ok()?;
         frame.slots[place.index] = SlotState::Value(next);
-        frame.control.push(Position::Block(place.body, 4));
+        frame
+            .control
+            .push(Position::Block(place.body, place.statements));
         Some(self.finish_statement(frame, 1, None))
     }
 

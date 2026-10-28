@@ -16,7 +16,7 @@ impl State {
         if let Some(owner) = self.charging {
             let target = if self.heap { "heap" } else { "meter" };
             self.steps.push(Step::Meter(format!(
-                "{target}.form(p::function({:?}), p::FormCharge::{form});",
+                "{target}.form(const {{ p::function({:?}) }}, p::FormCharge::{form});",
                 owner.to_string()
             )));
         }
@@ -47,7 +47,7 @@ impl Evaluator<'_> {
         if let Some(given) = given {
             let target = if self.heap { "heap" } else { "meter" };
             state.steps.push(Step::Meter(format!(
-                "{target}.bill(p::function({:?}), &[{given}], {});",
+                "{target}.bill(const {{ p::function({:?}) }}, &[{given}], {});",
                 function.to_string(),
                 answer.code
             )));

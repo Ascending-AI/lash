@@ -110,7 +110,7 @@ pub fn prepared_scalar_charge(
 }
 
 /// What a region charges a call of `definition` on `args` that returned
-/// `result` from the values alone (`Fast::immediate`), the arguments at the
+/// `result` from the values alone (`Plan::immediate`), the arguments at the
 /// positions `fresh` sets being constructions of no members, for the owning
 /// library's independent charge oracle; `None` where the region measures the
 /// formula in the arena instead.
@@ -122,11 +122,7 @@ pub fn immediate_charge(
 ) -> Option<u64> {
     let params = &definition.signature.params;
     let plan = crate::compile::Plan::new(definition.charge()?, params);
-    crate::compile::Fast::new(definition.charge()?, params, &plan, false).immediate(
-        args,
-        crate::compile::Fresh::of(fresh),
-        result,
-    )
+    plan.immediate(args, crate::compile::Fresh::of(fresh), result)
 }
 
 /// How many call islands lowering forms for `program`'s document under its

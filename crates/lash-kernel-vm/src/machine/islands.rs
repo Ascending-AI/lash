@@ -148,6 +148,7 @@ pub(super) enum Stands {
 pub(super) struct Level {
     /// The original library completion owner, including its ordered arguments.
     library: Option<super::LibraryCall>,
+    boundary: Option<crate::compile::LibId>,
     link: lash_kernel_value::LinkId,
     code: CodeId,
     slots: Vec<SlotState>,
@@ -951,7 +952,16 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             .or_else(|| {
                 self.projection()
                     .is_none()
-                    .then(|| fast.immediate(args, Fresh::default(), &value))
+                    .then(|| {
+                        function
+                            .charge
+                            .immediate(args, Fresh::default(), &value)
+                            .or_else(|| {
+                                (!self.arena.any_cold())
+                                    .then(|| function.charge.resident_minimum(args, &value))
+                                    .flatten()
+                            })
+                    })
                     .flatten()
             }) {
             Some(units) => units,
@@ -1093,13 +1103,12 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         let units = if matches!(value, Value::Tuple(_)) {
             None
         } else if self.charging {
-            self.exe
-                .lib(site.lib)
-                .prepared
-                .as_ref()
-                .and_then(|(_, fast)| {
-                    fast.immediate(&[value, Value::Absent], Fresh::of(0b10), &answer)
-                })
+            let function = self.exe.lib(site.lib);
+            function.prepared.as_ref().and_then(|_| {
+                function
+                    .charge
+                    .immediate(&[value, Value::Absent], Fresh::of(0b10), &answer)
+            })
         } else {
             Some(0)
         };
@@ -1331,6 +1340,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         captured: u32,
         slots: &Slots,
         library: Option<super::LibraryCall>,
+        boundary: Option<crate::compile::LibId>,
     ) {
         let exit = &mut self.scratch.exit;
         let mut slots = slots[..plan.slots].to_vec();
@@ -1345,6 +1355,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         exit.regs.clear();
         exit.levels.push(Level {
             library,
+            boundary,
             link: self.link,
             code: plan.code,
             slots,

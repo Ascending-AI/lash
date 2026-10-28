@@ -174,7 +174,7 @@ impl Build<'_> {
         else {
             return None;
         };
-        let Some(Direct::Length(charge)) = native.direct else {
+        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, charge)) = native.direct else {
             return None;
         };
         let Op::Operator {
@@ -279,7 +279,10 @@ impl Build<'_> {
         else {
             return None;
         };
-        if !matches!(len.direct, Some(Direct::Length(_))) {
+        if !matches!(
+            len.direct,
+            Some(Direct::Length(lash_kernel_doc::ValueKind::List, _))
+        ) {
             return None;
         }
         let [
@@ -399,7 +402,7 @@ impl Build<'_> {
         {
             return None;
         }
-        let Some(Direct::Length(native)) = len.direct else {
+        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, native)) = len.direct else {
             return None;
         };
         let literal = matches!(index, Read::Literal { .. });

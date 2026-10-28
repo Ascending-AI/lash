@@ -57,9 +57,9 @@ py.sealed	58710d2567c00e176b0640b9b6d5138484b8123d08dfd53a42d88cfc81b72bd9	close
 py.to_list	a983e01d9150fef208e2170532f731b999b43ab1ea850fb2bd73c050d72d5ca9	callback	apply next	true	0	true	sum(4, size(value), size(result))	segment of 1 sites
 py.iadd	4041337de5548ab116ffc2b3cc0e956bdf14391ff09dbe0122d7bee1069280c7	callback	invoke py.to_list	true	0	false	sum(4, size(left), size(right))	segment of 1 sites
 py.contains	dadc83e22970fe0f01c342dbd601edcc7d94c8760460a994ce36f6109bcfa7ae	callback	apply next	true	0	true	statements	segment of 1 sites
-py.getitem	cddefc57ae988d32cc9f9688b34c2f121071c4257f5bdb155afcd9cd25e18bc5	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
-py.list_getitem	9366a6a860ba2f2ed096178ee964bb619a3cbd2e3291ee5e6dfab79f96e129d8	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
-py.tuple_getitem	2f99795f4721f72f900b1908b0ada7fbf22ed3b5e428127ac39c8cb29984ca8c	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.getitem	0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4	callback	invoke py.repr	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.list_getitem	7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
+py.tuple_getitem	cf8603da7a642649b4e38e555c42468444ef38bd21507a3c48f6aeb4983a60f7	callback	invoke py.getitem	true	0	false	sum(6, deep_size(index))	segment of 1 sites
 py.length	3893955e415b4454d388e0facfe77ebef15f5f5841fb00de7dc4b31b7097576f	closed	-	true	0	false	4	generated
 py.for_in.open	28387f24396aec23a3f7e3a8f6209aee0a4e0642c5565ecc43c1823429a8a017	closed	-	true	0	false	4	generated
 py.to_tuple	ec31630535a9f5b261ef85e0cb440f2e51d91bfc807ae3817833ce99061f8bbf	callback	invoke py.to_list	true	0	false	sum(4, product(size(value), size(value)))	segment of 1 sites
@@ -79,32 +79,33 @@ py.args.append	b55aacf2ccb9af09e4e6947b329100625c65e8cfed604c78271b1e8eb1a6e0ba	
 py.args.extend	ce5f37cc6b116ff37620812d1ec9bda8feea204241bb140a535a8469892d6f35	callback	invoke py.to_list	true	0	true	statements	segment of 1 sites
 py.kw.put	6ea033ae5fb9b9310d5d01757b4acd4e476bb37884d8889effb5cb4c259edc36	closed	-	true	0	false	statements	generated
 py.kw.extend	626afc5f942a98f5d0a00a2c2c596afadd4ea04f43e05bc1fa257cd418a29b48	closed	-	true	0	true	statements	generated
-py.bind	5a4e48279f307ded609004613d3c0003c432d2d8a0475100b00111362a98b161	callback	invoke py.to_tuple	true	0	true	statements	segment of 1 sites
-py.call	c98ee0f36b0dc8231c62bfe12574c8e461a1558ac77496d96710f756605a01db	callback	apply packed; apply namespace	false	0	false	statements	segment of 2 sites
+py.bind	ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec	callback	invoke py.to_tuple	true	0	true	statements	segment of 1 sites
+py.call_target	39f92fa4992a878680aedefefbdd582509590054a804f2a733c8a8abd11c1a9b	closed	-	false	0	false	4	generated
+py.call	0df1a87f8cdbc2ebb96465b82ac97c9ecf57961901df2b66ec27aa51818d5552	callback	apply packed; apply namespace	false	0	false	statements	segment of 2 sites
 py.dict.extend	b8c7a59d9c59397e3f1a59768fa670b4ad61eb46c9d0665cf416baf9cdd68ce6	closed	-	true	0	true	statements	generated
 py.unpack.star	03ba1fd25b3d1b85feb4ffc3379d4b085cab5e21741949cf0fcad61e7531b273	callback	invoke py.to_list	true	0	true	statements	segment of 1 sites
 py.iterator.step	c5a76027dc0c57d1543b45b1a2673e7c5136b8148327650e6e17de1d6f3e5f43	callback	apply next	false	0	false	statements	segment of 1 sites
-py.iter	d2bba21e4532ed0a8f2d1ba7da21c60e0b500f3375ad7c0603aa49bbeebef5ae	closed	-	false	2	false	statements	generated
+py.iter	90e0987fde6a175d54ad34844bf6d96101501348b40f9b5bef8f5190221d2a5d	closed	-	false	2	false	statements	generated
 py.next	6662ce9b1a02e4a2e3d1de5b81acedfab2585e90a9287f90c0961df6ee74da63	callback	invoke py.iterator.step	false	0	false	statements	segment of 1 sites
-py.map	e23ef736ebd2b1107b69dc3a63829e5f8986bbbb559853a7bc541d0803444d6d	closed	-	true	1	true	statements	generated
-py.filter	adc484049377de511856b28519839f63160a1e8fd07d9587926bfc79c3244652	closed	-	false	1	false	statements	generated
-py.iterator.open	ad6de85da37af10d7c2855c5a427f9ec62c25290fa55d237ecbcfef614c1451d	closed	-	false	0	false	statements	generated
+py.map	84ec8a74c57518590ec901229d42c7cf0cfbd3b203ecc519b4a4eb07bf7eac50	closed	-	true	1	true	statements	generated
+py.filter	a13187051b084c0bab8fd2b50f91e2d6aa8debe2149fefe19cdcf245438a339a	closed	-	false	1	false	statements	generated
+py.iterator.open	17d19fde58b36348479883d549ce12cfcb9b251a915dad21dbea73acf5f2630b	closed	-	false	0	false	statements	generated
 py.show	a45491ffb22c34e20f8d0d5d2ded720f97bb24b987cafddf382e1e02004b70d0	callback	invoke py.str	true	0	false	sum(4, deep_size(args), size(result))	segment of 1 sites
 py.number_text	719d1c4f82ff04dc0ada43f3716230b68739593aab2d9db9d88a7aa6918c741b	closed	-	true	0	false	sum(8, size(value), size(result))	generated
 py.number_underscores	d18182fc03e762c6a14bd5898f86f6a8ba3e7ee956818bd0d9fe42b505123abf	closed	-	true	0	false	sum(8, product(size(digits), size(digits)))	generated
 py.int	c5e11ab254e431ef1b1598e5d9128ac25d78dfd0e14c7e91ae5a01591d068899	callback	invoke py.repr	true	0	false	sum(6, size(value))	segment of 1 sites
 py.float	ab958f64f90baa3068f2be225a0ea667879ea334b8c337934286cdad5d7ea9d4	callback	invoke py.repr	true	0	false	sum(6, size(value))	segment of 2 sites
 py.abs	7457f88b82189aa4c73b0c612f9ca4d6462def754e24bb1ac83d17d2bc75abbc	closed	-	true	0	false	sum(4, size(value))	generated
-py.extreme	d8d2e1aa684157c2120d14bfc334c7c9970216f32a7eabe9b8982058cd097cb5	callback	invoke py.to_list; invoke py.call	true	0	false	sum(4, deep_size(args))	segment of 2 sites
-py.sum	57a98da8255e19e5fec18cda77523d80f08995c7f2a8c4b2076d36c175202f83	callback	invoke py.to_list	true	0	false	sum(4, deep_size(values))	segment of 1 sites
-py.sorted	0c4410c5c85917b031a0dbbc6850b0260128154da4064793d8941dc31f86c1b2	callback	apply sort; invoke py.to_list; invoke py.call	true	1	true	sum(8, product(2, size(values)), size(result))	segment of 3 sites
+py.extreme	b41103b7a9e5093216333ea4669e0ad06b248d2f5b4313e2d6dd556e36b1d28b	callback	invoke py.call; invoke py.to_list	true	0	false	sum(4, deep_size(args))	segment of 2 sites
+py.sum	5d4118316cdf2e84ea57ebfdcda45c052d1a2dbdf7d52447e28383390ba1f19e	callback	invoke py.to_list	true	0	false	sum(4, deep_size(values))	segment of 1 sites
+py.sorted	f4b193624fa16a3dbfc69a1b4be1f2d177a0101541703d10f42d6f2da8418561	callback	apply sort; apply callback; invoke py.to_list	true	1	true	sum(8, product(2, size(values)), size(result))	segment of 3 sites
 collection.range	d006425fd56bb6d784062858834cd78917dbf49d283741f3dbaddc9711a611cc	closed	-	true	0	false	sum(1, size(start), size(end), size(step), size(result))	generated
 py.range	daac05a8cbd3f7aa3a503662e56a92b10514afed312e2ad70ca355f817d6c2ee	closed	-	true	0	false	sum(4, size(result))	generated
 py.enumerate	60346475b321d03f62b02d6fe2548ef545b6e5583f1779aec0332e0e3ef0c915	callback	invoke py.to_list	true	0	false	sum(4, size(values), size(result))	segment of 1 sites
 py.zip	9555dc6228483c4b676f9af1847aeb7b27b5c093b52f967cb9218284ea764c2d	callback	invoke py.to_list	true	0	false	sum(4, deep_size(sequences), size(result))	segment of 1 sites
 py.reversed	909d60fae61de2c59298167ad6c0d86f0b16da128cf45c776d0030ca7de165e7	callback	invoke py.to_list	true	0	false	sum(4, size(values), size(result))	segment of 1 sites
-py.any	393e01006e81aea4ad54383db8ffcd3c137228529447918a5411517ea2952b6e	callback	invoke py.iterator.step	false	0	true	statements	segment of 1 sites
-py.all	d9f72c90b86beb474a36800ce6e9469eb3ed7c0714c5a71289ba52e631356300	callback	invoke py.iterator.step	false	0	true	statements	segment of 1 sites
+py.any	f02c468cd2a7d1ebe32fe264d71acfbeba03c08d56a9496ad503c28d665bb008	callback	invoke py.iterator.step	false	0	true	statements	segment of 1 sites
+py.all	0f39da0d462c6f0fa5b70d15b48bef14062b47ed9152cf70cc028ebfe016f4bb	callback	invoke py.iterator.step	false	0	true	statements	segment of 1 sites
 py.round	6d3de1b3d30ca68304403de2cdff65f8af46182311fed20c8a8d2f6ad71d92fb	closed	-	true	0	false	sum(6, size(value))	generated
 py.isinstance	580d8ecc23904513cdce8424e71f5c26e0e37f853a49dd9ff72222c1d1d5bacc	closed	-	true	0	false	sum(8, size(names))	generated
 py.ord	d655da821ba4dc1331a180933fe650c77a0103b27a88a4a4f4e9de12a0b10f6f	closed	-	true	0	false	6	generated
@@ -143,7 +144,7 @@ py.method.pop	e0365712d70dd75ae6ee5731cbb0fd82e8e2cf90dff6c7360a93cd5526e4fe17	c
 py.method.remove	e0c9c7b3042acb50b15455ad155a99cb5c4faf235cad50009ce8eea1560e9dbe	callback	invoke py.repr	true	0	false	sum(6, size(self), deep_size(value))	segment of 1 sites
 py.method.index	6a18b823cc397cc4d6c81168e0c8a2bc8b393888f6827713144fcff2787c2b5f	closed	-	true	0	true	sum(8, product(size(self), size(value)), deep_size(value))	generated
 py.method.count	1b7b67744c8f0b5a2c21903627b17e8087330f5948a450c9d413923eee914bf0	closed	-	true	0	true	sum(8, product(size(self), size(value)), deep_size(value))	generated
-py.method.sort	bb99d1171a5c1e1d4e53bccceb05cc19b3e5aabe1c76a90f1e66158ccf61a253	callback	invoke py.sorted	true	0	true	sum(8, product(4, size(self)))	segment of 2 sites
+py.method.sort	198cee3f0e77640033e02a945137d138d1223165ab6d48af9f2cea0cef5970a7	callback	invoke py.sorted	true	0	true	sum(8, product(4, size(self)))	segment of 1 sites
 py.method.reverse	612517d9cb72dc2e0cc667a8f4c41905c3e0baf5ca2a7a048a0b5564ef44cccc	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.copy	a899545cc6192375102c6ca3b2b21d62652f0cdcf3731327eeac0fe78402f864	closed	-	true	0	false	sum(4, size(self))	generated
 list.clear	27868c041abd5f698b725972b59a0ec7dad38dd305428ee0c02e40ef64a45de7	closed	-	true	0	true	sum(1, size(xs))	generated
@@ -224,11 +225,11 @@ py.method.isdisjoint	03c874541253e89f5c5f1a019a9c1d26f2ce566e9856767da3e35c8b9cb
 py.method.popitem	17a6fbf21025befb07abf3e929ba852a95daf5ecb6937f53a3b695de2c773067	closed	-	true	0	false	sum(8, size(self))	generated
 py.method.fromkeys	14e30b54229eb9f8cb3162c7b4b482f1d25ae30b23f63f1cb4e41410ba70c8e4	callback	invoke py.to_list	true	0	false	sum(8, size(source), size(result))	segment of 1 sites
 py.method.conjugate	093a188d7676bbef061bff27496d6ea0554a6873bc733e443460c27984e48282	closed	-	true	0	false	4	generated
-py.method.translate	f00ce3e14cd31aa9947c924e50acef86b62873131c4f3fe2b4504f544c07aded	callback	invoke py.getitem	true	0	true	sum(8, size(self), deep_size(table), size(result))	segment of 1 sites
+py.method.translate	40daef9d0e1d65bdacd1bda24abd432daa30de218a0615553f25cd74db33c7d8	callback	invoke py.getitem	true	0	true	sum(8, size(self), deep_size(table), size(result))	segment of 1 sites
 py.method.maketrans	95e33688fe18d64134b6b17e427886023df52f69f2565845da0c6973c05edebb	closed	-	true	0	true	sum(8, deep_size(first), size(second), size(deleted), size(result))	generated
 py.method.to_bytes	80c9ccb5a2a3dad8c624c5193c6dca43252add6c58c3c2da8c0af35b23ce05b8	closed	-	true	0	false	sum(256, product(128, product(sum(1, size(self), size(length), size(byteorder), size(signed), size(result)), sum(1, size(self), size(length), size(byteorder), size(signed), size(result)))))	generated
 py.int.from_octets	ba1ea9090826a356ee2f1c0b2919430414698874ac8543efea43bd8756e02e65	closed	-	false	0	false	sum(256, product(128, product(sum(1, deep_size(octets), size(byteorder), size(result)), sum(1, deep_size(octets), size(byteorder), size(result)))))	generated
-py.method.from_bytes	76b2d4822d7e7342f53b8058c46238c8f1a46c06765d61b06e4dd0c736b48eff	callback	invoke py.iterator.step	true	0	false	statements	segment of 1 sites
+py.method.from_bytes	92564eaef02a5a0717b88ae1e98e41f5c5e2fc90efe3375dbc0b42b7084584f5	callback	invoke py.iterator.step	true	0	false	statements	segment of 1 sites
 py.format.group	8d2c94239041063ea5927a95e9536576ad72d49cedb2e6675866f2ff371a7b44	closed	-	false	0	true	sum(4, product(size(digits), size(digits)))	generated
 py.format.exponent	4ba93616d9eb175441708407ac03aefbf3aca20d779325b22e7d22ec47cb7440	closed	-	false	0	false	sum(4, size(digits))	generated
 py.ascii	62947bdae2724873911778aaaaed3a38d41ebe1213bea6e394e10c56edd05a95	callback	invoke py.repr	true	0	false	sum(8, deep_size(value), size(result))	segment of 1 sites
@@ -237,9 +238,9 @@ py.format	25768642f4f3770f91b8d7f93c741a93b0117ce255b3385702f4ceedc19e6d3d	callb
 py.format.read_count	25a633f333cdfddf775308348d8d44fae2d5c4266af5ba8629283cb1d595ec06	closed	-	false	0	true	sum(8, size(spec))	generated
 py.format_parse	705a0e3b768d626ad7b0fe6bfc47f8d0a45b587a7f3396269dca3cdedce34183	callback	invoke py.format	true	0	true	sum(16, deep_size(value), size(spec), size(result))	segment of 1 sites
 py.format_spec	4c07b28a04bb87811bc309e8927e3494219ce4ece28e30a0ecaceb2c410e2715	callback	invoke py.repr; invoke py.ascii; invoke py.format_parse; invoke py.str	true	0	false	sum(16, deep_size(value), size(spec), size(result))	segment of 5 sites
-py.percent	c2dc068ab36076345e9990b5e169f52d8e633300d6121faa34a982d8afb9d060	callback	invoke py.format; invoke py.repr; invoke py.ascii; invoke py.str; invoke py.getitem	true	0	true	sum(16, size(pattern), deep_size(arguments), size(result))	segment of 7 sites
-py.mod	8bf0b4feaaa01caa6b25c2046a600100fb8d9c810e5cb34db951905fae0c422e	callback	invoke py.percent	true	0	false	sum(4, size(left), size(right))	segment of 1 sites
-py.divmod	f6fa45b84b1062b919a355e695139f2de1276768556d8731e5b67f4bf83eeeb1	callback	invoke py.mod	true	0	false	sum(6, size(left), size(right))	segment of 1 sites
+py.percent	2ade3ced9e11d4f14c651c30ec2e0dc0302924ff3328a578e3eab958d35ff345	callback	invoke py.getitem; invoke py.format; invoke py.repr; invoke py.ascii; invoke py.str	true	0	true	sum(16, size(pattern), deep_size(arguments), size(result))	segment of 7 sites
+py.mod	6ac0b7baaaf2b6fc921beb7f9a8bb3c8fb35826e5009e40b4fda2fe0cf9826b6	callback	invoke py.percent	true	0	false	sum(4, size(left), size(right))	segment of 1 sites
+py.divmod	4d5b049c8d4e20a0ba5298307e6e14a5ca7afdd5f0a3a40b2b6169ef4b20624c	callback	invoke py.mod	true	0	false	sum(6, size(left), size(right))	segment of 1 sites
 py.namespace	5e4f58dbb2b9765eff6b24441b775ce817223dcf95c9cbc32afbeae5f8c11f2d	closed	-	true	0	true	statements	generated
 py.vars	6e47e0d381e3160f5dfca0be4178b6ed3121b6ee317bdd5b1b323e472286dd69	closed	-	false	0	false	statements	generated
 py.slice.value	0468f37100cfd88f467ff1b4830b82eed64667c4e0e2d963922268b20148cc32	closed	-	false	0	false	statements	generated
@@ -253,9 +254,9 @@ py.type.name	07baf5c231d8abc239e0187960035d4325d6b29c5de3a45a79cef0bda1ae4a85	cl
 py.same	3bb84910728fdf84b09e867fbc278a06c1f0baf05afe5b76146cb0e7fcbedd9b	closed	-	false	0	false	statements	generated
 py.instance	5bf5682bfce7557ea2c361e3c01e5b719aa0ce44594aea361d921ed775334e66	callback	apply test	false	1	false	statements	segment of 1 sites
 py.type.construct	14a3c908676a16501f5a0a4f130d291cc25d87c02e40e436541eb1cfb4ea201d	callback	invoke py.exc.new; invoke py.to_tuple	true	0	false	statements	segment of 2 sites
-py.type.value	4ebbac3536670448a34c516c2467cf16eb19016c0546e0a0a79d22b121ce6887	callback	apply get_class	false	1	false	statements	segment of 1 sites
+py.type.value	6f1d03bd22c0be06b258e97830bca34dd701adee8b91195afa0213f062a80d45	callback	apply get_class	false	1	false	statements	segment of 1 sites
 py.catch.matches	71e07fddf67574d20e33e0c60b84e4b25281f6944bf4c6598463e48b712564df	callback	apply test	false	1	false	statements	segment of 1 sites
-py.raise.value	fefc4e2d47d20e63db5bfda79c98d49bb43b91913632d99e5e1122909988ae5e	callback	invoke py.call	false	0	false	statements	segment of 1 sites
+py.raise.value	7729cf48adebeef1dc241d920a885c1ee0e108d32972012b6aef05ec52ffc152	callback	invoke py.call	false	0	false	statements	segment of 1 sites
 py.slice.start	8ce876f7186d4c14429594af120054465e22fdc1c5f6e2c184a4492f1f6cd2bc	closed	-	false	0	false	statements	generated
 py.slice.stop	19d00c01d481182920c64312b92ef8ad2472a2f5beef36b2db644fa383154b91	closed	-	false	0	false	statements	generated
 py.slice.step	26ef683710766afe6dc29154231b55fcc28a799ac16b5d4a3f9e0bfe3429c05c	closed	-	false	0	false	statements	generated
@@ -269,16 +270,16 @@ py.gather	9bc363c5e9c4c8c768f15a2292a84c8c9ad0660c82000489abdc93f0198e3167	task	
 py.sleep	1ec26bfbb01d755a8be024f946ccd41ec6707458d03524fe2bb0e4104c548e48	task	yield; perform import 2	true	0	false	512	nests an action that is not a library call
 py.gather.options	b997f5567a697759d5708b4600a6629f1cca66d1cf9a1cf39ba949591340f638	closed	-	false	0	true	sum(4, size(kwargs))	generated
 py.json_quote	8041ef87ddd79600c6ff6c0082c4aff464ed04e9eeef77fc1be6e38143dabd13	closed	-	true	0	false	sum(8, size(value), size(result))	generated
-py.json_dump	3b35535a2d8af14afdc0c41b030f7ae420f5ae0589c05bf08269b8fae23446b1	callback	apply go	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
+py.json_dump	77ae49333da5b1e96d35f0b14e5c1f5cf8a43eea9f09d56c7e8a48443e95610e	callback	apply go	false	1	false	sum(16, deep_size(value), deep_size(options), size(result))	segment of 1 sites
 py.value_attribute	0cddd6740e4cba74c8420278fbfa760182dd3e96c2f8a4934e75c28d7caafe39	closed	-	false	0	false	32	generated
 py.format.attribute	124554e9f4b821d65de9f000e45cd4143fbfb4aaf20715aff996fa01942790d5	closed	-	true	0	false	sum(8, size(name))	generated
-py.method.format	91afdf6b3c87c0c0142fb6e463954066c57f831e4cbe0dc59147dd9802082dc3	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
-py.method.format_map	aee9b5f8527c30dced5a9ceec468b3b8724497eb3b93addd6ffb3de195a5fb3c	callback	invoke py.method.format	true	0	false	sum(8, size(self), deep_size(mapping), size(result))	segment of 1 sites
+py.method.format	8629523e9553c11e2a586b519956ec62f88ed2c4602ee096211312d6cf06220c	callback	apply render	true	1	false	sum(16, size(self), deep_size(args), deep_size(keywords), size(result))	segment of 1 sites
+py.method.format_map	c58478f198fed43e369a86b1b1e649911edca6dd14c9083edac7b2d7802c0534	callback	invoke py.method.format	true	0	false	sum(8, size(self), deep_size(mapping), size(result))	segment of 1 sites
 py.attribute_names	226c2fbdad5be0224843e4d45dcf6b0f8aba80678ac6199846401459d1e05e04	closed	-	true	0	false	sum(128, size(result))	generated
 py.dir	93efb4cc7526035740466082205bfd0e50fd1e42be80ad66e0a08d33b5d4a5a9	closed	-	true	0	false	statements	generated
-py.attribute	352ace6c146708cb008c66727ce14ac9ed6410c4b2895bfba5e09d670b57a2d1	closed	-	true	110	false	sum(1024, size(name))	generated
-py.getattr	5e1f056e00f2926725e048af7ba30811b76b79ed3806dd05bf840dab87374555	closed	-	true	0	false	sum(12, size(name))	generated
-py.hasattr	b349d8ed074ba1582edd4e42b660acf14f6ccc3c3cad323ee2da03640c2ee617	closed	-	true	0	false	sum(12, size(name))	generated
+py.attribute	08938a628eb782d8b6cee05db283fb37bc0a6e1516077f867114a5929ae94bf3	closed	-	true	110	false	sum(1024, size(name))	generated
+py.getattr	3c3ffeb45191fb6884377395b16f63e05831d4e6fc3a0a08fefc2870d749f9a6	closed	-	true	0	false	sum(12, size(name))	generated
+py.hasattr	330e4541eacd59afd7bb724037ae6e1909ce52e3c287ee4872d5eec8789ebddd	closed	-	true	0	false	sum(12, size(name))	generated
 py.math.acos	82321a42c8b1f0cd7ec0099d7625105a0db15f53a1b5231b2dbdd3018446801a	closed	-	false	0	false	32	generated
 py.math.acosh	cf92db901541ad48eb3fdba43b0602789d6d2a1fa9f1e03272760edb0d904dad	closed	-	false	0	false	32	generated
 py.math.asin	0a3b2e557fbe057904c996bf5d8ba295db2ad0c58ca70f403a77bc470c96b00e	closed	-	false	0	false	32	generated
@@ -322,6 +323,6 @@ py.math.radians	e9016b8a8f7dbad346f83287755dda8682898f0d708b86b017d74b7d3a286971
 py.math.factorial	4e5da8e12810f83c61ca48685d614d01af9ebcb427a72cb4d687db0177fcdf82	closed	-	false	0	true	32	generated
 py.math.gcd	5d6a2b4feb24bcac249f64727ec62460aaf45b3b58d86bb0e4d323cc1a940b42	closed	-	false	0	true	32	generated
 py.json.loads	9fb7cf351caa0dd8f3e6cceb5d92b478fe063a1c48212d44e9dd5360b04c6ec6	closed	-	false	0	false	32	generated
-py.json.dumps	5d934152b06526041c45d549043c05d7b0139c1ccd60829310239af04e36734e	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
-py.module.math	63c9ecb75321fb892bccdc36eddf211d07c9472d2ff44ebd6d4c65bdc1501be4	closed	-	false	42	false	64	generated
-py.module.json	1d9c68537b9b4122971a56c694057aef6733bfee7bac4a1da77dbe42f91b8c75	closed	-	false	2	false	64	generated
+py.json.dumps	1b40697f27f57524fd5353df27da957b685201ef68911604ea95d0c61c6158f0	callback	invoke py.json_dump	false	0	false	32	segment of 1 sites
+py.module.math	27e7ce63cb039c37b640e27de9cf9d76dad6a67e68db52937dec66f009e8c2ca	closed	-	false	42	false	64	generated
+py.module.json	8157449afbe299ce9d0ce8dc5aed4b19eb8ddb3600c8133f6726f5627c79ee72	closed	-	false	2	false	64	generated

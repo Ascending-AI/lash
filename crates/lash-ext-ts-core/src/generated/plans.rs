@@ -47008,31 +47008,31 @@ fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
         [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             let charge_mark = heap.mark();
             if let Some(value) = (|| {
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Statement);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Construction(2));
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Statement);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Construction(2));
                 let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("toJSON") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?)])?; let _ = v0;
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
                 let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)])?; let _ = v1;
-                heap.bill(p::function("c150c8d151f1f2833b809a12cf6b3b0a2ce3730753e55448637340a26c302171"), &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)], v1);
+                heap.bill(const { p::function("c150c8d151f1f2833b809a12cf6b3b0a2ce3730753e55448637340a26c302171") }, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)], v1);
                 heap.bind(v1, None)?;
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Statement);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Statement);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
                 let v2 = (natives[0].entry)(&[v1, Value::Int(2)])?; let _ = v2;
-                heap.bill(p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a"), &[v1, Value::Int(2)], v2);
-                heap.form(p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70"), p::FormCharge::Expression);
+                heap.bill(const { p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a") }, &[v1, Value::Int(2)], v2);
+                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
                 let v3 = match (natives[1].entry)(&[v2, Value::Int(1)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Int(1)])? }; let _ = v3;
-                heap.bill(p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), &[v2, Value::Int(1)], v3);
+                heap.bill(const { p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d") }, &[v2, Value::Int(1)], v3);
                 Some(v3)
             })() { return Some(value); }
             heap.rewind(charge_mark);

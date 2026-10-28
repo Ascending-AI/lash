@@ -49,11 +49,11 @@ enum Key {
     Text,
 }
 impl Key {
-    fn admits(self, value: &Expr) -> bool {
+    fn admits(self, proven: Ty, value: &Expr) -> bool {
         match self {
             Self::Any => true,
-            Self::Int => matches!(value, Expr::Literal(Literal::Int(_))),
-            Self::Text => matches!(value, Expr::Literal(Literal::Text(_))),
+            Self::Int => proven == Ty::Int || matches!(value, Expr::Literal(Literal::Int(_))),
+            Self::Text => proven == Ty::Str || matches!(value, Expr::Literal(Literal::Text(_))),
         }
     }
 }
@@ -125,17 +125,21 @@ const WRITES: &[Write] = &[
     },
 ];
 
-pub(crate) fn read(receiver: Ty, key: &Expr) -> Declaration {
+pub(crate) fn read(receiver: Ty, proven: Ty, key: &Expr) -> Declaration {
     READS
         .iter()
-        .find(|entry| entry.receiver.is_none_or(|kind| kind == receiver) && entry.key.admits(key))
+        .find(|entry| {
+            entry.receiver.is_none_or(|kind| kind == receiver) && entry.key.admits(proven, key)
+        })
         .unwrap_or_else(|| unreachable!("the final read accepts every receiver and key"))
         .call
 }
 pub(crate) fn write(receiver: Ty, key: &Expr) -> Store {
     WRITES
         .iter()
-        .find(|entry| entry.receiver.is_none_or(|kind| kind == receiver) && entry.key.admits(key))
+        .find(|entry| {
+            entry.receiver.is_none_or(|kind| kind == receiver) && entry.key.admits(Ty::Unknown, key)
+        })
         .unwrap_or_else(|| unreachable!("the final write accepts every receiver and key"))
         .store
 }

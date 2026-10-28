@@ -1455,6 +1455,8 @@ fn arms(arms: BTreeMap<String, Vec<Vec<&'static str>>>) -> String {
         .join("\n")
 }
 
+/// A text-key path that only looks up unchanged operands and returns the
+/// present entry. Missing keys retain the body's failure path.
 /// A record path whose only heap effects are a constant membership guard
 /// and the final write of its unchanged arguments. The runtime resolves the
 /// guard's native, so the certificate does not assume its implementation.

@@ -230,8 +230,9 @@ impl Lowerer<'_> {
                 }
                 index => {
                     let kind = self.subscript_kind(&subscript.value);
+                    let index_kind = self.subscript_kind(index);
                     let operands = self.operands(&[&subscript.value, index])?;
-                    self.getitem(kind, &operands)
+                    self.getitem(kind, index_kind, &operands)
                 }
             },
             PyExpr::Slice(slice) => Err(diagnostics::with_repair(
@@ -460,15 +461,30 @@ impl Lowerer<'_> {
     }
 
     /// One comparison, on operands already lowered.
-    fn comparison(&mut self, op: ast::CmpOp, left: Operand, right: Operand) -> Lowering<Operand> {
+    fn comparison(
+        &mut self,
+        op: ast::CmpOp,
+        left: Operand,
+        right: Operand,
+        proven: Ty,
+    ) -> Lowering<Operand> {
         let declaration = crate::constructs::operators::COMPARISONS
             .iter()
             .find(|entry| entry.source == op)
-            .unwrap_or_else(|| unreachable!("every comparison is declared"));
+            .copied()
+            .unwrap_or_else(|| unreachable!("every comparison is declared"))
+            .for_receiver(proven);
         if declaration.swapped {
             let left = self.pin(left);
             let right = self.pin(right);
-            let found = self.invoke(declaration.helper, &[right, left], Ty::Bool)?;
+            let found = if declaration.native {
+                Operand::inline(
+                    self.native(declaration.helper, vec![right.expr, left.expr])?,
+                    Ty::Bool,
+                )
+            } else {
+                self.invoke(declaration.helper, &[right, left], Ty::Bool)?
+            };
             return if declaration.negated {
                 Ok(Operand::inline(self.not(found.expr)?, Ty::Bool))
             } else {
@@ -492,13 +508,14 @@ impl Lowerer<'_> {
         else {
             return self.expr(&compare.left);
         };
+        let proven = self.subscript_kind(first);
         let operands = self.operands(&[&compare.left, first])?;
         if compare.ops.len() == 1 {
-            return self.comparison(*first_op, operands[0].clone(), operands[1].clone());
+            return self.comparison(*first_op, operands[0].clone(), operands[1].clone(), proven);
         }
         // `a < b < c`: `b` is evaluated once, and `c` only if `a < b`.
         let middle = self.pin(operands[1].clone());
-        let holds = self.comparison(*first_op, operands[0].clone(), middle.clone())?;
+        let holds = self.comparison(*first_op, operands[0].clone(), middle.clone(), proven)?;
         let result = self.temp();
         self.emit(Stmt::Let {
             name: result.clone(),
@@ -524,11 +541,12 @@ impl Lowerer<'_> {
             return Ok(());
         };
         let then_block = self.block(|this| {
+            let proven = this.subscript_kind(right);
             let mut right = this.expr(right)?;
             if ops.len() > 1 {
                 right = this.pin(right);
             }
-            let holds = this.comparison(*op, left, right.clone())?;
+            let holds = this.comparison(*op, left, right.clone(), proven)?;
             this.store(Place::Variable(result.clone()), holds);
             this.compare_rest(right, &ops[1..], &comparators[1..], result)
         })?;
