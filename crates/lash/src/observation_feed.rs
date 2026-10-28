@@ -30,6 +30,11 @@
 //! in-memory default holds this process's publications; a host whose
 //! sessions run on several processes configures one shared store, and every
 //! process's feed then carries every commit.
+//! The backend's keyed commit notifications also wake the feed. If its
+//! durable head moved beyond the last delivered commit, the feed continues
+//! again from a live position preceding newer commits at that revision,
+//! recovering a retained commit even when the old live subscription missed
+//! its notification.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::pin::Pin;
@@ -65,6 +70,7 @@ pub(crate) struct FeedSource {
     resident: RuntimeHandle,
     /// The commits this node is still publishing.
     published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
+    backend: lash_execution_contracts::backend::Backend,
 }
 
 impl FeedSource {
@@ -73,6 +79,7 @@ impl FeedSource {
         store: lash_core::store::SessionStore,
         work_limits: lash_trace::ObservationWorkLimits,
         published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
+        backend: lash_execution_contracts::backend::Backend,
     ) -> Self {
         let observation = resident.observe();
         Self {
@@ -80,6 +87,7 @@ impl FeedSource {
             #[cfg(test)]
             rebuild_barrier: None,
             published_heads,
+            backend,
             session_id: observation.session_id().clone(),
             transcript_decoders: observation.read_view.transcript_decoders().clone(),
             live_replay: Arc::clone(&resident.live_replay_store),
@@ -567,6 +575,7 @@ impl SessionObservationStream {
                 done: false,
                 delivered: None,
                 live: None,
+                changes: None,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -659,6 +668,7 @@ struct FeedState {
     /// established it: a `Committed` at or before it is a redelivery.
     delivered: Option<SessionRevision>,
     live: Option<LiveReplaySubscription>,
+    changes: Option<lash_durable::runner::KeyWatch>,
 }
 
 impl FeedState {
@@ -677,32 +687,109 @@ impl FeedState {
     }
 
     async fn step(&mut self) -> Option<Result<SessionObservationStreamItem>> {
+        if self.changes.is_none() {
+            let stores = self.source.backend.stores();
+            let actor = match lash_durable::ActorKey::session(self.source.session_id.as_str()) {
+                Ok(actor) => actor,
+                Err(error) => {
+                    return Some(Err(live_replay_error(LiveReplayStoreError::Store(
+                        error.to_string(),
+                    ))));
+                }
+            };
+            let transport = (self.source.backend.config().settings().notifier
+                == lash_durable::Notifier::AfterCommit)
+                .then(|| stores.node_wakes())
+                .flatten();
+            self.changes = Some(stores.wake_sink().observe(actor, transport).await);
+        }
         loop {
             if self.done {
                 return None;
             }
             let Some(live) = self.live.as_mut() else {
+                // Consume hints before the authoritative subscription read. A
+                // commit racing that read remains dirty for the next pass.
+                if let Some(changes) = &mut self.changes {
+                    changes.seen();
+                }
                 match self.subscribe().await {
                     Ok(Some(item)) => return Some(Ok(item)),
                     Ok(None) => continue,
                     Err(error) => return Some(Err(error)),
                 }
             };
-            let item = live.next().await;
+            let item = tokio::select! {
+                biased;
+                () = async {
+                    match &mut self.changes {
+                        Some(changes) => changes.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(changes) = &mut self.changes {
+                        changes.seen();
+                    }
+                    match self.source.durable_revision().await {
+                        Ok(head) if self.delivered.is_none_or(|held| head > held) => {
+                            self.rewind_to_held_revision();
+                            self.set_live(None);
+                        }
+                        Ok(_) => {},
+                        Err(error) => return Some(Err(error)),
+                    }
+                    continue;
+                },
+                item = live.next() => item,
+            };
             match item {
                 None => return None,
                 Some(Ok(event)) => match self.deliver(event) {
                     Delivery::Item(item) => return Some(Ok(item)),
                     Delivery::Skipped => {}
                     Delivery::Diverged => {
+                        if self.rewind_to_held_revision() {
+                            self.set_live(None);
+                            continue;
+                        }
                         return Some(self.rebuild(LiveReplayGapReason::Unavailable).await);
                     }
                 },
                 Some(Err(
                     LiveReplayStoreError::SubscriberLagged(_) | LiveReplayStoreError::Closed,
-                )) => self.set_live(None),
+                )) => {
+                    self.rewind_to_held_revision();
+                    self.set_live(None);
+                }
                 Some(Err(error)) => return Some(Err(live_replay_error(error))),
             }
+        }
+    }
+
+    /// Auxiliary traffic can pass a commit whose live notification was
+    /// lost. A replay cursor at the held revision precedes every newer
+    /// retained commit, even when the last delivered live position does not.
+    fn rewind_to_held_revision(&mut self) -> bool {
+        let Some(held) = self.delivered else {
+            return false;
+        };
+        let recovery = self
+            .source
+            .live_replay
+            .current_cursor(&self.source.session_id, held);
+        let Ok(from) = self.cursor.parse_for_session(&self.source.session_id) else {
+            return false;
+        };
+        let Ok(to) = recovery.parse_for_session(&self.source.session_id) else {
+            return false;
+        };
+        if from.replay_incarnation_id == to.replay_incarnation_id
+            && to.live_position < from.live_position
+        {
+            self.cursor = recovery;
+            true
+        } else {
+            false
         }
     }
 
@@ -776,7 +863,7 @@ impl FeedState {
         self.cursor = SessionCursor::new(
             at.replay_incarnation_id,
             &self.source.session_id,
-            delivered.max(at.revision),
+            delivered,
             at.live_position,
         );
     }

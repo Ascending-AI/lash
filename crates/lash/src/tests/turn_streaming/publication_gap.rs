@@ -16,6 +16,8 @@ enum Fault {
     Refuse,
     /// Hold it until the test releases it.
     Hold,
+    /// Retain the commit but lose its notification to the existing reader.
+    MissNotification,
 }
 
 /// A law's hold on a replay store: the commit publication it holds, and
@@ -73,6 +75,9 @@ struct CommitPublicationStore {
     gate: Gate,
     /// The cursor of the reader under test: only its reads pass the gate.
     reader: std::sync::Mutex<Option<lash_core::SessionCursor>>,
+    missed: Arc<std::sync::atomic::AtomicBool>,
+    published: tokio::sync::Notify,
+    boundary: tokio::sync::Mutex<()>,
 }
 
 impl CommitPublicationStore {
@@ -85,6 +90,9 @@ impl CommitPublicationStore {
             armed: std::sync::atomic::AtomicBool::new(false),
             gate: Gate::default(),
             reader: std::sync::Mutex::new(None),
+            missed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            published: tokio::sync::Notify::new(),
+            boundary: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -129,9 +137,16 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
                     ));
                 }
                 Fault::Hold => self.gate.hold().await,
+                Fault::MissNotification => self.missed.store(true, Ordering::SeqCst),
             }
         }
-        self.inner.publish(session, revision, events).await
+        let committed = events.iter().any(|event| commits_rows(&event.payload));
+        let _boundary = self.boundary.lock().await;
+        let result = self.inner.publish(session, revision, events).await;
+        if committed && result.is_ok() {
+            self.published.notify_one();
+        }
+        result
     }
 
     async fn replay_after_cursor(
@@ -148,7 +163,32 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
         cursor: &lash_core::SessionCursor,
     ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
     {
-        let outcome = self.inner.subscribe_after_cursor(cursor).await;
+        let _boundary = self.boundary.lock().await;
+        let prefix = if matches!(self.fault, Fault::MissNotification)
+            && self.reader.lock_recover().as_ref() == Some(cursor)
+        {
+            Some(self.inner.replay_after_cursor(cursor).await?)
+        } else {
+            None
+        };
+        let mut outcome = self.inner.subscribe_after_cursor(cursor).await;
+        if let Some(lash_core::LiveReplayOutcome::Replayed(prefix)) = prefix
+            && let Ok(lash_core::LiveReplaySubscribeOutcome::Subscribed(subscription)) = outcome
+        {
+            let missed = Arc::clone(&self.missed);
+            let replayed = prefix.len();
+            outcome = Ok(lash_core::LiveReplaySubscribeOutcome::Subscribed(
+                lash_core::LiveReplaySubscription::new(
+                    prefix,
+                    subscription.skip(replayed).filter_map(move |item| {
+                        let drop_notification = item.as_ref().is_ok_and(|event| {
+                            commits_rows(&event.payload) && missed.swap(false, Ordering::SeqCst)
+                        });
+                        std::future::ready((!drop_notification).then_some(item))
+                    }),
+                ),
+            ));
+        }
         self.read_by(cursor);
         outcome
     }
@@ -185,6 +225,163 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
+}
+
+/// FIG-7531: a reader opened from Current follows two adjacent turns without
+/// a timer, even when B's retained commit loses its live notification.
+#[tokio::test]
+async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_timer() -> Result<()> {
+    use crate::observe::{SessionObservationEventPayload, SessionObservationStreamItem};
+    use futures_util::FutureExt as _;
+    use lash_core::LiveReplayStore as _;
+
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        for miss_notification in [false, true] {
+            let replay = CommitPublicationStore::new(if miss_notification {
+                Fault::MissNotification
+            } else {
+                Fault::Hold
+            });
+            let reached = Arc::new(tokio::sync::Notify::new());
+            let released = Arc::new(tokio::sync::Notify::new());
+            let provider = crate::testing::TestProvider::builder()
+                .kind("queued-feed-commit")
+                .complete({
+                    let reached = Arc::clone(&reached);
+                    let released = Arc::clone(&released);
+                    move |request| {
+                        let reached = Arc::clone(&reached);
+                        let released = Arc::clone(&released);
+                        async move {
+                            let answer = last_user_text(&request);
+                            reached.notify_one();
+                            released.notified().await;
+                            Ok(text_response(&answer))
+                        }
+                    }
+                })
+                .build()
+                .into_handle();
+            let backend = sqlite_memory_store_backend().await;
+            let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+                .serve_test_llm_profile(provider, mock_llm_profile_spec())
+                .live_replay_store(replay.clone())
+                .build(crate::tests::host::runtime_lease_owner())?;
+            let session_id = SessionId::from("queued-feed-commit");
+            let writer = created_session(&core, session_id.clone())
+                .await
+                .open()
+                .await?;
+            let state = lash_core::store::load_session_window_state(
+                &writer.binding.store(),
+                lash_core::store::WindowSelector::Current,
+            )
+            .await?
+            .expect("created head")
+            .state;
+            let reader = core
+                .session(session_id.clone())
+                .observe_with_state(state)
+                .await?;
+            let snapshot = reader.observe().snapshot().await?;
+            *replay.reader.lock_recover() = Some(snapshot.cursor.clone());
+            let mut feed = reader.observe().subscribe_and_recover(snapshot.cursor);
+            tokio::select! {
+                biased;
+                _ = feed.next() => panic!("the initial feed has no events"),
+                () = replay.gate.read.notified() => {},
+            }
+            let a = writer.send(TurnInput::text("answer A")).await?;
+            reached.notified().await;
+            let b = writer.send(TurnInput::text("answer B")).await?;
+            released.notify_one();
+            reached.notified().await;
+            assert_ne!(a.input_id(), b.input_id(), "B is a separately queued input");
+
+            let mut commits = Vec::new();
+            let record = |item: SessionObservationStreamItem, commits: &mut Vec<String>| match item
+            {
+                SessionObservationStreamItem::Gap { gap, .. } => {
+                    panic!("retained commits have no gap: {gap:?}, missed={miss_notification}")
+                }
+                SessionObservationStreamItem::Event(event) => {
+                    if let SessionObservationEventPayload::Committed { entries, .. } =
+                        &event.payload
+                    {
+                        commits.extend(
+                            entries
+                                .iter()
+                                .filter(|entry| entry.provenance.is_turn_reply)
+                                .map(|entry| {
+                                    entry
+                                        .provenance
+                                        .turn_id
+                                        .as_ref()
+                                        .expect("reply turn")
+                                        .as_str()
+                                        .to_owned()
+                                }),
+                        );
+                    }
+                }
+            };
+            // B is held at its final model reply while A's commit is consumed.
+            replay.published.notified().await;
+            while commits.is_empty() {
+                record(
+                    feed.next().await.expect("the feed stays open")?,
+                    &mut commits,
+                );
+            }
+            while let Some(item) = feed.next().now_or_never() {
+                record(item.expect("the feed stays open")?, &mut commits);
+            }
+            let a_run = a.outcome().await?.run().cloned().expect("A committed");
+            if miss_notification {
+                replay.arm();
+            }
+            released.notify_one();
+            let b_run = b.outcome().await?.run().cloned().expect("B committed");
+            replay.published.notified().await;
+            let head = replay
+                .inner
+                .tail_cursor(&session_id)
+                .parse()
+                .expect("retained head")
+                .revision;
+            replay
+                .inner
+                .publish(
+                    &session_id,
+                    head,
+                    vec![lash_core::LiveReplayEventDraft::new(
+                        None::<lash_vocabulary::identity::TurnId>,
+                        SessionObservationEventPayload::ResidentChanged,
+                    )],
+                )
+                .await
+                .expect("auxiliary traffic after B's commit");
+            tokio::time::pause();
+            let frozen = tokio::time::Instant::now();
+            for _ in 0..256 {
+                while let Some(item) = feed.next().now_or_never() {
+                    record(item.expect("the feed stays open")?, &mut commits);
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(tokio::time::Instant::now(), frozen, "no fallback timer ran");
+            assert_eq!(
+                commits,
+                vec![a_run.as_str(), b_run.as_str()],
+                "ordered and once, missed={miss_notification}"
+            );
+            tokio::time::resume();
+            core.shutdown().await?;
+        }
+        Ok(())
+    })
+    .await
+    .expect("queued-turn feed law deadlock watchdog")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

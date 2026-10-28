@@ -33,6 +33,16 @@ The facade's feed (`ObservableSession::snapshot` and `subscribe_and_recover`, wh
 
 `LiveReplayStore` is implementable outside lash: `LiveReplaySubscription::new(replay, live)` builds a subscription from the replayed prefix and any stream of later events, and the trait documents the cursor contract (incarnation as publisher epoch, ordered and exclusive replay, typed gaps, current cursors behind newer revisions). The `live_replay_tests!` conformance catalogue certifies an implementation, including a multi-session burst with no loss, reordering or duplicate. The in-memory store stays the default and holds one process's publications; a host whose sessions run on several processes supplies one shared store, and the snapshot is the durable head either way. `lash::postgres::PostgresLiveReplayStore` is that shared store over PostgreSQL (FIG-5101): each session's head row is its sequencer, taken under its row lock inside the transaction that appends a replica tick's events and rings one `pg_notify` doorbell; the log is an UNLOGGED table whose sentinel row rotates the incarnation when crash recovery or failover truncates it; retention is per session by count, age (database time) and bytes; and a per-replica mirror of the heads answers the synchronous `current_cursor`, earlier rather than later when it has not learned a position. It passes `live_replay_tests!`.
 
+The feed subscribes to the backend's keyed session-change notifications before
+its authoritative subscription read (FIG-7531). A notification checks the
+durable head; if it advanced beyond the last delivered commit, the feed
+resubscribes at that delivered revision, rewinding its live position before
+newer retained commits when auxiliary traffic passed them. This
+recovers retained commits whose live notification was missed without a timer.
+Auxiliary events advance the live position but never the revision the
+consumer holds. The backend's existing listener carries the same hints across
+processes; replay retention still determines whether continuation is possible.
+
 ## Consequences
 
 Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. Hosts project local observations into their own DTOs ([ADR 0136](0136-hosts-own-their-wire-contracts.md)). Custom live replay stores implement per-session sequencing and ordered publication themselves; the `LiveReplayStore` trait states every obligation and `lash-conformance` certifies them.

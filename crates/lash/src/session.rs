@@ -888,6 +888,7 @@ impl LashSession {
             store: self.binding.store(),
             observation_work_limits: self.binding.observation_work_limits(),
             published_heads: self.binding.published_heads(),
+            backend: self.binding.effect_host().backend().clone(),
         }
     }
 
@@ -1187,6 +1188,7 @@ pub struct ObservableSession {
     pub(crate) runtime: RuntimeHandle,
     store: lash_core::store::SessionStore,
     published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
+    backend: lash_execution_contracts::backend::Backend,
 }
 
 impl ObservableSession {
@@ -1200,6 +1202,7 @@ impl ObservableSession {
             self.store.clone(),
             self.observation_work_limits,
             Arc::clone(&self.published_heads),
+            self.backend.clone(),
         )
     }
 
