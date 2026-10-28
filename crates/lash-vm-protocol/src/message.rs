@@ -412,11 +412,27 @@ pub enum HostReadKind {
 
 /// What a run has used so far, as its machine meters it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "(Option<u64>, u64, u32)", into = "(Option<u64>, u64, u32)")]
 pub struct RunMeters {
     pub charged: Option<u64>,
     pub memory: u64,
     pub live_tasks: u32,
+}
+
+impl From<RunMeters> for (Option<u64>, u64, u32) {
+    fn from(meters: RunMeters) -> Self {
+        (meters.charged, meters.memory, meters.live_tasks)
+    }
+}
+
+impl From<(Option<u64>, u64, u32)> for RunMeters {
+    fn from((charged, memory, live_tasks): (Option<u64>, u64, u32)) -> Self {
+        Self {
+            charged,
+            memory,
+            live_tasks,
+        }
+    }
 }
 
 /// One part of the parent's immutable holdings, which cross once after

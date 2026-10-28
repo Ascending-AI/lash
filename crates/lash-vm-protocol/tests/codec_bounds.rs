@@ -164,7 +164,11 @@ fn a_control_frame_decodes_without_allocating() {
         message: WorkerMessage::Progress {
             phase: WorkerPhase::Computing,
             cpu_nanos: 1_000_000,
-            meters: None,
+            meters: Some(lash_vm_protocol::RunMeters {
+                charged: Some(100),
+                memory: 4096,
+                live_tasks: 1,
+            }),
             work: None,
         },
     };
