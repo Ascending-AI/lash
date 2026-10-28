@@ -167,14 +167,6 @@
     "peak_bytes": 107343872,
     "samples": 27
   },
-  "lash-internal-vm-runtime/lash_vm_runtime": {
-    "cpu_count": 1,
-    "memory_kb": 786432,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 335880192,
-    "peak_bytes": 335880192,
-    "samples": 29
-  },
   "lash-internal-llm-tools/lash_llm_tools": {
     "cpu_count": 1,
     "memory_kb": 524288,
@@ -334,14 +326,6 @@
     "p99_peak_bytes": 191733760,
     "peak_bytes": 191733760,
     "samples": 25
-  },
-  "lash-internal-protocol-standard/native_tools": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 95854592,
-    "peak_bytes": 95854592,
-    "samples": 56
   },
   "lash-internal-protocol-standard/protocol_scenarios": {
     "cpu_count": 1,
@@ -518,6 +502,14 @@
     "p99_peak_bytes": 167858176,
     "peak_bytes": 167858176,
     "samples": 43
+  },
+  "lash-internal-vm-runtime/lash_vm_runtime": {
+    "cpu_count": 1,
+    "memory_kb": 786432,
+    "p95_cores": 1.07,
+    "p99_peak_bytes": 335880192,
+    "peak_bytes": 335880192,
+    "samples": 29
   },
   "lash-internal-vm-worker/lash_vm_worker": {
     "cpu_count": 1,
