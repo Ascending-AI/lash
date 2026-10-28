@@ -1000,7 +1000,12 @@ impl crate::compile::room::Execution for RoomNativeExecution<'_> {
 struct RoomNativeFacts<'a>(&'a crate::compile::room::CheckedRoom);
 impl crate::compile::room::Facts for RoomNativeFacts<'_> {
     fn measure(&self, m: &crate::compile::room::Measure) -> Option<i128> {
-        matches!(m, crate::compile::room::Measure::Release(_)).then_some(0)
+        use crate::compile::room::{Measure, Owner};
+        match m {
+            Measure::Release(_) => Some(0),
+            Measure::Local(Owner::Operand(_)) => Some(16),
+            _ => None,
+        }
     }
     fn call(
         &self,
