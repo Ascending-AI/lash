@@ -137,6 +137,13 @@ struct Tables {
     stmts: Vec<Stmt>,
     /// Every statement's ops, and what they index.
     stream: Stream,
+    /// Derived from unchanged source before layout transforms. Runtime pool
+    /// reads are a later phase; these entries are code-owned, never serialized.
+    #[allow(
+        dead_code,
+        reason = "phase-one code projection; runtime reads follow in phase three"
+    )]
+    constant_pools: BTreeMap<Unit, doc::constant_pool::ConstantPool>,
     /// Each statement's step edge, by statement.
     edges: Vec<StepEdge>,
     /// Each function body by its site, and each block by its own: how a
@@ -1228,6 +1235,8 @@ struct Compiler<'a> {
     live: Vec<(u32, u32, Reg)>,
     /// The site path length of the statement being compiled.
     stmt_depth: u32,
+    document_owner: Option<lash_kernel_value::DocumentId>,
+    constant_pools: BTreeMap<Unit, doc::constant_pool::ConstantPool>,
 }
 
 use document_code::compile_document;
@@ -1317,6 +1326,8 @@ impl<'a> Compiler<'a> {
             path: Vec::new(),
             live: Vec::new(),
             stmt_depth: 0,
+            document_owner: None,
+            constant_pools: BTreeMap::new(),
         }
     }
 
@@ -1386,6 +1397,7 @@ impl<'a> Compiler<'a> {
             blocks: self.blocks,
             stmts: self.stmts,
             stream: self.stream,
+            constant_pools: self.constant_pools,
             edges,
             code_at,
             closure_at,

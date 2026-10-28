@@ -858,21 +858,8 @@ pub mod heap_values {
         })
     }
 
-    /// LocalCostV1 prices immutable data at each holding location.
-    pub fn local_cost(value: &PageValue) -> u64 {
-        16u64.saturating_add(match value {
-            PageValue::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
-            PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
-            PageValue::Text(v) => v.summary.utf8_bytes,
-            PageValue::Bytes(v) => v.len,
-            PageValue::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
-            PageValue::Tuple(v) => v.summary.cost.0,
-            PageValue::Error(v) => v.cost.0,
-            PageValue::Function(_) => 64,
-            PageValue::Handle(v) => (v.kind.len() + v.id.len()) as u64,
-            _ => 0,
-        })
-    }
+    /// The canonical logical occurrence price, also used to validate summaries.
+    pub use crate::logical_held::local_cost;
     fn nesting(value: &PageValue) -> u32 {
         match value {
             PageValue::Tuple(t) => t.summary.depth,

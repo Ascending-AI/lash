@@ -12,6 +12,7 @@
 //! Its neutral leaves live in lash-kernel-value; it depends on no runtime crate.
 
 mod ast;
+pub mod constant_pool;
 use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 mod caption;
 mod correspondence;
@@ -62,6 +63,8 @@ mod graph_codec;
 /// The persistent semantic heap's page vocabulary: what pages, saved rows
 /// and projection hold (FIG-6195, FIG-6708).
 pub mod heap;
+pub mod logical_held;
+pub use logical_held::LogicalHeldV1;
 mod identified;
 pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
 pub use identified::{IdentifiedDocument, document_work};

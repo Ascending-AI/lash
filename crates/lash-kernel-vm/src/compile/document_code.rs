@@ -11,6 +11,7 @@ enum UnitSource<'a> {
 /// library body it reaches.
 pub(super) fn compile_document(
     document: &Document,
+    identity: lash_kernel_value::DocumentId,
     functions: &BTreeMap<FunctionId, &FunctionDefinition>,
     library: &PreparedLibrary,
     authored: &BTreeSet<FunctionId>,
@@ -78,6 +79,7 @@ pub(super) fn compile_document(
             sites: prepared.sites,
         },
     );
+    compiler.document_owner = Some(identity);
     compiler.imports = imports
         .iter()
         .filter_map(|(key, (_, function))| {

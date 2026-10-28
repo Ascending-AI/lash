@@ -4,6 +4,7 @@ use super::heap_impl::{PagedHeap, census_fault, keyed};
 use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::*;
 use super::{FamilyRecord, FrozenRef, HeapWriteError, MembershipRun, ObjectKind, SealBudget};
+use lash_kernel_doc::LogicalHeldV1;
 use lash_kernel_doc::heap::*;
 use std::sync::Arc;
 use {
@@ -65,7 +66,7 @@ impl ObjectHead {
     }
 }
 pub fn value_cost(value: &PageValue) -> u64 {
-    lash_kernel_doc::heap_values::local_cost(value)
+    LogicalHeldV1::local(value)
 }
 
 impl Cell for PageValue {
@@ -90,7 +91,7 @@ impl Cell for PageValue {
 }
 impl Cell for EntityId {
     fn cost(&self) -> u64 {
-        8
+        LogicalHeldV1::ENTITY_EDGE
     }
 }
 impl Cell for Ordinal {
@@ -158,17 +159,17 @@ impl Cell for ObjectHead {
         }
     }
     fn cost(&self) -> u64 {
-        32u64.saturating_add(match &self.body {
-            Body::List { rows, .. } => rows.cost(),
+        match &self.body {
+            Body::List { rows, .. } => LogicalHeldV1::object(rows.cost()),
             Body::Table {
                 kind: ObjectKind::Record,
                 rows,
                 ..
-            } => rows.cost().saturating_sub(rows.len() * 16),
-            Body::Table { rows, .. } => rows.cost(),
-            Body::Closure { captures, .. } => captures.cost(),
-            Body::Variable(value) => value_cost(value),
-        })
+            } => LogicalHeldV1::record(rows.cost(), rows.len()),
+            Body::Table { rows, .. } => LogicalHeldV1::object(rows.cost()),
+            Body::Closure { captures, .. } => LogicalHeldV1::object(captures.cost()),
+            Body::Variable(value) => LogicalHeldV1::object(value_cost(value)),
+        }
     }
     fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
         match &mut self.body {
@@ -468,7 +469,7 @@ pub mod execution {
     }
     impl Cell for OccurrenceRecord {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
     }
     impl TokenCodec for OccurrenceRecord {
@@ -525,12 +526,12 @@ pub mod execution {
     }
     impl Cell for u64 {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
     }
     impl Cell for TaskId {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
         fn task_edges(&self) -> u64 {
             1
@@ -538,12 +539,12 @@ pub mod execution {
     }
     impl Cell for Name {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
     }
     impl Cell for LoopRecord {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
         fn children(&self, out: &mut Vec<PageRef>) {
             self.site.children(out);
@@ -554,7 +555,7 @@ pub mod execution {
     }
     impl Cell for FinallyRecord {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
         fn children(&self, out: &mut Vec<PageRef>) {
             self.site.children(out);
@@ -572,12 +573,12 @@ pub mod execution {
     }
     impl Cell for JoinerRecord {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
     }
     impl Cell for WaitRecord {
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
         fn children(&self, out: &mut Vec<PageRef>) {
             match &self.phase {
@@ -607,7 +608,7 @@ pub mod execution {
             self.members.task_edges()
         }
         fn cost(&self) -> u64 {
-            0
+            LogicalHeldV1::BOOKKEEPING
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             self.members.seal_nested(access, work)
@@ -710,11 +711,13 @@ pub mod execution {
                 + self.pending.as_ref().map_or(0, PendingRecord::task_edges)
         }
         fn cost(&self) -> u64 {
-            64 + self.bindings.cost()
-                + self.iterated.cost()
-                + self.departing.cost()
-                + self.arguments.as_ref().map_or(0, Tree::cost)
-                + self.pending.as_ref().map_or(0, PendingRecord::cost)
+            LogicalHeldV1::frame([
+                self.bindings.cost(),
+                self.iterated.cost(),
+                self.departing.cost(),
+                self.arguments.as_ref().map_or(0, Tree::cost),
+                self.pending.as_ref().map_or(0, PendingRecord::cost),
+            ])
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.bindings.seal_nested(access, work)?
@@ -810,7 +813,7 @@ pub mod execution {
         }
 
         fn cost(&self) -> u64 {
-            self.frames.cost() + self.held().map_or(0, value_cost)
+            LogicalHeldV1::task(self.frames.cost(), self.held())
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.joiners.seal_nested(access, work)?

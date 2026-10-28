@@ -809,3 +809,183 @@ fn an_immutable_document_admission_never_authorizes_a_changed_body() {
     Arc::make_mut(&mut document).library.insert(absent);
     assert!(checks.check(&document, &helpers).is_err());
 }
+
+/// FIG-7522: an immutable payload belongs to its exact source version and
+/// coordinate; equal bytes never authorize another archive entry.
+#[test]
+fn pool_keys_authenticate_exact_source_versions_and_mutable_templates() {
+    use crate::constant_pool::{ConstantPool, PoolOwner};
+    use crate::{Expr, Literal, Node};
+    use lash_kernel_value::tokens::{encode_body, logical_digest};
+
+    let mut definition = parse_definition(
+        "function constants() -> Any\nkernel 1\ncharge 1\nbody { let xs = [(1, 2), (1, 2)] let packed = \"a long packed immutable payload\" return (xs, packed) }",
+    ).unwrap();
+    definition.body_mut().unwrap().block.push(crate::Stmt::Let {
+        name: lash_kernel_value::Name::new("ignored"),
+        value: crate::Rhs::Action(crate::Action::Call {
+            callee: crate::Callee::Value(lash_kernel_value::Name::new("callback")),
+            args: vec![
+                crate::Atom::Literal(Literal::Text("an atom payload".into())),
+                crate::Atom::Literal(Literal::Function(
+                    lash_kernel_value::FunctionId::from_bytes([7; 32]),
+                )),
+                crate::Atom::Variable(lash_kernel_value::Name::new("xs")),
+            ],
+        }),
+    });
+    let old = ConstantPool::for_function(&definition);
+    let mut archived = definition.clone();
+    archived.body_mut().unwrap().block.push(crate::Stmt::Do {
+        value: Expr::Literal(Literal::Null),
+    });
+    let new = ConstantPool::for_function(&archived);
+    let body = &definition.body().unwrap().block;
+    let mut pending = vec![(Vec::new(), Node::Block(body))];
+    let mut expected = Vec::new();
+    while let Some((path, node)) = pending.pop() {
+        // Independent source oracle: no mutable expression or function literal
+        // can authorize code-owned data, even when all its leaves are closed.
+        if let Node::Expr(expr) = node {
+            let mut leaves = vec![expr];
+            let mut immutable = true;
+            while let Some(leaf) = leaves.pop() {
+                match leaf {
+                    Expr::Literal(Literal::Function(_)) => immutable = false,
+                    Expr::Literal(_) => {}
+                    Expr::Tuple(items) => leaves.extend(items),
+                    _ => immutable = false,
+                }
+            }
+            if immutable {
+                let entry = old
+                    .at(&crate::constant_pool::PoolCoordinate {
+                        path: path.clone(),
+                        atom: None,
+                    })
+                    .unwrap();
+                assert_eq!(entry.key.owner, PoolOwner::Function(definition.identity()));
+                assert_eq!(entry.payload.as_ref(), encode_body(expr));
+                assert_eq!(entry.key.digest, logical_digest(&encode_body(expr)));
+                assert!(old.authenticates(&entry.key));
+                assert!(
+                    !new.authenticates(&entry.key),
+                    "archive version was ignored"
+                );
+                let mut bad = entry.key.clone();
+                bad.digest[0] ^= 1;
+                assert!(!old.authenticates(&bad));
+                bad = entry.key.clone();
+                bad.coordinate.path.push(999);
+                assert!(!old.authenticates(&bad));
+                expected.push(entry.key.clone());
+            }
+        }
+        if let Node::Action(crate::Action::Call { args, .. }) = node {
+            let coordinate = crate::constant_pool::PoolCoordinate {
+                path: path.clone(),
+                atom: Some(0),
+            };
+            let entry = old.at(&coordinate).expect("closed atom payload");
+            let crate::Atom::Literal(literal) = &args[0] else {
+                panic!("literal atom")
+            };
+            assert_eq!(
+                entry.payload.as_ref(),
+                encode_body(&Expr::Literal(literal.clone()))
+            );
+            assert_eq!(entry.key.owner, PoolOwner::Function(definition.identity()));
+            assert!(old.authenticates(&entry.key));
+            assert!(!new.authenticates(&entry.key));
+            assert!(
+                old.at(&crate::constant_pool::PoolCoordinate {
+                    path: path.clone(),
+                    atom: Some(1)
+                })
+                .is_none(),
+                "a callable literal needs its defining Link"
+            );
+            expected.push(entry.key.clone());
+        }
+        for (index, child) in node.children().into_iter().enumerate() {
+            let mut path = path.clone();
+            path.push(index as u32);
+            pending.push((path, child));
+        }
+    }
+    assert_eq!(old.entries().len(), expected.len());
+    // Identical payloads at separate source locations keep distinct keys.
+    assert!(old.entries().iter().any(|a| {
+        old.entries()
+            .iter()
+            .any(|b| a.key.digest == b.key.digest && a.key.coordinate != b.key.coordinate)
+    }));
+}
+
+/// FIG-7522: warming may change representation but never occurrence prices;
+/// a stored tuple cannot understate the cost of its members.
+#[test]
+fn logical_prices_ignore_residency_and_reject_understated_summaries() {
+    use crate::LogicalHeldV1 as Cost;
+    use crate::heap::*;
+    use lash_kernel_value::tokens::{decode_body, encode_body};
+    use std::sync::Arc;
+
+    let page = Arc::new(PageRef {
+        id: PageId([13; 32]),
+        grant: PageGrant::NONE,
+    });
+    let text = "a long λ payload";
+    let warm = PageValue::text(text);
+    let mut cold = warm.clone();
+    if let PageValue::Text(text) = &mut cold {
+        text.body = TextPayload::Paged(Arc::clone(&page));
+    }
+    assert_eq!(Cost::local(&warm), 16 + text.len() as u64);
+    assert_eq!(Cost::local(&cold), Cost::local(&warm));
+    for number in [0i64, 1, -1, 255, 256, i64::MIN, i64::MAX] {
+        let magnitude = number.unsigned_abs();
+        let expected = if magnitude == 0 {
+            0
+        } else {
+            (64 - magnitude.leading_zeros() as u64).div_ceil(8)
+        };
+        let inline = PageValue::Int(number.into());
+        let paged = PageValue::Int(IntRef::Paged {
+            normal: Default::default(),
+            summary: IntSummary {
+                bits: 64 - magnitude.leading_zeros() as u64,
+                negative: number < 0,
+            },
+            digits: Arc::clone(&page),
+        });
+        assert_eq!(Cost::local(&inline), 16 + expected);
+        assert_eq!(Cost::local(&paged), 16 + expected);
+    }
+    let tuple = TupleRef {
+        normal: Default::default(),
+        family: None,
+        summary: TupleSummary {
+            task_edges: 0,
+            len: 2,
+            cost: LogicalBytes(33),
+            has_edges: false,
+            depth: 1,
+        },
+        body: Payload::Resident(Arc::from([PageValue::Null, PageValue::Int(1.into())])),
+    };
+    assert!(decode_body::<TupleRef>(&encode_body(&tuple)).is_ok());
+    let mut bad = tuple.clone();
+    bad.summary.cost.0 -= 1;
+    assert!(decode_body::<TupleRef>(&encode_body(&bad)).is_err());
+    assert_eq!(Cost::local(&PageValue::Tuple(Arc::new(tuple))), 49);
+    assert_eq!(
+        Cost::REFERENCE,
+        16,
+        "pooled payloads pay only their holding occurrence"
+    );
+    assert_eq!(Cost::object(33), 65);
+    assert_eq!(Cost::record(65, 2), 65);
+    assert_eq!(Cost::frame([16, 17]), 97);
+    assert_eq!(Cost::task(97, Some(&PageValue::Null)), 113);
+}

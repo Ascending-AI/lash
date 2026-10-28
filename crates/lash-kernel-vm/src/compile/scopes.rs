@@ -17,6 +17,19 @@ impl Compiler<'_> {
         body: &doc::Block,
         charged: bool,
     ) {
+        let owner = match &unit {
+            Unit::Main => self
+                .document_owner
+                .map(doc::constant_pool::PoolOwner::Document),
+            Unit::Library(function) => Some(doc::constant_pool::PoolOwner::Function(*function)),
+            Unit::Function(_) => None,
+        };
+        if let Some(owner) = owner {
+            self.constant_pools.insert(
+                unit.clone(),
+                doc::constant_pool::ConstantPool::extract(owner, body),
+            );
+        }
         let main = unit == Unit::Main;
         let free = matches!(unit, Unit::Library(_) | Unit::Function(_));
         self.unit = unit;
