@@ -6,11 +6,8 @@ impl Lowerer<'_> {
     /// assignment may declare the slot, unless its RHS or an earlier node
     /// reads or captures it. Nested assignments cannot declare an outer slot.
     /// A cell's carried names are also used after its root block finishes.
-    pub(super) fn finish_declarations(
-        &self,
-        mut body: Buf,
-        carried: Option<&BTreeSet<String>>,
-    ) -> Buf {
+    pub(super) fn finish_declarations(&self, body: Buf, carried: Option<&BTreeSet<String>>) -> Buf {
+        let (mut statements, mut notes) = body.into_parts();
         /// Whether `action` reads `name`, as the expression it stands for
         /// would: as its callee or as one of its arguments.
         fn action_mentions(action: &lash_kernel_doc::Action, name: &Name) -> bool {
@@ -72,11 +69,11 @@ impl Lowerer<'_> {
             false
         }
         let mut remove = BTreeSet::new();
-        for index in 0..body.stmts.len() {
+        for index in 0..statements.len() {
             let Stmt::Let {
                 name,
                 value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-            } = &body.stmts[index]
+            } = &statements[index]
             else {
                 continue;
             };
@@ -160,7 +157,7 @@ impl Lowerer<'_> {
                 }
                 let mut candidates = Vec::new();
                 loops(
-                    lash_kernel_doc::Node::Block(&body.stmts),
+                    lash_kernel_doc::Node::Block(&statements),
                     &mut Vec::new(),
                     &mut candidates,
                 );
@@ -173,7 +170,7 @@ impl Lowerer<'_> {
                         ..
                     })) = path
                         .iter()
-                        .try_fold(lash_kernel_doc::Node::Block(&body.stmts), |node, index| {
+                        .try_fold(lash_kernel_doc::Node::Block(&statements), |node, index| {
                             node.children().get(*index as usize).copied()
                         })
                     else {
@@ -219,7 +216,7 @@ impl Lowerer<'_> {
                             })
                     }
                     if outside(
-                        lash_kernel_doc::Node::Block(&body.stmts),
+                        lash_kernel_doc::Node::Block(&statements),
                         &path,
                         &name,
                         &self.local_functions,
@@ -236,7 +233,7 @@ impl Lowerer<'_> {
                         }
                         count(lash_kernel_doc::Node::Expr(iterable))
                     };
-                    if let Some(note) = note_at(&body.stmts, &mut body.notes, &path)
+                    if let Some(note) = note_at(&statements, &mut notes, &path)
                         && let Some(notes) = note.blocks.get_mut(expression_blocks)
                     {
                         notes.remove(0);
@@ -245,7 +242,7 @@ impl Lowerer<'_> {
                         binding,
                         body: pass,
                         ..
-                    })) = lash_kernel_doc::NodeMut::Block(&mut body.stmts).descend(&path)
+                    })) = lash_kernel_doc::NodeMut::Block(&mut statements).descend(&path)
                     {
                         *binding = name.clone();
                         pass.remove(0);
@@ -257,12 +254,12 @@ impl Lowerer<'_> {
                     continue;
                 }
             }
-            for next in index + 1..body.stmts.len() {
+            for next in statements.iter_mut().skip(index + 1) {
                 if let Stmt::Assign {
                     place: Place::Variable(write),
                     value,
                     ..
-                } = &body.stmts[next]
+                } = &*next
                     && write == &name
                 {
                     let mentioned = match value {
@@ -274,7 +271,7 @@ impl Lowerer<'_> {
                         Rhs::Action(action) => action_mentions(action, &name),
                     };
                     if !mentioned {
-                        body.stmts[next] = Stmt::Let {
+                        *next = Stmt::Let {
                             name: name.clone(),
                             value: value.clone(),
                         };
@@ -283,7 +280,7 @@ impl Lowerer<'_> {
                     break;
                 }
                 if mentions(
-                    lash_kernel_doc::Node::Stmt(&body.stmts[next]),
+                    lash_kernel_doc::Node::Stmt(next),
                     &name,
                     &self.local_functions,
                 ) {
@@ -292,17 +289,17 @@ impl Lowerer<'_> {
             }
         }
         let mut index = 0;
-        body.stmts.retain(|_| {
+        statements.retain(|_| {
             let keep = !remove.contains(&index);
             index += 1;
             keep
         });
         let mut index = 0;
-        body.notes.retain(|_| {
+        notes.retain(|_| {
             let keep = !remove.contains(&index);
             index += 1;
             keep
         });
-        body
+        Buf::from_parts(statements, notes)
     }
 }

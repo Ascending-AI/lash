@@ -23,6 +23,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-dialect-conventions = { workspace = true, optional = true }
 lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-durable = { workspace = true }
@@ -111,7 +112,7 @@ workflow-view = [
 ]
 # Editing a document (`lash::workflow::edit`, `lash::workflow::authoring`):
 # drafts, edits, transactions and authoring operations, over the view.
-workflow-authoring = ["workflow-view", "dep:lash-kernel-edit"]
+workflow-authoring = ["dep:lash-dialect-conventions", "workflow-view", "dep:lash-kernel-edit"]
 
 # The dialects a host's sessions and processes are written in, each off by
 # default: a host names the ones it runs, and there is no dialect it gets

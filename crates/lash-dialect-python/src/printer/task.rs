@@ -56,7 +56,10 @@ impl super::Renderer<'_> {
             return None;
         };
         if let k::ActKind::Call(callee) = &action.kind
-            && target(callee).is_some_and(|target| self.operators.is(&target, "py.reply"))
+            && target(callee).is_some_and(|target| {
+                self.operators
+                    .is(&target, crate::constructs::conventions::REPLY)
+            })
         {
             let [k::Expr::Act(performed)] = action.args.as_slice() else {
                 return None;

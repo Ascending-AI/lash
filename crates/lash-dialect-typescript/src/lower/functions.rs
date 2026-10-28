@@ -2,75 +2,12 @@
 //! `fn(this, args)`.
 
 use lash_kernel_dialect::Written;
-use lash_kernel_doc::{Expr, Float, Literal, Place, SourceLanguage, Stmt};
+use lash_kernel_doc::{Expr, Float, Place, SourceLanguage, Stmt};
 
 use super::patterns::Mode;
 use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
-
-/// Only authored bigint positions change the ordinary Number boundary.
-fn bigint_input_shape(ty: &lash_kernel_value::Type) -> Option<Expr> {
-    use lash_kernel_doc::RecordEntry;
-    use lash_kernel_value::Type;
-    let text = |value: &str| Expr::Literal(Literal::Text(value.into()));
-    match ty {
-        Type::Int => Some(Expr::Literal(Literal::Bool(true))),
-        Type::List(element) => {
-            bigint_input_shape(element).map(|shape| Expr::Tuple(vec![text("list"), shape]))
-        }
-        Type::Tuple(elements) => {
-            let shapes: Vec<_> = elements.iter().map(bigint_input_shape).collect();
-            shapes.iter().any(Option::is_some).then(|| {
-                Expr::Tuple(vec![
-                    text("tuple"),
-                    Expr::List(
-                        shapes
-                            .into_iter()
-                            .map(|shape| shape.unwrap_or(Expr::Literal(Literal::Absent)))
-                            .collect(),
-                    ),
-                ])
-            })
-        }
-        Type::Record(record) => {
-            let fields: Vec<_> = record
-                .fields
-                .iter()
-                .filter_map(|field| {
-                    bigint_input_shape(&field.ty).map(|value| RecordEntry {
-                        field: field.name.clone(),
-                        value,
-                    })
-                })
-                .collect();
-            let rest = record.rest.kept_type().and_then(bigint_input_shape);
-            if fields.is_empty() && rest.is_none() {
-                return None;
-            }
-            Some(Expr::Tuple(vec![
-                text("record"),
-                Expr::Record(fields),
-                rest.unwrap_or(Expr::Literal(Literal::Absent)),
-            ]))
-        }
-        Type::Union(members) => {
-            let number = members
-                .iter()
-                .any(|member| matches!(member, Type::Number | Type::Float));
-            let mut shapes: Vec<_> = members
-                .iter()
-                .filter(|member| !(number && matches!(member, Type::Int)))
-                .filter_map(bigint_input_shape)
-                .collect();
-            match shapes.len() {
-                0 => None,
-                1 => shapes.pop(),
-                _ => Some(Expr::List(shapes)),
-            }
-        }
-        _ => None,
-    }
-}
+use crate::constructs::numbers;
 
 impl Lowerer<'_> {
     pub(super) fn annotated_input(
@@ -81,12 +18,16 @@ impl Lowerer<'_> {
         let Some(shape) = annotation
             .and_then(|annotation| self.facts.entry_annotation(annotation, false).ok())
             .as_ref()
-            .and_then(bigint_input_shape)
+            .and_then(numbers::input_shape)
         else {
             return Ok(value);
         };
         let shape = self.inline(shape, Ty::Unknown);
-        self.invoke("ts.bigint.input", &[value, shape], Ty::Unknown)
+        self.invoke(
+            numbers::BIGINT_INPUT.helper,
+            &numbers::BIGINT_INPUT.arguments(value, shape),
+            Ty::Unknown,
+        )
     }
 
     /// What the source wrote of `function`: its signature as text. A call
@@ -160,15 +101,7 @@ impl Lowerer<'_> {
             .count();
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
         let length = Float::new(length as f64);
-        let text = |value: &str| Expr::Literal(Literal::Text(value.to_owned()));
-        let token = Expr::Tuple(vec![
-            text(crate::FUNCTION_TAG),
-            text(""),
-            text(name),
-            Expr::Literal(Literal::Float(length)),
-            closure_expr,
-            Expr::Record(Vec::new()),
-        ]);
+        let token = crate::constructs::callables::token(closure_expr, name, length);
         if let Some(mut note) = note {
             if let Some(origin) = note
                 .written
@@ -184,7 +117,8 @@ impl Lowerer<'_> {
                 last.blocks = note.blocks;
                 last.nested_written = note.nested_written;
                 if let Some(written) = note.written {
-                    last.nested_written.push((vec![0, 4], written));
+                    last.nested_written
+                        .push((vec![0, crate::constructs::callables::CALLABLE], written));
                 }
             }
             value
@@ -249,7 +183,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
                 .as_ref()
-                .and_then(bigint_input_shape),
+                .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
@@ -324,7 +258,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
                 .as_ref()
-                .and_then(bigint_input_shape),
+                .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: false,
             async_body: function.is_async,
@@ -404,7 +338,11 @@ impl Lowerer<'_> {
     pub(super) fn source_return(&mut self, value: Operand) -> Lowering<()> {
         let value = if let Some(shape) = self.frame().bigint_result.clone() {
             let shape = self.inline(shape, Ty::Unknown);
-            self.invoke("ts.bigint.input", &[value, shape], Ty::Unknown)?
+            self.invoke(
+                numbers::BIGINT_INPUT.helper,
+                &numbers::BIGINT_INPUT.arguments(value, shape),
+                Ty::Unknown,
+            )?
         } else {
             value
         };
@@ -477,7 +415,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(|annotation| self.facts.entry_annotation(annotation, true).ok())
                 .as_ref()
-                .and_then(bigint_input_shape),
+                .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,

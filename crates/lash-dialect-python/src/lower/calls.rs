@@ -496,7 +496,11 @@ impl Lowerer<'_> {
             return Ok(Operand::none());
         }
         // The reply reads as `json.loads` gives it: an object is a dict.
-        self.invoke("py.reply", &[result], Ty::Unknown)
+        self.invoke(
+            crate::constructs::conventions::REPLY,
+            &[result],
+            Ty::Unknown,
+        )
     }
 
     /// Evaluates the callee and the arguments of a call of a Python
@@ -1318,7 +1322,11 @@ impl Lowerer<'_> {
         let body = self.block(|this| {
             let mut result = Operand::inline(Expr::Act(Box::new(action)), Ty::Unknown);
             if reply {
-                result = this.invoke("py.reply", &[result], Ty::Unknown)?;
+                result = this.invoke(
+                    crate::constructs::conventions::REPLY,
+                    &[result],
+                    Ty::Unknown,
+                )?;
             }
             this.emit(Stmt::Return { value: result.expr });
             Ok(())

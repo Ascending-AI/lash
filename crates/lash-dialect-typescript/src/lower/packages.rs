@@ -784,10 +784,14 @@ impl<'a> Lowerer<'a> {
                 let untagged = Expr::If {
                     cond: Box::new(tuple),
                     then: Box::new(Expr::If {
-                        cond: Box::new(
-                            self.same(Self::element(&value, 0), Operand::text("ts.bigint").expr())?,
-                        ),
-                        then: Box::new(Self::element(&value, 1)),
+                        cond: Box::new(self.same(
+                            Self::element(&value, crate::constructs::numbers::bigint_tag_slot()),
+                            Operand::text(crate::constructs::numbers::BIGINT_TAG).expr(),
+                        )?),
+                        then: Box::new(Self::element(
+                            &value,
+                            crate::constructs::numbers::bigint_value_slot(),
+                        )),
                         r#else: Box::new(value.expr()),
                     }),
                     r#else: Box::new(value.expr()),

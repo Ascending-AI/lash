@@ -141,7 +141,7 @@ pub(crate) async fn preview(
     // Keep the caption base intact until the staged edit has been rekeyed.
     let mut draft = current.draft.clone();
     let applied = draft
-        .apply(&transaction, &environment.checker())
+        .apply(&transaction, &environment.checker(), lash::workflow::edit::CONVENTIONS)
         .map_err(|refusal| {
             ErrorResponse::new(
                 StatusCode::UNPROCESSABLE_ENTITY,

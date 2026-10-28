@@ -558,8 +558,11 @@ impl Lowerer<'_> {
                 };
                 let arguments = match args {
                     WaitArguments::Packed(args) => {
-                        let boundary =
-                            self.invoke("ts.copy_boundary", &[args.value, forward], Ty::Unknown)?;
+                        let boundary = self.invoke(
+                            crate::constructs::conventions::ARGUMENT_COPY,
+                            &[args.value, forward],
+                            Ty::Unknown,
+                        )?;
                         vec![boundary.expr()]
                     }
                     WaitArguments::Slots(args) => {
@@ -575,7 +578,7 @@ impl Lowerer<'_> {
                                 Operand::undefined()
                             };
                             let value = self.invoke(
-                                "ts.copy_boundary",
+                                crate::constructs::conventions::ARGUMENT_COPY,
                                 &[arg.value, factory],
                                 Ty::Unknown,
                             )?;

@@ -607,8 +607,9 @@ impl<'a> Lifter<'a> {
                 _ => None,
             };
             if let Some((k::ActKind::Call(k::Callee::Local(id)), args)) = input
-                && self.is(&id, "ts.bigint.input")
-                && matches!(args.first(), Some(k::Expr::Variable(value)) if value == name)
+                && crate::constructs::numbers::BIGINT_INPUT
+                    .call(&id, &args, &|id, helper| self.is(id, helper))
+                    .is_some_and(|value| matches!(value, k::Expr::Variable(value) if value == name))
             {
                 return Ok(1);
             }

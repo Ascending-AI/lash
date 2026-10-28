@@ -105,6 +105,10 @@ fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow:
             }],
         },
         &lash_kernel_check::Environment::new(embedding.library()),
+        &[
+            lash_dialect_typescript::CONVENTIONS,
+            lash_dialect_python::CONVENTIONS,
+        ],
     )?;
     let captions = lowered
         .captions

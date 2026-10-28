@@ -2,16 +2,10 @@
 use super::{BindingScope, Renderer, k};
 use lash_kernel_value::Name;
 
-fn token(value: &k::Expr) -> Option<&[k::Expr]> {
-    let k::Expr::Tuple(parts) = value else {
-        return None;
-    };
-    (parts.len() == 5
-        && matches!(&parts[0], k::Expr::Literal(k::Literal::Text(tag)) if tag == "py.function"))
-    .then_some(parts)
-}
+use crate::constructs::callables::parts as token;
+use crate::constructs::callables::{CALLABLE, CATEGORY, NAME, PARAMETERS};
 fn category(parts: &[k::Expr]) -> Option<&str> {
-    match &parts[4] {
+    match &parts[CATEGORY] {
         k::Expr::Literal(k::Literal::Text(name)) => Some(name),
         k::Expr::Tuple(fields) => match fields.first()? {
             k::Expr::Literal(k::Literal::Text(name)) => Some(name),
@@ -40,7 +34,7 @@ impl Renderer<'_> {
         }
         if let Some(parts) = token(value)
             && category(parts) == Some("py.exception")
-            && let k::Expr::Literal(k::Literal::Text(name)) = &parts[3]
+            && let k::Expr::Literal(k::Literal::Text(name)) = &parts[NAME]
             && super::identifier(name)
         {
             return Some(name.clone());
@@ -66,7 +60,7 @@ impl Renderer<'_> {
         closure: &k::Closure,
         parts: &[k::Expr],
     ) -> Option<(Vec<Name>, k::Block, lash_kernel_value::FunctionId, usize)> {
-        let k::Expr::Tuple(metadata) = &parts[2] else {
+        let k::Expr::Tuple(metadata) = &parts[PARAMETERS] else {
             return None;
         };
         let definition = self.document.functions.get(&closure.function)?;
@@ -74,25 +68,7 @@ impl Renderer<'_> {
             return None;
         }
         let stored = &definition.body()?.block;
-        let mut expanded = Vec::new();
-        if let [k::Stmt::Return { value }] = stored.as_slice() {
-            let mut value = value;
-            while let k::Expr::Let {
-                name,
-                value: bound,
-                body,
-            } = value
-            {
-                expanded.push(k::Stmt::Let {
-                    name: name.clone(),
-                    value: k::Rhs::Expr(*bound.clone()),
-                });
-                value = body;
-            }
-            expanded.push(k::Stmt::Return {
-                value: value.clone(),
-            });
-        }
+        let expanded = lash_kernel_dialect::builder::expanded_return(stored).unwrap_or_default();
         let folded = expanded.len() > 1;
         let body = if folded { &expanded } else { stored };
         let k::Stmt::Let { name: slots, value } = body.first()? else {
@@ -109,7 +85,7 @@ impl Renderer<'_> {
             return None;
         };
         if !super::task::target(callee).is_some_and(|target| self.operators.is(&target, "py.bind"))
-            || call.args.get(1) != Some(&parts[2])
+            || call.args.get(1) != Some(&parts[PARAMETERS])
         {
             return None;
         }
@@ -180,18 +156,18 @@ impl Renderer<'_> {
         let Some(parts) = token(body) else {
             return 0;
         };
-        if parts[1] != k::Expr::Variable(temporary.clone()) {
+        if parts[CALLABLE] != k::Expr::Variable(temporary.clone()) {
             return 0;
         }
         if category(parts) != Some("py.callable")
-            || !matches!(&parts[3], k::Expr::Literal(k::Literal::Text(spelling)) if spelling == name.as_str())
+            || !matches!(&parts[NAME], k::Expr::Literal(k::Literal::Text(spelling)) if spelling == name.as_str())
         {
             return 0;
         }
         let Some((names, body, body_unit, prologue)) = self.packed_body(&closure, parts) else {
             return 0;
         };
-        let asynchronous = matches!(&parts[4], k::Expr::Tuple(fields) if fields.get(1) == Some(&k::Expr::Literal(k::Literal::Bool(true))));
+        let asynchronous = matches!(&parts[CATEGORY], k::Expr::Tuple(fields) if fields.get(1) == Some(&k::Expr::Literal(k::Literal::Bool(true))));
         self.caption_next();
         self.padding();
         self.out.begin_node(None); // packed closure binding
@@ -242,7 +218,7 @@ impl Renderer<'_> {
     }
 
     fn packed_parameters(&mut self, parts: &[k::Expr], start: Option<&k::CallablePresentation>) {
-        let k::Expr::Tuple(metadata) = &parts[2] else {
+        let k::Expr::Tuple(metadata) = &parts[PARAMETERS] else {
             return;
         };
         self.out.write("(");
@@ -308,13 +284,14 @@ impl Renderer<'_> {
         };
         match category(parts) {
             Some("py.builtin" | "py.type" | "py.exception") => {
-                if let k::Expr::Literal(k::Literal::Text(name)) = &parts[3] {
+                if let k::Expr::Literal(k::Literal::Text(name)) = &parts[NAME] {
                     self.out.write(name);
                     return true;
                 }
             }
             Some("py.callable") => {
-                let Some(k::Expr::Closure(closure)) = self.resolved(&parts[1]).cloned() else {
+                let Some(k::Expr::Closure(closure)) = self.resolved(&parts[CALLABLE]).cloned()
+                else {
                     return false;
                 };
                 let Some((_, body, _, _)) = self.packed_body(&closure, parts) else {
@@ -324,7 +301,7 @@ impl Renderer<'_> {
                     return false;
                 };
                 self.out.write("(lambda ");
-                let k::Expr::Tuple(metadata) = &parts[2] else {
+                let k::Expr::Tuple(metadata) = &parts[PARAMETERS] else {
                     return false;
                 };
                 for (i, param) in metadata.iter().enumerate() {

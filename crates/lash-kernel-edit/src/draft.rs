@@ -92,10 +92,15 @@ impl Draft {
 
     /// Applies `transaction` whole and publishes the result, or refuses it
     /// and changes nothing.
+    ///
+    /// `conventions` supplies the source dialects' authoring recipes. Export
+    /// and library evidence select the recipe for this document; an empty
+    /// slice admits kernel authoring only.
     pub fn apply(
         &mut self,
         transaction: &Transaction,
         environment: &Environment<'_>,
+        conventions: &[lash_kernel_dialect::conventions::Conventions],
     ) -> Result<Applied, EditRefusal> {
         if transaction.base != self.identity() {
             return Err(EditRefusal {
@@ -142,6 +147,11 @@ impl Draft {
             None
         };
         let mut working = Working::open(&self.document);
+        let source = lash_kernel_dialect::conventions::Conventions::of(
+            &self.document,
+            environment.functions,
+            conventions,
+        );
         for (index, edit) in (0u32..).zip(&transaction.edits) {
             if edit.base() != self.identity {
                 return Err(EditRefusal {
@@ -156,7 +166,7 @@ impl Draft {
                 });
             }
             working
-                .canvas(edit, environment.functions)
+                .canvas(edit, environment.functions, source)
                 .map_err(|fault| match *fault {
                     FaultKind::At(location, kind) => EditRefusal {
                         diagnostics: vec![EditDiagnostic {

@@ -252,6 +252,7 @@ pub async fn edit_saved(
             edits,
         },
         &checked.checker(),
+        lash::workflow::edit::CONVENTIONS,
     )?;
     let start = artifacts
         .publish_workflow(

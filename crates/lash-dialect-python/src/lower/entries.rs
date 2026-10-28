@@ -122,8 +122,7 @@ impl Lowerer<'_> {
                 }
                 Ok(())
             })?;
-            prefix.stmts.extend(defaults.stmts);
-            prefix.notes.extend(defaults.notes);
+            prefix.extend(defaults);
             let (params, body) = self.function_body(
                 Some(&def.parameters),
                 Body::Suite(&def.body),
@@ -131,8 +130,7 @@ impl Lowerer<'_> {
                 &[],
                 None,
             )?;
-            prefix.stmts.extend(body.stmts);
-            prefix.notes.extend(body.notes);
+            prefix.extend(body);
             Ok((params, prefix))
         })();
         self.scopes.pop();
@@ -155,11 +153,12 @@ impl Lowerer<'_> {
                 .into_diagnostic());
         }
         let (params, body) = body?;
+        let (body, notes) = body.into_parts();
         let convention = convention?;
         let entry = Name::new(name);
         let definition = lash_kernel_dialect::authoring::local_function(
             params,
-            body.stmts,
+            body,
             &self.imports.as_map(),
             self.library,
             &self.local_functions,
@@ -175,7 +174,7 @@ impl Lowerer<'_> {
                     convention,
                     asynchronous: def.is_async,
                     rest: def.parameters.vararg.is_some(),
-                    notes: body.notes,
+                    notes,
                 })
                 .map_err(ModuleError::into_diagnostic)?;
         }

@@ -164,16 +164,7 @@ impl Lifter<'_> {
 
     /// Whether `via` is the protocol a `for…of` loop lowers to.
     fn for_of(&self, via: &k::Protocol) -> bool {
-        self.is(&via.open, "ts.for_of.open")
-            && via
-                .next
-                .as_ref()
-                .is_some_and(|next| self.is(next, "ts.for_of.next"))
-            && via
-                .item
-                .as_ref()
-                .is_some_and(|item| self.is(item, "ts.for_of.item"))
-            && via.check.is_none()
+        crate::constructs::conventions::FOR_OF.matches(via, |id, name| self.is(id, name))
     }
 
     pub(super) fn binding(&self, name: &Name) -> Lift<String> {
@@ -270,23 +261,7 @@ impl Lifter<'_> {
 
     /// `same(kind(x), kind)`.
     pub(super) fn kind_test<'e>(&self, condition: &'e k::Expr, kind: &str) -> Option<&'e k::Expr> {
-        let k::Expr::Call { function, args } = condition else {
-            return None;
-        };
-        let [
-            k::Expr::Call {
-                function: of,
-                args: tested,
-            },
-            k::Expr::Literal(k::Literal::Text(written)),
-        ] = args.as_slice()
-        else {
-            return None;
-        };
-        let [tested] = tested.as_slice() else {
-            return None;
-        };
-        (self.is(function, "same") && self.is(of, "kind") && written == kind).then_some(tested)
+        crate::constructs::reads::kind(condition, kind, &|id, name| self.is(id, name))
     }
 
     /// `set name = value` alone in a block.
@@ -341,30 +316,12 @@ impl Lifter<'_> {
         else {
             return Ok(None);
         };
-        let k::Expr::Call {
-            function: not,
-            args,
-        } = unbranded
+        let Some(values) =
+            crate::constructs::reads::UNBRANDED.recognize(unbranded, &|id, name| self.is(id, name))
         else {
             return Ok(None);
         };
-        let [
-            k::Expr::Call {
-                function: contains,
-                args: contained,
-            },
-        ] = args.as_slice()
-        else {
-            return Ok(None);
-        };
-        if !self.is(not, "bool.not")
-            || !self.is(contains, "record.contains")
-            || contained.as_slice()
-                != [
-                    target.clone(),
-                    k::Expr::Literal(k::Literal::Text(lash_kernel_dialect::BRAND_FIELD.into())),
-                ]
-        {
+        if values.as_slice() != [target] {
             return Ok(None);
         }
         // A name some built-in has is the record's own only where the record
@@ -480,25 +437,15 @@ impl Lifter<'_> {
         } else {
             (bounds, in_bounds, out_of_bounds, None)
         };
-        let k::Expr::Call { function: lt, args } = bounds else {
-            return Ok(None);
-        };
-        let [
-            index,
-            k::Expr::Call {
-                function: len,
-                args: measured,
-            },
-        ] = args.as_slice()
+        let Some(values) =
+            crate::constructs::reads::BOUNDS.recognize(bounds, &|id, name| self.is(id, name))
         else {
             return Ok(None);
         };
-        let [target] = measured.as_slice() else {
+        let [index, target] = values.as_slice() else {
             return Ok(None);
         };
-        if !self.is(lt, "num.lt") || !self.is(len, "list.len") {
-            return Ok(None);
-        }
+        let (index, target) = (*index, *target);
         if let Some(listed) = self.kind_test(condition, "list")
             && listed != target
         {
@@ -526,9 +473,9 @@ impl Lifter<'_> {
         else {
             return Ok(None);
         };
-        let is_hole = matches!(hole, k::Expr::Call { function, args }
-            if self.is(function, "same")
-                && args.as_slice() == [k::Expr::Variable(name.clone()), k::Expr::Tuple(Vec::new())]);
+        let is_hole = crate::constructs::reads::HOLE
+            .recognize(hole, &|id, name| self.is(id, name))
+            .is_some_and(|values| values.as_slice() == [&k::Expr::Variable(name.clone())]);
         let reset = matches!(
             Self::sets(undefined, name),
             Some(k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)))
@@ -566,22 +513,12 @@ impl Lifter<'_> {
         let Some(target) = self.kind_test(condition, "list") else {
             return Ok(None);
         };
-        let Some(k::Rhs::Expr(k::Expr::Call { function, args })) = Self::sets(then_block, name)
-        else {
+        let Some(k::Rhs::Expr(value)) = Self::sets(then_block, name) else {
             return Ok(None);
         };
-        let [
-            k::Expr::Call {
-                function: len,
-                args: measured,
-            },
-        ] = args.as_slice()
-        else {
-            return Ok(None);
-        };
-        if !self.is(function, "num.to_float")
-            || !self.is(len, "list.len")
-            || measured.as_slice() != [target.clone()]
+        if !crate::constructs::reads::LENGTH
+            .recognize(value, &|id, name| self.is(id, name))
+            .is_some_and(|values| values.as_slice() == [target])
         {
             return Ok(None);
         }

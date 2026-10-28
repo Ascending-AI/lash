@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-dialect-conventions = { workspace = true }
 lash-ext-ts-helpers = { workspace = true }
 lash-kernel-services = { workspace = true }
 lash-kernel-value = { workspace = true }

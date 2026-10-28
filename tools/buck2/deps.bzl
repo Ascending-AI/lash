@@ -129,6 +129,14 @@ PACKAGE_DEPS = {
             "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine"
         }
     },
+    "lash-dialect-conventions": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc"
+        }
+    },
     "lash-dialect-python": {
         "build": {},
         "dev": {
@@ -148,6 +156,7 @@ PACKAGE_DEPS = {
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {
+            "lash_dialect_conventions": "//crates/lash-dialect-conventions:lash-dialect-conventions",
             "lash_ext_py_helpers": "//crates/lash-ext-py-helpers:lash-ext-py-helpers",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -188,6 +197,7 @@ PACKAGE_DEPS = {
             "stats_alloc": "//third-party/rust:p0349"
         },
         "normal": {
+            "lash_dialect_conventions": "//crates/lash-dialect-conventions:lash-dialect-conventions",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_ts_helpers": "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -1599,6 +1609,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
@@ -1904,6 +1915,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
+            "lash_dialect_conventions": "//crates/lash-dialect-conventions:lash-dialect-conventions",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_durable": "//crates/lash-durable:lash-durable",

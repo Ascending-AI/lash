@@ -280,7 +280,7 @@ impl Lowerer<'_> {
                     this.condition(test)
                 })?;
                 if let Some(condition) = self.branch_expression(&test_buf, condition.clone()) {
-                    let nested_written = Self::branch_written(&test_buf, &[0]);
+                    let nested_written = test_buf.written(&[0]);
                     let mut blocks: Vec<_> =
                         test_buf.into_notes().flat_map(|note| note.blocks).collect();
                     let body = self.loop_block(Vec::new(), |this| this.lower_statement(body))?;
@@ -654,7 +654,8 @@ impl Lowerer<'_> {
     /// `if same(raw, ()) { set element = absent }`: the empty tuple is a
     /// hole, which no JavaScript value is.
     pub(super) fn absent_if_hole(&mut self, element: &Name, raw: &Operand) -> Lowering<()> {
-        let hole = self.same(raw.expr(), Expr::Tuple(Vec::new()))?;
+        let hole = crate::constructs::reads::HOLE
+            .emit(&[raw.expr()], &mut |name, args| self.native(name, args))?;
         let absent = self.one(Stmt::Assign {
             place: Place::Variable(element.clone()),
             value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
@@ -675,12 +676,8 @@ impl Lowerer<'_> {
         body: &ast::Stmt,
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
-        let via = lash_kernel_doc::Protocol {
-            open: self.function_target("ts.for_of.open")?,
-            next: Some(self.function_target("ts.for_of.next")?),
-            item: Some(self.function_target("ts.for_of.item")?),
-            check: None,
-        };
+        let via =
+            crate::constructs::conventions::FOR_OF.resolve(|name| self.function_target(name))?;
         let mut item = self.temp();
         let body = self.loop_block(Vec::new(), |this| {
             if let ast::Pattern::Ident(name, _) = pattern

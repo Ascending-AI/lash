@@ -8,3 +8,5 @@ pub fn numeric_name(name: &str) -> bool {
     matches!(name, "NaN" | "Infinity" | "-Infinity")
         || digits.as_bytes().first().is_some_and(u8::is_ascii_digit)
 }
+
+include!(concat!(env!("OUT_DIR"), "/primitive_facts.rs"));

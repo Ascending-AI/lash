@@ -40,7 +40,7 @@ mod lazy;
 mod packages;
 mod patterns;
 mod positional;
-pub(crate) mod primitive_methods;
+mod primitive;
 mod process;
 mod statements;
 pub(crate) mod walk;
@@ -144,98 +144,7 @@ struct Positional {
 
 pub(crate) use lash_kernel_dialect::Note;
 
-/// A kernel block under construction: each statement with the note of
-/// its source layers, so a move, removal or fold carries both.
-#[derive(Debug, Default)]
-pub(crate) struct Buf {
-    implicit_return: bool,
-    emitted: Vec<Emitted>,
-}
-
-#[derive(Debug)]
-struct Emitted {
-    stmt: Stmt,
-    note: Note,
-}
-
-impl Buf {
-    /// The block of the one statement `stmt`.
-    fn one(stmt: Stmt, note: Note) -> Self {
-        Self {
-            implicit_return: false,
-            emitted: vec![Emitted { stmt, note }],
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.emitted.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.emitted.is_empty()
-    }
-
-    fn stmts(&self) -> impl DoubleEndedIterator<Item = &Stmt> + ExactSizeIterator {
-        self.emitted.iter().map(|emitted| &emitted.stmt)
-    }
-
-    fn notes(&self) -> impl Iterator<Item = &Note> {
-        self.emitted.iter().map(|emitted| &emitted.note)
-    }
-
-    fn last_stmt(&self) -> Option<&Stmt> {
-        self.emitted.last().map(|emitted| &emitted.stmt)
-    }
-
-    fn last_note_mut(&mut self) -> Option<&mut Note> {
-        self.emitted.last_mut().map(|emitted| &mut emitted.note)
-    }
-
-    /// The statement at `index` and its note, to change.
-    fn get_mut(&mut self, index: usize) -> Option<(&Stmt, &mut Note)> {
-        self.emitted
-            .get_mut(index)
-            .map(|emitted| (&emitted.stmt, &mut emitted.note))
-    }
-
-    fn push(&mut self, stmt: Stmt, note: Note) {
-        self.emitted.push(Emitted { stmt, note });
-    }
-
-    fn insert(&mut self, index: usize, stmt: Stmt, note: Note) {
-        self.emitted.insert(index, Emitted { stmt, note });
-    }
-
-    fn pop(&mut self) -> Option<(Stmt, Note)> {
-        self.emitted
-            .pop()
-            .map(|emitted| (emitted.stmt, emitted.note))
-    }
-
-    /// Puts `buf`'s statements before the one at `index`.
-    fn splice(&mut self, index: usize, buf: Buf) {
-        self.emitted.splice(index..index, buf.emitted);
-    }
-
-    fn extend(&mut self, buf: Buf) {
-        if !buf.is_empty() {
-            self.implicit_return = buf.implicit_return;
-        }
-        self.emitted.extend(buf.emitted);
-    }
-
-    /// The finished block, and the notes of its statements in order.
-    fn into_parts(self) -> (Block, Vec<Note>) {
-        self.emitted
-            .into_iter()
-            .map(|emitted| (emitted.stmt, emitted.note))
-            .unzip()
-    }
-
-    fn into_notes(self) -> impl Iterator<Item = Note> {
-        self.emitted.into_iter().map(|emitted| emitted.note)
-    }
-}
+pub(crate) use lash_kernel_dialect::builder::BlockBuilder as Buf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BindingKind {
@@ -939,12 +848,10 @@ impl Lowerer<'_> {
 
     /// Lowers into a new kernel block and returns it.
     fn block(&mut self, lower: impl FnOnce(&mut Self) -> Lowering<()>) -> Lowering<Buf> {
-        let outer = std::mem::take(&mut self.buf);
         self.kernel_depth += 1;
-        let result = lower(self);
+        let result = lash_kernel_dialect::builder::region(self, |this| &mut this.buf, lower);
         self.kernel_depth -= 1;
-        let inner = std::mem::replace(&mut self.buf, outer);
-        result.map(|()| inner)
+        result.map(|(inner, ())| inner)
     }
 
     /// A block with a scope of its own.
@@ -967,16 +874,11 @@ impl Lowerer<'_> {
     }
 
     fn emit_if(&mut self, condition: Expr, then_block: Buf, else_block: Buf) {
-        let (then_block, then_notes) = then_block.into_parts();
-        let (else_block, else_notes) = else_block.into_parts();
-        self.push(
-            Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            },
-            vec![then_notes, else_notes],
-        );
+        let mut region = Buf::conditional(condition, then_block, else_block);
+        let (statement, note) = region
+            .pop()
+            .unwrap_or_else(|| unreachable!("one conditional"));
+        self.push(statement, note.blocks);
     }
 
     fn emit_while(&mut self, condition: Expr, body: Buf) {
@@ -1195,7 +1097,10 @@ impl Lowerer<'_> {
         if operand.ty == Ty::Float {
             return Ok(operand.expr());
         }
-        self.native("ts.number.checked", vec![operand.expr()])
+        self.native(
+            crate::constructs::operators::NUMBER_GUARD,
+            vec![operand.expr()],
+        )
     }
 
     // Types.
@@ -1386,10 +1291,7 @@ impl Lowerer<'_> {
 
     /// Statements emitted while lowering one operand, without opening a scope.
     fn aside<T>(&mut self, lower: impl FnOnce(&mut Self) -> Lowering<T>) -> Lowering<(Buf, T)> {
-        let outer = std::mem::take(&mut self.buf);
-        let result = lower(self);
-        let inner = std::mem::replace(&mut self.buf, outer);
-        result.map(|value| (inner, value))
+        lash_kernel_dialect::builder::region(self, |this| &mut this.buf, lower)
     }
 
     /// Commit operand buffers in source order, pinning only before later statements.

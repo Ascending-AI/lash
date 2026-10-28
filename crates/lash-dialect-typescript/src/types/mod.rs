@@ -322,60 +322,7 @@ pub(crate) fn believed(annotation: &TypeAnnotation, aliases: &BTreeMap<String, T
     }
 }
 
-/// The kernel function a binary operator is, for operands of known types.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Direct {
-    /// `function(left, right)` over two numbers, each as a float.
-    Numeric(&'static str),
-    /// `function(right, left)` over two numbers, each as a float.
-    NumericSwapped(&'static str),
-    /// `eq(left, right)` over two numbers, each as a float; negated for
-    /// `!==` and `!=`.
-    NumericEqual { negated: bool },
-    /// `text.concat(left, right)` over two texts.
-    Concat,
-    /// `text.concat` over a text and a float's text, the float on the left
-    /// when `float_left`. A primitive's ToPrimitive is itself and a float
-    /// has no `toString` of its own to run, so `+` is the float's spelling
-    /// (`ts.number.format_value`) concatenated with the text.
-    ConcatFloat { float_left: bool },
-}
-
-/// The kernel function `op` is when both operands' types are known, or
-/// `None` when a helper has to decide at run time.
-///
-/// Every function named here takes exactly the operand types it is chosen
-/// for (`K-NUM-008`), so a believed type that is wrong raises `type_error`.
-/// `**` stays a helper: JavaScript's `1 ** NaN` is not the kernel's.
-pub(crate) fn direct_binary(op: BinaryOp, left: &Ty, right: &Ty) -> Option<Direct> {
-    if left.is_number() && right.is_number() {
-        return Some(match op {
-            BinaryOp::Add => Direct::Numeric("num.add"),
-            BinaryOp::Subtract => Direct::Numeric("num.sub"),
-            BinaryOp::Multiply => Direct::Numeric("num.mul"),
-            BinaryOp::Divide => Direct::Numeric("num.div"),
-            BinaryOp::Remainder => Direct::Numeric("num.rem_trunc"),
-            BinaryOp::Less => Direct::Numeric("num.lt"),
-            BinaryOp::LessEqual => Direct::Numeric("num.le"),
-            BinaryOp::Greater => Direct::NumericSwapped("num.lt"),
-            BinaryOp::GreaterEqual => Direct::NumericSwapped("num.le"),
-            BinaryOp::StrictEqual | BinaryOp::LooseEqual => Direct::NumericEqual { negated: false },
-            BinaryOp::StrictNotEqual | BinaryOp::LooseNotEqual => {
-                Direct::NumericEqual { negated: true }
-            }
-            _ => return None,
-        });
-    }
-    if op != BinaryOp::Add {
-        return None;
-    }
-    match (left, right) {
-        (Ty::Text, Ty::Text) => Some(Direct::Concat),
-        (Ty::Float, Ty::Text) => Some(Direct::ConcatFloat { float_left: true }),
-        (Ty::Text, Ty::Float) => Some(Direct::ConcatFloat { float_left: false }),
-        _ => None,
-    }
-}
+pub(crate) use crate::constructs::operators::Direct;
 
 /// What a binary operator gives, whichever way it is lowered.
 pub(crate) fn binary_result(op: BinaryOp, left: &Ty, right: &Ty) -> Ty {

@@ -627,7 +627,7 @@ impl<'a> Lowerer<'a> {
             None => match &ordinary {
                 Some(Ok(slots)) => {
                     let value = this.invoke(
-                        &format!("py.method.{name}"),
+                        &crate::constructs::access::method_name(name),
                         slots,
                         method.map_or(Ty::Unknown, |method| method.result.into()),
                     )?;

@@ -1,6 +1,6 @@
 //! Proven receivers select typed access helpers with the ordinary Python fees.
 
-use lash_kernel_doc::{Expr, Literal, Member, Place};
+use lash_kernel_doc::{Member, Place};
 use ruff_python_ast::Expr as PyExpr;
 
 use super::{Lowerer, Lowering, Operand};
@@ -20,13 +20,8 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn getitem(&mut self, kind: Ty, operands: &[Operand]) -> Lowering<Operand> {
-        let helper = match (kind, &operands[1].expr) {
-            (Ty::Dict, Expr::Literal(Literal::Text(_))) => "py.dict_getitem",
-            (Ty::List, Expr::Literal(Literal::Int(_))) => "py.list_getitem",
-            (Ty::Tuple, Expr::Literal(Literal::Int(_))) => "py.tuple_getitem",
-            _ => "py.getitem",
-        };
-        self.invoke(helper, operands, Ty::Unknown)
+        let declaration = crate::constructs::access::read(kind, &operands[1].expr);
+        self.invoke(declaration.helper, operands, Ty::Unknown)
     }
 
     pub(super) fn setitem(
@@ -36,21 +31,20 @@ impl Lowerer<'_> {
         index: Operand,
         value: Operand,
     ) -> Lowering<()> {
-        if kind == Ty::Dict {
-            self.store(
-                Place::Member(Member::Index {
-                    target: target.expr,
-                    index: index.expr,
-                }),
-                value,
-            );
-            return Ok(());
+        match crate::constructs::access::write(kind, &index.expr) {
+            crate::constructs::access::Store::Member => {
+                self.store(
+                    Place::Member(Member::Index {
+                        target: target.expr,
+                        index: index.expr,
+                    }),
+                    value,
+                );
+                Ok(())
+            }
+            crate::constructs::access::Store::Call(declaration) => {
+                self.invoke_do(declaration.helper, &[target, index, value])
+            }
         }
-        let helper = if kind == Ty::List && matches!(&index.expr, Expr::Literal(Literal::Int(_))) {
-            "py.list_setitem"
-        } else {
-            "py.setitem"
-        };
-        self.invoke_do(helper, &[target, index, value])
     }
 }

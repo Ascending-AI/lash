@@ -1,0 +1,22 @@
+[package]
+name = "lash-dialect-conventions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Source convention declarations for parser-free document authoring."
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }

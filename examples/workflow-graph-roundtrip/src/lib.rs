@@ -596,7 +596,11 @@ async fn edit_workflow(
         edits: request.edits,
     };
     let applied = draft
-        .apply(&transaction, &environment.checker())
+        .apply(
+            &transaction,
+            &environment.checker(),
+            lash::workflow::edit::CONVENTIONS,
+        )
         .map_err(|refusal| {
             let diagnostics = refusal
                 .diagnostics

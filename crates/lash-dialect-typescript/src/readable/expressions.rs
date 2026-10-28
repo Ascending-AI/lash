@@ -36,13 +36,7 @@ impl Lifter<'_> {
                     .collect::<Lift<_>>()?,
             )),
             k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                if matches!(expr, k::Expr::Tuple(_))
-                    && let [
-                        k::Expr::Literal(k::Literal::Text(tag)),
-                        k::Expr::Literal(k::Literal::Int(value)),
-                    ] = items.as_slice()
-                    && tag == "ts.bigint"
-                {
+                if let Some(value) = crate::constructs::numbers::bigint_value(expr) {
                     return Ok(Expr::Number(format!("{value}n")));
                 }
                 if matches!(expr, k::Expr::Tuple(_))
@@ -145,7 +139,7 @@ impl Lifter<'_> {
             return None;
         };
         if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id))
-            if self.is(id, "ts.copy_boundary"))
+            if self.is(id, crate::constructs::conventions::ARGUMENT_COPY))
         {
             return None;
         }
@@ -175,7 +169,7 @@ impl Lifter<'_> {
                 "length".to_owned(),
             ));
         }
-        if let Some(method) = self.primitive_method(&name, args)? {
+        if let Some(method) = self.primitive_method(function, args)? {
             return Ok(method);
         }
         if self.style.operators
@@ -208,8 +202,17 @@ impl Lifter<'_> {
                 )),
             )),
             ("num.to_float", [value]) => self.expr(value),
-            ("num.neg", [value]) => Ok(Expr::Unary("-", Box::new(self.expr(value)?))),
-            ("bool.not", [value]) => Ok(Expr::Unary("!", Box::new(self.condition(value)?))),
+            (name, [value]) => match crate::constructs::operators::unary_inverse(name, true) {
+                Some((token, condition)) => Ok(Expr::Unary(
+                    token,
+                    Box::new(if condition {
+                        self.condition(value)?
+                    } else {
+                        self.expr(value)?
+                    }),
+                )),
+                None => refuse(format!("`{name}` has no source spelling")),
+            },
             (
                 "text.join",
                 [
@@ -217,7 +220,7 @@ impl Lifter<'_> {
                     k::Expr::Literal(k::Literal::Text(separator)),
                 ],
             ) if separator.is_empty() => self.template(parts),
-            (name, [left, right]) => match binary_of(name) {
+            (name, [left, right]) => match crate::constructs::operators::native_inverse(name) {
                 Some(op) => self.binary(op, left, right),
                 None => refuse(format!("`{name}` has no operator")),
             },
@@ -229,22 +232,33 @@ impl Lifter<'_> {
     /// whose `number` checks the operator lowers again.
     fn operator(&mut self, name: &str, args: &[k::Expr]) -> Option<Lift<Expr>> {
         match (name, args) {
-            ("ts.number.checked", [value]) => Some(self.expr(value)),
+            (crate::constructs::operators::NUMBER_GUARD, [value]) => Some(self.expr(value)),
             // Text operands read as text without the assertions.
             ("text.concat", [left, right]) => Some(self.binary("+", left, right)),
-            ("num.neg", [value]) => Some(
-                self.expr(value)
-                    .map(|value| Expr::Unary("-", Box::new(value))),
-            ),
-            ("bool.not", [k::Expr::Call { function, args }]) if self.is(function, "eq") => {
+            (name, [k::Expr::Call { function, args }])
+                if name == crate::constructs::operators::native_not()
+                    && self.is(
+                        function,
+                        crate::types::Direct::NumericEqual { negated: false }.function(),
+                    ) =>
+            {
                 match args.as_slice() {
                     [left, right] => Some(self.binary("!==", left, right)),
                     _ => None,
                 }
             }
-            (name, [left, right]) => {
-                binary_of(name).map(|operator| self.binary(operator, left, right))
+            (name, [value]) => {
+                crate::constructs::operators::unary_inverse(name, true).map(|(token, condition)| {
+                    let value = if condition {
+                        self.condition(value)
+                    } else {
+                        self.expr(value)
+                    };
+                    value.map(|value| Expr::Unary(token, Box::new(value)))
+                })
             }
+            (name, [left, right]) => crate::constructs::operators::native_inverse(name)
+                .map(|operator| self.binary(operator, left, right)),
             _ => None,
         }
     }
@@ -255,7 +269,7 @@ impl Lifter<'_> {
         if let (k::Expr::Variable(first), k::Expr::Variable(second)) = (left, right)
             && let (Some(first), Some(second)) = (self.pending_at(first), self.pending_at(second))
             && second < first
-            && let Some(mirrored) = mirror(op)
+            && let Some(mirrored) = crate::constructs::operators::mirror(op)
         {
             let right = self.expr(right)?;
             let left = self.expr(left)?;
@@ -263,9 +277,9 @@ impl Lifter<'_> {
         }
         let mut operand = |value: &k::Expr| {
             if !self.style.operators
-                && matches!(op, "===" | "%")
+                && crate::constructs::operators::asserted(op)
                 && let k::Expr::Call { function, args } = value
-                && self.is(function, "ts.number.checked")
+                && self.is(function, crate::constructs::operators::NUMBER_GUARD)
                 && let [value] = args.as_slice()
             {
                 return Ok(Expr::As(
@@ -495,7 +509,7 @@ impl Lifter<'_> {
     fn crossing(&mut self, arg: &k::Expr) -> Lift<Expr> {
         if let k::Expr::Act(boundary) = arg
             && let k::ActKind::Call(k::Callee::Local(id)) = &boundary.kind
-            && self.is(id, "ts.copy_boundary")
+            && self.is(id, crate::constructs::conventions::ARGUMENT_COPY)
             && let [value, _factory] = boundary.args.as_slice()
         {
             return self.expr(value);
@@ -532,18 +546,26 @@ impl Lifter<'_> {
     /// A dialect helper's call, as the source operator or built-in it
     /// implements.
     fn helper(&mut self, name: &str, args: &[k::Expr]) -> Lift<Expr> {
+        if let Some(value) = crate::constructs::numbers::BIGINT_INPUT.named(name, args) {
+            return self.expr(value);
+        }
         match (name, args) {
-            ("ts.bigint.input", [value, _shape]) => self.expr(value),
             ("ts.pow", [left, right]) => self.binary("**", left, right),
             // A slice over constant bounds; an omitted end is the whole length.
-            ("ts.string.slice_units", [receiver, start, end]) => {
+            (crate::constructs::methods::SLICE_UNITS, [receiver, start, end]) => {
                 let receiver = self.expr(receiver)?;
                 let mut bounds = vec![self.expr(start)?, self.expr(end)?];
                 if bounds.last() == Some(&Expr::Undefined) {
                     bounds.pop();
                 }
                 Ok(Expr::Call(
-                    Box::new(Expr::Field(Box::new(receiver), "slice".into())),
+                    Box::new(Expr::Field(
+                        Box::new(receiver),
+                        crate::constructs::methods::source_method(
+                            crate::constructs::methods::Kind::Slice,
+                        )
+                        .into(),
+                    )),
                     bounds,
                 ))
             }
@@ -585,7 +607,7 @@ impl Lifter<'_> {
                 let [k::Expr::Act(boundary)] = performed.args.as_slice() else {
                     return refuse("pending tool wrapper input");
                 };
-                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, "ts.copy_boundary"))
+                if !matches!(&boundary.kind, k::ActKind::Call(k::Callee::Local(id)) if self.is(id, crate::constructs::conventions::ARGUMENT_COPY))
                 {
                     return refuse("pending tool wrapper boundary");
                 }
@@ -614,10 +636,28 @@ impl Lifter<'_> {
                     k::Expr::Literal(k::Literal::Text(label)),
                 ],
             ) if name.as_str() == label => self.variable(name),
-            ("ts.strict_equals", [left, right]) => self.binary("===", left, right),
-            ("ts.strict_not_equals", [left, right]) => self.binary("!==", left, right),
-            ("ts.not", [value]) => Ok(Expr::Unary("!", Box::new(self.expr(value)?))),
-            ("ts.typeof", [value]) => Ok(Expr::Unary("typeof ", Box::new(self.expr(value)?))),
+            (name, [left, right])
+                if crate::constructs::operators::BINARY
+                    .iter()
+                    .any(|entry| entry.helper == name) =>
+            {
+                let declaration = crate::constructs::operators::BINARY
+                    .iter()
+                    .find(|entry| entry.helper == name)
+                    .unwrap_or_else(|| unreachable!("declared helper"));
+                if declaration.swapped {
+                    self.binary(declaration.token, right, left)
+                } else {
+                    self.binary(declaration.token, left, right)
+                }
+            }
+            (name, [value])
+                if crate::constructs::operators::unary_inverse(name, false).is_some() =>
+            {
+                let (token, _) = crate::constructs::operators::unary_inverse(name, false)
+                    .unwrap_or_else(|| unreachable!("a declared unary inverse"));
+                Ok(Expr::Unary(token, Box::new(self.expr(value)?)))
+            }
             (name, [target]) if name.starts_with("ts.property.") => {
                 let property = &name["ts.property.".len()..];
                 let target = self.expr(target)?;
@@ -700,45 +740,14 @@ fn builtin_value(parts: &[k::Expr]) -> Option<Expr> {
 }
 
 fn global(namespace: &str) -> Option<&'static str> {
-    Some(match namespace {
-        "json" => "JSON",
-        "math" => "Math",
-        "date" => "Date",
-        "console" => "console",
-        "object" => "Object",
-        "array" => "Array",
-        "number" => "Number",
-        "string" => "String",
-        "promise" => "Promise",
-        _ => return None,
-    })
-}
-
-fn binary_of(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "num.add" | "ts.add" => "+",
-        "num.sub" | "ts.sub" => "-",
-        "num.mul" | "ts.mul" => "*",
-        "num.div" | "ts.div" => "/",
-        "num.rem_trunc" | "ts.rem" => "%",
-        "num.lt" | "ts.lt" => "<",
-        "num.le" | "ts.le" => "<=",
-        "ts.gt" => ">",
-        "ts.ge" => ">=",
-        "eq" => "===",
-        _ => return None,
-    })
-}
-
-/// The comparison `b op' a` that is `a op b`.
-fn mirror(op: &str) -> Option<&'static str> {
-    Some(match op {
-        "<" => ">",
-        "<=" => ">=",
-        ">" => "<",
-        ">=" => "<=",
-        _ => return None,
-    })
+    let prefix = format!("ts.{namespace}.");
+    let mut roots = lash_ext_ts_helpers::builtins::table()
+        .functions
+        .iter()
+        .filter(|(_, helper)| helper.starts_with(&prefix))
+        .filter_map(|(path, _)| (*path).split_once('.').map(|(root, _)| root));
+    let root = roots.next()?;
+    roots.all(|other| other == root).then_some(root)
 }
 
 pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {

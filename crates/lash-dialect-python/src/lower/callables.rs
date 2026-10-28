@@ -59,7 +59,7 @@ impl Lowerer<'_> {
             options.skip_required_check,
         )?;
         if let Expr::Tuple(parts) = &mut token.expr {
-            parts[4] = Expr::Tuple(vec![
+            parts[crate::constructs::callables::CATEGORY] = Expr::Tuple(vec![
                 Expr::Literal(Literal::Text("py.callable".into())),
                 Expr::Literal(Literal::Bool(options.is_async)),
             ]);
@@ -86,7 +86,8 @@ impl Lowerer<'_> {
         } else {
             self.fresh("exception")
         };
-        let expression_body = matches!(body.stmts.as_slice(), [Stmt::Return { .. }]);
+        let expression_body =
+            body.len() == 1 && matches!(body.last_stmt(), Some(Stmt::Return { .. }));
         let mut packed_body = self.block(|this| {
             let slots = this.invoke(
                 "py.bind",
@@ -111,27 +112,25 @@ impl Lowerer<'_> {
                     }))),
                 });
             }
-            this.buf.stmts.extend(body.stmts);
-            this.buf.notes.extend(body.notes);
+            this.buf.extend(body);
             Ok(())
         })?;
-        if expression_body && let Some(Stmt::Return { value }) = packed_body.stmts.last().cloned() {
-            let prefix = Buf {
-                stmts: packed_body.stmts[..packed_body.stmts.len() - 1].to_vec(),
-                notes: Vec::new(),
-            };
+        if expression_body && let Some(Stmt::Return { value }) = packed_body.last_stmt().cloned() {
+            let (statements, mut notes) = packed_body.clone().into_parts();
+            let prefix = Buf::from_parts(
+                statements[..statements.len() - 1].to_vec(),
+                notes[..notes.len() - 1].to_vec(),
+            );
             if let Some(value) = self.branch_expression(&prefix, value) {
-                let note = packed_body.notes.pop().unwrap_or_default();
-                packed_body = Buf {
-                    stmts: vec![Stmt::Return { value }],
-                    notes: vec![note],
-                };
+                let note = notes.pop().unwrap_or_default();
+                packed_body = Buf::one(Stmt::Return { value }, note);
             }
         }
+
         if let Some(start) = &mut start {
             start.representation = FunctionRepresentation::Token {
-                tag: "py.function".into(),
-                callable: 1,
+                tag: crate::constructs::callables::TAG.into(),
+                callable: crate::constructs::callables::CALLABLE as u32,
             };
         }
         if let Some(start) = &mut start {
@@ -142,13 +141,7 @@ impl Lowerer<'_> {
         }
         let packed = self.emit_closure(vec![positional, keywords, exception], packed_body, start);
         Ok(Operand::inline(
-            Expr::Tuple(vec![
-                Expr::Literal(Literal::Text("py.function".into())),
-                packed.expr,
-                Expr::Tuple(metadata),
-                Expr::Literal(Literal::Text(name.into())),
-                Expr::Literal(Literal::Null),
-            ]),
+            crate::constructs::callables::token(packed.expr, metadata, name),
             Ty::Unknown,
         ))
     }
@@ -243,7 +236,7 @@ impl Lowerer<'_> {
             crate::exceptions::Catches::Named(names) => ("named", names),
         };
         if let Expr::Tuple(parts) = &mut token.expr {
-            parts[4] = Expr::Tuple(vec![
+            parts[crate::constructs::callables::CATEGORY] = Expr::Tuple(vec![
                 Expr::Literal(Literal::Text("py.exception".into())),
                 Expr::Literal(Literal::Text(mode.into())),
                 Expr::Tuple(

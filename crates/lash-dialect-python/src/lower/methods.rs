@@ -204,7 +204,11 @@ impl Lowerer<'_> {
             self.store(Place::Member(Member::Index { target, index: end }), value);
             return Ok(Operand::none());
         }
-        let value = self.invoke(&format!("py.method.{name}"), &slots, method.result.into())?;
+        let value = self.invoke(
+            &crate::constructs::access::method_name(name),
+            &slots,
+            method.result.into(),
+        )?;
         if awaited {
             return self.await_via("py.await", value);
         }

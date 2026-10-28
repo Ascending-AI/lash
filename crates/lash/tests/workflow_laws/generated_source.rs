@@ -594,6 +594,7 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
                     edits: vec![operation],
                 },
                 &checked.checker(),
+                lash::workflow::edit::CONVENTIONS,
             ) {
                 failures.push(format!("{format:?} {name}: edit {error:?}"));
                 continue;

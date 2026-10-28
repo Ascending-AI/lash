@@ -126,7 +126,7 @@ impl Lowerer<'_> {
                         skip_required_check: false,
                     },
                 )?;
-                if let Some(note) = self.buf.notes.last_mut() {
+                if let Some(note) = self.buf.last_note_mut() {
                     note.span = Some(diagnostics::span(lambda.range));
                     note.written = Some(written);
                 }
@@ -140,7 +140,10 @@ impl Lowerer<'_> {
                             let key = self.expr(key)?;
                             let key = self.pin(key);
                             let value = self.expr(&item.value)?;
-                            self.invoke_do("py.setitem", &[out.clone(), key, value])?;
+                            self.invoke_do(
+                                crate::constructs::access::STORE.helper,
+                                &[out.clone(), key, value],
+                            )?;
                         } else {
                             let value = self.expr(&item.value)?;
                             self.invoke_do("py.dict.extend", &[out.clone(), value])?;
@@ -219,7 +222,11 @@ impl Lowerer<'_> {
                         slice.upper.as_deref(),
                         slice.step.as_deref(),
                     ])?;
-                    self.invoke("py.slice", &operands, Ty::Unknown)
+                    self.invoke(
+                        crate::constructs::access::SLICE.helper,
+                        &operands,
+                        Ty::Unknown,
+                    )
                 }
                 index => {
                     let kind = self.subscript_kind(&subscript.value);
@@ -305,74 +312,55 @@ impl Lowerer<'_> {
         range: TextRange,
         operand_ranges: [TextRange; 2],
     ) -> Lowering<Operand> {
-        use ast::Operator;
-        let numbers = left.ty.is_number() && right.ty.is_number();
-        let number = if left.ty == Ty::Int && right.ty == Ty::Int {
-            Ty::Int
-        } else if numbers {
-            Ty::Float
-        } else {
-            Ty::Unknown
-        };
-        // Two operands the source types as numbers add, subtract and
-        // multiply as the kernel does (tier 1).
-        let direct = match op {
-            Operator::Add if numbers => Some(("add", number)),
-            Operator::Sub if numbers => Some(("sub", number)),
-            Operator::Mult if numbers => Some(("mul", number)),
-            Operator::Add if left.ty == Ty::Str && right.ty == Ty::Str => {
-                Some(("text.concat", Ty::Str))
-            }
-            _ => None,
-        };
-        if let Some((function, ty)) = direct {
-            let call = self.native(function, vec![left.expr, right.expr])?;
-            return Ok(Operand::inline(call, ty));
+        use crate::constructs::operators::{self, Inverse};
+        let declaration = operators::select(op, left.ty, right.ty, None)
+            .unwrap_or_else(|| unreachable!("every binary construct is declared"));
+        if let Inverse::Refused(crate::constructs::operators::Refusal::MatrixProduct) =
+            declaration.inverse
+        {
+            return Err(diagnostics::with_repair(
+                Code::OperatorUnsupported,
+                format!("the operator `{}` is not in the dialect", op.as_str()),
+                range,
+                format!(
+                    "compute the matrix product of `{}` and `{}` with loops over their entries",
+                    self.text(operand_ranges[0]),
+                    self.text(operand_ranges[1])
+                ),
+            ));
         }
-        let (helper, ty) = match op {
-            Operator::Add => ("py.add", Ty::Unknown),
-            Operator::Sub => ("py.sub", Ty::Unknown),
-            Operator::Mult => ("py.mul", Ty::Unknown),
-            Operator::Div => ("py.truediv", Ty::Float),
-            Operator::FloorDiv => ("py.floordiv", number),
-            Operator::Mod => ("py.mod", number),
-            Operator::Pow => ("py.pow", Ty::Unknown),
-            Operator::BitOr | Operator::BitAnd | Operator::BitXor => {
-                let symbol = Operand::text(op.as_str());
-                return self.invoke("py.bitwise", &[symbol, left, right], Ty::Unknown);
+        self.binary_call(declaration, left, right)
+    }
+
+    pub(super) fn binary_call(
+        &mut self,
+        declaration: &crate::constructs::operators::Alternative,
+        left: Operand,
+        right: Operand,
+    ) -> Lowering<Operand> {
+        use crate::constructs::operators::Call;
+        let ty = declaration.result(left.ty, right.ty);
+        match declaration.call {
+            Call::Native => Ok(Operand::inline(
+                self.native(declaration.helper, vec![left.expr, right.expr])?,
+                ty,
+            )),
+            Call::Action => self.invoke(declaration.helper, &[left, right], ty),
+            Call::SymbolAction => {
+                let symbol = declaration
+                    .token()
+                    .unwrap_or_else(|| unreachable!("symbol calls have source syntax"));
+                self.invoke(
+                    declaration.helper,
+                    &[Operand::text(symbol), left, right],
+                    ty,
+                )
             }
-            Operator::LShift | Operator::RShift => {
-                return self.invoke(
-                    "py.shift",
-                    &[Operand::text(op.as_str()), left, right],
-                    Ty::Int,
-                );
-            }
-            Operator::MatMult => {
-                return Err(diagnostics::with_repair(
-                    Code::OperatorUnsupported,
-                    format!("the operator `{}` is not in the dialect", op.as_str()),
-                    range,
-                    match op {
-                        Operator::LShift | Operator::RShift => format!(
-                            "write `({}) {} (2 ** ({}))`",
-                            self.text(operand_ranges[0]),
-                            if op == Operator::LShift { "*" } else { "//" },
-                            self.text(operand_ranges[1])
-                        ),
-                        _ => format!(
-                            "compute the matrix product of `{}` and `{}` with loops over their entries",
-                            self.text(operand_ranges[0]),
-                            self.text(operand_ranges[1])
-                        ),
-                    },
-                ));
-            }
-        };
-        self.invoke(helper, &[left, right], ty)
+        }
     }
 
     fn unary(&mut self, operation: &ast::ExprUnaryOp) -> Lowering<Operand> {
+        let declaration = crate::constructs::operators::unary(operation.op);
         match operation.op {
             ast::UnaryOp::Not => {
                 let operand = self.expr(&operation.operand)?;
@@ -395,22 +383,25 @@ impl Lowerer<'_> {
                     });
                 }
                 let operand = self.expr(&operation.operand)?;
-                if operand.ty.is_number() {
+                if let Some(native) = declaration.native_for(operand.ty) {
                     let ty = operand.ty;
-                    return Ok(Operand::inline(self.native("neg", vec![operand.expr])?, ty));
+                    return Ok(Operand::inline(
+                        self.native(native, vec![operand.expr])?,
+                        ty,
+                    ));
                 }
-                self.invoke("py.neg", &[operand], Ty::Unknown)
+                self.invoke(declaration.dynamic, &[operand], Ty::Unknown)
             }
             ast::UnaryOp::UAdd => {
                 let operand = self.expr(&operation.operand)?;
                 if operand.ty.is_number() {
                     return Ok(operand);
                 }
-                self.invoke("py.pos", &[operand], Ty::Unknown)
+                self.invoke(declaration.dynamic, &[operand], Ty::Unknown)
             }
             ast::UnaryOp::Invert => {
                 let value = self.expr(&operation.operand)?;
-                self.invoke("py.invert", &[value], Ty::Int)
+                self.invoke(declaration.dynamic, &[value], Ty::Int)
             }
         }
     }
@@ -470,36 +461,27 @@ impl Lowerer<'_> {
 
     /// One comparison, on operands already lowered.
     fn comparison(&mut self, op: ast::CmpOp, left: Operand, right: Operand) -> Lowering<Operand> {
-        use ast::CmpOp;
-        let (function, negated) = match op {
-            CmpOp::Eq => ("eq", false),
-            CmpOp::NotEq => ("eq", true),
-            CmpOp::Lt => ("lt", false),
-            CmpOp::LtE => ("le", false),
-            CmpOp::Gt => ("gt", false),
-            CmpOp::GtE => ("ge", false),
-            CmpOp::Is => ("same", false),
-            CmpOp::IsNot => ("same", true),
-            CmpOp::In | CmpOp::NotIn => {
-                // The helper takes (container, member), while Python reads
-                // the member first. Expression lets preserve that order.
-                let left = self.pin(left);
-                let right = self.pin(right);
-                let found = self.invoke("py.contains", &[right, left], Ty::Bool)?;
-                if op == CmpOp::In {
-                    return Ok(found);
-                }
-                return Ok(Operand::inline(self.not(found.expr)?, Ty::Bool));
-            }
-        };
-        let mut call = if function == "same" {
-            self.invoke("py.same", &[left, right], Ty::Bool)?.expr
-        } else if function == "eq" {
-            self.invoke("py.equal", &[left, right], Ty::Bool)?.expr
+        let declaration = crate::constructs::operators::COMPARISONS
+            .iter()
+            .find(|entry| entry.source == op)
+            .unwrap_or_else(|| unreachable!("every comparison is declared"));
+        if declaration.swapped {
+            let left = self.pin(left);
+            let right = self.pin(right);
+            let found = self.invoke(declaration.helper, &[right, left], Ty::Bool)?;
+            return if declaration.negated {
+                Ok(Operand::inline(self.not(found.expr)?, Ty::Bool))
+            } else {
+                Ok(found)
+            };
+        }
+        let mut call = if declaration.native {
+            self.native(declaration.helper, vec![left.expr, right.expr])?
         } else {
-            self.native(function, vec![left.expr, right.expr])?
+            self.invoke(declaration.helper, &[left, right], Ty::Bool)?
+                .expr
         };
-        if negated {
+        if declaration.negated {
             call = self.not(call)?;
         }
         Ok(Operand::inline(call, Ty::Bool))
@@ -592,7 +574,11 @@ impl Lowerer<'_> {
             && let [argument] = &*call.arguments.args
         {
             let value = self.expr(argument)?;
-            return self.invoke("py.type", &[value], Ty::Str);
+            return self.invoke(
+                crate::constructs::access::TYPE_NAME.helper,
+                &[value],
+                Ty::Str,
+            );
         }
         let receiver = self.expr(&attribute.value)?;
         if self.seals() && !self.is_asyncio(&attribute.value) {
@@ -616,11 +602,12 @@ impl Lowerer<'_> {
         collect: Collect<'_>,
         generators: &[ast::Comprehension],
     ) -> Lowering<Operand> {
-        let (empty, ty) = match collect {
-            Collect::List(_) => (Expr::List(Vec::new()), Ty::List),
-            Collect::Set(_) => (Expr::Set(Vec::new()), Ty::Set),
-            Collect::Dict(..) => (Expr::Map(Vec::new()), Ty::Dict),
+        let collection = match collect {
+            Collect::List(_) => crate::constructs::collections::Collection::List,
+            Collect::Set(_) => crate::constructs::collections::Collection::Set,
+            Collect::Dict(..) => crate::constructs::collections::Collection::Dict,
         };
+        let (empty, ty) = collection.allocation();
         let out = self.let_rhs(Rhs::Expr(empty), ty);
         let Expr::Variable(target) = out.expr.clone() else {
             return Ok(out);
@@ -640,7 +627,8 @@ impl Lowerer<'_> {
             let mut names = Vec::new();
             target_names(&generator.target, &mut names);
             for name in names {
-                let renamed = self.fresh(&format!("{name}_"));
+                let renamed =
+                    self.fresh(&crate::constructs::collections::COMPREHENSION.binding_base(&name));
                 self.emit(Stmt::Let {
                     name: renamed.clone(),
                     value: Rhs::Expr(Expr::Literal(Literal::Absent)),
@@ -724,7 +712,11 @@ impl Lowerer<'_> {
         match collect {
             Collect::List(element) => {
                 let value = self.expr(element)?;
-                let end = self.native("list.len", vec![target.clone()])?;
+                let end = crate::constructs::collections::COMPREHENSION
+                    .append_index
+                    .emit(std::slice::from_ref(&target), &mut |name, args| {
+                        self.native(name, args)
+                    })?;
                 self.store(Place::Member(Member::Index { target, index: end }), value);
             }
             Collect::Set(element) => {

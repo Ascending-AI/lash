@@ -56,11 +56,12 @@ impl Operators {
             .all(|arg| types.expression(arg, &self.functions) == Kind::Text);
         let candidates: Vec<_> = candidates
             .iter()
-            .filter(|id| match self.functions[id].as_str() {
-                "add" | "sub" | "mul" | "neg" | "int.add" | "int.sub" | "int.mul" => numeric,
-                "text.concat" => text,
-                "py.add" | "py.sub" | "py.mul" | "py.neg" => !numeric && !text,
-                _ => true,
+            .filter(|id| {
+                crate::constructs::operators::inverse_eligible(
+                    self.functions[id].as_str(),
+                    numeric,
+                    text,
+                )
             })
             .collect();
         match candidates.as_slice() {
@@ -79,26 +80,7 @@ impl Operators {
         (args.len() == arity && self.id(token, args, types) == Some(*id)).then_some(token)
     }
 }
-fn spelling(label: &str) -> Option<&'static str> {
-    Some(match label {
-        "add" | "int.add" | "text.concat" | "py.add" => "+",
-        "sub" | "int.sub" | "py.sub" => "-",
-        "mul" | "int.mul" | "py.mul" => "*",
-        "py.truediv" => "/",
-        "py.floordiv" => "//",
-        "py.mod" => "%",
-        "py.pow" => "**",
-        "eq" | "py.equal" => "==",
-        "same" | "py.same" => "is",
-        "lt" | "int.lt" => "<",
-        "le" | "int.le" => "<=",
-        "gt" => ">",
-        "ge" => ">=",
-        "bool.not" => "not",
-        "neg" | "py.neg" => "neg",
-        _ => return None,
-    })
-}
+use crate::constructs::operators::spelling;
 
 /// How an exported library action is spelled when an author could have
 /// written it: a builtin call, or a method of its first operand. Each takes
@@ -115,29 +97,6 @@ pub(crate) enum Authored {
     TypeName,
 }
 
-/// The builtins whose helper takes its arguments positionally. `float` is
-/// absent: `float("nan")` already spells a literal.
-const BUILTINS: [(&str, &str); 18] = [
-    ("abs", "py.abs"),
-    ("all", "py.all"),
-    ("any", "py.any"),
-    ("bool", "py.truth"),
-    ("chr", "py.chr"),
-    ("dict", "py.to_dict"),
-    ("divmod", "py.divmod"),
-    ("int", "py.int"),
-    ("len", "py.length"),
-    ("list", "py.to_list"),
-    ("ord", "py.ord"),
-    ("range", "py.range"),
-    ("repr", "py.repr"),
-    ("reversed", "py.reversed"),
-    ("round", "py.round"),
-    ("set", "py.to_set"),
-    ("sum", "py.sum"),
-    ("tuple", "py.to_tuple"),
-];
-
 impl Operators {
     /// Helpers lowered as actions retain their exact library identity, even
     /// when source type inference cannot prove native numeric operands.
@@ -145,11 +104,49 @@ impl Operators {
         &self,
         target: &k::FunctionTarget,
         args: &[k::Expr],
-    ) -> Option<&'static str> {
+    ) -> Option<(&'static str, usize)> {
         let label = target.label(self)?;
+        if let Some(entry) = crate::constructs::operators::BINARY.iter().find(|entry| entry.helper == label && entry.call == crate::constructs::operators::Call::SymbolAction && matches!(args.first(), Some(k::Expr::Literal(k::Literal::Text(symbol))) if entry.token() == Some(symbol.as_str()))) {
+            return (args.len() == 3).then_some((entry.token()?, 1));
+        }
+        if let Some(entry) = crate::constructs::operators::UNARY
+            .iter()
+            .find(|entry| entry.dynamic == label && entry.source != ruff_python_ast::UnaryOp::Not)
+        {
+            return (args.len() == 1).then_some((entry.token, 0));
+        }
         let token = spelling(&label)?;
         let arity = if matches!(token, "not" | "neg") { 1 } else { 2 };
-        (args.len() == arity).then_some(token)
+        (args.len() == arity).then_some((token, 0))
+    }
+
+    pub(crate) fn assignment_token(
+        &self,
+        reference: &impl Reference,
+        native: bool,
+    ) -> Option<&'static str> {
+        let label = reference.label(self)?;
+        crate::constructs::operators::BINARY
+            .iter()
+            .find_map(|entry| {
+                if entry.helper != label
+                    || (entry.call == crate::constructs::operators::Call::Native) != native
+                {
+                    return None;
+                }
+                match entry.inverse {
+                    crate::constructs::operators::Inverse::Assignment(token) => Some(token),
+                    _ => None,
+                }
+            })
+    }
+
+    pub(crate) fn access(
+        &self,
+        reference: &impl Reference,
+        arity: usize,
+    ) -> Option<crate::constructs::access::Form> {
+        crate::constructs::access::inverse(&reference.label(self)?, arity)
     }
 
     /// The one function the base document labels `label`.
@@ -166,27 +163,11 @@ impl Operators {
     /// `view` spells (`for x in e:` for none, `for x in e.items():` for
     /// `items`): the one function labelled each of its hooks.
     pub(crate) fn for_in(&self, view: Option<&str>) -> Option<k::Protocol> {
-        let (open, item) = match view {
-            None => ("py.for_in.open", None),
-            Some("keys") => ("py.for_in.keys", None),
-            Some("values") => ("py.for_in.values", Some("py.for_in.value")),
-            Some("items") => ("py.for_in.items", Some("py.for_in.item")),
-            Some(_) => return None,
-        };
-        Some(k::Protocol {
-            open: self.target(open)?,
-            next: if view.is_none() {
-                Some(self.target("py.iterator.step")?)
-            } else {
-                None
-            },
-            item: match item {
-                Some(item) => Some(self.target(item)?),
-                None => None,
-            },
-            check: Some(self.target("py.for_in.check")?),
-        })
+        crate::constructs::conventions::iteration(view)?
+            .resolve(|name| self.target(name).ok_or(()))
+            .ok()
     }
+
     /// The view a native `for` spells for a loop through `via`, or none:
     /// `Some(None)` for `for x in e:`, `Some(Some("items"))` for
     /// `for x in e.items():`. Python's `for` is the loop through the base's
@@ -194,8 +175,9 @@ impl Operators {
     /// kernel's own loop (`via` none).
     pub(crate) fn native_loop(&self, via: Option<&k::Protocol>) -> Option<Option<&'static str>> {
         match (self.for_in(None).is_some(), via) {
-            (true, Some(via)) => [None, Some("keys"), Some("values"), Some("items")]
-                .into_iter()
+            (true, Some(via)) => crate::constructs::conventions::ITERATIONS
+                .iter()
+                .map(|(view, _)| *view)
                 .find(|view| self.for_in(*view).as_ref() == Some(via)),
             (false, None) => Some(None),
             _ => None,
@@ -209,15 +191,18 @@ impl Operators {
         if args.is_empty() {
             return None;
         }
-        if let Some((name, _)) = BUILTINS.iter().find(|(_, helper)| *helper == label) {
-            return Some(Authored::Builtin(name));
+        if let Some(spec) = crate::constructs::builtins::BUILTINS
+            .iter()
+            .find(|spec| spec.printed_helper().ok() == Some(label))
+        {
+            return Some(Authored::Builtin(spec.name));
         }
-        match label {
-            "py.getitem" => (args.len() == 2).then_some(Authored::Index),
-            "py.slice" => (args.len() == 4).then_some(Authored::Slice),
-            "py.type" => (args.len() == 1).then_some(Authored::TypeName),
-            _ => {
-                let method = label.strip_prefix("py.method.")?;
+        match crate::constructs::access::inverse(label, args.len()) {
+            Some(crate::constructs::access::Form::Index) => Some(Authored::Index),
+            Some(crate::constructs::access::Form::Slice) => Some(Authored::Slice),
+            Some(crate::constructs::access::Form::TypeName) => Some(Authored::TypeName),
+            Some(crate::constructs::access::Form::Store) | None => {
+                let method = label.strip_prefix(crate::constructs::access::METHOD_PREFIX)?;
                 crate::printer::attribute_identifier(method)
                     .then(|| Authored::Method(method.to_owned()))
             }

@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-dialect-conventions = { workspace = true }
 lash-ext-py-helpers = { workspace = true }
 num-bigint = { workspace = true }
 lash-kernel-services = { workspace = true }

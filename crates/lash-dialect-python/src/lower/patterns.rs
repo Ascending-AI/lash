@@ -150,7 +150,7 @@ impl Lowerer<'_> {
                                 Operand::inline(end, Ty::Int)
                             };
                             let sliced = this.invoke(
-                                "py.slice",
+                                crate::constructs::access::SLICE.helper,
                                 &[value.clone(), integer(index), end, Operand::none()],
                                 Ty::Unknown,
                             )?;
@@ -166,7 +166,11 @@ impl Lowerer<'_> {
                             } else {
                                 integer(index)
                             };
-                            this.invoke("py.getitem", &[value.clone(), position], Ty::Unknown)?
+                            this.invoke(
+                                crate::constructs::access::INDEX.helper,
+                                &[value.clone(), position],
+                                Ty::Unknown,
+                            )?
                         };
                         let item = this.pin(item);
                         this.pattern(pattern, item, ok, captures)
@@ -208,8 +212,11 @@ impl Lowerer<'_> {
                             this.invoke("py.contains", &[value.clone(), key.clone()], Ty::Bool)?;
                         this.store(Place::Variable(ok.clone()), present);
                         let nested = this.block(|this| {
-                            let item =
-                                this.invoke("py.getitem", &[value.clone(), key], Ty::Unknown)?;
+                            let item = this.invoke(
+                                crate::constructs::access::INDEX.helper,
+                                &[value.clone(), key],
+                                Ty::Unknown,
+                            )?;
                             let item = this.pin(item);
                             this.pattern(pattern, item, ok, captures)
                         })?;

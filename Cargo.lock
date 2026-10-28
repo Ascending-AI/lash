@@ -2080,10 +2080,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-dialect-conventions"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+]
+
+[[package]]
 name = "lash-dialect-python"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "lash-dialect-conventions",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
  "lash-ext-helper-compiler",
@@ -2117,6 +2126,7 @@ name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "lash-dialect-conventions",
  "lash-dialect-python",
  "lash-ext-date-ecma",
  "lash-ext-helper-compiler",
@@ -3426,6 +3436,7 @@ name = "lash-kernel-edit"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-check",
+ "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-package",
  "lash-kernel-value",
@@ -3694,6 +3705,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "futures-util",
+ "lash-dialect-conventions",
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-internal-conformance",

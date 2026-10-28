@@ -51,18 +51,7 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 
 pub(crate) use lash_kernel_dialect::Note;
 
-/// Kernel statements with their notes.
-#[derive(Debug, Default)]
-pub(crate) struct Buf {
-    stmts: Vec<Stmt>,
-    notes: Vec<Note>,
-}
-
-impl Buf {
-    fn is_empty(&self) -> bool {
-        self.stmts.is_empty()
-    }
-}
+pub(crate) use lash_kernel_dialect::builder::BlockBuilder as Buf;
 
 /// A lowered Python expression, what is known of its type, and whether later
 /// statements can change what it evaluates to.
@@ -147,8 +136,8 @@ struct Scope {
 /// `else` is a child, which an empty one is not.
 fn loop_blocks(body: Vec<Note>, orelse: &Buf) -> Vec<Vec<Note>> {
     let mut blocks = vec![body];
-    if !orelse.stmts.is_empty() {
-        blocks.push(orelse.notes.clone());
+    if !orelse.is_empty() {
+        blocks.push(orelse.notes().cloned().collect());
     }
     blocks
 }
@@ -427,7 +416,8 @@ pub(crate) fn lower_with_calls(
             .is_none()
             .then_some(&lowerer.scopes[0].bindings.locals),
     );
-    let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
+    let (main, main_notes) = main.into_parts();
+    let mut document = Document::new(NumberPolicy::BySpelling, main);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.local_functions;
     if let Some(module) = lowerer.module.take() {
@@ -464,7 +454,7 @@ pub(crate) fn lower_with_calls(
         &document,
         source,
         lash_kernel_doc::SourceLanguage::Python,
-        &main.notes,
+        &main_notes,
         &lowerer.declared_notes,
         &lowerer.declared_captions,
     )
@@ -790,12 +780,14 @@ impl Lowerer<'_> {
                 })
                 .collect();
         }
-        self.buf.stmts.push(stmt);
-        self.buf.notes.push(Note {
-            span: self.span,
-            blocks,
-            ..Note::default()
-        });
+        self.buf.push(
+            stmt,
+            Note {
+                span: self.span,
+                blocks,
+                ..Note::default()
+            },
+        );
     }
 
     pub(crate) fn emit(&mut self, stmt: Stmt) {
@@ -805,27 +797,22 @@ impl Lowerer<'_> {
     /// Lowers into a new kernel block, which what it binds does not
     /// outlive, and returns it.
     fn block(&mut self, lower: impl FnOnce(&mut Self) -> Lowering<()>) -> Lowering<Buf> {
-        let outer = std::mem::take(&mut self.buf);
         self.kernel_depth += 1;
         self.scope_mut().bound.push(BTreeSet::new());
-        let result = lower(self);
+        let result = lash_kernel_dialect::builder::region(self, |this| &mut this.buf, lower);
         self.scope_mut().bound.pop();
         self.kernel_depth -= 1;
-        let inner = std::mem::replace(&mut self.buf, outer);
-        result.map(|()| inner)
+        result.map(|(inner, ())| inner)
     }
 
     /// Lowers into a buffer of its own that joins the current block.
     fn aside<T>(&mut self, lower: impl FnOnce(&mut Self) -> Lowering<T>) -> Lowering<(Buf, T)> {
-        let outer = std::mem::take(&mut self.buf);
-        let result = lower(self);
-        let inner = std::mem::replace(&mut self.buf, outer);
-        result.map(|value| (inner, value))
+        lash_kernel_dialect::builder::region(self, |this| &mut this.buf, lower)
     }
 
     fn append(&mut self, buf: Buf) {
         if self.kernel_depth == 0 {
-            for stmt in &buf.stmts {
+            for stmt in buf.stmts() {
                 if let Stmt::Let { name, .. } = stmt
                     && !self.scopes[0].bindings.locals.contains(name.as_str())
                 {
@@ -833,29 +820,27 @@ impl Lowerer<'_> {
                 }
             }
         }
-        self.buf.stmts.extend(buf.stmts);
-        self.buf.notes.extend(buf.notes);
+        self.buf.extend(buf);
     }
 
     fn emit_if(&mut self, condition: Expr, then_block: Buf, else_block: Buf) {
-        self.push(
-            Stmt::If {
-                condition,
-                then_block: then_block.stmts,
-                else_block: else_block.stmts,
-            },
-            vec![then_block.notes, else_block.notes],
-        );
+        let mut region = Buf::conditional(condition, then_block, else_block);
+        let (statement, note) = region
+            .pop()
+            .unwrap_or_else(|| unreachable!("one conditional"));
+        self.push(statement, note.blocks);
     }
 
     fn emit_while(&mut self, condition: Expr, body: Buf, orelse: Buf) {
-        let blocks = loop_blocks(body.notes, &orelse);
+        let (body, notes) = body.into_parts();
+        let blocks = loop_blocks(notes, &orelse);
+        let (orelse, _) = orelse.into_parts();
         self.push(
             Stmt::While {
                 metered: 0,
                 condition,
-                body: body.stmts,
-                else_block: orelse.stmts,
+                body,
+                else_block: orelse,
             },
             blocks,
         );
@@ -869,36 +854,38 @@ impl Lowerer<'_> {
         body: Buf,
         orelse: Buf,
     ) {
-        let blocks = loop_blocks(body.notes, &orelse);
+        let (body, notes) = body.into_parts();
+        let blocks = loop_blocks(notes, &orelse);
+        let (orelse, _) = orelse.into_parts();
         self.push(
             Stmt::For {
                 metered: 0,
                 binding,
                 iterable,
                 via,
-                body: body.stmts,
-                else_block: orelse.stmts,
+                body,
+                else_block: orelse,
             },
             blocks,
         );
     }
 
     fn emit_try(&mut self, body: Buf, catch: Option<(Name, Buf)>, finally: Option<Buf>) {
-        let mut blocks = vec![body.notes];
+        let (body, notes) = body.into_parts();
+        let mut blocks = vec![notes];
         let catch = catch.map(|(binding, buf)| {
-            blocks.push(buf.notes);
-            Catch {
-                binding,
-                body: buf.stmts,
-            }
+            let (buf, notes) = buf.into_parts();
+            blocks.push(notes);
+            Catch { binding, body: buf }
         });
         let finally = finally.map(|buf| {
-            blocks.push(buf.notes);
-            buf.stmts
+            let (buf, notes) = buf.into_parts();
+            blocks.push(notes);
+            buf
         });
         self.push(
             Stmt::Try(TryStmt {
-                body: body.stmts,
+                body,
                 catch,
                 finally,
             }),
@@ -913,16 +900,17 @@ impl Lowerer<'_> {
         start: Option<lash_kernel_doc::CallablePresentation>,
     ) -> Operand {
         let name = self.temp();
+        let (body, notes) = body.into_parts();
         let definition = lash_kernel_dialect::authoring::local_function(
             params,
-            body.stmts,
+            body,
             &self.imports.as_map(),
             self.library,
             &self.local_functions,
         );
         let function = definition.identity();
         self.local_functions.insert(function, definition);
-        self.local_notes.insert(function, body.notes);
+        self.local_notes.insert(function, notes);
         self.emit(Stmt::Let {
             name: name.clone(),
             value: Rhs::Expr(Expr::Closure(Box::new(Closure {
@@ -1015,14 +1003,13 @@ impl Lowerer<'_> {
         if !operand.stable {
             return None;
         }
-        match self.buf.stmts.last() {
+        match self.buf.last_stmt() {
             Some(Stmt::Let { name, .. }) if name == wanted => {}
             _ => return None,
         }
-        let Some(Stmt::Let { name, value }) = self.buf.stmts.pop() else {
+        let Some((Stmt::Let { name, value }, note)) = self.buf.pop() else {
             return None;
         };
-        let note = self.buf.notes.pop()?;
         self.private.remove(&name);
         Some((value, note))
     }
@@ -1035,7 +1022,7 @@ impl Lowerer<'_> {
                 Rhs::Action(action) => action.into(),
             };
             self.push(Stmt::Return { value: expr }, note.blocks);
-            if let Some(placed) = self.buf.notes.last_mut() {
+            if let Some(placed) = self.buf.last_note_mut() {
                 placed.written = note.written;
                 placed.nested_written = note.nested_written;
             }
@@ -1061,7 +1048,7 @@ impl Lowerer<'_> {
                     },
                     note.blocks,
                 );
-                if let Some(assigned) = self.buf.notes.last_mut() {
+                if let Some(assigned) = self.buf.last_note_mut() {
                     assigned.written = note.written;
                     assigned.nested_written = note
                         .nested_written
@@ -1098,7 +1085,7 @@ impl Lowerer<'_> {
                 // raise, so it stays, bound to a variable nothing reads.
                 Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, note.blocks),
             }
-            if let Some(note) = self.buf.notes.last_mut() {
+            if let Some(note) = self.buf.last_note_mut() {
                 note.nested_written = nested_written;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
@@ -1144,11 +1131,18 @@ impl Lowerer<'_> {
         if operand.ty == Ty::Bool {
             return Ok(operand.expr);
         }
-        Ok(self.invoke("py.truth", &[operand], Ty::Bool)?.expr)
+        let declaration = crate::constructs::operators::unary(ast::UnaryOp::Not);
+        Ok(self.invoke(declaration.dynamic, &[operand], Ty::Bool)?.expr)
     }
 
     fn not(&mut self, condition: Expr) -> Lowering<Expr> {
-        self.native("bool.not", vec![condition])
+        let declaration = crate::constructs::operators::unary(ast::UnaryOp::Not);
+        self.native(
+            declaration
+                .native
+                .unwrap_or_else(|| unreachable!("boolean negation has a native call")),
+            vec![condition],
+        )
     }
 
     /// Runs `lower` one level deeper in the source, refusing a program

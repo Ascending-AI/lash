@@ -10,69 +10,7 @@ use {
     lash_kernel_value::Type,
 };
 
-pub(super) struct Builtin {
-    pub(super) name: &'static str,
-    helper: &'static str,
-    class: bool,
-    /// Parameter spelling: `/` positional only, `*` keyword only,
-    /// `...` variadic positional, `**` variadic keyword; `=` omittable.
-    params: &'static [&'static str],
-}
-macro_rules! builtin { ($name:literal, $helper:literal, [$($param:literal),*]) => { Builtin { name: $name, helper: $helper, class: false, params: &[$($param),*] } }; }
-macro_rules! builtin_type { ($name:literal, $helper:literal, [$($param:literal),*]) => { Builtin { class: true, ..builtin!($name, $helper, [$($param),*]) } }; }
-pub(super) const BUILTINS: &[Builtin] = &[
-    builtin!(
-        "print",
-        "py.print_text",
-        ["...values", "*sep=", "*end=", "*flush="]
-    ),
-    builtin!("len", "py.length", ["/obj"]),
-    builtin_type!("str", "py.str", ["/object="]),
-    builtin!("repr", "py.repr", ["/obj"]),
-    builtin_type!("int", "py.int", ["/x=", "base="]),
-    builtin_type!("float", "py.float", ["/x="]),
-    builtin_type!("bool", "py.truth", ["/object="]),
-    builtin_type!("bytes", "py.bytes", ["source=", "encoding=", "errors="]),
-    builtin!("getattr", "py.getattr", ["/object", "/name", "/default="]),
-    builtin!("hasattr", "py.hasattr", ["/object", "/name"]),
-    builtin!("abs", "py.abs", ["/x"]),
-    builtin!("min", "py.extreme", ["...values", "*key=", "*default="]),
-    builtin!("max", "py.extreme", ["...values", "*key=", "*default="]),
-    builtin!("sum", "py.sum", ["/iterable", "start="]),
-    builtin!("sorted", "py.sorted", ["/iterable", "*key=", "*reverse="]),
-    builtin_type!("list", "py.to_list", ["/iterable="]),
-    builtin_type!("tuple", "py.to_tuple", ["/iterable="]),
-    builtin_type!("set", "py.to_set", ["/iterable="]),
-    builtin_type!("dict", "py.dict", ["/mapping=", "**kwargs"]),
-    builtin!("range", "py.range", ["/start", "/stop=", "/step="]),
-    builtin!("enumerate", "py.enumerate", ["iterable", "start="]),
-    builtin!("zip", "py.zip", ["...iterables", "*strict="]),
-    builtin!("reversed", "py.reversed", ["/sequence"]),
-    builtin!("any", "py.any", ["/iterable"]),
-    builtin!("all", "py.all", ["/iterable"]),
-    builtin!("round", "py.round", ["number", "ndigits="]),
-    builtin!("isinstance", "py.instance", ["/obj", "/classinfo"]),
-    builtin!("ord", "py.ord", ["/c"]),
-    builtin!("chr", "py.chr", ["/i"]),
-    builtin!("divmod", "py.divmod", ["/x", "/y"]),
-    builtin_type!("type", "py.type.value", ["/object"]),
-    builtin!("iter", "py.iter", ["/iterable", "/sentinel="]),
-    builtin!("next", "py.next", ["/iterator", "/default="]),
-    builtin_type!("slice", "py.slice.value", ["/start", "/stop=", "/step="]),
-    builtin!("map", "py.map", ["/function", "...iterables"]),
-    builtin!("filter", "py.filter", ["/function", "/iterable"]),
-    builtin!("callable", "py.callable", ["/object"]),
-    builtin!("format", "py.format_spec", ["/value", "/format_spec="]),
-    builtin!("pow", "py.pow.mod", ["base", "exp", "mod="]),
-    builtin!("hex", "py.hex", ["/number"]),
-    builtin!("oct", "py.oct", ["/number"]),
-    builtin!("bin", "py.bin", ["/number"]),
-    builtin!("ascii", "py.ascii", ["/object"]),
-    builtin!("vars", "py.vars", ["/object="]),
-    builtin!("dir", "py.dir", ["/object="]),
-    builtin!("globals", "py.namespace", []),
-    builtin!("locals", "py.namespace", []),
-];
+pub(super) use crate::constructs::builtins::{BUILTINS, Builtin};
 
 impl Lowerer<'_> {
     pub(super) fn builtin_value(&mut self, spec: &Builtin) -> Lowering<Operand> {

@@ -490,7 +490,14 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 && let Some(transaction) = canvas_edit(document, env.library)
             {
                 let mut draft = Draft::open(document.clone())?;
-                let applied = draft.apply(&transaction, &checker)?;
+                let applied = draft.apply(
+                    &transaction,
+                    &checker,
+                    &[
+                        lash_dialect_typescript::CONVENTIONS,
+                        lash_dialect_python::CONVENTIONS,
+                    ],
+                )?;
                 let rekeyed = lowered
                     .captions
                     .rekey(&applied.correspondence, document, draft.document())
@@ -601,10 +608,24 @@ fn edit(
     let json = serde_json::to_string_pretty(&Replay { transaction })? + "\n";
     let replay: Replay = serde_json::from_str(&json)?;
     let mut draft = Draft::open(document.clone())?;
-    let applied = draft.apply(&replay.transaction, checker)?;
+    let applied = draft.apply(
+        &replay.transaction,
+        checker,
+        &[
+            lash_dialect_typescript::CONVENTIONS,
+            lash_dialect_python::CONVENTIONS,
+        ],
+    )?;
     let mut repeated = Draft::open(document.clone())?;
     let context = Checker::new(checker.functions);
-    let again = repeated.apply(&replay.transaction, &context)?;
+    let again = repeated.apply(
+        &replay.transaction,
+        &context,
+        &[
+            lash_dialect_typescript::CONVENTIONS,
+            lash_dialect_python::CONVENTIONS,
+        ],
+    )?;
     ensure!(
         draft.document().canonical_bytes() == repeated.document().canonical_bytes()
             && applied.correspondence == again.correspondence,

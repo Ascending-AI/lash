@@ -637,6 +637,7 @@ async fn draft_independent_edits_publish_fresh_linked_content() {
                 ],
             },
             &lash_kernel_check::Environment::new(&functions),
+            lash::workflow::edit::CONVENTIONS,
         )
         .unwrap();
     let functions = opened.draft.document().functions.clone();
@@ -658,6 +659,7 @@ async fn draft_independent_edits_publish_fresh_linked_content() {
                 }],
             },
             &lash_kernel_check::Environment::new(&functions),
+            lash::workflow::edit::CONVENTIONS,
         )
         .unwrap();
     let b = publish(

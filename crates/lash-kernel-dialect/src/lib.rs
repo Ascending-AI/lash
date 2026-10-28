@@ -13,6 +13,9 @@
 //! lines carry names only; [`define_functions`] fills the identities in.
 
 pub mod authoring;
+pub mod builder;
+pub mod construct;
+pub mod conventions;
 mod diagnostic;
 mod dialect;
 pub mod dispatch;

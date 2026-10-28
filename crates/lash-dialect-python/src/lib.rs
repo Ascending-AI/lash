@@ -12,6 +12,7 @@
 //! have: no form, no value kind and no library function was added for it.
 
 mod captions;
+mod constructs;
 mod diagnostics;
 mod exceptions;
 mod generated_operators;
@@ -23,6 +24,7 @@ mod scope;
 #[cfg(test)]
 mod tests;
 
+pub use constructs::conventions::CONVENTIONS;
 pub use diagnostics::{Code, GeneratedSourceCode};
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,

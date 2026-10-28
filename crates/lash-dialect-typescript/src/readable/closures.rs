@@ -11,27 +11,8 @@ use lash_kernel_value::sites::Site;
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{Body, Expr, Function, Param, Type};
 
-/// The token a TypeScript function value is: its tag, its own `this`
-/// binding, its name, its arity, its callable and its properties.
-const TOKEN: &str = "ts.function";
-
-pub(super) fn authored_name(value: &k::Expr) -> Option<&str> {
-    let k::Expr::Tuple(parts) = value else {
-        return None;
-    };
-    let [
-        k::Expr::Literal(k::Literal::Text(tag)),
-        _,
-        k::Expr::Literal(k::Literal::Text(name)),
-        _,
-        k::Expr::Closure(_),
-        _,
-    ] = parts.as_slice()
-    else {
-        return None;
-    };
-    (tag == TOKEN).then_some(name.as_str())
-}
+pub(super) use crate::constructs::callables::authored_name;
+use crate::constructs::callables::{self, Token};
 
 impl Lifter<'_> {
     /// Recover a captured module function's body form. Block bodies can
@@ -80,23 +61,15 @@ impl Lifter<'_> {
 
     /// The function `value`, at `site`, is the token of, when it is one.
     pub(super) fn closure(&mut self, value: &k::Expr, _site: &Site) -> Lift<Option<Function>> {
-        let k::Expr::Tuple(parts) = value else {
-            return Ok(None);
-        };
-        let [
-            k::Expr::Literal(k::Literal::Text(tag)),
-            k::Expr::Literal(k::Literal::Text(bound)),
-            k::Expr::Literal(k::Literal::Text(_)),
-            k::Expr::Literal(k::Literal::Float(declared)),
-            k::Expr::Closure(closure),
+        let Some(Token {
+            path: bound,
+            length: declared,
+            closure,
             properties,
-        ] = parts.as_slice()
+        }) = callables::decode(value)
         else {
             return Ok(None);
         };
-        if tag != TOKEN {
-            return Ok(None);
-        }
         let bare = match properties {
             k::Expr::Map(entries) => entries.is_empty(),
             k::Expr::Record(entries) => entries.is_empty(),
@@ -301,25 +274,18 @@ fn padded(lifter: &Lifter<'_>, args: &Name, arity: usize, value: &k::Expr) -> bo
 
 /// `args'[index]` of the padded list `padded`.
 fn argument(lifter: &Lifter<'_>, padded: &Name, index: usize, value: &k::Expr) -> bool {
-    let value = match value {
-        k::Expr::Act(act) if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input")) =>
-        {
-            let [value, _shape] = act.args.as_slice() else {
-                return false;
-            };
-            value
-        }
-        _ => value,
-    };
+    let value = crate::constructs::numbers::BIGINT_INPUT
+        .recognize(value, &|id, name| lifter.is(id, name))
+        .unwrap_or(value);
     matches!(value, k::Expr::Member(member) if matches!(&**member, k::Member::Index { target, index: at }
         if *target == k::Expr::Variable(padded.clone())
             && *at == k::Expr::Literal(k::Literal::Float(k::Float::new(index as f64)))))
 }
 
 fn bigint_binding(lifter: &Lifter<'_>, value: &k::Expr, name: &Name) -> bool {
-    matches!(value, k::Expr::Act(act)
-        if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input"))
-            && matches!(act.args.first(), Some(k::Expr::Variable(value)) if value == name))
+    crate::constructs::numbers::BIGINT_INPUT
+        .recognize(value, &|id, helper| lifter.is(id, helper))
+        .is_some_and(|value| matches!(value, k::Expr::Variable(value) if value == name))
 }
 
 /// The body `value` binds `names` around, from the padded `args`.
@@ -330,9 +296,8 @@ fn arguments_around<'v>(
     value: &'v k::Expr,
 ) -> Option<&'v k::Expr> {
     let mut value = value;
-    while let k::Expr::Act(act) = value
-        && matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.bigint.input"))
-        && let [inner, _shape] = act.args.as_slice()
+    while let Some(inner) =
+        crate::constructs::numbers::BIGINT_INPUT.recognize(value, &|id, name| lifter.is(id, name))
     {
         value = inner;
     }

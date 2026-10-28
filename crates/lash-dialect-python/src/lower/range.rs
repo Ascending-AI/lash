@@ -35,7 +35,11 @@ impl Lowerer<'_> {
             )?;
             let invalid = self.not(integer)?;
             let failure = self.block(|this| {
-                let name = this.invoke("py.type", std::slice::from_ref(bound), Ty::Str)?;
+                let name = this.invoke(
+                    crate::constructs::access::TYPE_NAME.helper,
+                    std::slice::from_ref(bound),
+                    Ty::Str,
+                )?;
                 let message = this.native(
                     "text.join",
                     vec![

@@ -311,7 +311,10 @@ impl Renderer<'_> {
                 };
                 if let Some(target) = target {
                     if self.operators.is(&target, "py.call") && self.packed_call(&act.args, true) {
-                    } else if self.operators.is(&target, "py.reply") {
+                    } else if self
+                        .operators
+                        .is(&target, crate::constructs::conventions::REPLY)
+                    {
                         if let [k::Expr::Act(performed)] = act.args.as_slice() {
                             self.nested_action(performed, false);
                         } else {
@@ -328,8 +331,13 @@ impl Renderer<'_> {
                     } else if self.operators.is(&target, "py.gather") {
                         self.gather(&act.args);
                     } else if self.name_check(&target, &act.args) {
-                    } else if let Some(token) = self.operators.action_token(&target, &act.args) {
-                        self.operator(token, &act.args);
+                    } else if let Some((token, prefix)) =
+                        self.operators.action_token(&target, &act.args)
+                    {
+                        for _ in 0..prefix {
+                            self.implicit();
+                        }
+                        self.operator(token, &act.args[prefix..]);
                     } else if !self.authored_call(&target, &act.args, true) {
                         self.helper(&target);
                         self.out.write("(");

@@ -507,6 +507,7 @@ fn signature_targets() {
                 edits: vec![insert],
             },
             &environment,
+            &[],
         )
         .expect("a step inserted in the body");
     let rekeyed = captions
@@ -801,6 +802,7 @@ fn rekey() {
                     edits: vec![operation],
                 },
                 &environment,
+                &[],
             )
             .unwrap_or_else(|refusal| panic!("{name}: {refusal:?}"));
         let result = draft.document();
@@ -925,6 +927,10 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                     edits: vec![insert],
                 },
                 &environment,
+                &[
+                    lash_dialect_typescript::CONVENTIONS,
+                    lash_dialect_python::CONVENTIONS,
+                ],
             )
             .unwrap_or_else(|refusal| panic!("{}: {refusal:?}", case.name));
         let result = draft.document();
@@ -1042,6 +1048,10 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                         edits: vec![operation],
                     },
                     &environment,
+                    &[
+                        lash_dialect_typescript::CONVENTIONS,
+                        lash_dialect_python::CONVENTIONS,
+                    ],
                 )
                 .map_err(|refusal| fail(&case.name, format!("{refusal:?}")))?;
             let rekeyed = lowered

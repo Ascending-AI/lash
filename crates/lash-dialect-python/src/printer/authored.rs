@@ -49,7 +49,8 @@ impl Renderer<'_> {
                 value: k::Expr::Act(action),
             } if matches!(&action.kind, k::ActKind::Call(callee)
                 if super::task::target(callee)
-                    .is_some_and(|target| self.operators.is(&target, "py.setitem"))) =>
+                    .is_some_and(|target| self.operators.access(&target, action.args.len())
+                        == Some(crate::constructs::access::Form::Store))) =>
             {
                 let [target, index, value] = action.args.as_slice() else {
                     return false;
@@ -68,12 +69,16 @@ impl Renderer<'_> {
                 place:
                     k::Place::Member(k::Member::Index {
                         target: k::Expr::Variable(list),
-                        index: k::Expr::Call { function, args },
+                        index,
                     }),
                 value,
                 ..
-            } if self.operators.unique("list.len") == Some(*function)
-                && matches!(args.as_slice(), [k::Expr::Variable(of)] if of == list)
+            } if crate::constructs::collections::COMPREHENSION
+                .append_index
+                .recognize(index, &|id, name| self.operators.unique(name) == Some(*id))
+                .is_some_and(
+                    |inputs| matches!(inputs.as_slice(), [k::Expr::Variable(of)] if of == list),
+                )
                 && self.inline_rhs(value) =>
             {
                 self.out.begin_node(None);
@@ -112,15 +117,20 @@ impl Renderer<'_> {
                         args,
                     }),
                 order: k::AssignOrder::ValueFirst,
-            } if self.operators.is(id, "py.iadd") => {
+            } if self.operators.assignment_token(id, false).is_some() => {
                 let [k::Atom::Variable(left), operand] = args.as_slice() else {
                     return false;
                 };
                 if left != name {
                     return false;
                 }
+                let Some(operator) = self.operators.assignment_token(id, false) else {
+                    return false;
+                };
                 self.name(name);
-                self.out.write(" += ");
+                self.out.write(" ");
+                self.out.write(operator);
+                self.out.write("= ");
                 self.out.begin_node(None);
                 self.atom(operand);
                 self.out.end_node();
@@ -159,15 +169,19 @@ impl Renderer<'_> {
     fn in_place<'e>(&self, name: &Name, value: &'e k::Expr) -> Option<(&'static str, &'e k::Expr)> {
         let (operator, args) = match value {
             k::Expr::Act(act) => match &act.kind {
-                k::ActKind::Call(k::Callee::Local(id)) if self.operators.is(id, "py.iadd") => {
-                    ("+", act.args.as_slice())
-                }
+                k::ActKind::Call(k::Callee::Local(id)) => (
+                    self.operators.assignment_token(id, false)?,
+                    act.args.as_slice(),
+                ),
                 _ => return None,
             },
-            // Numeric accumulators use a pure helper even when the right
-            // operand is unknown. Only augmented assignment lowers to it.
-            k::Expr::Call { function, args } if self.operators.is(function, "py.number.iadd") => {
-                ("+", args.as_slice())
+            k::Expr::Call { function, args }
+                if self.operators.assignment_token(function, true).is_some() =>
+            {
+                (
+                    self.operators.assignment_token(function, true)?,
+                    args.as_slice(),
+                )
             }
             k::Expr::Call { function, args } => {
                 let operator = self.operators.token(function, args, &self.scope.types)?;
@@ -548,58 +562,20 @@ impl Renderer<'_> {
     }
 
     fn lift_comprehension(&self, statements: &[k::Stmt]) -> Option<(Name, Comprehension)> {
-        let [
-            k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(k::Expr::List(empty)),
-            },
-            k::Stmt::For {
-                binding,
-                iterable,
-                via,
-                body,
-                else_block,
-                metered: 0,
-            },
-            rest @ ..,
-        ] = statements
-        else {
-            return None;
-        };
-        if !temporary_name(name)
-            || !empty.is_empty()
-            || !else_block.is_empty()
-            || reads(rest, name) != 1
-            || assigned(rest, name)
-        {
-            return None;
-        }
-        let [
-            k::Stmt::Assign {
-                place:
-                    k::Place::Member(k::Member::Index {
-                        target: k::Expr::Variable(target),
-                        index: k::Expr::Call { function, args },
-                    }),
-                value,
-                order: k::AssignOrder::ValueFirst,
-            },
-        ] = body.as_slice()
-        else {
-            return None;
-        };
-        if target != name
-            || self.operators.unique("list.len") != Some(*function)
-            || args.as_slice() != [k::Expr::Variable(name.clone())]
-        {
-            return None;
-        }
-        // Lowering gives comprehension-local bindings a fresh suffix and
-        // then folds the iteration assignment into the loop's own binding.
-        // Recover that alpha-renaming only for this complete generator shape;
-        // the readback must reproduce the exact original binding and body ID.
-        let (source, suffix) = binding.as_str().rsplit_once('_')?;
-        if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        let found = crate::constructs::collections::COMPREHENSION
+            .recognize(statements, &|id, name| {
+                self.operators.unique(name) == Some(*id)
+            })?;
+        let crate::constructs::collections::Comprehension {
+            result: name,
+            binding,
+            source_binding,
+            iterable,
+            via,
+            value,
+            rest,
+        } = found;
+        if !temporary_name(name) || reads(rest, name) != 1 || assigned(rest, name) {
             return None;
         }
         let element = match value {
@@ -611,9 +587,9 @@ impl Renderer<'_> {
             Comprehension {
                 element,
                 binding: binding.clone(),
-                source_binding: Name::new(source),
+                source_binding,
                 iterable: iterable.clone(),
-                view: self.operators.native_loop(via.as_ref())?,
+                view: self.operators.native_loop(via)?,
             },
         ))
     }
@@ -665,8 +641,12 @@ impl Renderer<'_> {
 
     pub(super) fn operator(&mut self, token: &str, args: &[k::Expr]) {
         self.out.write("(");
-        if matches!(token, "neg" | "not") {
-            self.out.write(if token == "neg" { "-" } else { "not " });
+        if args.len() == 1 {
+            self.out.write(match token {
+                "neg" => "-",
+                "not" => "not ",
+                other => other,
+            });
             self.out.write("(");
             self.inline_expr(&args[0]);
             self.out.write(")");

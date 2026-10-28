@@ -134,6 +134,8 @@ pub mod graph {
 /// correspondence an applied transaction answers.
 #[cfg(feature = "workflow-authoring")]
 pub mod edit {
+    pub use lash_dialect_conventions::ALL as CONVENTIONS;
+    pub use lash_kernel_dialect::conventions::{Boundary, BoundaryOperand, Conventions, Iteration};
     pub use lash_kernel_edit::{
         Applied, Draft, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction, Location,
         NodeClass, Position, Transaction, extract_entry,

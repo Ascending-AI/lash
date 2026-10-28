@@ -41,19 +41,19 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn single(&self, stmt: Stmt) -> Buf {
-        Buf {
-            stmts: vec![stmt],
-            notes: vec![Note {
+        Buf::one(
+            stmt,
+            Note {
                 span: self.span,
                 ..Note::default()
-            }],
-        }
+            },
+        )
     }
 
     fn statement(&mut self, statement: &PyStmt) -> Lowering<()> {
         self.span_of(statement);
         let span = self.span;
-        let first = self.buf.stmts.len();
+        let first = self.buf.len();
         self.nested(statement.range(), |this| {
             this.statement_inner(statement, span)
         })?;
@@ -269,7 +269,7 @@ impl Lowerer<'_> {
                 self.emit_if(condition, then_block, else_block);
                 // An `elif`'s caption names its own check, the nested `if`.
                 if let Some(caption) = self.caption_at(clause.start())
-                    && let Some(note) = self.buf.notes.last_mut()
+                    && let Some(note) = self.buf.last_note_mut()
                 {
                     note.caption = Some(caption);
                 }
@@ -385,29 +385,18 @@ impl Lowerer<'_> {
                 {
                     let receiver = self.expr(&attribute.value)?;
                     let view = attribute.attr.id.as_str();
-                    let item = match view {
-                        "items" => Some(self.function_target("py.for_in.item")?),
-                        "values" => Some(self.function_target("py.for_in.value")?),
-                        _ => None,
-                    };
-                    let via = Protocol {
-                        open: self.function_target(&format!("py.for_in.{view}"))?,
-                        next: None,
-                        item,
-                        check: Some(self.function_target("py.for_in.check")?),
-                    };
+                    let via = crate::constructs::conventions::iteration(Some(view))
+                        .unwrap_or_else(|| unreachable!("declared dictionary view"))
+                        .resolve(|name| self.function_target(name))?;
                     return Ok((receiver, via));
                 }
                 _ => {}
             }
         }
         let value = self.expr(iter)?;
-        let via = Protocol {
-            open: self.function_target("py.for_in.open")?,
-            next: Some(self.function_target("py.iterator.step")?),
-            item: None,
-            check: Some(self.function_target("py.for_in.check")?),
-        };
+        let via = crate::constructs::conventions::iteration(None)
+            .unwrap_or_else(|| unreachable!("default iteration"))
+            .resolve(|name| self.function_target(name))?;
         Ok((value, via))
     }
 
@@ -580,7 +569,8 @@ impl Lowerer<'_> {
                     .into_iter()
                     .map(|value| self.pin(value))
                     .collect::<Vec<_>>();
-                let current = self.invoke("py.slice", &place, Ty::Unknown)?;
+                let current =
+                    self.invoke(crate::constructs::access::SLICE.helper, &place, Ty::Unknown)?;
                 let current = self.pin(current);
                 let right = self.expr(&assign.value)?;
                 let result = self.in_place(assign, current, right)?;
@@ -621,22 +611,20 @@ impl Lowerer<'_> {
         left: Operand,
         right: Operand,
     ) -> Lowering<Operand> {
-        let typed = (left.ty.is_number() && right.ty.is_number())
-            || (left.ty == Ty::Str && right.ty == Ty::Str);
-        if assign.op == ast::Operator::Add && !typed {
-            let numeric = match assign.target.as_ref() {
-                PyExpr::Name(name) => self.variable(name.id.as_str()).is_some_and(|found| {
-                    self.local_fact(found.scope, name.id.as_str()).is_number()
-                }),
-                _ => false,
-            };
-            if numeric {
-                // Source proof excludes list extension while preserving
-                // Python addition errors for an unknown right operand.
-                let value = self.native("py.number.iadd", vec![left.expr, right.expr])?;
-                return Ok(Operand::inline(value, Ty::Unknown));
-            }
-            return self.invoke("py.iadd", &[left, right], Ty::Unknown);
+        let numeric = match assign.target.as_ref() {
+            PyExpr::Name(name) => self
+                .variable(name.id.as_str())
+                .is_some_and(|found| self.local_fact(found.scope, name.id.as_str()).is_number()),
+            _ => false,
+        };
+        let declaration =
+            crate::constructs::operators::select(assign.op, left.ty, right.ty, Some(numeric))
+                .unwrap_or_else(|| unreachable!("every augmented operation is declared"));
+        if matches!(
+            declaration.inverse,
+            crate::constructs::operators::Inverse::Assignment(_)
+        ) {
+            return self.binary_call(declaration, left, right);
         }
         self.binary(
             assign.op,
@@ -675,7 +663,7 @@ impl Lowerer<'_> {
         attempt: &ast::StmtTry,
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
-        let mut body = self.block(|this| {
+        let body = self.block(|this| {
             if attempt.handlers.is_empty() {
                 return this.statements(&attempt.body);
             }
@@ -691,11 +679,7 @@ impl Lowerer<'_> {
             this.scope_mut().handlers.pop();
             result
         })?;
-        let mut nodes: Vec<_> = finally
-            .stmts
-            .iter()
-            .map(lash_kernel_doc::Node::Stmt)
-            .collect();
+        let mut nodes: Vec<_> = finally.stmts().map(lash_kernel_doc::Node::Stmt).collect();
         let mut reads_active = false;
         while let Some(node) = nodes.pop() {
             if matches!(node, lash_kernel_doc::Node::Expr(Expr::Variable(name)) if name == &active)
@@ -707,13 +691,18 @@ impl Lowerer<'_> {
         }
         if !reads_active {
             self.span = span;
-            if attempt.orelse.is_empty()
-                && let [Stmt::Try(scope)] = body.stmts.as_mut_slice()
+            let merge = attempt.orelse.is_empty()
                 && !attempt.handlers.is_empty()
-            {
-                scope.finally = Some(finally.stmts);
-                body.notes[0].blocks.push(finally.notes);
-                self.append(body);
+                && body.len() == 1
+                && matches!(body.last_stmt(), Some(Stmt::Try(_)));
+            if merge {
+                let (mut statements, mut notes) = body.into_parts();
+                let (finally, finally_notes) = finally.into_parts();
+                if let [Stmt::Try(scope)] = statements.as_mut_slice() {
+                    scope.finally = Some(finally);
+                }
+                notes[0].blocks.push(finally_notes);
+                self.append(Buf::from_parts(statements, notes));
             } else {
                 self.emit_try(body, None, Some(finally));
             }
@@ -1168,7 +1157,7 @@ impl Lowerer<'_> {
             self.callable_presentation(Some(&def.parameters), def.returns.as_deref(), params.len());
         // No closure can capture the omitted parameter, and no body form
         // reads it. All uses of this local are exact positional calls.
-        let mut nodes = vec![lash_kernel_doc::Node::Block(&body.stmts)];
+        let mut nodes: Vec<_> = body.stmts().map(lash_kernel_doc::Node::Stmt).collect();
         let mut needs_active = false;
         while let Some(node) = nodes.pop() {
             if matches!(node, lash_kernel_doc::Node::Expr(Expr::Closure(_)))
@@ -1184,13 +1173,8 @@ impl Lowerer<'_> {
         if bare {
             params.retain(|param| param != &active);
             if let Some(slot) = direct.take() {
-                let (stmts, notes) = std::mem::take(&mut self.buf.stmts)
-                    .into_iter()
-                    .zip(std::mem::take(&mut self.buf.notes))
-                    .filter(|(stmt, _)| !matches!(stmt, Stmt::Let { name, .. } if name == &slot))
-                    .unzip();
-                self.buf.stmts = stmts;
-                self.buf.notes = notes;
+                self.buf
+                    .retain(|stmt| !matches!(stmt, Stmt::Let { name, .. } if name == &slot));
             }
             let variable = self.written(name, def.name.range)?;
             self.scope_mut().direct_defs.insert(
@@ -1207,7 +1191,7 @@ impl Lowerer<'_> {
             // adapter, so keep its own declaration origin too.
             self.span_of(def);
             let closure = self.emit_closure(params.clone(), body, None);
-            if let Some(note) = self.buf.notes.last_mut() {
+            if let Some(note) = self.buf.last_note_mut() {
                 note.written = Some(written.clone());
             }
             self.emit(Stmt::Assign {
@@ -1275,7 +1259,7 @@ impl Lowerer<'_> {
         }
         self.store(Place::Variable(variable), closure);
         if def.decorator_list.is_empty()
-            && let Some(note) = self.buf.notes.last_mut()
+            && let Some(note) = self.buf.last_note_mut()
         {
             note.nested_written
                 .push((if bare { vec![0] } else { vec![0, 0] }, written));

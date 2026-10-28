@@ -124,7 +124,7 @@ impl Lowerer<'_> {
 
     /// Gives `caption` to `arm` of the statement just emitted.
     pub(super) fn caption_arm(&mut self, arm: Arm, caption: Option<Caption>) {
-        let (Some(caption), Some(note)) = (caption, self.buf.notes.last_mut()) else {
+        let (Some(caption), Some(note)) = (caption, self.buf.last_note_mut()) else {
             return;
         };
         let index = match arm {
@@ -144,12 +144,16 @@ impl Lowerer<'_> {
         let Some(caption) = self.caption_at(statement.start()) else {
             return Ok(());
         };
-        let emitted = first..self.buf.stmts.len();
+        let emitted = first..self.buf.len();
         let last = |matches: fn(&Stmt) -> bool| {
-            emitted
-                .clone()
-                .rev()
-                .find(|&index| matches(&self.buf.stmts[index]))
+            emitted.clone().rev().find(|&index| {
+                matches(
+                    self.buf
+                        .stmts()
+                        .nth(index)
+                        .unwrap_or_else(|| unreachable!("emitted statement")),
+                )
+            })
         };
         let owner = match statement {
             PyStmt::FunctionDef(def) if self.entry_defs.contains(&def.range) => {
@@ -177,11 +181,22 @@ impl Lowerer<'_> {
             PyStmt::FunctionDef(_) => emitted.clone().last(),
             _ => emitted
                 .clone()
-                .find(|&index| acts(Node::Stmt(&self.buf.stmts[index])))
+                .find(|&index| {
+                    acts(Node::Stmt(
+                        self.buf
+                            .stmts()
+                            .nth(index)
+                            .unwrap_or_else(|| unreachable!("emitted statement")),
+                    ))
+                })
                 .or_else(|| emitted.clone().last()),
         };
         if let Some(owner) = owner {
-            self.buf.notes[owner].caption = Some(caption);
+            self.buf
+                .get_mut(owner)
+                .unwrap_or_else(|| unreachable!("emitted statement"))
+                .1
+                .caption = Some(caption);
         }
         Ok(())
     }

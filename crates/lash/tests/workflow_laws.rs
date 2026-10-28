@@ -432,6 +432,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
                 }],
             },
             &checked.checker(),
+            lash::workflow::edit::CONVENTIONS,
         )
         .expect("the edit applies");
     assert_ne!(applied.admitted.identity, first.document);
@@ -1995,6 +1996,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
                 }],
             },
             &lash_kernel_check::Environment::new(&release.functions),
+            lash::workflow::edit::CONVENTIONS,
         )
         .unwrap();
     let bytes = lash::workflow::document::DocumentBytes::from(opened.draft.into_document());

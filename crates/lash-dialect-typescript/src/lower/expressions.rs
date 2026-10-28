@@ -9,36 +9,9 @@ use super::calls::Key;
 use super::patterns::Mode;
 use super::{Buf, Lowerer, Lowering, Operand, Ty, unknown_binding};
 use crate::adapter::{self as ast, AssignOp, BinaryOp, LogicalOp, UnaryOp};
+use crate::constructs::{numbers, operators};
 use crate::types::{self, Direct};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
-
-/// The helper that carries a binary operator's JavaScript meaning.
-fn binary_helper(op: BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Add => "ts.add",
-        BinaryOp::Subtract => "ts.sub",
-        BinaryOp::Multiply => "ts.mul",
-        BinaryOp::Divide => "ts.div",
-        BinaryOp::Remainder => "ts.rem",
-        BinaryOp::Exponent => "ts.pow",
-        BinaryOp::BitAnd => "ts.bit_and",
-        BinaryOp::BitOr => "ts.bit_or",
-        BinaryOp::BitXor => "ts.bit_xor",
-        BinaryOp::ShiftLeft => "ts.shl",
-        BinaryOp::ShiftRight => "ts.shr",
-        BinaryOp::ShiftRightUnsigned => "ts.ushr",
-        BinaryOp::StrictEqual => "ts.strict_equals",
-        BinaryOp::StrictNotEqual => "ts.strict_not_equals",
-        BinaryOp::LooseEqual => "ts.loose_equals",
-        BinaryOp::LooseNotEqual => "ts.loose_not_equals",
-        BinaryOp::Less => "ts.lt",
-        BinaryOp::LessEqual => "ts.le",
-        BinaryOp::Greater => "ts.gt",
-        BinaryOp::GreaterEqual => "ts.ge",
-        BinaryOp::In => "ts.in",
-        BinaryOp::InstanceOf => unreachable!("`instanceof` is resolved by its class"),
-    }
-}
 
 /// Each cache belongs to one dynamic loop entry, never to a function or
 /// source spelling. Only already-live, singly-defined roots can enter it.
@@ -79,7 +52,12 @@ impl Lowerer<'_> {
             None => self.lower_expr_inner(expr)?,
         };
         if value.ty == Ty::BigInt && !matches!(expr, ast::Expr::BigInt(_)) {
-            value = self.invoke("ts.bigint.input", &[value, Operand::bool(true)], Ty::BigInt)?;
+            value = self.invoke(
+                numbers::BIGINT_INPUT.helper,
+                &numbers::BIGINT_INPUT
+                    .arguments(value, Operand::bool(numbers::BIGINT_INPUT.scalar)),
+                Ty::BigInt,
+            )?;
         }
         value.plain = self.facts.plain(expr);
         value.text_prefix = self.facts.text_prefix(expr);
@@ -223,13 +201,9 @@ impl Lowerer<'_> {
             ast::Expr::Null => Ok(Operand::null()),
             ast::Expr::Bool(value) => Ok(Operand::bool(*value)),
             ast::Expr::Number(value) => Ok(Operand::number(*value)),
-            ast::Expr::BigInt(value) => Ok(self.inline(
-                Expr::Tuple(vec![
-                    Operand::text("ts.bigint").expr(),
-                    Expr::Literal(Literal::Int(value.clone())),
-                ]),
-                Ty::BigInt,
-            )),
+            ast::Expr::BigInt(value) => {
+                Ok(self.inline(numbers::bigint_literal(value.clone()), Ty::BigInt))
+            }
             ast::Expr::String(value) => Ok(Operand::text(value.clone())),
             ast::Expr::LoneSurrogateString => Err(Diagnostic::new(
                 DiagnosticCode::LoneSurrogateLiteralUnsupported,
@@ -608,32 +582,28 @@ impl Lowerer<'_> {
             _ => {}
         }
         let value = self.lower_expr(value)?;
-        match op {
-            UnaryOp::Plus | UnaryOp::Minus if value.ty.is_number() => {
+        use crate::constructs::operators::{self, UnaryCall, UnaryNative};
+        let declaration = operators::unary(op);
+        let ty = types::unary_result(op, &value.ty);
+        match declaration.native {
+            UnaryNative::NumberIdentity if value.ty.is_number() => {
                 let number = self.float(&value)?;
-                let number = if op == UnaryOp::Minus {
-                    self.native("num.neg", vec![number])?
-                } else {
-                    number
-                };
-                Ok(self.inline(number, Ty::Float))
+                return Ok(self.inline(number, Ty::Float));
             }
-            UnaryOp::Not if value.ty == Ty::Bool => {
-                let negated = self.native("bool.not", vec![value.expr()])?;
-                Ok(self.inline(negated, Ty::Bool))
+            UnaryNative::NumberNegation(function) if value.ty.is_number() => {
+                let number = self.float(&value)?;
+                let number = self.native(function, vec![number])?;
+                return Ok(self.inline(number, Ty::Float));
             }
-            UnaryOp::Plus => self.invoke("ts.to_number", &[value], Ty::Float),
-            UnaryOp::Minus => {
-                let ty = types::unary_result(op, &value.ty);
-                self.invoke("ts.neg", &[value], ty)
+            UnaryNative::Boolean(function) if value.ty == Ty::Bool => {
+                let negated = self.native(function, vec![value.expr()])?;
+                return Ok(self.inline(negated, Ty::Bool));
             }
-            UnaryOp::Not => self.invoke("ts.not", &[value], Ty::Bool),
-            UnaryOp::TypeOf => self.invoke("ts.typeof", &[value], Ty::Text),
-            UnaryOp::BitNot => {
-                let ty = types::unary_result(op, &value.ty);
-                self.invoke("ts.bit_not", &[value], ty)
-            }
-            UnaryOp::Void => {
+            _ => {}
+        }
+        match declaration.call {
+            UnaryCall::Invoke(function) => self.invoke(function, &[value], ty),
+            UnaryCall::Discard => {
                 self.discard(value);
                 Ok(Operand::undefined())
             }
@@ -706,7 +676,7 @@ impl Lowerer<'_> {
         right: Operand,
     ) -> Lowering<Operand> {
         let ty = types::binary_result(op, &left.ty, &right.ty);
-        if let Some(direct) = types::direct_binary(op, &left.ty, &right.ty) {
+        if let Some(direct) = crate::constructs::operators::binary(op).direct(&left.ty, &right.ty) {
             // Source values are evaluated before numeric checks. A trusted
             // left annotation can fail its check, so hold a non-atomic right
             // value first, after reading the left, to preserve raise order.
@@ -732,27 +702,30 @@ impl Lowerer<'_> {
                 }
                 Direct::NumericEqual { negated } => {
                     let args = vec![self.float(&left)?, self.float(&right)?];
-                    let equal = self.native("eq", args)?;
+                    let equal = self.native(direct.function(), args)?;
                     if negated {
-                        self.native("bool.not", vec![equal])?
+                        self.native(operators::native_not(), vec![equal])?
                     } else {
                         equal
                     }
                 }
-                Direct::Concat => self.native("text.concat", vec![left.expr(), right.expr()])?,
+                Direct::Concat => {
+                    self.native(direct.function(), vec![left.expr(), right.expr()])?
+                }
                 Direct::ConcatFloat { float_left } => {
                     let (left, right) = if float_left {
                         (self.float_text(left)?, right)
                     } else {
                         (left, self.float_text(right)?)
                     };
-                    self.native("text.concat", vec![left.expr(), right.expr()])?
+                    self.native(direct.function(), vec![left.expr(), right.expr()])?
                 }
             };
             return Ok(self.inline(value, ty));
         }
-        let helper = binary_helper(op);
-        if op == BinaryOp::In {
+        let declaration = crate::constructs::operators::binary(op);
+        let helper = declaration.helper;
+        if declaration.swapped {
             // `key in object`: the helper takes the object first.
             let left = self.pin(left);
             let right = self.pin(right);

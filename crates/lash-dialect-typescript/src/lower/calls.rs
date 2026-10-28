@@ -2,6 +2,7 @@
 
 mod optional;
 
+use crate::constructs::reads;
 use lash_kernel_doc::{AssignOrder, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
@@ -337,8 +338,8 @@ impl Lowerer<'_> {
                 let Some(tests) = self.list_tests(object)? else {
                     return Ok(None);
                 };
-                let length = self.native("list.len", vec![object.expr()])?;
-                let read = self.native("num.to_float", vec![length])?;
+                let read = reads::LENGTH
+                    .emit(&[object.expr()], &mut |name, args| self.native(name, args))?;
                 Ok(Some(Direct {
                     tests,
                     read,
@@ -424,16 +425,16 @@ impl Lowerer<'_> {
         match object.ty {
             Ty::Object => {}
             Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Record(_) | Ty::Union(_) => {
-                let kind = self.native("kind", vec![object.expr()])?;
-                tests.push(self.same(kind, Operand::text("record").expr())?);
+                tests.push(reads::KIND.emit(
+                    &[object.expr(), Operand::text("record").expr()],
+                    &mut |name, args| self.native(name, args),
+                )?);
             }
             _ => return Ok(None),
         }
-        let branded = self.native(
-            "record.contains",
-            vec![object.expr(), Operand::text("__lash_brand").expr()],
-        )?;
-        tests.push(self.native("bool.not", vec![branded])?);
+        tests.push(
+            reads::UNBRANDED.emit(&[object.expr()], &mut |name, args| self.native(name, args))?,
+        );
         Ok(Some(tests))
     }
 
@@ -451,11 +452,17 @@ impl Lowerer<'_> {
             }
             Some(_) => {}
             None => {
-                let kind = self.native("kind", vec![key.expr()])?;
-                tests.push(self.same(kind, Operand::text("text").expr())?);
+                tests.push(reads::KIND.emit(
+                    &[key.expr(), Operand::text("text").expr()],
+                    &mut |name, args| self.native(name, args),
+                )?);
             }
         }
-        tests.push(self.native("record.contains", vec![object.expr(), key.expr()])?);
+        tests.push(
+            reads::OWN.emit(&[object.expr(), key.expr()], &mut |name, args| {
+                self.native(name, args)
+            })?,
+        );
         Ok(tests)
     }
 
@@ -468,8 +475,10 @@ impl Lowerer<'_> {
         match object.ty {
             Ty::Array => Ok(Some(Vec::new())),
             Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_) => {
-                let kind = self.native("kind", vec![object.expr()])?;
-                Ok(Some(vec![self.same(kind, Operand::text("list").expr())?]))
+                Ok(Some(vec![reads::KIND.emit(
+                    &[object.expr(), Operand::text("list").expr()],
+                    &mut |name, args| self.native(name, args),
+                )?]))
             }
             _ => Ok(None),
         }
@@ -501,14 +510,22 @@ impl Lowerer<'_> {
             _ => {
                 // Only a whole number that is not negative is its own
                 // absolute value rounded down; NaN is not, and -0 is 0.
-                let floor = self.native("num.floor", vec![index.expr()])?;
-                let magnitude = self.native("num.abs", vec![index.expr()])?;
-                tests.push(self.native("eq", vec![floor, magnitude])?);
+                tests.push(
+                    reads::POSITION
+                        .emit(&[index.expr()], &mut |name, args| self.native(name, args))?,
+                );
             }
         }
-        let length = self.native("list.len", vec![object.expr()])?;
-        let bound = if append { "num.le" } else { "num.lt" };
-        tests.push(self.native(bound, vec![index.expr(), length])?);
+        let bound = if append {
+            reads::APPEND_BOUNDS
+        } else {
+            reads::BOUNDS
+        };
+        tests.push(
+            bound.emit(&[index.expr(), object.expr()], &mut |name, args| {
+                self.native(name, args)
+            })?,
+        );
         Ok(Some(tests))
     }
 
@@ -1325,30 +1342,5 @@ pub(crate) fn position_guard(
     condition: &Expr,
     is_native: impl Fn(&lash_kernel_value::FunctionId, &str) -> bool,
 ) -> Option<&Expr> {
-    let Expr::Call { function, args } = condition else {
-        return None;
-    };
-    if !is_native(function, "eq") {
-        return None;
-    }
-    let [
-        Expr::Call {
-            function: floor,
-            args: rounded,
-        },
-        Expr::Call {
-            function: abs,
-            args: magnitude,
-        },
-    ] = args.as_slice()
-    else {
-        return None;
-    };
-    let [index] = rounded.as_slice() else {
-        return None;
-    };
-    (is_native(floor, "num.floor")
-        && is_native(abs, "num.abs")
-        && magnitude.as_slice() == std::slice::from_ref(index))
-    .then_some(index)
+    reads::position(condition, &is_native)
 }

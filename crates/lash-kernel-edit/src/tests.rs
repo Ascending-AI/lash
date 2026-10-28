@@ -54,6 +54,7 @@ fn apply(draft: &mut Draft, edits: Vec<Operation>) -> Applied {
                 edits,
             },
             &Environment::new(&functions),
+            &[],
         )
         .unwrap()
 }
@@ -69,6 +70,7 @@ fn refuse(draft: &mut Draft, edits: Vec<Operation>) -> EditRefusal {
                 edits,
             },
             &Environment::new(&functions),
+            &[],
         )
         .unwrap_err();
     assert_eq!(draft.document(), &before, "CANVAS-ATOMIC: refused document");
@@ -126,7 +128,7 @@ fn canvas_closed_rejects_source_syntax_and_stale_bases() {
     apply(&mut draft, vec![operation.clone()]);
     let before = draft.document().clone();
     let refusal = draft
-        .apply(&transaction, &Environment::new(&before.functions))
+        .apply(&transaction, &Environment::new(&before.functions), &[])
         .unwrap_err();
     assert_eq!(
         refusal.diagnostics[0].kind,
@@ -1323,6 +1325,7 @@ fn typed_data_constructors_use_installed_helpers() {
                 }],
             },
             &Environment::new(&functions),
+            &[],
         )
         .unwrap();
     assert!(draft.document().library.contains(&timestamp));
@@ -1345,7 +1348,8 @@ fn typed_data_constructors_use_installed_helpers() {
                         }
                     }]
                 },
-                &Environment::new(&functions)
+                &Environment::new(&functions),
+                &[]
             )
             .is_err()
     );

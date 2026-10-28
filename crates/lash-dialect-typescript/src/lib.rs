@@ -9,6 +9,7 @@
 
 mod adapter;
 mod captions;
+mod constructs;
 mod diagnostics;
 mod lower;
 mod printer;
@@ -20,6 +21,7 @@ mod types;
 mod tests;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
+pub use constructs::conventions::CONVENTIONS;
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
@@ -50,10 +52,10 @@ use lash_kernel_doc::Span as SourceSpan;
 /// the built-in's path, its name and length, the closure that calls it and,
 /// for one the program made, the record of what it deleted of itself
 /// (`lower/functions.rs`).
-pub(crate) const FUNCTION_TAG: &str = "ts.function";
+pub(crate) const FUNCTION_TAG: &str = constructs::callables::TAG;
 
 /// The slot of a TypeScript function token that holds its closure.
-pub(crate) const FUNCTION_CALLABLE: u32 = 4;
+pub(crate) const FUNCTION_CALLABLE: u32 = constructs::callables::CALLABLE;
 
 /// What a TypeScript function value is, as the dialect's package declares
 /// it ([`lash_kernel_dialect::Dialect::function_values`]).

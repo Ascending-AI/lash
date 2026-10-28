@@ -473,7 +473,11 @@ async fn edit_draft(State(host): State<Host>, Json(request): Json<EditDraft>) ->
         base: draft.identity(),
         edits: request.edits,
     };
-    match draft.apply(&transaction, &environment.checker()) {
+    match draft.apply(
+        &transaction,
+        &environment.checker(),
+        lash::workflow::edit::CONVENTIONS,
+    ) {
         Ok(applied) => Ok(Json(json!({
             "applied": true,
             "correspondence": serde_json::to_value(&applied.correspondence).map_err(api_error)?,
