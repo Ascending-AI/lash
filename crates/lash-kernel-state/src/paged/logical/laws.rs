@@ -171,6 +171,28 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         &access,
     );
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 113);
+    for holding in [
+        value(16, &[2], &access),
+        Holding::scalar(0),
+        value(0, &[2, 2], &access),
+        Holding::with_edges(0, [Identity::Task(TaskId(7))], &access).unwrap(),
+    ] {
+        assert!(matches!(
+            ledger.prepare([Change::Roots(vec![(capture, Some(holding))])], &access),
+            Err(HeapFault::Malformed(_))
+        ));
+        assert_eq!(ledger.balance().unwrap().total().unwrap(), 113);
+    }
+    assert!(matches!(
+        ledger.prepare(
+            [Change::Roots(vec![(
+                owner(0),
+                Some(value(0, &[2], &access))
+            )])],
+            &access
+        ),
+        Err(HeapFault::Malformed(_))
+    ));
     let root = ledger.seal(&access, budget()).unwrap().unwrap();
     let mut cold = Ledger::open(root).unwrap();
     assert_eq!(cold.balance().unwrap(), ledger.balance().unwrap());

@@ -462,6 +462,20 @@ impl Edit<'_, '_> {
                     owner: *owner,
                     value: value.clone(),
                 })?;
+                if matches!(
+                    owner,
+                    Owner::Value {
+                        slot: Slot::Capture(_),
+                        ..
+                    }
+                ) {
+                    value.each_edge(self.access, &mut |edge| {
+                        if edge.count != 1 || !matches!(edge.target, Identity::Object(_)) {
+                            return Err(invalid("capture must borrow one variable cell"));
+                        }
+                        Ok(())
+                    })?;
+                }
                 self.retain(value)?;
             }
         }

@@ -194,6 +194,21 @@ impl TokenCodec for RootHolding {
 }
 pub(super) fn validate_root(record: &RootHolding) -> Result<(), HeapFault> {
     match record.owner {
+        Owner::Value {
+            slot: Slot::Capture(_),
+            ..
+        } => {
+            if record.value.bytes != 0
+                || record.value.links.len() != 1
+                || record.value.links.task_edges() != 0
+            {
+                Err(invalid(
+                    "capture must borrow one variable cell without an occurrence",
+                ))
+            } else {
+                Ok(())
+            }
+        }
         Owner::Frame { .. }
             if record.value.bytes != Cost::FRAME || !record.value.links.is_empty() =>
         {
