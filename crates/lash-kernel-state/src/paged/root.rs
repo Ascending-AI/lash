@@ -489,6 +489,9 @@ pub enum BoundRecord {
     Value(PageValue),
     /// A variable a closure shares.
     Shared(EntityId),
+    /// A frame borrows a closure's cell; its declaring binding owns the
+    /// occurrence. This form is not a session binding.
+    Captured(EntityId),
 }
 
 #[derive(Clone, Debug)]

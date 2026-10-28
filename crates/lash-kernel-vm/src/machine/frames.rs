@@ -454,7 +454,18 @@ impl Frame {
                     continue;
                 }
                 SlotState::Value(value) => BoundRecord::Value(project(arena, access, value)?),
-                SlotState::Cell(cell) => BoundRecord::Shared(project_cell(arena, *cell)?),
+                SlotState::Cell(cell) => {
+                    let id = project_cell(arena, *cell)?;
+                    if code
+                        .captures
+                        .iter()
+                        .any(|capture| capture.inner_at as usize == at)
+                    {
+                        BoundRecord::Captured(id)
+                    } else {
+                        BoundRecord::Shared(id)
+                    }
+                }
             };
             let (name, declared) = match stored.bindings.get(&info.key, access)? {
                 Some(old) => (old.name, old.declared),

@@ -456,6 +456,10 @@ impl TokenCodec for BoundRecord {
                 out.sum(1, 1);
                 value.encode(out);
             }
+            Self::Captured(value) => {
+                out.sum(2, 1);
+                value.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -468,6 +472,10 @@ impl TokenCodec for BoundRecord {
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
                 Self::Shared(<EntityId>::decode(input)?)
+            }
+            2 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Self::Captured(<EntityId>::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

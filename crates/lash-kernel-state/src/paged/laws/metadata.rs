@@ -1,6 +1,6 @@
 //! Bounded S1/S4 metadata and exact diagnostic projections.
 use super::super::directory::ordinal_key;
-use super::super::tree::{SealWork, Tree};
+use super::super::tree::{Cell, SealWork, Tree};
 use super::super::*;
 use super::heap::{fresh, seal};
 
@@ -16,6 +16,79 @@ fn work() -> SealWork {
         pages: u64::MAX,
         bytes: u64::MAX,
     })
+}
+
+/// LogicalHeldV1: cursor occurrences are complete values, captured cells
+/// borrow reach, and completion-formula mirrors add no guest occurrence.
+#[test]
+fn source_frame_costs_distinguish_owned_values_captures_and_formula_mirrors() {
+    let (mut heap, _) = fresh();
+    let access = heap.pages().clone();
+    let site = SiteRef::new(&Site::new(Unit::Main, vec![0]), &access).unwrap();
+    let variable = heap
+        .allocate_object(ObjectInit::Variable(PageValue::Null))
+        .unwrap();
+    let list = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
+    let tuple = PageValue::Tuple(heap.tuple(vec![PageValue::Null, PageValue::Null]).unwrap());
+    let mut frame =
+        FrameRecord::fresh(lash_kernel_value::LinkId::from_bytes([1; 32]), site.clone());
+    for (at, value) in [
+        BoundRecord::Shared(variable),
+        BoundRecord::Captured(variable),
+        BoundRecord::Value(tuple.clone()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        frame
+            .bindings
+            .write(
+                ordinal_key(at as u64),
+                BindingRecord {
+                    name: NameRef::new(&Name::new(format!("v{at}")), &access).unwrap(),
+                    declared: site.clone(),
+                    value,
+                },
+                &access,
+            )
+            .unwrap();
+    }
+    assert_eq!(frame.bindings.cost(), 16 + 0 + 48);
+    for (at, (value, expected)) in [
+        (tuple.clone(), 48),
+        (PageValue::List(list), 16),
+        (PageValue::text("abcd"), 20),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cursor = IteratedRecord(value);
+        assert_eq!(cursor.cost(), expected);
+        frame
+            .iterated
+            .write(ordinal_key(at as u64), cursor, &access)
+            .unwrap();
+    }
+    frame
+        .departing
+        .write(ordinal_key(0), PageValue::Null, &access)
+        .unwrap();
+    let mut arguments = Tree::new(false);
+    arguments.write(ordinal_key(0), tuple, &access).unwrap();
+    frame.arguments = Some(arguments);
+    assert_eq!(frame.cost(), 228); // header 64 + bindings 64 + cursors 84 + departure 16.
+    assert!(frame.prepare(&access, &mut work()).unwrap());
+    let cold: FrameRecord = decode_body(&encode_body(&frame)).unwrap();
+    assert_eq!(cold.cost(), 228);
+    assert!(
+        matches!(cold.bindings.get(&ordinal_key(1), &access).unwrap().unwrap().value, BoundRecord::Captured(id) if id == variable)
+    );
+    frame.arguments = None;
+    assert_eq!(
+        frame.cost(),
+        cold.cost(),
+        "charge bookkeeping cannot change the guest balance"
+    );
 }
 
 /// S4 metadata amendment: a long binding and capture name are descriptors,

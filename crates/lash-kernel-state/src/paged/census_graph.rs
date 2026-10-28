@@ -337,7 +337,9 @@ pub(crate) fn binding_values(
 ) -> Result<(), HeapFault> {
     match &binding.value {
         BoundRecord::Value(v) => visit(v),
-        BoundRecord::Shared(id) => visit(&PageValue::Ref(Identity::Object(*id))),
+        BoundRecord::Shared(id) | BoundRecord::Captured(id) => {
+            visit(&PageValue::Ref(Identity::Object(*id)))
+        }
     }
 }
 

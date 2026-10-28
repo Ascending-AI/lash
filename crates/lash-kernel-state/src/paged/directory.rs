@@ -662,6 +662,7 @@ pub mod execution {
             match &self.value {
                 BoundRecord::Value(v) => value_cost(v),
                 BoundRecord::Shared(_) => LogicalHeldV1::REFERENCE,
+                BoundRecord::Captured(_) => 0,
             }
         }
         fn children(&self, out: &mut Vec<PageRef>) {

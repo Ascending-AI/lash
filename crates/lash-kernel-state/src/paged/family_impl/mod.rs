@@ -658,7 +658,9 @@ impl PagedHeap {
             let mut edges = Vec::new();
             match &record.value {
                 BoundRecord::Value(value) => self.edges_of(value, &mut edges)?,
-                BoundRecord::Shared(id) => edges.push(Identity::Object(*id)),
+                BoundRecord::Shared(id) | BoundRecord::Captured(id) => {
+                    edges.push(Identity::Object(*id))
+                }
             }
             pending.extend(edges.iter().copied());
             roots.push(edges);

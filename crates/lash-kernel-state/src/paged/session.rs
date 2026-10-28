@@ -109,6 +109,9 @@ impl PagedHeap {
             .map(|binding| match binding {
                 BoundRecord::Value(value) => Ok(value),
                 BoundRecord::Shared(id) => self.variable_get(id),
+                BoundRecord::Captured(_) => Err(HeapFault::Malformed(
+                    "borrowed frame capture in a session binding".into(),
+                )),
             })
             .transpose()
     }

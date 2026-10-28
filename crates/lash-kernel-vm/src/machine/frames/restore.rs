@@ -294,9 +294,25 @@ pub(super) fn frame(
                 ..
             }) => SlotState::Value(admit(arena, access, &value)?),
             Some(BindingRecord {
-                value: BoundRecord::Shared(id),
+                value: bound @ (BoundRecord::Shared(_) | BoundRecord::Captured(_)),
                 ..
-            }) => SlotState::Cell(admit_cell(arena, id)),
+            }) => {
+                let borrowed = code
+                    .captures
+                    .iter()
+                    .any(|capture| capture.inner_at as usize == at);
+                let id = match bound {
+                    BoundRecord::Captured(id) if borrowed => id,
+                    BoundRecord::Shared(id) if !borrowed => id,
+                    _ => {
+                        return Err(malformed(
+                            "binding capture ownership disagrees with its source",
+                        )
+                        .into());
+                    }
+                };
+                SlotState::Cell(admit_cell(arena, id))
+            }
         };
     }
     Ok(Box::new(Frame {

@@ -195,6 +195,11 @@ impl SessionEditor {
         let value = match record.value {
             BoundRecord::Value(value) => value,
             BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+            BoundRecord::Captured(_) => {
+                return Err(HeapFault::Malformed(
+                    "borrowed frame capture in a session binding".into(),
+                ));
+            }
         };
         Ok(Some(match crate::data::copy_page_out(&self.heap, &value) {
             Ok(datum) => SessionValue::Data(datum),
@@ -226,6 +231,11 @@ impl SessionEditor {
         let mut pending = vec![match record.value {
             BoundRecord::Value(value) => value,
             BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+            BoundRecord::Captured(_) => {
+                return Err(HeapFault::Malformed(
+                    "borrowed frame capture in a session binding".into(),
+                ));
+            }
         }];
         let mut objects = BTreeSet::new();
         while let Some(value) = pending.pop() {

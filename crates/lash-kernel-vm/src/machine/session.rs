@@ -773,6 +773,9 @@ impl KernelMachine {
                 );
                 Some(value)
             }
+            Some(BoundRecord::Captured(_)) => {
+                return Err(fault("borrowed frame capture in a session binding"));
+            }
             Some(BoundRecord::Shared(id)) => {
                 let cell = project::admit_cell(&mut self.arena.borrow_mut(), id);
                 Some(self.in_arena(|arena| arena.cell(cell)).map_err(

@@ -343,7 +343,7 @@ impl Reader {
                     r.put(&0u64);
                     r.value(v)
                 }
-                BoundRecord::Shared(id) => {
+                BoundRecord::Shared(id) | BoundRecord::Captured(id) => {
                     r.put(&1u64);
                     r.entity(*id)
                 }

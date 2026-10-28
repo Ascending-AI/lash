@@ -26,6 +26,11 @@ impl SessionEditor {
         let value = match record.value {
             super::BoundRecord::Value(value) => value,
             super::BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+            super::BoundRecord::Captured(_) => {
+                return Err(HeapFault::Malformed(
+                    "borrowed frame capture in a session binding".into(),
+                ));
+            }
         };
         let (kind, extent) = extent(&self.heap, &value)?;
         if fits(&self.heap, &value, &mut (budget as u64), &mut Vec::new(), 0)? {
