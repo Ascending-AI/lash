@@ -797,12 +797,12 @@ The combined ordinary population has these host allocation medians:
 | ts-codemode | 11,088,014 B | 11,983,899 B |
 | py-codemode | 8,275,273 B | 8,256,481 B |
 
-Five ordinary captures at clean `f088bd47dd` matched every counted summary
+Five ordinary captures at clean `342b8f1c41` matched every counted summary
 and every turn/compaction record across four workloads: 1,280 turns and
 15 compactions. Their executable digest is identical and no diagnostic
-probe or attribution mode is enabled. The first refresh updates 34 medians,
-sets zero measured noise and retains the tighter prior/observed depth
-slopes. The TypeScript host slope is 23,795.667 B per prior turn and remains
+probe or attribution mode is enabled. The refresh uses the measured
+medians, sets zero measured noise and retains the tighter prior/observed
+depth slopes. The TypeScript host slope is 23,795.667 B per prior turn and remains
 within the existing allowance around the retained 23,166.143 B baseline.
 No depth-slope baseline rises. Hard budgets, tolerances, known-breach policy,
 normal blessing guard and all determinism assertions remain unchanged.
