@@ -74,6 +74,7 @@ impl<T: Domain> Program<T> {
     /// The verifier checks the source stream first. A target inside a suffix
     /// keeps that suffix separate; every surviving target is then relocated.
     pub(super) fn fused(mut self) -> Self {
+        self.recurrence = Recurrence::derive(&self).map(Box::new);
         let len = self.code.len();
         let mut targets = vec![false; len + 1];
         for op in &self.code {

@@ -689,6 +689,10 @@ fn scalar_layouts_agree() {
         "let i = 0.0 while flat.lt(i, 5.0) { set i = flat.add(i, 1.0) } return i",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 5.0) { if flat.lt(i, 2.0) { set s = flat.add(s, 2.0) } else { set s = flat.add(s, 3.0) } set i = flat.add(i, 1.0) } return (i, s)",
         "let i = 0 let s = 0 while flat.lt(i, 5) { if flat.lt(i, 2) { set s = flat.add(s, flat.mul(i, i)) } else { set s = flat.add(s, i) } set i = flat.add(i, 1) } print s do perform 0(s) as Any return s",
+        "let i = -2 let before = 99 let after = 99 while flat.lt(i, 3) { set before = i set i = flat.add(i, 1) set after = i } do perform 0((i, before, after)) as Any return (i, before, after)",
+        "let i = 1 let before = 0 while flat.lt(i, 20) { set before = i set i = flat.mul(i, 2) } return (i, before)",
+        "let i = 0.0 let before = -1.0 let after = -1.0 while flat.lt(i, 0.5) { set before = i set i = flat.add(i, 0.1) set after = i } return (i, before, after)",
+        "let i = 9223372036854775806 let before = 0 try { while flat.lt(i, 9223372036854775807) { set before = i set i = flat.add(i, 2) } } catch err { print (i, before) } return (i, before)",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 5.0) { set s = flat.add(flat.mul(s, -0.0), flat.div(0.0, 0.0)) set i = flat.add(i, 1.0) } print s do perform 0(s) as Any return s",
         "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.rem(s, 2.0) set i = flat.add(i, 1.0) } print s return s",
         "let i = 0 let target = 0 let a = 1 let s = 0 while flat.lt(i, 3) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } return (i, target, s, a)",
@@ -1120,6 +1124,9 @@ fn capture_scopes_agree() {
 #[test]
 fn typed_repeat_agrees() {
     for body in [
+        "let i = -2 let before = 99 let after = 99 while flat.lt(i, 3) { set before = i set i = flat.add(i, 1) set after = i } do perform 0((i, before, after)) as Any return (i, before, after)",
+        "let i = 1 let before = 0 while flat.lt(i, 20) { set before = i set i = flat.mul(i, 2) } return (i, before)",
+        "let i = 0.0 let before = -1.0 let after = -1.0 while flat.lt(i, 0.5) { set before = i set i = flat.add(i, 0.1) set after = i } return (i, before, after)",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set s = flat.add(s, previous) set i = flat.add(previous, 1.0) } if true { do perform 0(s) as Any } return s",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
     ] {

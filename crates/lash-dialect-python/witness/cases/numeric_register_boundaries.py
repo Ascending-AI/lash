@@ -67,3 +67,30 @@ async def accumulate():
         print(type(error).__name__, str(error))
     return total
 print(await accumulate())
+
+counter = -2
+before = 99
+after = 99
+while counter < 3:
+    before = counter
+    counter += 1
+    after = counter
+print(await host.echo(str((counter, before, after))))
+
+counter = 9223372036854775806
+before = 0
+after = 0
+while counter < 9223372036854775807:
+    before = counter
+    counter += 2
+    after = counter
+print(await host.echo(str((counter, before, after))))
+
+counter = 0.0
+before = -1.0
+after = -1.0
+while counter < 0.5:
+    before = counter
+    counter += 0.1
+    after = counter
+print(counter, before, after)

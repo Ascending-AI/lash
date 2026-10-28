@@ -43,7 +43,9 @@ use super::super::{Executable, LibId};
 use super::{Body, Event, RegionSlot, Role, Step, Summary};
 
 mod code;
+mod recurrence;
 use code::Instruction;
+use recurrence::Recurrence;
 
 /// The most variables a run holds in registers.
 const REGISTERS: usize = 16;
@@ -76,6 +78,16 @@ pub(crate) struct Headroom {
     pub(crate) slice_end: u64,
     pub(crate) iteration_max: u64,
     pub(crate) loop_test: u64,
+}
+
+impl Headroom {
+    #[inline(always)]
+    fn admits_iteration(self, units: u64) -> bool {
+        self.charged
+            .checked_add(units)
+            .and_then(|charged| charged.checked_add(self.iteration_max))
+            .is_some_and(|end| end <= self.bound && end < self.slice_end)
+    }
 }
 
 /// How a program's run, or one iteration of its repeat, ended.
@@ -393,6 +405,7 @@ struct Program<T> {
     tested: bool,
     /// Whether its formulas are charged.
     charged: bool,
+    recurrence: Option<Box<Recurrence<T>>>,
 }
 
 impl<T: Domain> Program<T> {
@@ -479,18 +492,29 @@ impl<T: Domain> Program<T> {
         let mut scratch = Scratch::new();
         let mut state = self.state::<RECORD>(scratch.temps(self.temps));
         self.enter::<RECORD>(&mut state, frame, pending)?;
+        if !RECORD && let Some(recurrence) = &self.recurrence {
+            let (iterations, units, ended) = recurrence.run::<COUNT>(
+                self,
+                &mut state,
+                headroom,
+                #[cfg(any(test, feature = "perf-witness"))]
+                census,
+            );
+            let written = if iterations == 0 {
+                0
+            } else {
+                recurrence.written
+            };
+            self.leave(frame, &state, written & !self.locals);
+            return Some((iterations, units, ended));
+        }
         let mut iterations = 0_u64;
         let mut units = 0_u64;
         let mut written = 0_u32;
         let ended = loop {
             // The charge headroom guard, as the batch's.
-            match headroom
-                .charged
-                .checked_add(units)
-                .and_then(|charged| charged.checked_add(headroom.iteration_max))
-            {
-                Some(end) if end <= headroom.bound && end < headroom.slice_end => {}
-                _ => break Ran::Done(0),
+            if !headroom.admits_iteration(units) {
+                break Ran::Done(0);
             }
             let regs = state.regs;
             let recorded = state.pending.len();
@@ -593,13 +617,8 @@ impl Mixed {
         let mut head_written = 0_u32;
         let mut tail_written = 0_u32;
         let ended = loop {
-            match headroom
-                .charged
-                .checked_add(units)
-                .and_then(|charged| charged.checked_add(headroom.iteration_max))
-            {
-                Some(end) if end <= headroom.bound && end < headroom.slice_end => {}
-                _ => break Ran::Done(0),
+            if !headroom.admits_iteration(units) {
+                break Ran::Done(0);
             }
             let integers = head.regs;
             let floats = tail.regs;
@@ -948,6 +967,7 @@ impl<'e, T: Domain> Builder<'e, T> {
             temps: self.temps,
             tested,
             charged: self.charged,
+            recurrence: None,
         };
         program
             .verify(self.exe, test, body, from, covers)
