@@ -235,32 +235,66 @@ pub(crate) fn observe_power_scratch(
     POWER_SCRATCH.with(|peak| peak.set(peak.get().max(bytes)));
 }
 use lash_kernel_doc::{
-    Datum, FunctionRegistry, Integer, LogicalHeldV1 as Cost,
+    Datum, ErrorDatum, FunctionRegistry, Integer, LogicalHeldV1 as Cost,
     NativeResourceContract as Contract, NativeResourceEntity as Entity,
     NativeResourceEvent as Event, NativeResourceExit as Exit, NativeResourceOrigin as Origin,
-    NewObject, Value, WorkCounter,
+    NewObject, Value,
 };
 
 #[path = "native_contract_observer.rs"]
 mod observer;
 
-fn check_case(registry: &FunctionRegistry, name: &str, input: Vec<Datum>) -> Option<Contract> {
-    let mut bench = heap();
-    let values = input.into_iter().map(|value| decode(&mut bench, value)).collect();
-    check_values(registry, name, bench, values)
+fn reset_scratch() {
+    POWER_SCRATCH.with(|peak| peak.set(0));
+    LIVE_SCRATCH.with(|live| assert_eq!(live.get(), 0));
 }
-fn check_values(registry: &FunctionRegistry, name: &str, bench: Bench, values: Vec<Value>) -> Option<Contract> {
-    let native = registry.iter().map(|(_, entry)| entry).find(|entry| entry.name() == name).unwrap();
-    let contract = observer::check_values(
-        &**native.native().unwrap(), name, bench, values,
-        || {
-            POWER_SCRATCH.with(|peak| peak.set(0));
-            LIVE_SCRATCH.with(|live| assert_eq!(live.get(), 0));
-        },
-        || POWER_SCRATCH.with(std::cell::Cell::get),
+fn peak_scratch() -> u64 {
+    POWER_SCRATCH.with(std::cell::Cell::get)
+}
+fn check_case(registry: &FunctionRegistry, name: &str, input: Vec<Datum>) -> Option<Contract> {
+    let native = registry
+        .iter()
+        .map(|(_, entry)| entry)
+        .find(|entry| entry.name() == name)
+        .unwrap();
+    let contract = observer::check_case(
+        &**native.native().unwrap(),
+        name,
+        input,
+        reset_scratch,
+        peak_scratch,
     );
     if contract.is_some() {
-        OBSERVED_NAMES.with(|names| { names.borrow_mut().insert(name.to_owned()); });
+        OBSERVED_NAMES.with(|names| {
+            names.borrow_mut().insert(name.to_owned());
+        });
+    }
+    contract
+}
+
+fn check_values(
+    registry: &FunctionRegistry,
+    name: &str,
+    bench: Bench,
+    values: Vec<Value>,
+) -> Option<Contract> {
+    let native = registry
+        .iter()
+        .map(|(_, entry)| entry)
+        .find(|entry| entry.name() == name)
+        .unwrap();
+    let contract = observer::check_values(
+        &**native.native().unwrap(),
+        name,
+        bench,
+        values,
+        reset_scratch,
+        peak_scratch,
+    );
+    if contract.is_some() {
+        OBSERVED_NAMES.with(|names| {
+            names.borrow_mut().insert(name.to_owned());
+        });
     }
     contract
 }

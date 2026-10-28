@@ -363,7 +363,35 @@ pub(crate) fn check_values(
         let mut reachable = Vec::new();
         let mut pending: Vec<_> = output_value.into_iter().copied().collect();
         while let Some(value) = pending.pop() {
-            if let Some((handle, _, members)) = actual.iter().find(|(handle, _, _)| Some(*handle) == value.handle())
+            match value {
+                Value::Tuple(handle) => {
+                    let lash_kernel_doc::arena::Body::Tuple(sequence) =
+                        bench.arena().body(handle).unwrap()
+                    else {
+                        panic!("tuple body")
+                    };
+                    for chunk in sequence.chunks.iter() {
+                        match chunk {
+                            lash_kernel_doc::arena::Chunk::Resident(values) => {
+                                pending.extend(values)
+                            }
+                            _ => panic!("resident tuple"),
+                        }
+                    }
+                }
+                Value::Error(handle) => {
+                    let lash_kernel_doc::arena::Body::Error(error) =
+                        bench.arena().body(handle).unwrap()
+                    else {
+                        panic!("error body")
+                    };
+                    pending.extend([error.kind, error.message, error.data]);
+                }
+                _ => {}
+            }
+            if let Some((handle, _, members)) = actual
+                .iter()
+                .find(|(handle, _, _)| Some(*handle) == value.handle())
                 && !reachable.contains(handle)
             {
                 reachable.push(*handle);
