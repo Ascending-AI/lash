@@ -444,6 +444,8 @@ impl LashRuntime {
         } else {
             run_config
         };
+        let run_config =
+            run_config.with_content_preparations(projection.head.phase_content_preparations());
         let driver = Box::new(RuntimeTurnDriver {
             prompt_state: projection.prompt.draft(),
 

@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::bodies::RunConfigReference;
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId, config};
+use lash_core_store::phase_preparation::PhaseContentPreparations;
 
 use crate::ResolvedRun;
 use lash_core_store::checkpoint_graph::node::VerifiedNode;
@@ -31,6 +32,7 @@ pub struct RecordedRunConfig {
     surface: Option<Arc<crate::RecordedSurface>>,
     environments: std::collections::BTreeMap<u64, lash_core_store::environment::RoundEnvironment>,
     publication: Option<Arc<crate::runtime::session_environment::Publication>>,
+    content_prepared: PhaseContentPreparations,
 }
 
 impl RecordedRunConfig {
@@ -47,6 +49,7 @@ impl RecordedRunConfig {
             surface: None,
             environments: Default::default(),
             publication: None,
+            content_prepared: PhaseContentPreparations::default(),
         }
     }
 
@@ -69,6 +72,20 @@ impl RecordedRunConfig {
         self.run_prepared = configuration.retained_run(&self.run);
         self.configuration = Some(configuration);
         self
+    }
+
+    pub(in crate::runtime) fn with_content_preparations(
+        mut self,
+        head: Option<&PhaseContentPreparations>,
+    ) -> Self {
+        if let Some(head) = head {
+            self.content_prepared = self.content_prepared.with_head(head);
+        }
+        self
+    }
+
+    pub(in crate::runtime) fn content_preparations(&self) -> &PhaseContentPreparations {
+        &self.content_prepared
     }
 
     /// The run's resolved shape.
@@ -112,6 +129,9 @@ impl RecordedRunConfig {
 
     /// Record that a committed phase stored this configuration as `stored`.
     pub(in crate::runtime) fn stored(&mut self, stored: &RunConfigStored) {
+        if let Some(prepared) = &stored.content_prepared {
+            self.content_prepared.clone_from(prepared);
+        }
         if let Some(node) = stored.run {
             self.run_stored = Some(node);
         }
@@ -128,6 +148,7 @@ impl RecordedRunConfig {
 /// drive is told once the phase's commit is acknowledged.
 #[derive(Clone, Debug, Default)]
 pub struct RunConfigStored {
+    pub(super) content_prepared: Option<PhaseContentPreparations>,
     run: Option<NodeId>,
     prepared: Option<(
         NodeId,
@@ -275,6 +296,7 @@ impl RecordedRunConfig {
         Ok(Self {
             environments,
             publication: None,
+            content_prepared: PhaseContentPreparations::default(),
             run: Arc::new(run.1),
             run_stored: match run.0 {
                 RunConfigReference::Resolved(root) => Some(root),

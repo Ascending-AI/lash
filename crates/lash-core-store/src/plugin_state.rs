@@ -362,7 +362,7 @@ pub fn fork_checkpoint_plugin_state(
     }
     // A catalog fork is in the source store: its copied roots already exist.
     // The hydrated closure is a read view, not a new publication.
-    checkpoint.namespace_nodes.clear();
+    checkpoint.component_nodes.clear();
     if forked == map {
         return Ok(false);
     }
@@ -460,7 +460,7 @@ mod keyed_publication_tests {
                     key.clone(),
                     crate::store::HydratedCheckpointComponent::changed(after.bytes.clone()),
                 )]),
-                namespace_nodes: after.graph.clone(),
+                component_nodes: after.graph.clone(),
                 ..Default::default()
             };
             assert_eq!(

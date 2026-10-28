@@ -284,7 +284,7 @@ impl ResidentCheckpointComponent {
 pub(super) fn assemble_plugin_state(
     entries: &std::collections::BTreeMap<String, ResidentCheckpointComponent>,
     map: crate::plugin_state::PluginStateMap,
-    namespace_nodes: &std::collections::BTreeMap<
+    component_nodes: &std::collections::BTreeMap<
         crate::checkpoint_graph::NodeId,
         crate::checkpoint_graph::EncodedNode,
     >,
@@ -324,7 +324,7 @@ pub(super) fn assemble_plugin_state(
                 }
             })?;
         let body = crate::plugin_state::NamespaceBody::load(
-            namespace_nodes,
+            component_nodes,
             root,
             crate::checkpoint_graph::DecodeLimits::within_total(1 << 32),
         )

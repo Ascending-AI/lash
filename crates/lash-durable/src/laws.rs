@@ -1250,7 +1250,7 @@ pub async fn lo_postimage_receipt_matches_reopen(
         .map_err(stored)?;
         let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
         let mut tx = store.begin(&actor, epoch).await?;
-        tx.stage(encoded.namespace_nodes.clone().into_values());
+        tx.stage(encoded.component_nodes.clone().into_values());
         tx.stage(encoded.descriptor.clone());
         if explicit {
             tx.release_root_lease(crate::domain::pages::RootLeaseId(9_000_000));
@@ -1329,7 +1329,7 @@ pub async fn lo_postimage_receipt_matches_reopen(
     .map_err(stored)?;
     let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
     let mut refused = store.begin(&actor, epoch).await?;
-    refused.stage(encoded.namespace_nodes.into_values());
+    refused.stage(encoded.component_nodes.into_values());
     refused.stage(encoded.descriptor);
     refused.write(DomainWrite::SessionCommit(SessionCommitWrite {
         session: id.clone(),

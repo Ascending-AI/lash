@@ -695,7 +695,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             })
             .collect(),
         execution: None,
-        namespace_nodes: Default::default(),
+        component_nodes: Default::default(),
     }
 }
 
@@ -2272,3 +2272,73 @@ mod configuration;
 
 #[path = "tests/prepared.rs"]
 mod prepared;
+
+/// FIG-7515: a terminal head owns reused content after its phase has retired.
+#[tokio::test]
+async fn a_heads_phase_content_survives_orphan_audit_and_cold_hydration() {
+    use lash_core_store::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging, NodeKind};
+    use lash_core_store::phase_preparation::{PhaseContentPreparations, PreparationRole};
+    let stores = crate::SqliteStoreSet::memory()
+        .await
+        .expect("memory stores");
+    let store = stores.process_env_store();
+    let durable = stores.durable_store();
+    let mut state = durable_state(&store, &SessionId::from("phase-preparation-owner")).await;
+    let text = "immutable schema population".repeat(2048);
+    let key = lash_core_store::store::BlobRef::for_content(text.as_bytes());
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let root = staging
+        .encode_value(NodeKind::TURN_CONTENT, &text)
+        .expect("content root");
+    let mut prepared = PhaseContentPreparations::default();
+    prepared.record(PreparationRole::Environment, key.clone(), root);
+    state
+        .set_phase_content_preparations(prepared)
+        .expect("head takes ownership");
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
+    commit
+        .checkpoint
+        .component_nodes
+        .extend(staging.into_nodes());
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("terminal head commit");
+    drop(state);
+    durable.audit_orphans().await.expect("peel unowned content");
+    let head = store
+        .load_session_window(
+            &SessionId::from("phase-preparation-owner"),
+            lash_core_store::store::WindowSelector::Current,
+        )
+        .await
+        .expect("cold head read")
+        .expect("stored head");
+    let mut cold = lash_core_store::session_state::RuntimeSessionState::fixture(
+        lash_core_store::session_policy::SessionPolicy::new(
+            lash_protocol_types::session_model::TurnBudget::Unbounded,
+            lash_protocol_types::session_model::MaxToolCalls::new(1024),
+            lash_protocol_types::session_model::NoProgressBudget::bounded(12),
+        ),
+    );
+    lash_core_store::session_state::adopt_durable_head(
+        &mut cold,
+        head,
+        lash_core_store::store::FleetFormat::current(),
+    )
+    .expect("hydrate and authenticate the retained content");
+    assert_eq!(
+        cold.phase_content_preparations()
+            .unwrap()
+            .get(PreparationRole::Environment, &key),
+        Some(root)
+    );
+    assert_eq!(
+        cold.phase_content_preparations().unwrap().get(
+            PreparationRole::Environment,
+            &lash_core_store::store::BlobRef::for_content(b"changed schema"),
+        ),
+        None,
+        "a changed environment cannot reuse the old encoding"
+    );
+}

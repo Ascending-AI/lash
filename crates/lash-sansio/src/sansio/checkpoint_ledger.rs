@@ -370,16 +370,20 @@ impl StoredEnvironment {
         *encoded += 1;
         Self {
             source: Arc::clone(source),
-            reference: content.put_value(source.as_ref()),
+            reference: content.put_value(&source.sync),
         }
     }
 
     pub(super) fn restore(
         reference: &CheckpointContentRef,
+        protocol_iteration: usize,
         content: &TurnCheckpointContent,
     ) -> Result<Self, TurnCheckpointRestoreError> {
         Ok(Self {
-            source: Arc::new(content.value(reference)?),
+            source: Arc::new(SyncedEnvironment {
+                protocol_iteration,
+                sync: content.value(reference)?,
+            }),
             reference: reference.clone(),
         })
     }

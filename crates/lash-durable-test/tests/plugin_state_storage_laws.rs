@@ -1367,6 +1367,7 @@ fn staged_content(
                     NodeKind::TURN_CONTENT
                         | NodeKind::MODEL_REQUEST_FRAME
                         | NodeKind::CONTENT_CHUNK
+                        | NodeKind::PHASE_PREPARATION
                 )
             })
         })

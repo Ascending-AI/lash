@@ -232,12 +232,20 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// before its first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) last_call_usage: Option<LlmUsage>,
-    /// The content holding the environment the machine last synced and its
-    /// iteration. `None` only before the protocol-start sync is answered.
-    pub(super) environment: Option<CheckpointContentRef>,
+    /// The immutable environment content and the iteration it was synced for.
+    /// `None` only before the protocol-start sync is answered.
+    pub(super) environment: Option<CheckpointEnvironment>,
     /// The turn's decided completion candidates, in decision order: content,
     /// as the history records are, since each holds its control.
     pub(super) decided_completions: CheckpointContentRef,
+}
+
+/// Iteration ownership changes without rewriting the environment's schemas.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CheckpointEnvironment {
+    pub(super) protocol_iteration: usize,
+    pub(super) content: CheckpointContentRef,
 }
 
 /// A progress boundary that delivered protocol records: how many messages
@@ -323,6 +331,13 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
     /// restore must be handed again; `None` for a turn started without one.
     pub fn window_pin(&self) -> Option<&TurnWindowPin> {
         self.window.as_ref().map(|window| &window.pin)
+    }
+
+    /// The immutable tool environment content named by this checkpoint.
+    pub fn environment_content(&self) -> Option<&CheckpointContentRef> {
+        self.environment
+            .as_ref()
+            .map(|environment| &environment.content)
     }
 
     /// The model request the checkpoint waits on, as it names it: the

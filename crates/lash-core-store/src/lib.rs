@@ -45,6 +45,7 @@ pub mod message_projection;
 pub mod obligations;
 mod persisted_session_config;
 mod persistent_map;
+pub mod phase_preparation;
 pub mod plugin_state;
 pub mod process_env;
 pub mod process_identity;

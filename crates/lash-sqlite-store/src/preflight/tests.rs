@@ -525,7 +525,7 @@ mod walk {
         let stored = store
             .put_checkpoint(&lash_core_store::store::HydratedSessionCheckpoint {
                 turn_state: lash_core_store::session_graph::PersistedTurnState::default(),
-                namespace_nodes: Default::default(),
+                component_nodes: Default::default(),
                 components: std::collections::BTreeMap::new(),
                 execution: Some(lash_core_store::store::CheckpointExecution {
                     root: execution_root,
@@ -617,7 +617,7 @@ mod walk {
         let stored = store
             .put_checkpoint(&lash_core_store::store::HydratedSessionCheckpoint {
                 turn_state: lash_core_store::session_graph::PersistedTurnState::default(),
-                namespace_nodes: Default::default(),
+                component_nodes: Default::default(),
                 components,
                 execution: None,
             })

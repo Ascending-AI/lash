@@ -457,9 +457,9 @@ pub struct HydratedSessionCheckpoint {
     /// The session's protocol execution state as graph nodes, or none.
     #[serde(skip)]
     pub execution: Option<CheckpointExecution>,
-    /// Keyed namespace nodes submitted with this checkpoint, or its loaded closure.
+    /// Typed component nodes submitted with this checkpoint, or their loaded closure.
     #[serde(skip)]
-    pub namespace_nodes: std::collections::BTreeMap<
+    pub component_nodes: std::collections::BTreeMap<
         crate::checkpoint_graph::NodeId,
         crate::checkpoint_graph::EncodedNode,
     >,
@@ -599,7 +599,7 @@ impl HydratedSessionCheckpoint {
                     }
                 })?;
             let namespace = crate::plugin_state::NamespaceBody::load(
-                &self.namespace_nodes,
+                &self.component_nodes,
                 root,
                 crate::checkpoint_graph::DecodeLimits::within_total(1 << 32),
             )

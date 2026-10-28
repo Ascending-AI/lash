@@ -800,10 +800,10 @@ fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
         plugins: std::collections::BTreeMap::from([("keyed".into(), namespace("1", 1))]),
     }));
     let next = crate::RuntimeCommit::persisted_state_for_test(&state);
-    assert!(next.checkpoint.namespace_nodes.len() <= 3);
+    assert!(next.checkpoint.component_nodes.len() <= 3);
     assert!(
         next.checkpoint
-            .namespace_nodes
+            .component_nodes
             .values()
             .map(|node| node.bytes.len())
             .sum::<usize>()

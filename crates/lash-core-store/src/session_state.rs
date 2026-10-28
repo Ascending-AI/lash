@@ -70,6 +70,7 @@ pub(crate) enum AcceptedExecutionRetention {
 
 mod checkpoint_component;
 mod checkpoints;
+mod phase_preparation;
 mod plugin_admission;
 mod plugin_source;
 use checkpoint_component::{
@@ -103,6 +104,11 @@ pub struct RuntimeCheckpointComponents {
     /// The SessionExecution graph the next checkpoint names.
     #[serde(skip)]
     execution: ResidentExecution,
+    #[serde(skip)]
+    phase_preparations: Option<(
+        crate::store::BlobRef,
+        crate::phase_preparation::PhaseContentPreparations,
+    )>,
 }
 
 impl Default for RuntimeCheckpointComponents {
@@ -118,6 +124,7 @@ impl RuntimeCheckpointComponents {
             entries: std::collections::BTreeMap::new(),
             execution_state_body_residency: ExecutionStateBodyResidency::Resident,
             execution: ResidentExecution::None,
+            phase_preparations: None,
         }
     }
 
@@ -127,6 +134,7 @@ impl RuntimeCheckpointComponents {
             entries: std::collections::BTreeMap::new(),
             execution_state_body_residency: ExecutionStateBodyResidency::Resident,
             execution: ResidentExecution::None,
+            phase_preparations: None,
         }
     }
 
@@ -230,7 +238,7 @@ impl RuntimeCheckpointComponents {
                 )?
                 .expect("present plugin-state component");
             let (snapshot, record) =
-                assemble_plugin_state(&entries, map, &checkpoint.namespace_nodes)?;
+                assemble_plugin_state(&entries, map, &checkpoint.component_nodes)?;
             entries.insert(
                 key,
                 ResidentCheckpointComponent::Unchanged {
@@ -267,6 +275,7 @@ impl RuntimeCheckpointComponents {
             entries,
             execution_state_body_residency: ExecutionStateBodyResidency::Resident,
             execution,
+            phase_preparations: Self::load_phase_preparations(checkpoint, &manifest)?,
         })
     }
 
@@ -294,6 +303,7 @@ impl RuntimeCheckpointComponents {
             entries,
             execution_state_body_residency: ExecutionStateBodyResidency::Resident,
             execution: ResidentExecution::None,
+            phase_preparations: None,
         }
     }
 
@@ -337,27 +347,29 @@ impl RuntimeCheckpointComponents {
                 descriptor: None,
             }),
         };
+        let mut component_nodes = self
+            .plugin_record()
+            .map(|record| {
+                record
+                    .bodies
+                    .iter()
+                    .filter(|(plugin, _)| {
+                        matches!(
+                            self.entries
+                                .get(&crate::plugin_state::namespace_component_key(plugin)),
+                            Some(ResidentCheckpointComponent::Changed { .. })
+                        )
+                    })
+                    .flat_map(|(_, body)| body.published.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.stage_phase_preparations(&mut component_nodes)?;
         Ok(crate::store::HydratedSessionCheckpoint {
             turn_state,
             components,
             execution,
-            namespace_nodes: self
-                .plugin_record()
-                .map(|record| {
-                    record
-                        .bodies
-                        .iter()
-                        .filter(|(plugin, _)| {
-                            matches!(
-                                self.entries
-                                    .get(&crate::plugin_state::namespace_component_key(plugin)),
-                                Some(ResidentCheckpointComponent::Changed { .. })
-                            )
-                        })
-                        .flat_map(|(_, body)| body.published.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            component_nodes,
         })
     }
 
@@ -593,6 +605,7 @@ impl RuntimeCheckpointComponents {
     }
 
     fn adopt_manifest(&mut self, manifest: &crate::store::SessionCheckpoint) {
+        self.retain_phase_preparations(manifest);
         self.entries
             .retain(|key, _| manifest.components.contains_key(key));
         for (key, descriptor) in &manifest.components {

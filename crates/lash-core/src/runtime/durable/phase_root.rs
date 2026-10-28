@@ -31,6 +31,8 @@ use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::NodeSource;
 use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
+use lash_core_store::phase_preparation::{PhaseContentPreparations, PreparationRole};
+use lash_core_store::store::BlobRef;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_value::tokens::TokenCodec;
@@ -166,13 +168,41 @@ impl TokenCodec for ModelRequestFrame {
     }
 }
 
-fn stage_request(staging: &mut GraphStaging, text: &str) -> Result<NodeId, String> {
+fn stage_prepared_content(
+    staging: &mut GraphStaging,
+    text: &str,
+    role: PreparationRole,
+    prepared: &mut PhaseContentPreparations,
+    held: &mut Vec<NodeId>,
+) -> Result<NodeId, String> {
+    let key = BlobRef::for_content(text.as_bytes());
+    if let Some(root) = prepared.get(role, &key) {
+        held.push(root);
+        return Ok(root);
+    }
+    let root = stage_content(staging, text).map_err(|error| error.to_string())?;
+    prepared.record(role, key, root);
+    Ok(root)
+}
+
+fn stage_request(
+    staging: &mut GraphStaging,
+    text: &str,
+    prepared: &mut PhaseContentPreparations,
+    held: &mut Vec<NodeId>,
+) -> Result<NodeId, String> {
     let mut config: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let scope = config
         .as_object_mut()
         .and_then(|config| config.remove("scope"))
         .ok_or_else(|| "the checkpoint's model request has no scope".to_owned())?;
-    let config = stage_content(staging, &config.to_string()).map_err(|e| e.to_string())?;
+    let config = stage_prepared_content(
+        staging,
+        &config.to_string(),
+        PreparationRole::ModelRequest,
+        prepared,
+        held,
+    )?;
     staging
         .encode_value(
             NodeKind::MODEL_REQUEST_FRAME,
@@ -188,6 +218,7 @@ fn load_content(
     parent: NodeId,
     node: NodeId,
     allowed: &[NodeKind],
+    prepared: Option<&mut PhaseContentPreparations>,
 ) -> Result<(String, Option<NodeId>), String> {
     let kind = decoder
         .child_kind(parent, node, allowed)
@@ -214,6 +245,13 @@ fn load_content(
     let mut config: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     if serde_json::to_string(&config).map_err(|e| e.to_string())? != text {
         return Err("the request config is not canonical JSON".to_owned());
+    }
+    if let Some(prepared) = prepared {
+        prepared.record(
+            PreparationRole::ModelRequest,
+            BlobRef::for_content(text.as_bytes()),
+            frame.config,
+        );
     }
     let fields = config
         .as_object_mut()
@@ -359,6 +397,12 @@ impl StagedPhase {
     ) -> Result<Self, String> {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
+        let mut content_prepared = checkpoint
+            .config
+            .as_ref()
+            .map(|config| config.content_preparations().clone())
+            .unwrap_or_default();
+        let mut content_held = Vec::new();
         let config = checkpoint
             .config
             .as_ref()
@@ -378,6 +422,7 @@ impl StagedPhase {
             .checkpoint
             .pending_request()
             .map(|(request, _, _)| request);
+        let environment = checkpoint.saved.checkpoint.environment_content();
         let held: BTreeMap<&CheckpointContentRef, NodeId> = held
             .iter()
             .map(|(digest, pin)| (digest, NodeId(*pin.as_bytes())))
@@ -413,7 +458,16 @@ impl StagedPhase {
                 let text = std::str::from_utf8(fresh[top])
                     .map_err(|error| format!("turn content {top} is not text: {error}"))?;
                 let node = match prev {
-                    _ if Some(top) == request => stage_request(&mut staging, text)?,
+                    _ if Some(top) == request => {
+                        stage_request(&mut staging, text, &mut content_prepared, &mut content_held)?
+                    }
+                    _ if Some(top) == environment => stage_prepared_content(
+                        &mut staging,
+                        text,
+                        PreparationRole::Environment,
+                        &mut content_prepared,
+                        &mut content_held,
+                    )?,
                     Some(prev) => stage_chunk(&mut staging, text, prev).map_err(refused)?,
                     None => stage_content(&mut staging, text).map_err(refused)?,
                 };
@@ -466,6 +520,8 @@ impl StagedPhase {
             supplied = config.supplied;
             config_stored = config.stored;
         }
+        held_nodes.extend(content_held);
+        config_stored.content_prepared = Some(content_prepared);
         Ok(Self {
             publication: publication.clone(),
             root,
@@ -573,6 +629,12 @@ pub(in crate::runtime) fn load(
     let text = |error: GraphRefusal| error.to_string();
     let body: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).map_err(text)?;
     let read = read_checkpoint(&body.checkpoint, body.window_pin)?;
+    let environment = read.checkpoint.environment_content().cloned();
+    let request = read
+        .checkpoint
+        .pending_request()
+        .map(|(request, _, _)| request.clone());
+    let mut prepared = PhaseContentPreparations::default();
     let mut content = TurnCheckpointContent::default();
     let mut stored = Vec::new();
     for (digest, node) in body.content {
@@ -585,14 +647,23 @@ pub(in crate::runtime) fn load(
             } else {
                 EARLIER_CHUNK
             };
-            let (blob, prev) = load_content(&mut decoder, parent, node, allowed)?;
+            let request_prepared = request
+                .as_ref()
+                .is_some_and(|request| named.as_ref() == Some(request))
+                .then_some(&mut prepared);
+            let (blob, prev) = load_content(&mut decoder, parent, node, allowed, request_prepared)?;
             let digest = named.unwrap_or_else(|| CheckpointContentRef::of_content(blob.as_bytes()));
             if content.contains(&digest) {
                 break;
             }
+            let environment_key = (environment.as_ref() == Some(&digest))
+                .then(|| BlobRef::for_content(blob.as_bytes()));
             content
                 .insert_stored(digest.clone(), blob.into_bytes())
                 .map_err(|error| error.to_string())?;
+            if let Some(key) = environment_key {
+                prepared.record(PreparationRole::Environment, key, node);
+            }
             stored.push((digest, CheckpointContentPin::new(node.0)));
             next = prev.map(|prev| (None, node, prev));
         }
@@ -630,11 +701,10 @@ pub(in crate::runtime) fn load(
                         .map_err(|error| error.to_string())
                 })
                 .collect::<Result<_, _>>()?;
-            Some(RecordedRunConfig::load(
-                (run, resolved),
-                environments,
-                source,
-            )?)
+            Some(
+                RecordedRunConfig::load((run, resolved), environments, source)?
+                    .with_content_preparations(Some(&prepared)),
+            )
         }
     };
     Ok((

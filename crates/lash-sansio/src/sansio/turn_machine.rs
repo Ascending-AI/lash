@@ -541,7 +541,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
             last_call_usage: self.last_call_usage.clone(),
             environment: environment
                 .as_ref()
-                .map(|environment| environment.reference.clone()),
+                .map(|environment| CheckpointEnvironment {
+                    protocol_iteration: environment.source.protocol_iteration,
+                    content: environment.reference.clone(),
+                }),
             decided_completions: completions.head().clone(),
         };
         let chains = StoredChains {
@@ -589,7 +592,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let environment = checkpoint
             .environment
             .as_ref()
-            .map(|reference| StoredEnvironment::restore(reference, &content))
+            .map(|environment| {
+                StoredEnvironment::restore(
+                    &environment.content,
+                    environment.protocol_iteration,
+                    &content,
+                )
+            })
             .transpose()?;
         let synced = environment
             .as_ref()

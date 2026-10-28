@@ -1910,7 +1910,7 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
     });
 
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
-    let environment_ref = encoded["checkpoint"]["environment"]
+    let environment_ref = encoded["checkpoint"]["environment"]["content"]
         .as_str()
         .expect("environment content reference");
     let environment: serde_json::Value = serde_json::from_str(
@@ -1919,11 +1919,11 @@ fn a_restored_machine_projects_from_the_environment_its_checkpoint_recorded() {
             .expect("recorded environment content"),
     )
     .expect("recorded environment");
-    assert_eq!(environment["protocol_iteration"], 0);
     assert_eq!(
-        environment["sync"]["tool_specs"][0]["name"],
-        "recorded_tool"
+        encoded["checkpoint"]["environment"]["protocol_iteration"],
+        0
     );
+    assert_eq!(environment["tool_specs"][0]["name"], "recorded_tool");
     let checkpoint: SavedTurn = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint, None)

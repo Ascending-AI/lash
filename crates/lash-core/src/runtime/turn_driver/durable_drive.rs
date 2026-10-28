@@ -1357,6 +1357,11 @@ impl TurnDrive for RuntimeDrive {
         };
         let failure_evidence = driver.failure_evidence.clone();
         model_calls::project_usage(cx, driver, &self.machine, head).await?;
+        driver
+            .turn_pipeline
+            .state_mut()
+            .set_phase_content_preparations(driver.run_config.content_preparations().clone())
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
         let mut commit = driver
             .turn_pipeline
             .durable_commit(

@@ -1023,7 +1023,7 @@ pub struct EncodedSessionCommit {
     pub json: String,
     pub execution: Option<crate::checkpoint_graph::NodeId>,
     pub descriptor: Option<crate::checkpoint_graph::EncodedNode>,
-    pub namespace_nodes: std::collections::BTreeMap<
+    pub component_nodes: std::collections::BTreeMap<
         crate::checkpoint_graph::NodeId,
         crate::checkpoint_graph::EncodedNode,
     >,
@@ -1108,7 +1108,7 @@ pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<EncodedSessionCom
         json,
         execution: execution.map(|execution| execution.root),
         descriptor: execution.and_then(super::CheckpointExecution::node),
-        namespace_nodes: commit.checkpoint.namespace_nodes.clone(),
+        component_nodes: commit.checkpoint.component_nodes.clone(),
     })
 }
 

@@ -340,7 +340,7 @@ async fn checkpoint_component_bodies_tx(
     let blob_refs = manifest
         .components
         .iter()
-        .filter(|(key, _)| lash_core_store::plugin_state::namespace_component_plugin(key).is_none())
+        .filter(|(key, _)| !lash_core_store::phase_preparation::is_graph_component(key))
         .map(|(_, descriptor)| descriptor.blob_ref.as_str().to_string())
         .collect::<std::collections::BTreeSet<_>>();
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
@@ -403,7 +403,7 @@ fn checkpoint_components(
     let mut acquisition_order = manifest
         .components
         .iter()
-        .filter(|(key, _)| lash_core_store::plugin_state::namespace_component_plugin(key).is_none())
+        .filter(|(key, _)| !lash_core_store::phase_preparation::is_graph_component(key))
         .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
         .collect::<Vec<_>>();
     acquisition_order.sort();
@@ -417,7 +417,7 @@ fn checkpoint_components(
                     record_kind: "HydratedSessionCheckpoint",
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
-        if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+        if lash_core_store::phase_preparation::is_graph_component(key) {
             continue;
         }
         let (stored_ref, body) = match component {
@@ -451,7 +451,7 @@ fn checkpoint_graph_parts(
     // edges once every component exists, beside the execution's descriptor
     // when the checkpoint holds it: a missing component is refused as one.
     let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
-    nodes.extend(checkpoint.namespace_nodes.clone());
+    nodes.extend(checkpoint.component_nodes.clone());
     if let Some(node) = checkpoint
         .execution
         .as_ref()
@@ -583,7 +583,7 @@ pub(crate) async fn get_checkpoint_tx(
             lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
                 .and_then(|id| lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &id))
                 .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
-        let body = if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+        let body = if lash_core_store::phase_preparation::is_graph_component(key) {
             graph_body.as_ref()
         } else {
             bodies.get(descriptor.blob_ref.as_str())
@@ -604,12 +604,10 @@ pub(crate) async fn get_checkpoint_tx(
         turn_state: manifest.turn_state,
         components,
         execution,
-        namespace_nodes: manifest
+        component_nodes: manifest
             .components
             .iter()
-            .filter(|(key, _)| {
-                lash_core_store::plugin_state::namespace_component_plugin(key).is_some()
-            })
+            .filter(|(key, _)| lash_core_store::phase_preparation::is_graph_component(key))
             .map(|(_, descriptor)| {
                 let root = lash_core_store::checkpoint_graph::NodeId::from_hex(
                     descriptor.blob_ref.as_str(),

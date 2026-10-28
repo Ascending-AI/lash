@@ -83,7 +83,7 @@ pub(crate) fn write_session_commit(
     expected_head: u64,
     commit: crate::store::EncodedSessionCommit,
 ) {
-    tx.stage(commit.namespace_nodes.into_values());
+    tx.stage(commit.component_nodes.into_values());
     match commit.descriptor {
         Some(descriptor) => {
             tx.stage([descriptor]);
