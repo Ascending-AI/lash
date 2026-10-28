@@ -7,17 +7,31 @@ thread_local! {
     static POWER_SCRATCH: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+pub(crate) fn observe_power_state(
+    result: &num_bigint::BigInt,
+    base: &num_bigint::BigInt,
+    exponent: &num_bigint::BigInt,
+) {
+    let bytes = 3 * Cost::REFERENCE
+        + result.bits().div_ceil(8)
+        + base.bits().div_ceil(8)
+        + exponent.bits().div_ceil(8);
+    POWER_SCRATCH.with(|peak| peak.set(peak.get().max(bytes)));
+}
+
 pub(crate) fn observe_power_scratch(
     result: &num_bigint::BigInt,
     base: &num_bigint::BigInt,
     a: &num_bigint::BigInt,
     b: &num_bigint::BigInt,
+    exponent: &num_bigint::BigInt,
 ) {
     let product = a * b;
-    let bytes = 3 * Cost::REFERENCE
+    let bytes = 4 * Cost::REFERENCE
         + result.bits().div_ceil(8)
         + base.bits().div_ceil(8)
-        + product.bits().div_ceil(8);
+        + product.bits().div_ceil(8)
+        + exponent.bits().div_ceil(8);
     POWER_SCRATCH.with(|peak| peak.set(peak.get().max(bytes)));
 }
 use lash_kernel_doc::{
@@ -443,6 +457,13 @@ fn native_contracts_match_logical_holdings_and_reject_understatements() {
             );
             checked += 1;
         }
+    }
+    for (base, exponent) in [
+        (1, Integer::new(num_bigint::BigInt::from(1) << 1024)),
+        (2, Integer::from(0)),
+    ] {
+        assert!(check_case(&registry, "int.pow", vec![int(base), Datum::Int(exponent)]).is_some());
+        checked += 1;
     }
     eprintln!(
         "checked {checked} native input/exit contracts; uncertified corpus leaves: {uncertified:?}"

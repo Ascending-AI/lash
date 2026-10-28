@@ -220,13 +220,23 @@ fn integer_pow(
     let mut base = a.clone();
     let mut result = BigInt::one();
     let mut room = Room { new, peak: 0 };
+    #[cfg(test)]
+    crate::native_contract_laws::observe_power_state(&result, &base, &exponent);
     while !exponent.is_zero() {
         if exponent.bit(0) {
+            #[cfg(test)]
+            crate::native_contract_laws::observe_power_scratch(
+                &result, &base, &result, &base, &exponent,
+            );
             room.product(&result, &base, &result, &base, counter)?;
             result *= &base;
         }
         exponent >>= 1usize;
         if !exponent.is_zero() {
+            #[cfg(test)]
+            crate::native_contract_laws::observe_power_scratch(
+                &result, &base, &base, &base, &exponent,
+            );
             room.product(&result, &base, &base, &base, counter)?;
             base = &base * &base;
         }
@@ -256,8 +266,6 @@ impl Room<'_, '_> {
         counter: &mut WorkCounter,
     ) -> Result<(), NativeError> {
         // Upper bound on output magnitude in 64-bit words.
-        #[cfg(test)]
-        crate::native_contract_laws::observe_power_scratch(result, base, a, b);
         let words = a.bits().saturating_add(b.bits()).div_ceil(64).max(1);
         counter.spend(words)?;
         let held = result.bits().saturating_add(base.bits()).div_ceil(8);

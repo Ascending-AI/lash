@@ -173,11 +173,11 @@ fn power(
             "integer exponent must be non-negative",
         ));
     }
+    let exponent_bytes = LogicalHeldV1::REFERENCE + right.bits().div_ceil(8);
     let mut exponent = right.into_bigint();
     let mut base = left.as_bigint().into_owned();
     let mut result = BigInt::one();
     let mut counter = lash_kernel_doc::WorkCounter::new(Some(super::INTEGER_POWER_WORK_LIMIT));
-    let products = !exponent.is_zero();
     while !exponent.is_zero() {
         if exponent.bit(0) {
             counter.spend(
@@ -197,16 +197,14 @@ fn power(
     }
     let bits = result.bits().max(left.bits()).max(1);
     let mut contract = number(Numeric::Int(lash_kernel_doc::Integer::new(result)));
-    if products {
-        // Canonical multiplication owns result, base and product occurrences.
-        // Every intermediate magnitude is bounded by the input/result maximum.
-        contract
-            .events
-            .push(lash_kernel_doc::NativeResourceEvent::Scratch {
-                owner: lash_kernel_doc::NativeResourceOwner(0),
-                bytes: 3 * (LogicalHeldV1::REFERENCE + bits.div_ceil(8)),
-                release: lash_kernel_doc::NativeResourceRelease::Exit,
-            });
-    }
+    // The copied exponent shrinks. Result, base and product magnitudes are
+    // bounded by the input/result maximum, including the zero-exponent state.
+    contract
+        .events
+        .push(lash_kernel_doc::NativeResourceEvent::Scratch {
+            owner: lash_kernel_doc::NativeResourceOwner(0),
+            bytes: exponent_bytes + 3 * (LogicalHeldV1::REFERENCE + bits.div_ceil(8)),
+            release: lash_kernel_doc::NativeResourceRelease::Exit,
+        });
     Ok(contract)
 }
