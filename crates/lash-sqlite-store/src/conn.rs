@@ -1028,9 +1028,12 @@ impl SqliteConnection {
             let (answer, result) = worker::inline_reply();
             flatten(
                 self.inner
-                    .write(batch::Member::new(&self.writer, f, move |value| {
-                        answer.send(value);
-                    }))
+                    .write_inline(
+                        batch::Member::new(&self.writer, f, move |value| {
+                            answer.send(value);
+                        }),
+                        result.disposal(),
+                    )
                     .map(Ok),
             )?;
             return result.recv().unwrap_or_else(|_| closed());

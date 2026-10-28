@@ -9,6 +9,8 @@ type Work = Box<dyn FnOnce(&mut rusqlite::Connection) + Send>;
 
 enum Command {
     Call(Work),
+    #[cfg(feature = "testing")]
+    Inline(Work, Arc<dyn std::any::Any + Send + Sync>),
     /// A write transaction: it may share a batch with the writes queued
     /// behind it (FIG-5958).
     Write(Member),
@@ -169,7 +171,21 @@ impl<T> InlineResult<T> {
                 .wait(result)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        result.take().ok_or(())?
+        let value = result.take().ok_or(())?;
+        drop(result);
+        // The worker's last owner is released after the boxed command and
+        // its captures. A reply alone precedes that disposal.
+        while Arc::strong_count(&self.0) != 1 {
+            std::thread::yield_now();
+        }
+        value
+    }
+}
+
+#[cfg(feature = "testing")]
+impl<T: Send + 'static> InlineResult<T> {
+    pub(super) fn disposal(&self) -> Arc<dyn std::any::Any + Send + Sync> {
+        self.0.clone()
     }
 }
 
@@ -214,6 +230,11 @@ impl Connection {
                 while let Some(command) = held.pop_front().or_else(|| receiver.recv().ok()) {
                     match command {
                         Command::Call(work) => work(&mut connection),
+                        #[cfg(feature = "testing")]
+                        Command::Inline(work, disposal) => {
+                            work(&mut connection);
+                            drop(disposal);
+                        }
                         Command::Write(first) => {
                             let members = gather(first, &mut held, &receiver);
                             for unrun in batch::run(&mut connection, members).into_iter().rev() {
@@ -268,9 +289,12 @@ impl Connection {
         F: FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
     {
         let (answer, result) = inline_reply();
-        self.send(Command::Call(Box::new(move |connection| {
-            answer.send(work(connection));
-        })))?;
+        self.send(Command::Inline(
+            Box::new(move |connection| {
+                answer.send(work(connection));
+            }),
+            result.disposal(),
+        ))?;
         result
             .recv()
             .map_err(|()| tokio_rusqlite::Error::ConnectionClosed)?
@@ -281,6 +305,23 @@ impl Connection {
     /// reply once its batch is settled.
     pub(super) fn write(&self, member: Member) -> tokio_rusqlite::Result<()> {
         self.send(Command::Write(member))
+    }
+
+    #[cfg(feature = "testing")]
+    pub(super) fn write_inline(
+        &self,
+        member: Member,
+        disposal: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> tokio_rusqlite::Result<()> {
+        self.send(Command::Inline(
+            Box::new(move |connection| {
+                let mut members = vec![member];
+                while !members.is_empty() {
+                    members = batch::run(connection, members);
+                }
+            }),
+            disposal,
+        ))
     }
 
     pub(super) async fn close(self) -> tokio_rusqlite::Result<()> {
