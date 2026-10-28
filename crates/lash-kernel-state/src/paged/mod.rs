@@ -60,6 +60,7 @@ pub use source::{PageAnswer, PageBody, PageKind, PagePortLimits, PageSource};
 mod census_graph;
 mod codec;
 mod equality;
+pub(crate) mod logical;
 mod publication;
 pub(crate) mod resident;
 pub(crate) mod stored;
@@ -85,6 +86,8 @@ mod laws {
     pub mod heap;
     #[path = "../family_impl/laws.rs"]
     mod lifecycle;
+    #[path = "../logical/laws.rs"]
+    mod logical;
     mod metadata;
     mod record_hints;
     pub mod root;

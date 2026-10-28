@@ -30,6 +30,9 @@ pub mod kernel_internals {
         &checkpoint.0
     }
 
+    pub mod logical {
+        pub use crate::paged::logical::*;
+    }
     pub mod census_impl {
         pub use crate::paged::census_impl::*;
     }

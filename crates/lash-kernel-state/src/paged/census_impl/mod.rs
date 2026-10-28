@@ -99,10 +99,8 @@ impl AllocationCensus for Census {
             .refinements
             .checked_add(1)
             .ok_or_else(|| malformed("refinement count overflow"))?;
-        let proof = trace::trace(graph, transient, self.limits)?;
-        let entities = proof.entities;
-        let holdings = proof.holdings;
-        self.last_trace = proof.sweep(graph)?;
+        let (entities, holdings, stats) = normalized_trace(graph, transient, self.limits)?;
+        self.last_trace = stats;
         self.normalized = holdings;
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| {
@@ -127,4 +125,16 @@ impl AllocationCensus for Census {
 
 fn malformed(reason: &str) -> CensusFault {
     CensusFault::Malformed(reason.to_owned())
+}
+
+pub(crate) fn normalized_trace(
+    graph: &mut dyn CensusGraph,
+    transient: &TransientRoots<'_>,
+    limits: TraceLimits,
+) -> Result<(u64, super::census::NormalizedHoldings, TraceStats), CensusFault> {
+    let proof = trace::trace(graph, transient, limits)?;
+    let entities = proof.entities;
+    let holdings = proof.holdings;
+    let stats = proof.sweep(graph)?;
+    Ok((entities, holdings, stats))
 }
