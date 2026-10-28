@@ -642,10 +642,10 @@ lash-runtime = [
   "host-schemas/process-ran/v1.schema.json",
   "host-schemas/process-workflow-overlay/v1.schema.json",
   "host-schemas/trace-record/v37.schema.json",
-  "host-schemas/worker-page-reply/v2.schema.json",
-  "host-schemas/worker-page-request/v2.schema.json",
-  "host-schemas/worker-seal-batch/v2.schema.json",
-  "host-schemas/worker-start/v2.schema.json",
+  "host-schemas/worker-page-reply/v3.schema.json",
+  "host-schemas/worker-page-request/v3.schema.json",
+  "host-schemas/worker-seal-batch/v3.schema.json",
+  "host-schemas/worker-start/v3.schema.json",
   "host-schemas/workflow-execution-overlay/v37.schema.json",
 ]
 lash-kernel-view = ["kernel-workflow-view-v1.d.ts", "kernel-workflow-view-v1.schema.json"]

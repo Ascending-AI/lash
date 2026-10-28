@@ -518,7 +518,21 @@ mod tests {
             lash_kernel_value::claims::HelperRequirements
         ))
         .unwrap();
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert!(schema["properties"].get("archives").is_some());
+        assert!(schema["properties"].get("outside").is_some());
         assert!(jsonschema::is_valid(&schema, &wire));
+        for invalid in [
+            serde_json::json!({"outside": {}}),
+            serde_json::json!({"archives": {}, "outside": {}, "extra": true}),
+        ] {
+            assert!(!jsonschema::is_valid(&schema, &invalid));
+            assert!(
+                serde_json::from_value::<lash_kernel_value::claims::HelperRequirements>(invalid)
+                    .is_err()
+            );
+        }
         let mut reused = original.clone();
         assert!(std::ptr::eq(
             original.machine.helpers.archives().get(&archive).unwrap(),

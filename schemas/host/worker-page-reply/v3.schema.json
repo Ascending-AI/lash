@@ -277,7 +277,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/worker-page-reply/v2",
+  "$id": "https://lash.dev/schemas/worker-page-reply/v3",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "maxItems": 2,
   "minItems": 2,
@@ -291,6 +291,6 @@
   ],
   "title": "Tuple_of_PageExchangeId_and_PageReply",
   "type": "array",
-  "x-lash-schema-version": 2,
+  "x-lash-schema-version": 3,
   "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
 }

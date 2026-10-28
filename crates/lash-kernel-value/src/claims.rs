@@ -31,7 +31,7 @@ impl crate::tokens::TokenCodec for HelperGeneration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 /// One generation floor per archive lineage, with exact code outside those archives.
 pub struct HelperRequirements(std::sync::Arc<HelperRequirementData>);
@@ -39,9 +39,20 @@ pub struct HelperRequirements(std::sync::Arc<HelperRequirementData>);
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "HelperRequirements")]
+/// One generation floor per archive lineage, with exact code outside those archives.
 struct HelperRequirementData {
     archives: BTreeMap<crate::HelperLibraryId, u32>,
     outside: BTreeMap<crate::HelperLibraryId, BTreeSet<FunctionId>>,
+}
+
+impl schemars::JsonSchema for HelperRequirements {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "HelperRequirements".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <HelperRequirementData as schemars::JsonSchema>::json_schema(generator)
+    }
 }
 
 impl Default for HelperRequirements {
