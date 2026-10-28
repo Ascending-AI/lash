@@ -94766,6 +94766,7 @@
         },
         {
           "build_label": "//crates/lash-dialect-typescript:build_script__build",
+          "cargo": "build_script_build",
           "check_label": "//crates/lash-dialect-typescript:build_script__build__metadata[check]",
           "clippy_label": "//crates/lash-dialect-typescript:build_script__build__clippy[clippy.txt]",
           "kind": "custom-build-compile",
@@ -96058,6 +96059,7 @@
         },
         {
           "build_label": "//crates/lash-ext-ts-helpers:build_script__build",
+          "cargo": "build_script_build",
           "check_label": "//crates/lash-ext-ts-helpers:build_script__build__metadata[check]",
           "clippy_label": "//crates/lash-ext-ts-helpers:build_script__build__clippy[clippy.txt]",
           "kind": "custom-build-compile",
@@ -96684,6 +96686,7 @@
         },
         {
           "build_label": "//crates/lash-kernel-engine:build_script__build",
+          "cargo": "build_script_build",
           "check_label": "//crates/lash-kernel-engine:build_script__build__metadata[check]",
           "clippy_label": "//crates/lash-kernel-engine:build_script__build__clippy[clippy.txt]",
           "kind": "custom-build-compile",
@@ -96980,6 +96983,7 @@
         },
         {
           "build_label": "//crates/lash-kernel-releases:build_script__build",
+          "cargo": "build_script_build",
           "check_label": "//crates/lash-kernel-releases:build_script__build__metadata[check]",
           "clippy_label": "//crates/lash-kernel-releases:build_script__build__clippy[clippy.txt]",
           "kind": "custom-build-compile",
@@ -97464,6 +97468,7 @@
         },
         {
           "build_label": "//crates/lash-perf:build_script__build",
+          "cargo": "build_script_build",
           "check_label": "//crates/lash-perf:build_script__build__metadata[check]",
           "clippy_label": "//crates/lash-perf:build_script__build__clippy[clippy.txt]",
           "kind": "custom-build-compile",

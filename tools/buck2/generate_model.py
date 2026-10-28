@@ -573,11 +573,10 @@ def validate_action_sizes(metadata: dict) -> None:
     """
     members = set(metadata["workspace_members"])
     crates = {
-        f"{package['name']}/{target['name'].replace('-', '_')}"
+        f"{package['name']}/" + ("build_script_build" if "custom-build" in target["kind"] else target['name'].replace('-', '_'))
         for package in metadata["packages"]
         if package["id"] in members
         for target in package["targets"]
-        if "custom-build" not in target["kind"]
     }
     stale = sorted(
         (set(ACTION_SIZES) | set(TARGET_KIND_SIZES) | set(OPTIMIZED_SIZES) | set(LARGE_TEST_RUNS)
@@ -1146,6 +1145,7 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
             # the Buck2 partition match `cargo clippy --all-targets` on build
             # scripts.
             "kind": "custom-build-compile",
+            "cargo": "build_script_build",
             "label": f"//{package_dir}:build_script__build",
             "tags": ["manual"],
         })

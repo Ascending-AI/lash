@@ -3,1110 +3,5402 @@
     "agent-workbench/agent_workbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 780886016,
-      "samples": 36
+      "p99_anon_peak_bytes": 682733568,
+      "samples": 226
+    },
+    "codex-host-auth/codex_host_auth": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 84226048,
+      "samples": 256
+    },
+    "dataframe/dataframe": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 91258880,
+      "samples": 232
+    },
+    "delegation/delegation": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 109084672,
+      "samples": 232
+    },
+    "e2e-consumer/e2e_consumer": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 219607040,
+      "samples": 232
+    },
+    "e2e-consumer/otlp_export": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 125616128,
+      "samples": 111
+    },
+    "integrator-contract/conformance": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 172871680,
+      "samples": 116
     },
     "integrator-contract/integrator_contract": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 91209728,
+      "p99_anon_peak_bytes": 101691392,
+      "samples": 232
+    },
+    "kernel-embedder/kernel_embedder": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 50429952,
+      "samples": 33
+    },
+    "kernel-engine-hello/kernel_engine_hello": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 45592576,
+      "samples": 23
+    },
+    "lash-dialect-conventions/lash_dialect_conventions": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 20398080,
+      "samples": 6
+    },
+    "lash-dialect-python/lash_dialect_python": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 227315712,
+      "samples": 151
+    },
+    "lash-dialect-typescript/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 34201600,
+      "samples": 8
+    },
+    "lash-dialect-typescript/helper_differential": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 82370560,
+      "samples": 129
+    },
+    "lash-dialect-typescript/lash_dialect_typescript": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 325521408,
+      "samples": 158
+    },
+    "lash-dialect-typescript/source_admission": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 74997760,
+      "samples": 67
+    },
+    "lash-dialect-typescript/test262_kernel": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 90091520,
+      "samples": 76
+    },
+    "lash-e2e/e2e": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 239153152,
+      "samples": 116
+    },
+    "lash-e2e/lash_e2e": {
+      "legacy_peak_bytes": 141254656,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 136871936,
+      "samples": 229
+    },
+    "lash-ext-date-ecma/lash_ext_date_ecma": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 54341632,
+      "samples": 28
+    },
+    "lash-ext-helper-compiler/lash_ext_helper_compiler": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 112357376,
+      "samples": 172
+    },
+    "lash-ext-helper-compiler/regenerate": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 42135552,
+      "samples": 32
+    },
+    "lash-ext-py-core/lash_ext_py_core": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 907341824,
+      "samples": 129
+    },
+    "lash-ext-py-core/plans": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 66007040,
+      "samples": 30
+    },
+    "lash-ext-py-helpers/lash_ext_py_helpers": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 53284864,
+      "samples": 36
+    },
+    "lash-ext-regex-ecma/lash_ext_regex_ecma": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 74178560,
+      "samples": 54
+    },
+    "lash-ext-ts-core/lash_ext_ts_core": {
+      "legacy_peak_bytes": 1609613312,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 117,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1703632896,
+      "p99_anon_peak_bytes": 1595011072,
+      "samples": 132,
+      "worker_memory_kb": 52428800
+    },
+    "lash-ext-ts-core/plans": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 65241088,
+      "samples": 28
+    },
+    "lash-ext-ts-helpers/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 45518848,
+      "samples": 4
+    },
+    "lash-ext-ts-helpers/lash_ext_ts_helpers": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 76136448,
+      "samples": 92
+    },
+    "lash-ext-url-whatwg/lash_ext_url_whatwg": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 51200000,
       "samples": 25
+    },
+    "lash-facade-failover/failover": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 104964096,
+      "samples": 109
+    },
+    "lash-facade-failover/lash_facade_failover": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 143413248,
+      "samples": 232
+    },
+    "lash-facade-failover/lash_facade_failover_node": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 44982272,
+      "samples": 21
+    },
+    "lash-internal-checkpoint-encoder/lash_checkpoint_encoder": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 73830400,
+      "samples": 11
     },
     "lash-internal-conformance/lash_conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 760655872,
-      "samples": 360
+      "p99_anon_peak_bytes": 788774912,
+      "samples": 125
     },
     "lash-internal-core-effect/lash_core_effect": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 67784704,
-      "samples": 14
+      "p99_anon_peak_bytes": 63086592,
+      "samples": 22
     },
     "lash-internal-core-execution/effect_model": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 58138624,
-      "samples": 13
+      "p99_anon_peak_bytes": 43511808,
+      "samples": 18
     },
     "lash-internal-core-execution/lash_core_execution": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1449795584,
-      "samples": 25
+      "p99_anon_peak_bytes": 1419870208,
+      "samples": 95
     },
     "lash-internal-core-execution/process_event_schema_generator": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 41406464,
-      "samples": 5
+      "p99_anon_peak_bytes": 41291776,
+      "samples": 20
     },
     "lash-internal-core-execution/store_backed": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 375283712,
-      "samples": 16
+      "p99_anon_peak_bytes": 179650560,
+      "samples": 64
     },
     "lash-internal-core-ids/lash_core_ids": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 65495040,
-      "samples": 4
+      "p99_anon_peak_bytes": 150761472,
+      "samples": 36
     },
     "lash-internal-core-llm/lash_core_llm": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 162988032,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 156770304,
-      "samples": 6
+      "p99_anon_peak_bytes": 197480448,
+      "samples": 36
     },
     "lash-internal-core-store/lash_core_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 848822272,
-      "samples": 18
+      "p99_anon_peak_bytes": 1194328064,
+      "samples": 60
     },
     "lash-internal-core-worker/lash_core_worker": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 60248064,
-      "samples": 17
+      "p99_anon_peak_bytes": 87121920,
+      "samples": 70
     },
     "lash-internal-core/integration_boundary": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 38567936,
-      "samples": 2
+      "p99_anon_peak_bytes": 36945920,
+      "samples": 17
     },
     "lash-internal-core/lash_core": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 700018688,
-      "samples": 27
+      "p99_anon_peak_bytes": 930144256,
+      "samples": 96
     },
     "lash-internal-core/panic_containment": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 96911360,
-      "samples": 14
+      "p99_anon_peak_bytes": 65339392,
+      "samples": 33
+    },
+    "lash-internal-core/process_workflow_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 37036032,
+      "samples": 10
     },
     "lash-internal-core/runtime_effect": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 168108032,
-      "samples": 14
+      "p99_anon_peak_bytes": 76533760,
+      "samples": 64
     },
     "lash-internal-core/runtime_lifecycle": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 227778560,
-      "samples": 14
+      "p99_anon_peak_bytes": 70897664,
+      "samples": 36
     },
     "lash-internal-core/runtime_observability": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 198991872,
-      "samples": 16
+      "p99_anon_peak_bytes": 113102848,
+      "samples": 64
     },
     "lash-internal-core/runtime_scenarios": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 180649984,
-      "samples": 16
+      "p99_anon_peak_bytes": 71782400,
+      "samples": 45
     },
     "lash-internal-core/runtime_turns": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 303992832,
-      "samples": 9
+      "p99_anon_peak_bytes": 76623872,
+      "samples": 60
     },
     "lash-internal-core/turn_event_schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 60694528,
-      "samples": 9
+      "p99_anon_peak_bytes": 55750656,
+      "samples": 25
+    },
+    "lash-internal-durable-test/after_turn_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 123768832,
+      "samples": 114
+    },
+    "lash-internal-durable-test/attachment_delivery_secret": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 108449792,
+      "samples": 109
+    },
+    "lash-internal-durable-test/attachment_ref_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 86511616,
+      "samples": 116
+    },
+    "lash-internal-durable-test/attachment_referrer_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 159817728,
+      "samples": 114
+    },
+    "lash-internal-durable-test/cell_process_handles": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 123469824,
+      "samples": 115
+    },
+    "lash-internal-durable-test/cell_read_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 122306560,
+      "samples": 116
+    },
+    "lash-internal-durable-test/cell_restore_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 162312192,
+      "samples": 115
+    },
+    "lash-internal-durable-test/child_turn_crash_proof": {
+      "legacy_peak_bytes": 101023744,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 99438592,
+      "samples": 116
+    },
+    "lash-internal-durable-test/codemode_execution_documents": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 129089536,
+      "samples": 114
+    },
+    "lash-internal-durable-test/committed_turns": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 144756736,
+      "samples": 114
+    },
+    "lash-internal-durable-test/config_change_observer_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 137211904,
+      "samples": 115
+    },
+    "lash-internal-durable-test/context_budget_warning": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 97882112,
+      "samples": 103
+    },
+    "lash-internal-durable-test/control_phase_expiry": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 113778688,
+      "samples": 108
+    },
+    "lash-internal-durable-test/core_node_processes": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 255565824,
+      "samples": 114
+    },
+    "lash-internal-durable-test/cross_process_reopen": {
+      "legacy_peak_bytes": 153288704,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 151261184,
+      "samples": 114
+    },
+    "lash-internal-durable-test/declared_start": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 163385344,
+      "samples": 115
+    },
+    "lash-internal-durable-test/declared_start_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 157569024,
+      "samples": 114
+    },
+    "lash-internal-durable-test/deleted_session_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 108339200,
+      "samples": 115
+    },
+    "lash-internal-durable-test/drain_by_release": {
+      "legacy_peak_bytes": 112128000,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 109809664,
+      "samples": 116
+    },
+    "lash-internal-durable-test/first_party_tools": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 114774016,
+      "samples": 115
+    },
+    "lash-internal-durable-test/frame_switch_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 120582144,
+      "samples": 115
+    },
+    "lash-internal-durable-test/frame_switch_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 104423424,
+      "samples": 115
+    },
+    "lash-internal-durable-test/idle_owner_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 105934848,
+      "samples": 103
+    },
+    "lash-internal-durable-test/kernel_step_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 208592896,
+      "samples": 114
+    },
+    "lash-internal-durable-test/lash_durable_test": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 185925632,
+      "samples": 145
+    },
+    "lash-internal-durable-test/live_fault_park": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 150564864,
+      "samples": 113
+    },
+    "lash-internal-durable-test/live_stream_takeover": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 121802752,
+      "samples": 114
+    },
+    "lash-internal-durable-test/lo_history": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 115343360,
+      "samples": 109
+    },
+    "lash-internal-durable-test/model_answer_receipt_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 151949312,
+      "samples": 116
+    },
+    "lash-internal-durable-test/one_slot_process_await": {
+      "legacy_peak_bytes": 114118656,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 111157248,
+      "samples": 104
+    },
+    "lash-internal-durable-test/open_session_commands": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 185966592,
+      "samples": 115
+    },
+    "lash-internal-durable-test/operation_contract_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 117923840,
+      "samples": 115
+    },
+    "lash-internal-durable-test/pinned_code_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 122454016,
+      "samples": 110
+    },
+    "lash-internal-durable-test/plugin_state_storage_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 163598336,
+      "samples": 114
+    },
+    "lash-internal-durable-test/pressure_frame_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 135290880,
+      "samples": 114
+    },
+    "lash-internal-durable-test/process_actor_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 105918464,
+      "samples": 116
+    },
+    "lash-internal-durable-test/process_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 109412352,
+      "samples": 116
+    },
+    "lash-internal-durable-test/process_lifecycle_events": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 139300864,
+      "samples": 116
+    },
+    "lash-internal-durable-test/process_ran_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 167378944,
+      "samples": 114
+    },
+    "lash-internal-durable-test/process_step_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 117792768,
+      "samples": 115
+    },
+    "lash-internal-durable-test/process_tool_call_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 188379136,
+      "samples": 114
+    },
+    "lash-internal-durable-test/process_tool_calls": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 144015360,
+      "samples": 115
+    },
+    "lash-internal-durable-test/recorded_behaviour_laws": {
+      "legacy_peak_bytes": 128024576,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 125231104,
+      "samples": 109
+    },
+    "lash-internal-durable-test/render_cache_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 115605504,
+      "samples": 115
+    },
+    "lash-internal-durable-test/resource_capacity": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 71299072,
+      "samples": 57
+    },
+    "lash-internal-durable-test/rlm_session_globals": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 132202496,
+      "samples": 114
+    },
+    "lash-internal-durable-test/round_crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 136716288,
+      "samples": 116
+    },
+    "lash-internal-durable-test/session_send": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 127279104,
+      "samples": 111
+    },
+    "lash-internal-durable-test/standard_turn_outcomes": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 159084544,
+      "samples": 114
+    },
+    "lash-internal-durable-test/steering_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 116129792,
+      "samples": 115
+    },
+    "lash-internal-durable-test/tool_activity": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 129683456,
+      "samples": 114
+    },
+    "lash-internal-durable-test/tool_batches": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 154292224,
+      "samples": 114
+    },
+    "lash-internal-durable-test/tool_call_identity": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 118870016,
+      "samples": 115
+    },
+    "lash-internal-durable-test/tool_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 225804288,
+      "samples": 114
+    },
+    "lash-internal-durable-test/tool_group_pool_width": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 110485504,
+      "samples": 116
+    },
+    "lash-internal-durable-test/tool_surface_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 149368832,
+      "samples": 115
+    },
+    "lash-internal-durable-test/turn_callback_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 136998912,
+      "samples": 115
+    },
+    "lash-internal-durable-test/turn_execution_state": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 116989952,
+      "samples": 114
+    },
+    "lash-internal-durable-test/turn_phases": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 180617216,
+      "samples": 115
+    },
+    "lash-internal-durable-test/turn_round_crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 141475840,
+      "samples": 116
+    },
+    "lash-internal-durable-test/turn_terminal_refusals": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 120025088,
+      "samples": 108
+    },
+    "lash-internal-durable-test/turn_trace_scope_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 138948608,
+      "samples": 115
+    },
+    "lash-internal-durable-test/vertical_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 205029376,
+      "samples": 115
+    },
+    "lash-internal-durable-test/worker_crashes": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 132026368,
+      "samples": 115
+    },
+    "lash-internal-durable/lash_durable": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 533909504,
+      "samples": 58
+    },
+    "lash-internal-execution-contracts/lash_execution_contracts": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 541999104,
+      "samples": 60
+    },
+    "lash-internal-facade-tests/facade_plugins": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 231182336,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_process": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 149274624,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_provider": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 167878656,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_send": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 150806528,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_session": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 208273408,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_streaming": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 217894912,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_tracing": {
+      "legacy_peak_bytes": 236060672,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 234205184,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_turns": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 272658432,
+      "samples": 113
+    },
+    "lash-internal-facade-tests/facade_warm_admission": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 57765888,
+      "samples": 39
+    },
+    "lash-internal-facade-tests/lash_facade_tests": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 167215104,
+      "samples": 114
     },
     "lash-internal-http-transport/lash_http_transport": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 74412032,
-      "samples": 4
+      "p99_anon_peak_bytes": 78331904,
+      "samples": 24
     },
     "lash-internal-llm-tools/lash_llm_tools": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 65417216,
-      "samples": 9
+      "p99_anon_peak_bytes": 71999488,
+      "samples": 70
     },
     "lash-internal-llm-transport/lash_llm_transport": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 98365440,
-      "samples": 19
+      "p99_anon_peak_bytes": 105422848,
+      "samples": 67
     },
     "lash-internal-llm-transport/property": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 44994560,
-      "samples": 3
+      "p99_anon_peak_bytes": 42213376,
+      "samples": 15
     },
     "lash-internal-plugin-mcp/lash_plugin_mcp": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 309600256,
-      "samples": 26
+      "p99_anon_peak_bytes": 426364928,
+      "samples": 211
     },
     "lash-internal-plugin-process-controls/lash_plugin_process_controls": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 78610432,
-      "samples": 17
+      "p99_anon_peak_bytes": 128671744,
+      "samples": 151
     },
     "lash-internal-plugin-standard-compaction/lash_plugin_standard_compaction": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 100249600,
-      "samples": 21
+      "p99_anon_peak_bytes": 156770304,
+      "samples": 151
     },
     "lash-internal-postgres-store/conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 652181504,
-      "samples": 18
+      "p99_anon_peak_bytes": 376274944,
+      "samples": 116
     },
     "lash-internal-postgres-store/durable_read_fixture": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 118546432,
-      "samples": 16
+      "p99_anon_peak_bytes": 106561536,
+      "samples": 105
+    },
+    "lash-internal-postgres-store/host_config_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 40321024,
+      "samples": 8
     },
     "lash-internal-postgres-store/host_provisioned_rollout": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 66158592,
-      "samples": 7
+      "p99_anon_peak_bytes": 66482176,
+      "samples": 66
     },
     "lash-internal-postgres-store/integration": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 155709440,
-      "samples": 12
+      "p99_anon_peak_bytes": 127553536,
+      "samples": 116
     },
     "lash-internal-postgres-store/lash_postgres_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 626556928,
-      "samples": 28
+      "p99_anon_peak_bytes": 1163812864,
+      "samples": 145
+    },
+    "lash-internal-postgres-store/live_replay": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 123662336,
+      "samples": 114
     },
     "lash-internal-postgres-store/migrate": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 86990848,
-      "samples": 11
+      "p99_anon_peak_bytes": 88367104,
+      "samples": 105
     },
     "lash-internal-postgres-store/preflight_durable_walk": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 74207232,
-      "samples": 12
+      "p99_anon_peak_bytes": 73793536,
+      "samples": 80
     },
     "lash-internal-postgres-store/preflight_schema_status": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 82108416,
-      "samples": 14
+      "p99_anon_peak_bytes": 86085632,
+      "samples": 105
     },
-    "lash-internal-postgres-store/schema_constraints": {
+    "lash-internal-postgres-store/process_replay": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 68419584,
-      "samples": 10
+      "p99_anon_peak_bytes": 95916032,
+      "samples": 107
+    },
+    "lash-internal-postgres-store/schema_constraints": {
+      "legacy_peak_bytes": 83845120,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 81510400,
+      "samples": 99
     },
     "lash-internal-postgres-store/schema_drift": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 88772608,
-      "samples": 13
+      "p99_anon_peak_bytes": 82853888,
+      "samples": 104
+    },
+    "lash-internal-postgres-workers/failover": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 114806784,
+      "samples": 111
+    },
+    "lash-internal-postgres-workers/lash_postgres_workers": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 159338496,
+      "samples": 232
+    },
+    "lash-internal-postgres-workers/lash_postgres_workers_node": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 50683904,
+      "samples": 29
     },
     "lash-internal-protocol-rlm/lash_protocol_rlm": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 643903488,
-      "samples": 32
+      "p99_anon_peak_bytes": 538607616,
+      "samples": 224
     },
     "lash-internal-protocol-rlm/protocol_drivers": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 127717376,
-      "samples": 13
+      "p99_anon_peak_bytes": 86331392,
+      "samples": 102
     },
     "lash-internal-protocol-standard/embedded_builder": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 61005824,
-      "samples": 5
+      "p99_anon_peak_bytes": 59883520,
+      "samples": 38
     },
     "lash-internal-protocol-standard/lash_protocol_standard": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 191733760,
-      "samples": 25
+      "p99_anon_peak_bytes": 197701632,
+      "samples": 187
     },
     "lash-internal-protocol-standard/protocol_scenarios": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 91348992,
-      "samples": 14
+      "p99_anon_peak_bytes": 77533184,
+      "samples": 65
+    },
+    "lash-internal-protocol-types/blake3_domains": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 36728832,
+      "samples": 32
+    },
+    "lash-internal-protocol-types/lash_protocol_types": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 632885248,
+      "samples": 30
     },
     "lash-internal-provider-anthropic/charge_safety": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 62521344,
-      "samples": 6
+      "p99_anon_peak_bytes": 63770624,
+      "samples": 12
     },
     "lash-internal-provider-anthropic/lash_provider_anthropic": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 122089472,
-      "samples": 23
+      "p99_anon_peak_bytes": 133660672,
+      "samples": 68
+    },
+    "lash-internal-provider-fixtures/lash_provider_fixtures": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 134209536,
+      "samples": 70
     },
     "lash-internal-provider-google/block_identity": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 56033280,
-      "samples": 6
+      "p99_anon_peak_bytes": 59060224,
+      "samples": 44
     },
     "lash-internal-provider-google/charge_safety": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 61284352,
-      "samples": 8
+      "p99_anon_peak_bytes": 63131648,
+      "samples": 42
+    },
+    "lash-internal-provider-google/delivery_scope": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 70598656,
+      "samples": 57
     },
     "lash-internal-provider-google/lash_provider_google": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 167419904,
-      "samples": 20
+      "p99_anon_peak_bytes": 184365056,
+      "samples": 150
     },
     "lash-internal-provider-openai/lash_provider_openai": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 356401152,
-      "samples": 27
+      "p99_anon_peak_bytes": 391098368,
+      "samples": 151
     },
     "lash-internal-rlm-types/lash_rlm_types": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 90198016,
-      "samples": 4
+      "p99_anon_peak_bytes": 57315328,
+      "samples": 26
     },
     "lash-internal-s3-store/lash_s3_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 92291072,
-      "samples": 22
+      "p99_anon_peak_bytes": 122236928,
+      "samples": 96
     },
     "lash-internal-sansio/lash_sansio": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 563109888,
-      "samples": 17
+      "p99_anon_peak_bytes": 161845248,
+      "samples": 30
     },
     "lash-internal-sqlite-store/conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 528973824,
-      "samples": 16
+      "p99_anon_peak_bytes": 326950912,
+      "samples": 116
     },
     "lash-internal-sqlite-store/conformance_memory": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 522010624,
-      "samples": 17
+      "p99_anon_peak_bytes": 321736704,
+      "samples": 116
     },
     "lash-internal-sqlite-store/durable_read_fixture": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 110358528,
-      "samples": 15
+      "p99_anon_peak_bytes": 98709504,
+      "samples": 103
     },
     "lash-internal-sqlite-store/integration": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 106434560,
-      "samples": 15
+      "p99_anon_peak_bytes": 104075264,
+      "samples": 116
     },
     "lash-internal-sqlite-store/lash_sqlite_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 503185408,
-      "samples": 22
+      "p99_anon_peak_bytes": 902021120,
+      "samples": 145
     },
     "lash-internal-sqlite-store/process_change_horizon": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 41381888,
-      "samples": 2
+      "p99_anon_peak_bytes": 47185920,
+      "samples": 32
     },
-    "lash-internal-store-sql/lash_store_sql": {
+    "lash-internal-tool-presenter-api/lash_tool_presenter_api": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 71176192,
-      "samples": 5
+      "p99_anon_peak_bytes": 72429568,
+      "samples": 83
+    },
+    "lash-internal-tool-presenter-python/lash_tool_presenter_python": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 68022272,
+      "samples": 75
+    },
+    "lash-internal-tool-presenter-standard/lash_tool_presenter_standard": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 73363456,
+      "samples": 80
+    },
+    "lash-internal-tool-presenter-typescript/lash_tool_presenter_typescript": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 70660096,
+      "samples": 70
     },
     "lash-internal-tool-support/lash_tool_support": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 50991104,
-      "samples": 11
+      "p99_anon_peak_bytes": 130760704,
+      "samples": 151
     },
     "lash-internal-trace/lash_trace": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 281337856,
-      "samples": 8
+      "p99_anon_peak_bytes": 500744192,
+      "samples": 31
     },
     "lash-internal-trace/schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 58753024,
-      "samples": 1
+      "p99_anon_peak_bytes": 62980096,
+      "samples": 15
     },
     "lash-internal-trace/trace_schema_generator": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 37220352,
-      "samples": 2
+      "p99_anon_peak_bytes": 39170048,
+      "samples": 7
+    },
+    "lash-internal-transport-failure/lash_transport_failure": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 48848896,
+      "samples": 7
     },
     "lash-internal-vm-broker/lash_vm_broker": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 135598080,
-      "samples": 23
+      "p99_anon_peak_bytes": 198361088,
+      "samples": 190
     },
     "lash-internal-vm-client/lash_vm_client": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 203845632,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 145477632,
-      "samples": 20
+      "p99_anon_peak_bytes": 200273920,
+      "samples": 190
     },
     "lash-internal-vm-client/wire_schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 41697280,
-      "samples": 5
+      "p99_anon_peak_bytes": 47779840,
+      "samples": 21
+    },
+    "lash-internal-vm-client/worker_wire_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 39276544,
+      "samples": 54
     },
     "lash-internal-vm-protocol/codec_bounds": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 21700608,
-      "samples": 1
+      "p99_anon_peak_bytes": 19927040,
+      "samples": 2
     },
     "lash-internal-vm-protocol/lash_vm_protocol": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 139386880,
-      "samples": 6
+      "p99_anon_peak_bytes": 132866048,
+      "samples": 32
     },
     "lash-internal-vm-runtime/lash_vm_runtime": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 335880192,
-      "samples": 29
+      "p99_anon_peak_bytes": 254791680,
+      "samples": 190
     },
-    "lash-internal-vm-worker/lash_vm_worker": {
+    "lash-internal-vm-worker/coldload": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 87801856,
-      "samples": 26
+      "p99_anon_peak_bytes": 63582208,
+      "samples": 44
+    },
+    "lash-internal-vm-worker/fresh_embedding": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 69103616,
+      "samples": 55
+    },
+    "lash-internal-vm-worker/kernel_perf": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 99164160,
+      "samples": 98
+    },
+    "lash-internal-vm-worker/lash_vm_worker": {
+      "legacy_peak_bytes": 194912256,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 175042560,
+      "samples": 248
     },
     "lash-internal-vm-worker/lash_vm_worker_fixture": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 42700800,
-      "samples": 4
+      "p99_anon_peak_bytes": 49364992,
+      "samples": 32
+    },
+    "lash-internal-vm-worker/park_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 130093056,
+      "samples": 112
     },
     "lash-internal-vm-worker/pool_laws": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 103923712,
+      "p99_anon_peak_bytes": 95809536,
+      "samples": 101
+    },
+    "lash-internal-vocabulary/lash_vocabulary": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 179032064,
+      "samples": 14
+    },
+    "lash-kernel-check/lash_kernel_check": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 105680896,
+      "samples": 67
+    },
+    "lash-kernel-conformance/admission_corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 45174784,
+      "samples": 23
+    },
+    "lash-kernel-conformance/lash_kernel_conformance": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 203399168,
+      "samples": 164
+    },
+    "lash-kernel-conformance/package_audit": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 44986368,
+      "samples": 23
+    },
+    "lash-kernel-conformance/sort_corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 49680384,
+      "samples": 37
+    },
+    "lash-kernel-dialect/lash_kernel_dialect": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 166625280,
+      "samples": 101
+    },
+    "lash-kernel-doc/document_example": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 36102144,
+      "samples": 11
+    },
+    "lash-kernel-doc/kernel_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 37142528,
+      "samples": 22
+    },
+    "lash-kernel-doc/lash_kernel_doc": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 375455744,
+      "samples": 74
+    },
+    "lash-kernel-edit/kernel_edit_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 36823040,
+      "samples": 21
+    },
+    "lash-kernel-edit/lash_kernel_edit": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 122941440,
+      "samples": 99
+    },
+    "lash-kernel-engine/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 36888576,
+      "samples": 13
+    },
+    "lash-kernel-engine/lash_kernel_engine": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 107835392,
+      "samples": 155
+    },
+    "lash-kernel-lib/lash_kernel_lib": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 186556416,
+      "samples": 113
+    },
+    "lash-kernel-migrate/kernel_migration_schema_generator": {
+      "legacy_peak_bytes": 41295872,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 36704256,
+      "samples": 25
+    },
+    "lash-kernel-migrate/lash_kernel_migrate": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 86933504,
+      "samples": 102
+    },
+    "lash-kernel-package/lash_kernel_package": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 97169408,
+      "samples": 74
+    },
+    "lash-kernel-releases/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 171823104,
+      "samples": 59
+    },
+    "lash-kernel-releases/lash_kernel_releases": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 321978368,
+      "samples": 91
+    },
+    "lash-kernel-releases/record_helper_data": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 55410688,
       "samples": 12
+    },
+    "lash-kernel-services/lash_kernel_services": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 35831808,
+      "samples": 13
+    },
+    "lash-kernel-state/lash_kernel_state": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 238440448,
+      "samples": 76
+    },
+    "lash-kernel-value/lash_kernel_value": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 300699648,
+      "samples": 14
+    },
+    "lash-kernel-view/kernel_view_schema_generator": {
+      "legacy_peak_bytes": 39874560,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 37281792,
+      "samples": 21
+    },
+    "lash-kernel-view/lash_kernel_view": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 192442368,
+      "samples": 92
+    },
+    "lash-kernel-vm/lash_kernel_vm": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 467550208,
+      "samples": 138
+    },
+    "lash-kernel-vm/linked_dispatch": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 58777600,
+      "samples": 42
+    },
+    "lash-perf/admission": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 71520256,
+      "samples": 63
+    },
+    "lash-perf/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 34660352,
+      "samples": 3
+    },
+    "lash-perf/cellpath": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 87166976,
+      "samples": 86
+    },
+    "lash-perf/durable_substrate": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 274681856,
+      "samples": 271
+    },
+    "lash-perf/git_provenance": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 44072960,
+      "samples": 35
+    },
+    "lash-perf/growturn": {
+      "legacy_peak_bytes": 124059648,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 122867712,
+      "samples": 117
+    },
+    "lash-perf/identity": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 74055680,
+      "samples": 65
     },
     "lash-perf/lash_perf": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 508211200,
-      "samples": 56
+      "p99_anon_peak_bytes": 938971136,
+      "samples": 454
+    },
+    "lash-perf/latency": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 42577920,
+      "samples": 36
+    },
+    "lash-perf/replay": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 85110784,
+      "samples": 100
     },
     "lash-perf/workload": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 78585856,
-      "samples": 10
+      "p99_anon_peak_bytes": 73400320,
+      "samples": 76
+    },
+    "lash-runtime/artifact_referrers_evidence": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 132829184,
+      "samples": 111
     },
     "lash-runtime/attachments_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 41988096,
-      "samples": 5
+      "p99_anon_peak_bytes": 46104576,
+      "samples": 30
+    },
+    "lash-runtime/generated_source": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 69906432,
+      "samples": 52
     },
     "lash-runtime/integration": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 168755200,
-      "samples": 14
+      "p99_anon_peak_bytes": 180912128,
+      "samples": 114
+    },
+    "lash-runtime/kernel_two_build_claim": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 22192128,
+      "samples": 12
     },
     "lash-runtime/lash": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1279057920,
-      "samples": 30
+      "p99_anon_peak_bytes": 1058033664,
+      "samples": 227
+    },
+    "lash-runtime/llm_profiles": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 124825600,
+      "samples": 114
     },
     "lash-runtime/otel_trace_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 21721088,
-      "samples": 1
+      "p99_anon_peak_bytes": 52682752,
+      "samples": 36
+    },
+    "lash-runtime/plugin_authoring": {
+      "legacy_peak_bytes": 78381056,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 76320768,
+      "samples": 116
+    },
+    "lash-runtime/plugin_certification": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 144269312,
+      "samples": 116
     },
     "lash-runtime/processes_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 47284224,
-      "samples": 3
+      "p99_anon_peak_bytes": 106274816,
+      "samples": 116
     },
     "lash-runtime/processes_evidence_b": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 36069376,
-      "samples": 2
+      "p99_anon_peak_bytes": 44732416,
+      "samples": 35
     },
     "lash-runtime/sessions_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 50032640,
-      "samples": 8
+      "p99_anon_peak_bytes": 49811456,
+      "samples": 35
     },
     "lash-runtime/ui": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 175235072,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 78708736,
-      "samples": 14
+      "p99_anon_peak_bytes": 93040640,
+      "samples": 86
     },
     "lash-runtime/worker_host": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 40398848,
-      "samples": 3
+      "p99_anon_peak_bytes": 43212800,
+      "samples": 20
+    },
+    "lash-runtime/workflow_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 292802560,
+      "samples": 115
+    },
+    "lash-runtime/workflow_view_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 96309248,
+      "samples": 95
+    },
+    "lash-sim/chaos_soak": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 51875840,
+      "samples": 49
+    },
+    "lash-sim/crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 78626816,
+      "samples": 95
     },
     "lash-sim/cross_backend_store_differential": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 277753856,
-      "samples": 16
+      "p99_anon_peak_bytes": 310042624,
+      "samples": 114
     },
     "lash-sim/lash_sim": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 922075136,
-      "samples": 46
+      "p99_anon_peak_bytes": 810659840,
+      "samples": 372
+    },
+    "lash-sim/logical_turn": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 100339712,
+      "samples": 114
     },
     "lash-sim/stack_policy": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 47366144,
-      "samples": 4
+      "p99_anon_peak_bytes": 45309952,
+      "samples": 51
     },
     "lashctl/lashctl": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 104148992,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 88748032,
-      "samples": 28
+      "p99_anon_peak_bytes": 105910272,
+      "samples": 185
     },
     "lashctl/operator_json_contract": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 70426624,
-      "samples": 11
+      "p99_anon_peak_bytes": 69488640,
+      "samples": 69
+    },
+    "mcp-events/mcp_events": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 105140224,
+      "samples": 174
+    },
+    "provider-signatures/provider_signatures": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 32370688,
+      "samples": 37
     },
     "rlm-smoke-host/rlm_smoke_host": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 98418688,
-      "samples": 28
+      "p99_anon_peak_bytes": 120967168,
+      "samples": 232
     },
     "toolbench/toolbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 234717184,
-      "samples": 32
+      "p99_anon_peak_bytes": 234172416,
+      "samples": 231
     },
     "transcript-contract/transcript_contract": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 50626560,
-      "samples": 11
+      "p99_anon_peak_bytes": 45084672,
+      "samples": 10
+    },
+    "workflow-corpus/canvas_probe_helper_0": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 34779136,
+      "samples": 2
+    },
+    "workflow-corpus/canvas_probe_helper_1": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 33001472,
+      "samples": 4
+    },
+    "workflow-corpus/canvas_probe_helper_2": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 35336192,
+      "samples": 4
+    },
+    "workflow-corpus/canvas_probe_nested": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 39989248,
+      "samples": 4
+    },
+    "workflow-corpus/canvas_probe_retry_0": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 39997440,
+      "samples": 4
+    },
+    "workflow-corpus/canvas_probe_retry_1": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 20430848,
+      "samples": 1
+    },
+    "workflow-corpus/canvas_probe_retry_2": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 32239616,
+      "samples": 3
+    },
+    "workflow-corpus/canvas_probe_retry_3": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 32808960,
+      "samples": 3
+    },
+    "workflow-corpus/corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 82132992,
+      "samples": 91
+    },
+    "workflow-corpus/workflow_corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 114343936,
+      "samples": 211
+    },
+    "workflow-graph-roundtrip/roundtrip": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 99831808,
+      "samples": 104
     },
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 166260736,
-      "samples": 44
+      "p99_anon_peak_bytes": 219922432,
+      "samples": 315
     }
   },
   "crates": {
     "agent-workbench/agent_workbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1908539392,
-      "samples": 44
+      "p99_anon_peak_bytes": 2156707840,
+      "samples": 336
+    },
+    "codex-host-auth/codex_host_auth": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 246284288,
+      "samples": 111
+    },
+    "dataframe/dataframe": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2822459392,
+      "p99_anon_peak_bytes": 963940352,
+      "samples": 9,
+      "worker_memory_kb": 52428800
+    },
+    "delegation/delegation": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 7,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1678622720,
+      "p99_anon_peak_bytes": 531120128,
+      "samples": 1350,
+      "worker_memory_kb": 52428800
+    },
+    "e2e-consumer/e2e_consumer": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 5242880,
+      "oom_kills": 93,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 3403866112,
+      "p99_anon_peak_bytes": 1569533952,
+      "samples": 52,
+      "worker_memory_kb": 52428800
+    },
+    "e2e-consumer/otlp_export": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1647450112,
+      "p99_anon_peak_bytes": 940433408,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "integrator-contract/conformance": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4980736,
+      "oom_kills": 15,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 3156312064,
+      "p99_anon_peak_bytes": 1527296000,
+      "samples": 8,
+      "worker_memory_kb": 52428800
     },
     "integrator-contract/integrator_contract": {
       "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1387660288,
+      "p99_anon_peak_bytes": 410877952,
+      "samples": 132,
+      "worker_memory_kb": 52428800
+    },
+    "kernel-embedder/kernel_embedder": {
+      "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 254066688,
-      "samples": 29
+      "p99_anon_peak_bytes": 94470144,
+      "samples": 59
+    },
+    "lash-dialect-conventions/lash_dialect_conventions": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 243441664,
+      "samples": 78
+    },
+    "lash-dialect-python/lash_dialect_python": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 631615488,
+      "samples": 1031
+    },
+    "lash-dialect-typescript/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 59133952,
+      "samples": 77
+    },
+    "lash-dialect-typescript/helper_differential": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 453685248,
+      "samples": 33
+    },
+    "lash-dialect-typescript/lash_dialect_typescript": {
+      "legacy_peak_bytes": 378286080,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 5,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1465208832,
+      "p99_anon_peak_bytes": 864768000,
+      "samples": 1193,
+      "worker_memory_kb": 52428800
+    },
+    "lash-dialect-typescript/source_admission": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 444944384,
+      "samples": 24
+    },
+    "lash-dialect-typescript/test262_kernel": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 392011776,
+      "samples": 21
+    },
+    "lash-e2e/e2e": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 84,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2716786688,
+      "p99_anon_peak_bytes": 1227182080,
+      "samples": 53,
+      "worker_memory_kb": 52428800
+    },
+    "lash-e2e/lash_e2e": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 278814720,
+      "samples": 172
+    },
+    "lash-ext-date-ecma/lash_ext_date_ecma": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 242679808,
+      "samples": 384
+    },
+    "lash-ext-helper-compiler/lash_ext_helper_compiler": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 368480256,
+      "samples": 569
+    },
+    "lash-ext-helper-compiler/regenerate": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 212357120,
+      "samples": 76
+    },
+    "lash-ext-py-core/lash_ext_py_core": {
+      "legacy_peak_bytes": 888754176,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 134,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1349984256,
+      "p99_anon_peak_bytes": 1286692864,
+      "samples": 623,
+      "worker_memory_kb": 52428800
+    },
+    "lash-ext-py-core/plans": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 281546752,
+      "samples": 14
+    },
+    "lash-ext-py-helpers/lash_ext_py_helpers": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 251019264,
+      "samples": 681
+    },
+    "lash-ext-regex-ecma/lash_ext_regex_ecma": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 250966016,
+      "samples": 570
+    },
+    "lash-ext-ts-core/lash_ext_ts_core": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 673,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2299014144,
+      "p99_anon_peak_bytes": 2199306240,
+      "samples": 751,
+      "worker_memory_kb": 52428800
+    },
+    "lash-ext-ts-core/plans": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 241258496,
+      "samples": 9
+    },
+    "lash-ext-ts-helpers/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 117948416,
+      "samples": 32
+    },
+    "lash-ext-ts-helpers/lash_ext_ts_helpers": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 257867776,
+      "samples": 1015
+    },
+    "lash-ext-url-whatwg/lash_ext_url_whatwg": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 241164288,
+      "samples": 370
+    },
+    "lash-facade-failover/failover": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2284321792,
+      "p99_anon_peak_bytes": 966066176,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-facade-failover/lash_facade_failover": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 6,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2090917888,
+      "p99_anon_peak_bytes": 780967936,
+      "samples": 240,
+      "worker_memory_kb": 52428800
+    },
+    "lash-facade-failover/lash_facade_failover_node": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 124,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2539597824,
+      "p99_anon_peak_bytes": 887164928,
+      "samples": 116,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-checkpoint-encoder/lash_checkpoint_encoder": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 237703168,
+      "samples": 198
     },
     "lash-internal-conformance/lash_conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 3157139456,
-      "samples": 159
+      "p99_anon_peak_bytes": 1251409920,
+      "samples": 850
     },
     "lash-internal-core-effect/lash_core_effect": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 82362368,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 310005760,
-      "samples": 102
+      "p99_anon_peak_bytes": 352473088,
+      "samples": 501
     },
     "lash-internal-core-execution/effect_model": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 406036480,
-      "samples": 24
+      "p99_anon_peak_bytes": 486002688,
+      "samples": 25
     },
     "lash-internal-core-execution/lash_core_execution": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 2656899072,
-      "samples": 222
+      "p99_anon_peak_bytes": 3987415040,
+      "samples": 1594
     },
     "lash-internal-core-execution/process_event_schema_generator": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 273104896,
-      "samples": 42
+      "p99_anon_peak_bytes": 241004544,
+      "samples": 60
     },
     "lash-internal-core-execution/store_backed": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1095933952,
-      "samples": 25
+      "p99_anon_peak_bytes": 1154347008,
+      "samples": 9
     },
     "lash-internal-core-ids/lash_core_ids": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 154112000,
-      "samples": 17
+      "p99_anon_peak_bytes": 369172480,
+      "samples": 768
     },
     "lash-internal-core-llm/lash_core_llm": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 330399744,
-      "samples": 26
+      "p99_anon_peak_bytes": 367083520,
+      "samples": 850
     },
     "lash-internal-core-store/lash_core_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1397657600,
-      "samples": 159
+      "p99_anon_peak_bytes": 2383286272,
+      "samples": 1168
     },
     "lash-internal-core-worker/lash_core_worker": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 362020864,
-      "samples": 139
+      "p99_anon_peak_bytes": 451371008,
+      "samples": 1512
     },
     "lash-internal-core/integration_boundary": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 69660672,
-      "samples": 9
+      "p99_anon_peak_bytes": 79085568,
+      "samples": 31
     },
     "lash-internal-core/lash_core": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 712712192,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1348108288,
-      "samples": 205
+      "p99_anon_peak_bytes": 2971144192,
+      "samples": 1730
     },
     "lash-internal-core/panic_containment": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 560984064,
-      "samples": 25
+      "p99_anon_peak_bytes": 342663168,
+      "samples": 46
+    },
+    "lash-internal-core/process_workflow_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 328798208,
+      "samples": 59
     },
     "lash-internal-core/runtime_effect": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 816447488,
-      "samples": 22
+      "p99_anon_peak_bytes": 338268160,
+      "samples": 80
     },
     "lash-internal-core/runtime_lifecycle": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 917204992,
-      "samples": 23
+      "p99_anon_peak_bytes": 393437184,
+      "samples": 55
     },
     "lash-internal-core/runtime_observability": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 858701824,
-      "samples": 20
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 10,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1404314624,
+      "p99_anon_peak_bytes": 603250688,
+      "samples": 79,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-core/runtime_scenarios": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 820342784,
-      "samples": 23
+      "p99_anon_peak_bytes": 453468160,
+      "samples": 59
     },
     "lash-internal-core/runtime_turns": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1023926272,
-      "samples": 25
+      "p99_anon_peak_bytes": 620724224,
+      "samples": 74
     },
     "lash-internal-core/turn_event_schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 304140288,
-      "samples": 16
+      "p99_anon_peak_bytes": 367972352,
+      "samples": 52
+    },
+    "lash-internal-durable-test/after_turn_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2358976512,
+      "p99_anon_peak_bytes": 991051776,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/attachment_delivery_secret": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 7,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1702945792,
+      "p99_anon_peak_bytes": 922607616,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/attachment_ref_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2214138880,
+      "p99_anon_peak_bytes": 888262656,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/attachment_referrer_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2597612544,
+      "p99_anon_peak_bytes": 1049468928,
+      "samples": 9,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/cell_process_handles": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 17,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2570370048,
+      "p99_anon_peak_bytes": 1015730176,
+      "samples": 13,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/cell_read_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2359701504,
+      "p99_anon_peak_bytes": 993042432,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/cell_restore_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 14,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2675355648,
+      "p99_anon_peak_bytes": 1081401344,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/child_turn_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2402447360,
+      "p99_anon_peak_bytes": 906268672,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/codemode_execution_documents": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2544841728,
+      "p99_anon_peak_bytes": 1033998336,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/committed_turns": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2302349312,
+      "p99_anon_peak_bytes": 1041408000,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/config_change_observer_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2560942080,
+      "p99_anon_peak_bytes": 1001938944,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/context_budget_warning": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2392930304,
+      "p99_anon_peak_bytes": 964251648,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/control_phase_expiry": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1557477376,
+      "p99_anon_peak_bytes": 915226624,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/core_node_processes": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 13,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2720260096,
+      "p99_anon_peak_bytes": 1191260160,
+      "samples": 9,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/cross_process_reopen": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2424851456,
+      "p99_anon_peak_bytes": 1035825152,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/declared_start": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2611280896,
+      "p99_anon_peak_bytes": 1081384960,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/declared_start_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2626703360,
+      "p99_anon_peak_bytes": 1061240832,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/deleted_session_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1723825152,
+      "p99_anon_peak_bytes": 942129152,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/drain_by_release": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1657465856,
+      "p99_anon_peak_bytes": 889376768,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/first_party_tools": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2411579392,
+      "p99_anon_peak_bytes": 983031808,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/frame_switch_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2288931840,
+      "p99_anon_peak_bytes": 939294720,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/frame_switch_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2364821504,
+      "p99_anon_peak_bytes": 974589952,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/idle_owner_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2634338304,
+      "p99_anon_peak_bytes": 921628672,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/kernel_step_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 21,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2795257856,
+      "p99_anon_peak_bytes": 1163644928,
+      "samples": 56,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/lash_durable_test": {
+      "legacy_peak_bytes": 466489344,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 595693568,
+      "samples": 485
+    },
+    "lash-internal-durable-test/live_fault_park": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 60,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2686025728,
+      "p99_anon_peak_bytes": 1068400640,
+      "samples": 50,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/live_stream_takeover": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2353590272,
+      "p99_anon_peak_bytes": 985886720,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/lo_history": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1739163648,
+      "p99_anon_peak_bytes": 942256128,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/model_answer_receipt_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2543355904,
+      "p99_anon_peak_bytes": 1077735424,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/one_slot_process_await": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2519334912,
+      "p99_anon_peak_bytes": 979476480,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/open_session_commands": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 12,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2678508544,
+      "p99_anon_peak_bytes": 1104130048,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/operation_contract_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2493256704,
+      "p99_anon_peak_bytes": 987435008,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/pinned_code_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2466674688,
+      "p99_anon_peak_bytes": 998969344,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/plugin_state_storage_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 19,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2854797312,
+      "p99_anon_peak_bytes": 1044119552,
+      "samples": 13,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/pressure_frame_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2593013760,
+      "p99_anon_peak_bytes": 1012461568,
+      "samples": 10,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_actor_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1707601920,
+      "p99_anon_peak_bytes": 859049984,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1569027072,
+      "p99_anon_peak_bytes": 876613632,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_lifecycle_events": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1709046784,
+      "p99_anon_peak_bytes": 991297536,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_ran_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 20,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2571739136,
+      "p99_anon_peak_bytes": 1056645120,
+      "samples": 14,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_step_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2658836480,
+      "p99_anon_peak_bytes": 937922560,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_tool_call_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2800267264,
+      "p99_anon_peak_bytes": 1091633152,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/process_tool_calls": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 18,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2546270208,
+      "p99_anon_peak_bytes": 1029070848,
+      "samples": 14,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/recorded_behaviour_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2395741184,
+      "p99_anon_peak_bytes": 1004253184,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/render_cache_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2487370752,
+      "p99_anon_peak_bytes": 1003937792,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/resource_capacity": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1641279488,
+      "p99_anon_peak_bytes": 871981056,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/rlm_session_globals": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2570616832,
+      "p99_anon_peak_bytes": 1007665152,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/round_crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1727971328,
+      "p99_anon_peak_bytes": 935477248,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/session_send": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1895161856,
+      "p99_anon_peak_bytes": 976515072,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/standard_turn_outcomes": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2354129920,
+      "p99_anon_peak_bytes": 975056896,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/steering_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 12,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2404769792,
+      "p99_anon_peak_bytes": 971194368,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_activity": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2382741504,
+      "p99_anon_peak_bytes": 968540160,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_batches": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 66,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2876649472,
+      "p99_anon_peak_bytes": 1052893184,
+      "samples": 50,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_call_identity": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2384640000,
+      "p99_anon_peak_bytes": 960331776,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 14,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2782861312,
+      "p99_anon_peak_bytes": 1178476544,
+      "samples": 10,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_group_pool_width": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2500919296,
+      "p99_anon_peak_bytes": 957976576,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/tool_surface_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2446336000,
+      "p99_anon_peak_bytes": 1024208896,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_callback_crash_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2174832640,
+      "p99_anon_peak_bytes": 981135360,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_execution_state": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2303203328,
+      "p99_anon_peak_bytes": 948625408,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_phases": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1867763712,
+      "p99_anon_peak_bytes": 1024913408,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_round_crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1741043712,
+      "p99_anon_peak_bytes": 925134848,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_terminal_refusals": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 9,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2207397888,
+      "p99_anon_peak_bytes": 929296384,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/turn_trace_scope_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2477267968,
+      "p99_anon_peak_bytes": 1016827904,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/vertical_crash_proof": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 12,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2659663872,
+      "p99_anon_peak_bytes": 1116262400,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable-test/worker_crashes": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2377466880,
+      "p99_anon_peak_bytes": 1008443392,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-durable/lash_durable": {
+      "legacy_peak_bytes": 638464000,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 28,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1446047744,
+      "p99_anon_peak_bytes": 1226899456,
+      "samples": 1091,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-execution-contracts/lash_execution_contracts": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 44,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2051608576,
+      "p99_anon_peak_bytes": 1746821120,
+      "samples": 1143,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_plugins": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 30,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2735246336,
+      "p99_anon_peak_bytes": 1209819136,
+      "samples": 60,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_process": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 26,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2742818816,
+      "p99_anon_peak_bytes": 1104973824,
+      "samples": 60,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_provider": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 21,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 3027648512,
+      "p99_anon_peak_bytes": 1125158912,
+      "samples": 60,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_send": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3670016,
+      "oom_kills": 18,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2485111808,
+      "p99_anon_peak_bytes": 1071804416,
+      "samples": 60,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_session": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 26,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2657595392,
+      "p99_anon_peak_bytes": 1192341504,
+      "samples": 59,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_streaming": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 22,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2691391488,
+      "p99_anon_peak_bytes": 1160327168,
+      "samples": 60,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_tracing": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 28,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2759036928,
+      "p99_anon_peak_bytes": 1252581376,
+      "samples": 59,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_turns": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 28,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 3283877888,
+      "p99_anon_peak_bytes": 1324314624,
+      "samples": 59,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/facade_warm_admission": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 16,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2351017984,
+      "p99_anon_peak_bytes": 931184640,
+      "samples": 34,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-facade-tests/lash_facade_tests": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 336830464,
+      "samples": 306
     },
     "lash-internal-http-transport/lash_http_transport": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 263327744,
-      "samples": 19
+      "p99_anon_peak_bytes": 304136192,
+      "samples": 256
     },
     "lash-internal-llm-tools/lash_llm_tools": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 121004032,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 331272192,
-      "samples": 72
+      "p99_anon_peak_bytes": 383074304,
+      "samples": 865
     },
     "lash-internal-llm-transport/lash_llm_transport": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 87220224,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 344207360,
-      "samples": 137
+      "p99_anon_peak_bytes": 431063040,
+      "samples": 945
     },
     "lash-internal-llm-transport/property": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 322662400,
-      "samples": 14
+      "p99_anon_peak_bytes": 375472128,
+      "samples": 17
     },
     "lash-internal-plugin-mcp/lash_plugin_mcp": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 405491712,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 936251392,
-      "samples": 140
+      "p99_anon_peak_bytes": 1087819776,
+      "samples": 1622
     },
     "lash-internal-plugin-process-controls/lash_plugin_process_controls": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 359964672,
-      "samples": 133
+      "legacy_peak_bytes": 151142400,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 15,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1632919552,
+      "p99_anon_peak_bytes": 624234496,
+      "samples": 1152,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-plugin-standard-compaction/lash_plugin_standard_compaction": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 365924352,
-      "samples": 134
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1716081664,
+      "p99_anon_peak_bytes": 395259904,
+      "samples": 1144,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-postgres-store/conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 2144571392,
-      "samples": 27
+      "p99_anon_peak_bytes": 1952784384,
+      "samples": 125
     },
     "lash-internal-postgres-store/durable_read_fixture": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 511479808,
-      "samples": 22
+      "p99_anon_peak_bytes": 518197248,
+      "samples": 116
+    },
+    "lash-internal-postgres-store/host_config_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 280244224,
+      "samples": 57
     },
     "lash-internal-postgres-store/host_provisioned_rollout": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 328097792,
-      "samples": 14
+      "p99_anon_peak_bytes": 318115840,
+      "samples": 86
     },
     "lash-internal-postgres-store/integration": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 719360000,
-      "samples": 18
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 18,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1379429376,
+      "p99_anon_peak_bytes": 605966336,
+      "samples": 125,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-postgres-store/lash_postgres_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1126838272,
-      "samples": 159
+      "p99_anon_peak_bytes": 2760642560,
+      "samples": 1024
+    },
+    "lash-internal-postgres-store/live_replay": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 26,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1671360512,
+      "p99_anon_peak_bytes": 912523264,
+      "samples": 124,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-postgres-store/migrate": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 350957568,
-      "samples": 16
+      "p99_anon_peak_bytes": 341864448,
+      "samples": 112
     },
     "lash-internal-postgres-store/preflight_durable_walk": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 384266240,
-      "samples": 18
+      "p99_anon_peak_bytes": 456613888,
+      "samples": 95
     },
     "lash-internal-postgres-store/preflight_schema_status": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 370483200,
-      "samples": 18
+      "p99_anon_peak_bytes": 346243072,
+      "samples": 115
+    },
+    "lash-internal-postgres-store/process_replay": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 23,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1659175936,
+      "p99_anon_peak_bytes": 864980992,
+      "samples": 120,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-postgres-store/schema_constraints": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 302796800,
-      "samples": 14
+      "p99_anon_peak_bytes": 336134144,
+      "samples": 114
     },
     "lash-internal-postgres-store/schema_drift": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 372183040,
-      "samples": 18
+      "p99_anon_peak_bytes": 336093184,
+      "samples": 114
+    },
+    "lash-internal-postgres-workers/failover": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2412628992,
+      "p99_anon_peak_bytes": 997023744,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-postgres-workers/lash_postgres_workers": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1715132416,
+      "p99_anon_peak_bytes": 828510208,
+      "samples": 240,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-postgres-workers/lash_postgres_workers_node": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 143,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2694205440,
+      "p99_anon_peak_bytes": 928673792,
+      "samples": 115,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-protocol-rlm/lash_protocol_rlm": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1613860864,
-      "samples": 211
+      "p99_anon_peak_bytes": 1518505984,
+      "samples": 3293
     },
     "lash-internal-protocol-rlm/protocol_drivers": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 919523328,
-      "samples": 27
+      "p99_anon_peak_bytes": 587018240,
+      "samples": 45
     },
     "lash-internal-protocol-standard/embedded_builder": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 576139264,
-      "samples": 15
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2097152,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1268096000,
+      "p99_anon_peak_bytes": 593637376,
+      "samples": 8,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-protocol-standard/lash_protocol_standard": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 254152704,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 771104768,
-      "samples": 178
+      "p99_anon_peak_bytes": 512995328,
+      "samples": 1817
     },
     "lash-internal-protocol-standard/protocol_scenarios": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 607531008,
-      "samples": 14
+      "p99_anon_peak_bytes": 497348608,
+      "samples": 8
+    },
+    "lash-internal-protocol-types/blake3_domains": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 72044544,
+      "samples": 7
+    },
+    "lash-internal-protocol-types/lash_protocol_types": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2097152,
+      "oom_kills": 4,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1156849664,
+      "p99_anon_peak_bytes": 1030328320,
+      "samples": 403,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-provider-anthropic/charge_safety": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 301428736,
-      "samples": 12
+      "p99_anon_peak_bytes": 369750016,
+      "samples": 19
     },
     "lash-internal-provider-anthropic/lash_provider_anthropic": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 401059840,
-      "samples": 119
+      "p99_anon_peak_bytes": 464084992,
+      "samples": 678
+    },
+    "lash-internal-provider-fixtures/lash_provider_fixtures": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 486924288,
+      "samples": 157
     },
     "lash-internal-provider-google/block_identity": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 309166080,
-      "samples": 12
+      "p99_anon_peak_bytes": 366669824,
+      "samples": 25
     },
     "lash-internal-provider-google/charge_safety": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 310067200,
-      "samples": 20
+      "p99_anon_peak_bytes": 357208064,
+      "samples": 24
+    },
+    "lash-internal-provider-google/delivery_scope": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 7,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1574776832,
+      "p99_anon_peak_bytes": 737505280,
+      "samples": 27,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-provider-google/lash_provider_google": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 789393408,
-      "samples": 114
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2883584,
+      "oom_kills": 15,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1734475776,
+      "p99_anon_peak_bytes": 989601792,
+      "samples": 334,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-provider-openai/lash_provider_openai": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1062019072,
-      "samples": 130
+      "p99_anon_peak_bytes": 1059184640,
+      "samples": 938
+    },
+    "lash-internal-render/lash_render": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 134926336,
+      "samples": 53
     },
     "lash-internal-rlm-types/lash_rlm_types": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 176451584,
-      "samples": 16
+      "p99_anon_peak_bytes": 240230400,
+      "samples": 206
     },
     "lash-internal-s3-store/lash_s3_store": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 589774848,
-      "samples": 57
+      "p99_anon_peak_bytes": 170848256,
+      "samples": 247
     },
     "lash-internal-sansio/lash_sansio": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 988327936,
-      "samples": 43
+      "p99_anon_peak_bytes": 467537920,
+      "samples": 382
     },
     "lash-internal-sqlite-store/conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1711915008,
-      "samples": 25
+      "p99_anon_peak_bytes": 1929842688,
+      "samples": 89
     },
     "lash-internal-sqlite-store/conformance_memory": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1709957120,
-      "samples": 28
+      "p99_anon_peak_bytes": 1929400320,
+      "samples": 89
     },
     "lash-internal-sqlite-store/durable_read_fixture": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 519245824,
-      "samples": 22
+      "p99_anon_peak_bytes": 524840960,
+      "samples": 81
     },
     "lash-internal-sqlite-store/integration": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 630915072,
-      "samples": 24
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 4,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1393436672,
+      "p99_anon_peak_bytes": 593608704,
+      "samples": 89,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-sqlite-store/lash_sqlite_store": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1111703552,
-      "samples": 208
+      "legacy_peak_bytes": 1067532288,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 6291456,
+      "oom_kills": 1,
+      "oom_max_request_kb": 2097152,
+      "oom_peak_bytes": 4582735872,
+      "p99_anon_peak_bytes": 2310815744,
+      "samples": 1336,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-sqlite-store/process_change_horizon": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 528576512,
-      "samples": 20
+      "p99_anon_peak_bytes": 501633024,
+      "samples": 45
     },
     "lash-internal-store-sql/lash_store_sql": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 122822656,
-      "samples": 7
+      "p99_anon_peak_bytes": 119185408,
+      "samples": 59
+    },
+    "lash-internal-tool-presenter-api/lash_tool_presenter_api": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 265920512,
+      "samples": 703
+    },
+    "lash-internal-tool-presenter-python/lash_tool_presenter_python": {
+      "legacy_peak_bytes": 265691136,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 263237632,
+      "samples": 567
+    },
+    "lash-internal-tool-presenter-standard/lash_tool_presenter_standard": {
+      "legacy_peak_bytes": 105721856,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 263520256,
+      "samples": 635
+    },
+    "lash-internal-tool-presenter-typescript/lash_tool_presenter_typescript": {
+      "legacy_peak_bytes": 85192704,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 263991296,
+      "samples": 543
+    },
+    "lash-internal-tool-shape/lash_tool_shape": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 112676864,
+      "samples": 39
     },
     "lash-internal-tool-support/lash_tool_support": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 346152960,
-      "samples": 102
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 10,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2324123648,
+      "p99_anon_peak_bytes": 392249344,
+      "samples": 1179,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-trace/lash_trace": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 459116544,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 579735552,
-      "samples": 21
+      "p99_anon_peak_bytes": 894500864,
+      "samples": 489
     },
     "lash-internal-trace/schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 190238720,
-      "samples": 4
+      "p99_anon_peak_bytes": 364773376,
+      "samples": 10
     },
     "lash-internal-trace/trace_schema_generator": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 134115328,
-      "samples": 7
+      "p99_anon_peak_bytes": 130916352,
+      "samples": 27
+    },
+    "lash-internal-transport-failure/lash_transport_failure": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 238399488,
+      "samples": 141
     },
     "lash-internal-vm-broker/lash_vm_broker": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 460320768,
-      "samples": 219
+      "legacy_peak_bytes": 241696768,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1427349504,
+      "p99_anon_peak_bytes": 467517440,
+      "samples": 3159,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-vm-client/lash_vm_client": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 426180608,
-      "samples": 196
+      "legacy_peak_bytes": 474492928,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 7,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1312428032,
+      "p99_anon_peak_bytes": 745721856,
+      "samples": 3462,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-vm-client/wire_schema": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 126615552,
-      "samples": 15
+      "p99_anon_peak_bytes": 440389632,
+      "samples": 8
+    },
+    "lash-internal-vm-client/worker_wire_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 413188096,
+      "samples": 82
     },
     "lash-internal-vm-protocol/codec_bounds": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 125411328,
-      "samples": 2
+      "p99_anon_peak_bytes": 132915200,
+      "samples": 7
     },
     "lash-internal-vm-protocol/lash_vm_protocol": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 285147136,
-      "samples": 21
+      "p99_anon_peak_bytes": 535474176,
+      "samples": 366
     },
     "lash-internal-vm-runtime/lash_vm_runtime": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1298223104,
-      "samples": 227
+      "p99_anon_peak_bytes": 1049128960,
+      "samples": 3147
+    },
+    "lash-internal-vm-worker/cell_mem": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 78270464,
+      "samples": 30
+    },
+    "lash-internal-vm-worker/coldload": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 382177280,
+      "samples": 64
+    },
+    "lash-internal-vm-worker/fresh_embedding": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 31,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1654169600,
+      "p99_anon_peak_bytes": 631173120,
+      "samples": 108,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-vm-worker/kernel_perf": {
+      "legacy_peak_bytes": 534573056,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1950629888,
+      "p99_anon_peak_bytes": 443699200,
+      "samples": 179,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-vm-worker/lash_vm_worker": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 539688960,
-      "samples": 221
+      "legacy_peak_bytes": 138711040,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 376,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2283057152,
+      "p99_anon_peak_bytes": 982986752,
+      "samples": 3837,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-vm-worker/lash_vm_worker_fixture": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 391249920,
-      "samples": 26
+      "legacy_peak_bytes": 791269376,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2883584,
+      "oom_kills": 158,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1852018688,
+      "p99_anon_peak_bytes": 602451968,
+      "samples": 359,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-vm-worker/park_matrix": {
+      "legacy_peak_bytes": 141651968,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 46,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2251571200,
+      "p99_anon_peak_bytes": 909950976,
+      "samples": 221,
+      "worker_memory_kb": 52428800
     },
     "lash-internal-vm-worker/pool_laws": {
       "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2883584,
+      "oom_kills": 35,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1861472256,
+      "p99_anon_peak_bytes": 673927168,
+      "samples": 181,
+      "worker_memory_kb": 52428800
+    },
+    "lash-internal-vocabulary/lash_vocabulary": {
+      "legacy_peak_bytes": 241700864,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 677883904,
-      "samples": 23
+      "p99_anon_peak_bytes": 435613696,
+      "samples": 230
+    },
+    "lash-kernel-check/lash_kernel_check": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 272699392,
+      "samples": 901
+    },
+    "lash-kernel-conformance/lash_kernel_conformance": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2359296,
+      "oom_kills": 20,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1480888320,
+      "p99_anon_peak_bytes": 715051008,
+      "samples": 297,
+      "worker_memory_kb": 52428800
+    },
+    "lash-kernel-conformance/sort_corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 304775168,
+      "samples": 6
+    },
+    "lash-kernel-dialect/lash_kernel_dialect": {
+      "legacy_peak_bytes": 266735616,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 453165056,
+      "samples": 1379
+    },
+    "lash-kernel-doc/document_example": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 95141888,
+      "samples": 6
+    },
+    "lash-kernel-doc/kernel_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 136941568,
+      "samples": 37
+    },
+    "lash-kernel-doc/lash_kernel_doc": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2097152,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1272320000,
+      "p99_anon_peak_bytes": 956485632,
+      "samples": 981,
+      "worker_memory_kb": 52428800
+    },
+    "lash-kernel-edit/kernel_edit_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 145195008,
+      "samples": 37
+    },
+    "lash-kernel-edit/lash_kernel_edit": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 474042368,
+      "samples": 604
+    },
+    "lash-kernel-engine/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 146821120,
+      "samples": 114
+    },
+    "lash-kernel-engine/lash_kernel_engine": {
+      "legacy_peak_bytes": 217858048,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 398315520,
+      "samples": 1646
+    },
+    "lash-kernel-exec/lash_kernel_exec": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 133423104,
+      "samples": 77
+    },
+    "lash-kernel-labels/lash_kernel_labels": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 123281408,
+      "samples": 55
+    },
+    "lash-kernel-lib/lash_kernel_lib": {
+      "legacy_peak_bytes": 365563904,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 440123392,
+      "samples": 1043
+    },
+    "lash-kernel-migrate/kernel_migration_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 141950976,
+      "samples": 45
+    },
+    "lash-kernel-migrate/lash_kernel_migrate": {
+      "legacy_peak_bytes": 150708224,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 351129600,
+      "samples": 997
+    },
+    "lash-kernel-package/lash_kernel_package": {
+      "legacy_peak_bytes": 326709248,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 342474752,
+      "samples": 1167
+    },
+    "lash-kernel-releases/build_script_build": {
+      "legacy_peak_bytes": 906088448,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3670016,
+      "oom_kills": 7,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2371944448,
+      "p99_anon_peak_bytes": 1957294080,
+      "samples": 297,
+      "worker_memory_kb": 52428800
+    },
+    "lash-kernel-releases/lash_kernel_releases": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 5505024,
+      "oom_kills": 114,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 4018262016,
+      "p99_anon_peak_bytes": 3499663360,
+      "samples": 891,
+      "worker_memory_kb": 52428800
+    },
+    "lash-kernel-releases/record_helper_data": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 152051712,
+      "samples": 11
+    },
+    "lash-kernel-services/lash_kernel_services": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 243990528,
+      "samples": 496
+    },
+    "lash-kernel-state/lash_kernel_state": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 832815104,
+      "samples": 1089
+    },
+    "lash-kernel-value/lash_kernel_value": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 841826304,
+      "samples": 270
+    },
+    "lash-kernel-view/kernel_view_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 117071872,
+      "samples": 43
+    },
+    "lash-kernel-view/lash_kernel_view": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 512585728,
+      "samples": 541
+    },
+    "lash-kernel-vm/lash_kernel_vm": {
+      "legacy_peak_bytes": 1123463168,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 239,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1624231936,
+      "p99_anon_peak_bytes": 1178521600,
+      "samples": 2330,
+      "worker_memory_kb": 52428800
+    },
+    "lash-kernel-vm/linked_dispatch": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 225554432,
+      "samples": 47
+    },
+    "lash-perf/admission": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 65622016,
+      "samples": 55
+    },
+    "lash-perf/build_script_build": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 59883520,
+      "samples": 45
+    },
+    "lash-perf/cellpath": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 77922304,
+      "samples": 80
+    },
+    "lash-perf/durable_substrate": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 4980736,
+      "oom_kills": 466,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 3605549056,
+      "p99_anon_peak_bytes": 1359036416,
+      "samples": 509,
+      "worker_memory_kb": 52428800
+    },
+    "lash-perf/git_provenance": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 21,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2119995392,
+      "p99_anon_peak_bytes": 774905856,
+      "samples": 44,
+      "worker_memory_kb": 52428800
+    },
+    "lash-perf/growturn": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 121131008,
+      "samples": 135
+    },
+    "lash-perf/identity": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 68968448,
+      "samples": 61
     },
     "lash-perf/lash_perf": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1413570560,
-      "samples": 127
+      "p99_anon_peak_bytes": 4576751616,
+      "samples": 1528
+    },
+    "lash-perf/latency": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 94003200,
+      "samples": 44
+    },
+    "lash-perf/replay": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 55,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2863443968,
+      "p99_anon_peak_bytes": 986378240,
+      "samples": 49,
+      "worker_memory_kb": 52428800
     },
     "lash-perf/workload": {
       "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 19,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1669561344,
+      "p99_anon_peak_bytes": 798523392,
+      "samples": 71,
+      "worker_memory_kb": 52428800
+    },
+    "lash-regress/integration": {
+      "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 699863040,
-      "samples": 16
+      "p99_anon_peak_bytes": 137723904,
+      "samples": 1
+    },
+    "lash-regress/lash_regress": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 281288704,
+      "samples": 109
+    },
+    "lash-regress/unicode_property_escapes": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 86904832,
+      "samples": 1
+    },
+    "lash-regress/unicodesets": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 51806208,
+      "samples": 1
+    },
+    "lash-runtime/artifact_referrers_evidence": {
+      "legacy_peak_bytes": 164630528,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3932160,
+      "oom_kills": 12,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2705758208,
+      "p99_anon_peak_bytes": 1108025344,
+      "samples": 145,
+      "worker_memory_kb": 52428800
     },
     "lash-runtime/attachments_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 195813376,
-      "samples": 18
+      "p99_anon_peak_bytes": 221634560,
+      "samples": 201
     },
     "lash-runtime/integration": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 928997376,
-      "samples": 36
+      "p99_anon_peak_bytes": 900079616,
+      "samples": 938
+    },
+    "lash-runtime/kernel_two_build_claim": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 4,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2311458816,
+      "p99_anon_peak_bytes": 844546048,
+      "samples": 218,
+      "worker_memory_kb": 52428800
     },
     "lash-runtime/lash": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 1154830336,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 2488434688,
-      "samples": 284
+      "p99_anon_peak_bytes": 2204221440,
+      "samples": 6326
+    },
+    "lash-runtime/llm_profiles": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3670016,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2375769088,
+      "p99_anon_peak_bytes": 974790656,
+      "samples": 151,
+      "worker_memory_kb": 52428800
     },
     "lash-runtime/otel_trace_evidence": {
       "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 13,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1537294336,
+      "p99_anon_peak_bytes": 616562688,
+      "samples": 195,
+      "worker_memory_kb": 52428800
+    },
+    "lash-runtime/plugin_authoring": {
+      "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 51343360,
-      "samples": 11
+      "p99_anon_peak_bytes": 68239360,
+      "samples": 45
+    },
+    "lash-runtime/plugin_certification": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 31,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2341677056,
+      "p99_anon_peak_bytes": 975740928,
+      "samples": 165,
+      "worker_memory_kb": 52428800
     },
     "lash-runtime/processes_evidence": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 210505728,
-      "samples": 20
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3670016,
+      "oom_kills": 10,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2364089344,
+      "p99_anon_peak_bytes": 990363648,
+      "samples": 198,
+      "worker_memory_kb": 52428800
     },
     "lash-runtime/processes_evidence_b": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 187490304,
-      "samples": 23
+      "p99_anon_peak_bytes": 211353600,
+      "samples": 177
     },
     "lash-runtime/sessions_evidence": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 198807552,
-      "samples": 19
+      "p99_anon_peak_bytes": 217001984,
+      "samples": 167
     },
     "lash-runtime/ui": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 248311808,
-      "samples": 40
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 50,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1633443840,
+      "p99_anon_peak_bytes": 464633856,
+      "samples": 536,
+      "worker_memory_kb": 52428800
     },
-    "lash-runtime/worker_host": {
+    "lash-runtime/workflow_laws": {
       "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 445333504,
-      "samples": 7
+      "oom_all_killed_request_kb": 1310720,
+      "oom_floor_kb": 5242880,
+      "oom_kills": 61,
+      "oom_max_request_kb": 1310720,
+      "oom_peak_bytes": 3405869056,
+      "p99_anon_peak_bytes": 1374330880,
+      "samples": 41,
+      "worker_memory_kb": 52428800
+    },
+    "lash-runtime/workflow_view_laws": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 589824,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 45,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2782363648,
+      "p99_anon_peak_bytes": 1119375360,
+      "samples": 29,
+      "worker_memory_kb": 52428800
+    },
+    "lash-sim/chaos_soak": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4194304,
+      "oom_kills": 11,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2556502016,
+      "p99_anon_peak_bytes": 1015619584,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "lash-sim/crash_matrix": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4456448,
+      "oom_kills": 17,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2717855744,
+      "p99_anon_peak_bytes": 1059479552,
+      "samples": 12,
+      "worker_memory_kb": 52428800
     },
     "lash-sim/cross_backend_store_differential": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1060728832,
-      "samples": 21
+      "p99_anon_peak_bytes": 1253756928,
+      "samples": 10
     },
     "lash-sim/lash_sim": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1836142592,
-      "samples": 153
+      "p99_anon_peak_bytes": 1851256832,
+      "samples": 362
+    },
+    "lash-sim/logical_turn": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 13,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2812170240,
+      "p99_anon_peak_bytes": 992083968,
+      "samples": 8,
+      "worker_memory_kb": 52428800
     },
     "lash-sim/stack_policy": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 593137664,
-      "samples": 12
+      "p99_anon_peak_bytes": 582287360,
+      "samples": 8
     },
     "lashctl/lashctl": {
-      "legacy_peak_bytes": 0,
+      "legacy_peak_bytes": 2045743104,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 591073280,
-      "samples": 61
+      "p99_anon_peak_bytes": 954826752,
+      "samples": 393
     },
     "lashctl/operator_json_contract": {
       "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 20,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1693290496,
+      "p99_anon_peak_bytes": 738177024,
+      "samples": 66,
+      "worker_memory_kb": 52428800
+    },
+    "mcp-events/mcp_events": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3145728,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1700170752,
+      "p99_anon_peak_bytes": 896851968,
+      "samples": 8,
+      "worker_memory_kb": 52428800
+    },
+    "provider-signatures/provider_signatures": {
+      "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 536141824,
-      "samples": 14
+      "p99_anon_peak_bytes": 47575040,
+      "samples": 31
     },
     "rlm-smoke-host/rlm_smoke_host": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1129299968,
-      "samples": 26
+      "p99_anon_peak_bytes": 1004810240,
+      "samples": 52
     },
     "toolbench/toolbench": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 1223401472,
-      "samples": 32
+      "p99_anon_peak_bytes": 1174585344,
+      "samples": 8
     },
     "transcript-contract/transcript_contract": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 86384640,
-      "samples": 14
+      "p99_anon_peak_bytes": 84508672,
+      "samples": 9
+    },
+    "workflow-corpus/canvas_probe_helper_0": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2097152,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1165137920,
+      "p99_anon_peak_bytes": 789577728,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_helper_1": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1600076800,
+      "p99_anon_peak_bytes": 794865664,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_helper_2": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 2883584,
+      "oom_kills": 3,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1327496192,
+      "p99_anon_peak_bytes": 793313280,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_helper_3": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1616156672,
+      "p99_anon_peak_bytes": 788942848,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_nested": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1638958080,
+      "p99_anon_peak_bytes": 802553856,
+      "samples": 6,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_retry_0": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 2,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1643779072,
+      "p99_anon_peak_bytes": 787296256,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_retry_1": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 3407872,
+      "oom_kills": 3,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1844060160,
+      "p99_anon_peak_bytes": 792395776,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_retry_2": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1565543424,
+      "p99_anon_peak_bytes": 791597056,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/canvas_probe_retry_3": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 1,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1590258688,
+      "p99_anon_peak_bytes": 785473536,
+      "samples": 3,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 3670016,
+      "oom_kills": 40,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 2398285824,
+      "p99_anon_peak_bytes": 852275200,
+      "samples": 43,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-corpus/workflow_corpus": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 0,
+      "oom_floor_kb": 2621440,
+      "oom_kills": 8,
+      "oom_max_request_kb": 524288,
+      "oom_peak_bytes": 1576598528,
+      "p99_anon_peak_bytes": 743067648,
+      "samples": 330,
+      "worker_memory_kb": 52428800
+    },
+    "workflow-graph-roundtrip/roundtrip": {
+      "legacy_peak_bytes": 0,
+      "oom_all_killed_request_kb": 524288,
+      "oom_floor_kb": 4718592,
+      "oom_kills": 29,
+      "oom_max_request_kb": 1048576,
+      "oom_peak_bytes": 2936279040,
+      "p99_anon_peak_bytes": 1089748992,
+      "samples": 20,
+      "worker_memory_kb": 52428800
     },
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 747884544,
-      "samples": 84
+      "p99_anon_peak_bytes": 1384402944,
+      "samples": 163
     }
   },
-  "kinds": {},
-  "optimized": {}
+  "kinds": {
+    "codex-host-auth/codex_host_auth": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 82366464,
+        "samples": 4
+      }
+    },
+    "dataframe/dataframe": {
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_all_killed_request_kb": 524288,
+        "oom_floor_kb": 2621440,
+        "oom_kills": 1,
+        "oom_max_request_kb": 524288,
+        "oom_peak_bytes": 1269394432,
+        "p99_anon_peak_bytes": 0,
+        "samples": 0,
+        "worker_memory_kb": 52428800
+      }
+    },
+    "delegation/delegation": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 197705728,
+        "samples": 14
+      }
+    },
+    "integrator-contract/integrator_contract": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 83025920,
+        "samples": 4
+      }
+    },
+    "kernel-embedder/kernel_embedder": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 60731392,
+        "samples": 1
+      }
+    },
+    "lash-dialect-conventions/lash_dialect_conventions": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 232079360,
+        "samples": 7
+      }
+    },
+    "lash-dialect-python/lash_dialect_python": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 332161024,
+        "samples": 24
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 618725376,
+        "samples": 7
+      }
+    },
+    "lash-dialect-typescript/lash_dialect_typescript": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 561934336,
+        "samples": 21
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 766078976,
+        "samples": 4
+      }
+    },
+    "lash-e2e/lash_e2e": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 123052032,
+        "samples": 4
+      }
+    },
+    "lash-ext-date-ecma/lash_ext_date_ecma": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 240726016,
+        "samples": 2
+      }
+    },
+    "lash-ext-helper-compiler/lash_ext_helper_compiler": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 176541696,
+        "samples": 20
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 363540480,
+        "samples": 2
+      }
+    },
+    "lash-ext-helper-compiler/regenerate": {
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 185925632,
+        "samples": 2
+      }
+    },
+    "lash-ext-py-core/lash_ext_py_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 905203712,
+        "samples": 2
+      }
+    },
+    "lash-ext-py-helpers/lash_ext_py_helpers": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 230981632,
+        "samples": 11
+      }
+    },
+    "lash-ext-regex-ecma/lash_ext_regex_ecma": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 227131392,
+        "samples": 2
+      }
+    },
+    "lash-ext-ts-core/lash_ext_ts_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1591971840,
+        "samples": 4
+      }
+    },
+    "lash-ext-ts-helpers/lash_ext_ts_helpers": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 258945024,
+        "samples": 13
+      }
+    },
+    "lash-ext-url-whatwg/lash_ext_url_whatwg": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 238829568,
+        "samples": 2
+      }
+    },
+    "lash-facade-failover/lash_facade_failover": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 253165568,
+        "samples": 8
+      }
+    },
+    "lash-internal-conformance/lash_conformance": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1120788480,
+        "samples": 10
+      }
+    },
+    "lash-internal-core-effect/lash_core_effect": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 329867264,
+        "samples": 4
+      }
+    },
+    "lash-internal-core-execution/lash_core_execution": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2381037568,
+        "samples": 14
+      }
+    },
+    "lash-internal-core-execution/process_event_schema_generator": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 241004544,
+        "samples": 2
+      }
+    },
+    "lash-internal-core-ids/lash_core_ids": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 356126720,
+        "samples": 8
+      }
+    },
+    "lash-internal-core-llm/lash_core_llm": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 335708160,
+        "samples": 8
+      }
+    },
+    "lash-internal-core-store/lash_core_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1814843392,
+        "samples": 8
+      }
+    },
+    "lash-internal-core-worker/lash_core_worker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 395063296,
+        "samples": 11
+      }
+    },
+    "lash-internal-core/lash_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1351155712,
+        "samples": 14
+      }
+    },
+    "lash-internal-durable-test/lash_durable_test": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 287027200,
+        "samples": 6
+      }
+    },
+    "lash-internal-durable/lash_durable": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 779218944,
+        "samples": 11
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 799281152,
+        "samples": 2
+      }
+    },
+    "lash-internal-execution-contracts/lash_execution_contracts": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 905015296,
+        "samples": 11
+      }
+    },
+    "lash-internal-http-transport/lash_http_transport": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 285315072,
+        "samples": 4
+      }
+    },
+    "lash-internal-llm-tools/lash_llm_tools": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 382947328,
+        "samples": 11
+      }
+    },
+    "lash-internal-llm-transport/lash_llm_transport": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 429457408,
+        "samples": 12
+      }
+    },
+    "lash-internal-plugin-mcp/lash_plugin_mcp": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 606699520,
+        "samples": 22
+      }
+    },
+    "lash-internal-plugin-process-controls/lash_plugin_process_controls": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 388784128,
+        "samples": 11
+      }
+    },
+    "lash-internal-plugin-standard-compaction/lash_plugin_standard_compaction": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 381296640,
+        "samples": 11
+      }
+    },
+    "lash-internal-postgres-store/lash_postgres_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1379287040,
+        "samples": 8
+      }
+    },
+    "lash-internal-postgres-workers/lash_postgres_workers": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 301256704,
+        "samples": 8
+      }
+    },
+    "lash-internal-protocol-rlm/lash_protocol_rlm": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 700035072,
+        "samples": 28
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1585618944,
+        "samples": 2
+      }
+    },
+    "lash-internal-protocol-standard/lash_protocol_standard": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 424280064,
+        "samples": 21
+      }
+    },
+    "lash-internal-protocol-types/lash_protocol_types": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 809144320,
+        "samples": 4
+      }
+    },
+    "lash-internal-provider-anthropic/lash_provider_anthropic": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 430530560,
+        "samples": 10
+      }
+    },
+    "lash-internal-provider-fixtures/lash_provider_fixtures": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 184156160,
+        "samples": 6
+      }
+    },
+    "lash-internal-provider-google/lash_provider_google": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 159559680,
+        "samples": 6
+      }
+    },
+    "lash-internal-provider-openai/lash_provider_openai": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 470814720,
+        "samples": 10
+      }
+    },
+    "lash-internal-rlm-types/lash_rlm_types": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 239300608,
+        "samples": 4
+      }
+    },
+    "lash-internal-s3-store/lash_s3_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 68763648,
+        "samples": 2
+      }
+    },
+    "lash-internal-sansio/lash_sansio": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 283693056,
+        "samples": 6
+      }
+    },
+    "lash-internal-sqlite-store/lash_sqlite_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1222184960,
+        "samples": 11
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2131836928,
+        "samples": 1
+      }
+    },
+    "lash-internal-tool-presenter-api/lash_tool_presenter_api": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 269230080,
+        "samples": 13
+      }
+    },
+    "lash-internal-tool-presenter-python/lash_tool_presenter_python": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 265945088,
+        "samples": 12
+      }
+    },
+    "lash-internal-tool-presenter-standard/lash_tool_presenter_standard": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 266510336,
+        "samples": 12
+      }
+    },
+    "lash-internal-tool-presenter-typescript/lash_tool_presenter_typescript": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 264093696,
+        "samples": 11
+      }
+    },
+    "lash-internal-tool-support/lash_tool_support": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 378830848,
+        "samples": 12
+      }
+    },
+    "lash-internal-trace/lash_trace": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 573153280,
+        "samples": 8
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 845021184,
+        "samples": 1
+      }
+    },
+    "lash-internal-trace/trace_schema_generator": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 130916352,
+        "samples": 1
+      }
+    },
+    "lash-internal-transport-failure/lash_transport_failure": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 234221568,
+        "samples": 4
+      }
+    },
+    "lash-internal-vm-broker/lash_vm_broker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 452972544,
+        "samples": 28
+      }
+    },
+    "lash-internal-vm-client/lash_vm_client": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 496979968,
+        "samples": 28
+      }
+    },
+    "lash-internal-vm-client/worker_wire_schema_generator": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 413188096,
+        "samples": 2
+      }
+    },
+    "lash-internal-vm-protocol/lash_vm_protocol": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 417992704,
+        "samples": 4
+      }
+    },
+    "lash-internal-vm-runtime/lash_vm_runtime": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 483012608,
+        "samples": 27
+      }
+    },
+    "lash-internal-vm-worker/lash_vm_worker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_all_killed_request_kb": 0,
+        "oom_floor_kb": 2359296,
+        "oom_kills": 1,
+        "oom_max_request_kb": 524288,
+        "oom_peak_bytes": 1330954240,
+        "p99_anon_peak_bytes": 598589440,
+        "samples": 31,
+        "worker_memory_kb": 52428800
+      }
+    },
+    "lash-kernel-check/lash_kernel_check": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 255516672,
+        "samples": 3
+      }
+    },
+    "lash-kernel-conformance/lash_kernel_conformance": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 306024448,
+        "samples": 11
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 700227584,
+        "samples": 7
+      }
+    },
+    "lash-kernel-dialect/lash_kernel_dialect": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 304193536,
+        "samples": 14
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 307687424,
+        "samples": 1
+      }
+    },
+    "lash-kernel-doc/lash_kernel_doc": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 409690112,
+        "samples": 3
+      }
+    },
+    "lash-kernel-edit/lash_kernel_edit": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 274722816,
+        "samples": 11
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 310808576,
+        "samples": 1
+      }
+    },
+    "lash-kernel-engine/lash_kernel_engine": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 342536192,
+        "samples": 23
+      }
+    },
+    "lash-kernel-lib/lash_kernel_lib": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 280817664,
+        "samples": 2
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 434249728,
+        "samples": 1
+      }
+    },
+    "lash-kernel-migrate/lash_kernel_migrate": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 267948032,
+        "samples": 12
+      }
+    },
+    "lash-kernel-package/lash_kernel_package": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 262967296,
+        "samples": 6
+      }
+    },
+    "lash-kernel-releases/lash_kernel_releases": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 404799488,
+        "samples": 2
+      }
+    },
+    "lash-kernel-state/lash_kernel_state": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 522158080,
+        "samples": 10
+      }
+    },
+    "lash-kernel-view/lash_kernel_view": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 304992256,
+        "samples": 3
+      }
+    },
+    "lash-kernel-vm/lash_kernel_vm": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 683790336,
+        "samples": 33
+      },
+      "test": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 891879424,
+        "samples": 7
+      }
+    },
+    "lash-perf/lash_perf": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1768529920,
+        "samples": 9
+      }
+    },
+    "lash-runtime/lash": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 985808896,
+        "samples": 22
+      }
+    },
+    "lash-sim/lash_sim": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1258483712,
+        "samples": 9
+      }
+    },
+    "lashctl/lashctl": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 959979520,
+        "samples": 4
+      }
+    },
+    "workflow-corpus/workflow_corpus": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 275951616,
+        "samples": 8
+      }
+    },
+    "workflow-graph-roundtrip/workflow_graph_roundtrip": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 197771264,
+        "samples": 4
+      }
+    }
+  },
+  "optimized": {
+    "delegation/delegation": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 416137216,
+        "samples": 26
+      }
+    },
+    "lash-dialect-python/lash_dialect_python": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 565239808,
+        "samples": 18
+      }
+    },
+    "lash-dialect-typescript/build_script_build": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 58961920,
+        "samples": 6
+      }
+    },
+    "lash-dialect-typescript/lash_dialect_typescript": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 798904320,
+        "samples": 14
+      }
+    },
+    "lash-ext-date-ecma/lash_ext_date_ecma": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 90423296,
+        "samples": 5
+      }
+    },
+    "lash-ext-helper-compiler/lash_ext_helper_compiler": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 278822912,
+        "samples": 1
+      }
+    },
+    "lash-ext-py-core/lash_ext_py_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 990445568,
+        "samples": 4
+      }
+    },
+    "lash-ext-py-helpers/lash_ext_py_helpers": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 126238720,
+        "samples": 14
+      }
+    },
+    "lash-ext-regex-ecma/lash_ext_regex_ecma": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 174690304,
+        "samples": 6
+      }
+    },
+    "lash-ext-ts-core/lash_ext_ts_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2070601728,
+        "samples": 2
+      }
+    },
+    "lash-ext-ts-helpers/lash_ext_ts_helpers": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 196956160,
+        "samples": 18
+      }
+    },
+    "lash-ext-url-whatwg/lash_ext_url_whatwg": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 83423232,
+        "samples": 5
+      }
+    },
+    "lash-internal-checkpoint-encoder/lash_checkpoint_encoder": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 120385536,
+        "samples": 2
+      }
+    },
+    "lash-internal-core-effect/lash_core_effect": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 66531328,
+        "samples": 1
+      }
+    },
+    "lash-internal-core-execution/lash_core_execution": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 4119330816,
+        "samples": 4
+      }
+    },
+    "lash-internal-core-ids/lash_core_ids": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 294408192,
+        "samples": 2
+      }
+    },
+    "lash-internal-core-llm/lash_core_llm": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 261746688,
+        "samples": 2
+      }
+    },
+    "lash-internal-core-store/lash_core_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2397147136,
+        "samples": 2
+      }
+    },
+    "lash-internal-core-worker/lash_core_worker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 439943168,
+        "samples": 4
+      }
+    },
+    "lash-internal-core/lash_core": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2944499712,
+        "samples": 4
+      }
+    },
+    "lash-internal-durable/lash_durable": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 749760512,
+        "samples": 1
+      }
+    },
+    "lash-internal-execution-contracts/lash_execution_contracts": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 884957184,
+        "samples": 1
+      }
+    },
+    "lash-internal-llm-tools/lash_llm_tools": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 224403456,
+        "samples": 4
+      }
+    },
+    "lash-internal-llm-transport/lash_llm_transport": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 247349248,
+        "samples": 4
+      }
+    },
+    "lash-internal-plugin-mcp/lash_plugin_mcp": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1094520832,
+        "samples": 26
+      }
+    },
+    "lash-internal-plugin-process-controls/lash_plugin_process_controls": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 301735936,
+        "samples": 4
+      }
+    },
+    "lash-internal-plugin-standard-compaction/lash_plugin_standard_compaction": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 266096640,
+        "samples": 4
+      }
+    },
+    "lash-internal-postgres-store/lash_postgres_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2712498176,
+        "samples": 3
+      }
+    },
+    "lash-internal-protocol-rlm/lash_protocol_rlm": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1557786624,
+        "samples": 26
+      }
+    },
+    "lash-internal-protocol-standard/lash_protocol_standard": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 423952384,
+        "samples": 18
+      }
+    },
+    "lash-internal-provider-anthropic/lash_provider_anthropic": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 262053888,
+        "samples": 4
+      }
+    },
+    "lash-internal-provider-openai/lash_provider_openai": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 489807872,
+        "samples": 4
+      }
+    },
+    "lash-internal-sqlite-store/lash_sqlite_store": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2370486272,
+        "samples": 2
+      }
+    },
+    "lash-internal-tool-presenter-api/lash_tool_presenter_api": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 149819392,
+        "samples": 9
+      }
+    },
+    "lash-internal-tool-presenter-python/lash_tool_presenter_python": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 146870272,
+        "samples": 12
+      }
+    },
+    "lash-internal-tool-presenter-standard/lash_tool_presenter_standard": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 146804736,
+        "samples": 11
+      }
+    },
+    "lash-internal-tool-presenter-typescript/lash_tool_presenter_typescript": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 151576576,
+        "samples": 12
+      }
+    },
+    "lash-internal-tool-support/lash_tool_support": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 237072384,
+        "samples": 4
+      }
+    },
+    "lash-internal-vm-broker/lash_vm_broker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 463560704,
+        "samples": 26
+      }
+    },
+    "lash-internal-vm-client/lash_vm_client": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 778731520,
+        "samples": 26
+      }
+    },
+    "lash-internal-vm-protocol/lash_vm_protocol": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 461504512,
+        "samples": 2
+      }
+    },
+    "lash-internal-vm-runtime/lash_vm_runtime": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 1075773440,
+        "samples": 26
+      }
+    },
+    "lash-internal-vm-worker/coldload": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 350097408,
+        "samples": 1
+      }
+    },
+    "lash-internal-vm-worker/lash_vm_worker": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 665473024,
+        "samples": 39
+      }
+    },
+    "lash-kernel-check/lash_kernel_check": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 230707200,
+        "samples": 7
+      }
+    },
+    "lash-kernel-dialect/lash_kernel_dialect": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 483844096,
+        "samples": 21
+      }
+    },
+    "lash-kernel-doc/lash_kernel_doc": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 919732224,
+        "samples": 7
+      }
+    },
+    "lash-kernel-edit/lash_kernel_edit": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 432734208,
+        "samples": 12
+      }
+    },
+    "lash-kernel-engine/lash_kernel_engine": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 382898176,
+        "samples": 22
+      }
+    },
+    "lash-kernel-lib/lash_kernel_lib": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 385064960,
+        "samples": 9
+      }
+    },
+    "lash-kernel-migrate/lash_kernel_migrate": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 361889792,
+        "samples": 12
+      }
+    },
+    "lash-kernel-package/lash_kernel_package": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 340365312,
+        "samples": 7
+      }
+    },
+    "lash-kernel-releases/build_script_build": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 972562432,
+        "samples": 11
+      }
+    },
+    "lash-kernel-releases/lash_kernel_releases": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 360808448,
+        "samples": 5
+      }
+    },
+    "lash-kernel-services/lash_kernel_services": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 49643520,
+        "samples": 8
+      }
+    },
+    "lash-kernel-state/lash_kernel_state": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 818139136,
+        "samples": 17
+      }
+    },
+    "lash-kernel-view/lash_kernel_view": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 393682944,
+        "samples": 8
+      }
+    },
+    "lash-kernel-vm/lash_kernel_vm": {
+      "target": {
+        "legacy_peak_bytes": 1264340992,
+        "oom_all_killed_request_kb": 0,
+        "oom_floor_kb": 2097152,
+        "oom_kills": 1,
+        "oom_max_request_kb": 524288,
+        "oom_peak_bytes": 1270853632,
+        "p99_anon_peak_bytes": 1178525696,
+        "samples": 24,
+        "worker_memory_kb": 52428800
+      }
+    },
+    "lash-perf/build_script_build": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 58249216,
+        "samples": 1
+      }
+    },
+    "lash-perf/lash_perf": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 4605124608,
+        "samples": 22
+      }
+    },
+    "lash-runtime/lash": {
+      "target": {
+        "legacy_peak_bytes": 0,
+        "oom_kills": 0,
+        "p99_anon_peak_bytes": 2347278336,
+        "samples": 25
+      }
+    }
+  }
 }

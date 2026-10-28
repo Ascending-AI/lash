@@ -230,6 +230,7 @@ def check_sizing() -> None:
     test_requests = bzl_value(text, "TEST_RUN_REQUESTS")
     batches = bzl_value(text, "BATCH_BUDGETS")
     test_compile_requests = bzl_value(text, "TEST_COMPILE_REQUESTS")
+    metadata_requests = bzl_value(text, "METADATA_REQUESTS")
     measured_compile = load_json("action-sizes.json")
     measured_kinds = load_json("target-kind-sizes.json")
     measured_tests = load_json("test-run-sizes.json")
@@ -250,6 +251,7 @@ def check_sizing() -> None:
     import generate_model as model
 
     default = {"cpu_count": model.DEFAULT_CPU_COUNT, "memory_kb": model.DEFAULT_MEMORY_KB}
+    assert default["memory_kb"] == sizes.UNMEASURED_MEMORY_KB
     for key, target in compile_requests.items():
         crate = request(measured_compile[key]) if key in measured_compile else default
         kinds = measured_kinds.get(key, {})
@@ -260,7 +262,7 @@ def check_sizing() -> None:
         assert target == (request(kinds["target"]) if "target" in kinds else crate), key
         assert test == (request(kinds["test"]) if "test" in kinds else crate), key
         for kind in kinds:
-            assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES, (key, kind)
+            assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES or kinds[kind].get("oom_kills"), (key, kind)
 
     # An optimized configuration's request is its row where that is more than
     # the dev request, and never less than the dev request: the select can
@@ -305,6 +307,10 @@ def check_sizing() -> None:
         if key not in compile_requests and key not in optimized_requests:
             memory_kb = max(memory_kb, sizes.ACTION_MEMORY_FLOOR_KB)
         sizes.check_compile_memory(measured, memory_kb, key)
+        if measured["oom_kills"]:
+            requests += [row for by_key in metadata_requests.values()
+                         for row in by_key.get(key, {}).values()]
+            assert all(row["memory_kb"] >= measured["oom_floor_kb"] for row in requests), (key, "override hides OOM floor")
     for profile, measured in (("kinds", evidence["kinds"]), ("optimized", evidence["optimized"])):
         for key, kinds in measured.items():
             assert set(kinds) <= {"target", "test"}, key
@@ -339,7 +345,7 @@ def check_sizing() -> None:
     }
     for key, row in measured_clippy.items():
         assert key in crates, f"Clippy row for no first-party crate: {key}"
-        assert row["samples"] >= sizes.MIN_SAMPLES, key
+        assert row["samples"] >= sizes.MIN_SAMPLES or row.get("oom_kills"), key
         assert row["memory_kb"] >= sizes.CLIPPY_FLOOR_KB, key
         if key not in evidence["clippy"]:
             assert row["peak_bytes"] <= row["memory_kb"] * 1024, key
@@ -351,7 +357,6 @@ def check_sizing() -> None:
             memory_kb = max(model.DEFAULT_MEMORY_KB, sizes.ACTION_MEMORY_FLOOR_KB)
         sizes.check_compile_memory(measured, memory_kb, ("clippy", key))
 
-    metadata_requests = bzl_value(text, "METADATA_REQUESTS")
     measured_metadata = load_json("metadata-sizes.json")
     assert set(metadata_requests) == set(measured_metadata) == {"dev", "optimized"}
     for profile, rows in measured_metadata.items():
@@ -362,7 +367,7 @@ def check_sizing() -> None:
         for key, kinds in rows.items():
             assert key in crates and kinds and set(kinds) <= {"target", "test"}, key
             for kind, row in kinds.items():
-                assert row["samples"] >= sizes.MIN_SAMPLES, (profile, key, kind)
+                assert row["samples"] >= sizes.MIN_SAMPLES or row.get("oom_kills"), (profile, key, kind)
                 assert row["memory_kb"] >= sizes.CLIPPY_FLOOR_KB, (profile, key, kind)
                 sizes.check_compile_memory(row, row["memory_kb"], ("metadata", profile, key, kind))
 

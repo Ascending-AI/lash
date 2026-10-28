@@ -57,6 +57,7 @@ TARGET_KINDS = {
     "bin": "target",
     "example": "target",
     "bench": "target",
+    "custom-build-compile": "target",
     "unit-test": "test",
     "bin-unit-test": "test",
     # An integration test's crate names that one target; it is listed so an

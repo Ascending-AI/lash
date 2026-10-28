@@ -15,6 +15,7 @@ supervisor):
           wall_ms=<wall time>  exit=<status>  requested_kb=<...>  requested_cpu=<...>
           test=<...>  op=<...>  category=<Buck2 category>  anon_peak_bytes=<...>
           action_digest=<...>  worker_cpu_count=<...>  worker_max_inflight=<...>
+          worker_memory_kb=<advertised worker memory>
 
 Copy the logs off the workers (`/workspace/kiln-executor/usage/actions.log*`)
 and refresh every size file with one command:
@@ -73,7 +74,18 @@ The rule, per `<package>/<crate>`:
   Anonymous peaks are sampled every 250 ms. The fixed allowance covers
   sampling error and the working set of file-backed pages. Older records
   without anonymous measurements keep the previous cgroup-peak rule.
-* At least 20 samples, or the row in force stays -- a crate in
+* An OOM retains the maximum observed total peak across every attempt,
+  including scheduler PSS for a killed supervisor. Its minimum is that peak
+  x 1.25 plus 512 MiB, rounded up to 256 MiB. A request ceiling at which every
+  recorded attempt was killed adds a further 512 MiB step and reserves at
+  least that failed ceiling plus the step. Even a low sampled peak advances
+  a failed ceiling by 256 MiB. OOM rows never lower the in-force memory
+  request and bypass the successful-sample minimum and hysteresis.
+  They require `worker_memory_kb` and cap at the smallest advertised budget
+  of the sampled workers. CPU still needs successful samples; kills are not
+  CPU samples. Existing kind/profile/metadata overrides inherit the crate's
+  OOM minimum, since an unjoined kill cannot identify a cheaper phase.
+* At least 20 successful samples, or the row in force stays -- a crate in
   `MINIMUM_MEMORY_KB` keeps its floor even on too few or too small samples.
   Fewer samples are not enough for a p95.
 * A request is a platform property and so part of the action key: resizing a
@@ -131,7 +143,8 @@ joined metadata/check actions supply the phase table, separated by target
 kind and dev/optimized profile. Twenty successful samples are required. The
 anonymous compile formula, fixed 512 MiB allowance, rounding and hysteresis
 apply with a 512 MiB admission floor; executor cgroup floors stay unchanged.
-OOM evidence refuses refresh. Missing rows inherit full compile requests.
+OOM evidence uses the same step-up, including killed-only rows. Missing rows
+inherit full compile requests.
 
 Clippy
 ------
@@ -214,6 +227,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # Measured compile sizing retains its existing baseline. Admission defaults
 # live in generate_model.py and may be below the executor's cgroup floor.
 DEFAULT_MEMORY_KB = 1572864
+UNMEASURED_MEMORY_KB = 512 * 1024
 # The executor raises every cgroup to at least this limit, independently of admission.
 ACTION_MEMORY_FLOOR_KB = 2097152
 DEFAULT_CPU_COUNT = 1
@@ -253,6 +267,8 @@ MEMORY_GRANULARITY_KB = 256 * 1024
 # changes by this much or by a whole CPU; smaller corrections are not worth a
 # cold rebuild of the row's targets.
 MEMORY_HYSTERESIS_KB = 512 * 1024
+# Fully censored request ceilings need a full resize step beyond sampled need.
+COMPILE_OOM_STEP_KB = MEMORY_HYSTERESIS_KB
 # Bazel's wrappers: another build system's reservations, left out of the
 # waste report, and a test label's evidence only until Buck2 has its own.
 BAZEL_TEST_TOOLS = {"test-setup.sh", "generate-xml.sh"}
@@ -286,6 +302,10 @@ class Samples:
         self.anon_peaks: list[int] = []
         self.oom_kills = 0
         self.slot_ratios: list[float] = []
+        self.attempts: collections.Counter[int] = collections.Counter()
+        self.killed_requests: collections.Counter[int] = collections.Counter()
+        self.observed_peak_bytes = 0
+        self.worker_memory_kb: int | None = None
 
     def observe(
         self,
@@ -297,6 +317,7 @@ class Samples:
         slot_share: float | None = None,
     ) -> None:
         basis = peak_bytes if anon_peak_bytes is None else anon_peak_bytes
+        self.observed_peak_bytes = max(self.observed_peak_bytes, peak_bytes)
         self.records.append((cores, basis, requested_cpu))
         if slot_share is not None:
             self.slot_ratios.append(cores / slot_share)
@@ -395,6 +416,7 @@ def first_party_crates(metadata: dict) -> set[tuple[str, str]]:
     for package in metadata["packages"]:
         for target in package["targets"]:
             if "custom-build" in target["kind"]:
+                crates.add((package["name"], "build_script_build"))
                 continue
             crates.add((package["name"], target["name"].replace("-", "_")))
     return crates
@@ -420,7 +442,6 @@ def collect(
     crates: set[tuple[str, str]],
     optimized_ops: frozenset[str] = frozenset(),
     clippy: bool = False,
-    *, include_killed: bool = False,
 ) -> dict[str, Samples]:
     """Keeps the Lash compile samples; every other record is skipped.
 
@@ -444,12 +465,25 @@ def collect(
         if (record.get("category") == "clippy") != clippy:
             continue
         observe_compile(measured[f"{pair[0]}/{pair[1]}"], record)
-    return {key: samples for key, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
+    return {key: samples for key, samples in measured.items() if samples.records or samples.oom_kills}
 
 
 def observe_compile(samples: Samples, record: dict[str, str]) -> None:
     """Keep sizing samples and retain kills even when they leave no sample."""
-    samples.oom_kills += oom_killed(record)
+    if record.get("exit") in (None, "", "-"):
+        return
+    killed = oom_killed(record)
+    requested_kb = as_int(record.get("requested_kb")) or 0
+    budget_kb = as_int(record.get("worker_memory_kb"))
+    if killed and (not requested_kb or not budget_kb):
+        raise ValueError("OOM sizing requires requested_kb and worker_memory_kb")
+    if budget_kb:
+        samples.worker_memory_kb = min(samples.worker_memory_kb or budget_kb, budget_kb)
+    samples.attempts[requested_kb] += 1
+    samples.observed_peak_bytes = max(samples.observed_peak_bytes, held_bytes(record) or 0)
+    samples.oom_kills += killed
+    if killed:
+        samples.killed_requests[requested_kb] += 1
     if record.get("exit") != "0":
         return
     wall_ms = as_int(record.get("wall_ms"))
@@ -494,7 +528,7 @@ def oom_killed(record: dict[str, str]) -> bool:
     )
 
 
-def collect_kinds(labelled, shared: set[str], *, include_killed: bool = False) -> dict[tuple[str, str], Samples]:
+def collect_kinds(labelled, shared: set[str]) -> dict[tuple[str, str], Samples]:
     """The matched records of each shared identity, per `(key, kind)`.
 
     `labelled` is `action_categories_from_events.labelled_records`; `shared`
@@ -508,10 +542,10 @@ def collect_kinds(labelled, shared: set[str], *, include_killed: bool = False) -
             continue
         if key in shared and kind in TARGET_KINDS and not optimized:
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
-    return {group: samples for group, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
+    return {group: samples for group, samples in measured.items() if samples.records or samples.oom_kills}
 
 
-def collect_optimized(labelled, *, include_killed: bool = False) -> dict[tuple[str, str], Samples]:
+def collect_optimized(labelled) -> dict[tuple[str, str], Samples]:
     """The matched records of optimized-configuration compiles, per `(key, kind)`."""
     from action_categories_from_events import TARGET_KINDS
 
@@ -519,7 +553,7 @@ def collect_optimized(labelled, *, include_killed: bool = False) -> dict[tuple[s
     for key, kind, category, _emit, optimized, record in labelled:
         if optimized and kind in TARGET_KINDS and category != "clippy":
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
-    return {group: samples for group, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
+    return {group: samples for group, samples in measured.items() if samples.records or samples.oom_kills}
 
 
 # The prelude names metadata-fast with infallible diagnostics `diag`.
@@ -546,15 +580,13 @@ def metadata_table(measured, current, inherited) -> dict:
 
     Metadata uses the anonymous compile formula and allowance, with the
     512 MiB admission floor used by Clippy. Its cgroup floor is unchanged.
-    Twenty samples and the compile hysteresis still apply. OOM evidence
-    refuses a refresh rather than pricing a row from survivors alone.
+    Twenty samples and the compile hysteresis still apply to successful-only
+    evidence. OOMs use the compile step-up even without successful samples.
     """
     rows = {profile: {key: dict(kinds) for key, kinds in current.get(profile, {}).items()}
             for profile in ("dev", "optimized")}
     for (key, kind, optimized), samples in sorted(measured.items()):
-        if samples.oom_kills:
-            raise ValueError(f"metadata OOM evidence for {key}/{kind}/{optimized}")
-        if len(samples.records) < MIN_SAMPLES:
+        if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
             continue
         profile = "optimized" if optimized else "dev"
         previous = rows[profile].get(key, {}).get(kind)
@@ -798,7 +830,7 @@ def request_of(row: dict | None) -> tuple[int, int]:
     row = row or {}
     return (
         row.get("cpu_count", DEFAULT_CPU_COUNT),
-        row.get("memory_kb", DEFAULT_MEMORY_KB),
+        row.get("memory_kb", UNMEASURED_MEMORY_KB),
     )
 
 
@@ -823,8 +855,19 @@ def compile_row(
         if not samples.records or percentile(samples.slot_ratios, CPU_PERCENTILE) <= 1
         else cpu_count_for(p95)
     )
+    oom = oom_evidence(samples)
+    oom_floor = oom.get("oom_floor_kb", 0)
+    if samples.oom_kills:
+        memory_kb = max(memory_kb, current[1], oom_floor)
+        if len(samples.records) < MIN_SAMPLES:
+            cpu_count = max(DEFAULT_CPU_COUNT, current[0])
+        if memory_kb > oom["worker_memory_kb"]:
+            if current[1] > oom["worker_memory_kb"] or minimum > oom["worker_memory_kb"]:
+                raise ValueError("in-force memory request exceeds sampled worker budget")
+            memory_kb = oom["worker_memory_kb"]
     cpu_count, memory_kb = settled(
-        current, cpu_count, memory_kb, max(max(samples.legacy_peaks, default=0), minimum * 1024)
+        current, cpu_count, memory_kb,
+        max(max(samples.legacy_peaks, default=0), minimum * 1024, oom_floor * 1024),
     )
     return {
         "cpu_count": cpu_count,
@@ -835,6 +878,7 @@ def compile_row(
         ),
         "peak_bytes": peak_bytes,
         "samples": len(samples.records),
+        **oom,
     }
 
 
@@ -851,12 +895,12 @@ def table(
     for key in sorted(set(measured) | set(MINIMUM_MEMORY_KB) | set(current)):
         samples = measured.get(key, Samples())
         minimum = MINIMUM_MEMORY_KB.get(key)
-        if len(samples.records) < MIN_SAMPLES and minimum is None:
+        if len(samples.records) < MIN_SAMPLES and minimum is None and not samples.oom_kills:
             if key in current:
                 sizes[key] = current[key]
             continue
         row = compile_row(samples, request_of(current.get(key)), minimum or 0)
-        if request_of(row) == (DEFAULT_CPU_COUNT, DEFAULT_MEMORY_KB):
+        if not samples.oom_kills and request_of(row) == (DEFAULT_CPU_COUNT, UNMEASURED_MEMORY_KB):
             continue
         sizes[key] = row
     return dict(sorted(sizes.items()))
@@ -875,7 +919,7 @@ def clippy_table(
     sizes = {}
     for key in sorted(set(measured) | set(current)):
         samples = measured.get(key, Samples())
-        if len(samples.records) < MIN_SAMPLES:
+        if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
             if key in current:
                 sizes[key] = current[key]
             continue
@@ -901,7 +945,18 @@ def kind_table(
         for kind, row in rows.items():
             sizes[key][kind] = row
     for (key, kind), samples in sorted(measured.items()):
-        if len(samples.records) < MIN_SAMPLES:
+        if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
+            previous = sizes[key].get(kind)
+            if previous and (
+                max(samples.legacy_peaks, default=0) > previous["memory_kb"] * 1024
+                or (samples.anon_peaks and percentile(samples.anon_peaks, MEMORY_PERCENTILE)
+                    >= COMPILE_HEADROOM * previous["memory_kb"] * 1024)
+            ):
+                check_compile_memory(
+                    compile_evidence({key: samples})[key],
+                    request_of(crate_rows.get(key))[1], (key, kind),
+                )
+                sizes[key].pop(kind)
             continue
         existing = current.get(key, {}).get(kind)
         in_force = request_of(existing or crate_rows.get(key))
@@ -948,7 +1003,7 @@ def optimized_table(
         existing = current.get(key, {}).get(kind)
         dev = dev_request(key, kind)
         in_force = request_of(existing) if existing else previous_request(key, kind)
-        row = compile_row(samples, in_force) if samples.records else dict(existing or {})
+        row = compile_row(samples, in_force) if samples.records or samples.oom_kills else dict(existing or {})
         if len(samples.records) < MIN_SAMPLES:
             row["cpu_count"] = max(row.get("cpu_count", 0), in_force[0])
             row["memory_kb"] = max(row.get("memory_kb", 0), in_force[1])
@@ -960,6 +1015,7 @@ def optimized_table(
                 "p99_peak_bytes": row.get("p99_peak_bytes", 0),
                 "peak_bytes": row.get("peak_bytes", 0),
                 "samples": len(samples.records),
+                **oom_evidence(samples),
             }
     return {key: dict(sorted(rows.items())) for key, rows in sorted(sizes.items())}
 
@@ -975,6 +1031,7 @@ def category_table(lines, crates: set[tuple[str, str]]) -> dict[str, dict[str, i
     """
     peaks: dict[str, list[int]] = collections.defaultdict(list)
     unsized: dict[str, int] = collections.defaultdict(int)
+    packages = {package for package, _crate in crates}
     for line in lines:
         record = parse_record(line)
         if record is None or record.get("category", "-") in ("-", ""):
@@ -984,7 +1041,10 @@ def category_table(lines, crates: set[tuple[str, str]]) -> dict[str, dict[str, i
             continue
         category = record["category"]
         peaks[category].append(peak_bytes)
-        if (record.get("pkg", ""), record.get("crate", "")) not in crates:
+        pair = (record.get("pkg", ""), record.get("crate", ""))
+        # A retired target in a current first-party package has no action in
+        # today's graph; its historical peak does not size a default action.
+        if pair not in crates and pair[0] not in packages:
             unsized[category] = max(unsized[category], peak_bytes)
     return {
         category: {
@@ -1165,19 +1225,31 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
             else resolved_request(key, kind, crate_rows, kind_rows)
         ),
     )
+    # A crate-only kill cannot name a cheaper target kind or metadata phase.
+    # Existing overrides must not hide the aggregate OOM floor.
+    for key, crate in crate_rows.items():
+        floor = crate.get("oom_floor_kb", 0)
+        if not floor:
+            continue
+        overrides = list(kind_rows.get(key, {}).values())
+        overrides += list(optimized_rows.get(key, {}).values())
+        overrides += [row for by_key in metadata_rows.values()
+                      for row in by_key.get(key, {}).values()]
+        for row in overrides:
+            row["memory_kb"] = max(row["memory_kb"], floor)
     test_rows = test_run_table(
         collect_test_runs(lines, labels),
         {label: row for label, row in stored("test-run-sizes.json").items() if label in labels},
     )
     evidence = {
-        "crates": compile_evidence(collect(lines, crates, optimized_ops, include_killed=True)),
-        "clippy": compile_evidence(collect(lines, crates, optimized_ops, clippy=True, include_killed=True)),
+        "crates": compile_evidence(collect(lines, crates, optimized_ops)),
+        "clippy": compile_evidence(collect(lines, crates, optimized_ops, clippy=True)),
         "kinds": {},
         "optimized": {},
     }
     for name, measured in (
-        ("kinds", collect_kinds(labelled, shared, include_killed=True)),
-        ("optimized", collect_optimized(labelled, include_killed=True)),
+        ("kinds", collect_kinds(labelled, shared)),
+        ("optimized", collect_optimized(labelled)),
     ):
         for (key, kind), row in compile_evidence(measured).items():
             evidence[name].setdefault(key, {})[kind] = row
@@ -1194,6 +1266,35 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         (ROOT / "tools/buck2" / name).write_text(render(rows), encoding="utf-8")
 
 
+def oom_evidence(samples: Samples) -> dict:
+    """A censored compile's minimum request, capped by its sampled workers."""
+    if not samples.oom_kills:
+        return {}
+    if not samples.worker_memory_kb or not samples.killed_requests:
+        raise ValueError("OOM sizing requires worker memory and failed request evidence")
+    all_killed = max(
+        (request for request, count in samples.killed_requests.items()
+         if count == samples.attempts[request]), default=0,
+    )
+    need = samples.observed_peak_bytes * MEMORY_MARGIN + COMPILE_CACHE_BYTES
+    if all_killed:
+        need += COMPILE_OOM_STEP_KB * 1024
+    floor = max(
+        math.ceil(need / 1024 / MEMORY_GRANULARITY_KB) * MEMORY_GRANULARITY_KB,
+        max(samples.killed_requests) + MEMORY_GRANULARITY_KB,
+        all_killed + COMPILE_OOM_STEP_KB if all_killed else 0,
+    )
+    budget = samples.worker_memory_kb // MEMORY_GRANULARITY_KB * MEMORY_GRANULARITY_KB
+    return {
+        "oom_kills": samples.oom_kills,
+        "oom_floor_kb": min(floor, budget),
+        "oom_peak_bytes": samples.observed_peak_bytes,
+        "oom_max_request_kb": max(samples.killed_requests),
+        "oom_all_killed_request_kb": all_killed,
+        "worker_memory_kb": budget,
+    }
+
+
 def compile_evidence(measured: dict) -> dict:
     """Safety measurements, including defaults and failed actions."""
     return {
@@ -1202,6 +1303,7 @@ def compile_evidence(measured: dict) -> dict:
             "legacy_peak_bytes": max(samples.legacy_peaks, default=0),
             "oom_kills": samples.oom_kills,
             "samples": len(samples.records),
+            **oom_evidence(samples),
         }
         for key, samples in sorted(measured.items())
     }
@@ -1217,8 +1319,10 @@ def prune_compile_evidence(evidence: dict, crates: set[tuple[str, str]]) -> dict
 
 
 def check_compile_memory(evidence: dict, memory_kb: int, identity: object) -> None:
-    """Reject anonymous p99 at 80% of the request and every recorded kill."""
-    assert evidence["oom_kills"] == 0, (identity, "OOM/SIGKILL in measurement window")
+    """Require OOM step-up and preserve anonymous and legacy headroom."""
+    if evidence["oom_kills"]:
+        assert memory_kb >= evidence["oom_floor_kb"], (identity, "OOM peak needs step-up")
+        assert memory_kb <= evidence["worker_memory_kb"], (identity, "request exceeds worker budget")
     assert evidence["p99_anon_peak_bytes"] < COMPILE_HEADROOM * memory_kb * 1024, (identity, "compile p99 needs headroom")
     assert evidence["legacy_peak_bytes"] <= memory_kb * 1024, (identity, "legacy peak exceeds request")
 
@@ -1239,6 +1343,8 @@ def read_lines(
                 # Metadata belongs to this captured log, not the current pool.
                 for field in ("worker_cpu_count", "worker_max_inflight"):
                     line += f"\t{field}={metadata[field]}"
+                if "worker_memory_kb" in metadata:
+                    line += f"\tworker_memory_kb={metadata['worker_memory_kb']}"
             lines.append(line)
     return lines
 

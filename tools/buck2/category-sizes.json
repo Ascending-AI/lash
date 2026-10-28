@@ -1,56 +1,44 @@
 {
   "buildscript": {
-    "p99_peak_bytes": 191111168,
-    "peak_bytes": 244113408,
-    "samples": 163,
-    "unsized_peak_bytes": 244113408
+    "p99_peak_bytes": 304783360,
+    "peak_bytes": 310157312,
+    "samples": 1055,
+    "unsized_peak_bytes": 43118592
   },
   "clippy": {
-    "p99_peak_bytes": 1481330688,
-    "peak_bytes": 2365784064,
-    "samples": 39720,
-    "unsized_peak_bytes": 64204800
-  },
-  "deps": {
-    "p99_peak_bytes": 19554304,
-    "peak_bytes": 22224896,
-    "samples": 129634,
-    "unsized_peak_bytes": 22224896
+    "p99_peak_bytes": 1174921216,
+    "peak_bytes": 1703632896,
+    "samples": 32689,
+    "unsized_peak_bytes": 0
   },
   "failure_filter": {
-    "p99_peak_bytes": 18100224,
-    "peak_bytes": 18526208,
-    "samples": 412,
-    "unsized_peak_bytes": 18526208
-  },
-  "http_archive": {
-    "p99_peak_bytes": 27910144,
-    "peak_bytes": 84611072,
-    "samples": 380,
-    "unsized_peak_bytes": 84611072
+    "p99_peak_bytes": 17399808,
+    "peak_bytes": 19087360,
+    "samples": 1080,
+    "unsized_peak_bytes": 19087360
   },
   "rustc": {
-    "p99_peak_bytes": 3083759616,
-    "peak_bytes": 5185740800,
-    "samples": 109851,
-    "unsized_peak_bytes": 1387737088
+    "p99_peak_bytes": 2507499520,
+    "peak_bytes": 5680197632,
+    "samples": 111612,
+    "unsized_peak_bytes": 690479104
   },
   "rustdoc_json": {
-    "p99_peak_bytes": 1111965696,
-    "peak_bytes": 1226665984,
-    "samples": 1654,
+    "p99_peak_bytes": 1089179648,
+    "peak_bytes": 1194594304,
+    "samples": 1996,
     "unsized_peak_bytes": 0
   },
   "schema_check": {
-    "p99_peak_bytes": 18743296,
-    "peak_bytes": 18743296,
-    "samples": 39,
-    "unsized_peak_bytes": 18743296
+    "p99_peak_bytes": 22458368,
+    "peak_bytes": 22458368,
+    "samples": 19,
+    "unsized_peak_bytes": 22458368
   },
   "schema_generate": {
-    "p99_peak_bytes": 25538560,
-    "peak_bytes": 26591232,
-    "samples": 202,
-    "unsized_peak_bytes": 26591232
+    "p99_peak_bytes": 50032640,
+    "peak_bytes": 50032640,
+    "samples": 72,
+    "unsized_peak_bytes": 50032640
   }
 }

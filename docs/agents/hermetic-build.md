@@ -175,9 +175,24 @@ python3 tools/buck2/action_sizes_from_log.py --report --since <unix-seconds> usa
 
 Commit the rewritten size/evidence tables and generated rules. The worker
 metadata sidecar is keyed by exact log path and records that worker's
-`worker_cpu_count` and `worker_max_inflight` at capture time. Records carrying
-these fields need no sidecar. The tool owns sizing formulas and evidence
+`worker_cpu_count`, `worker_max_inflight` and `worker_memory_kb` at capture time.
+Records carrying these fields need no sidecar. OOM records require the worker
+memory budget. The tool owns sizing formulas and evidence
 requirements. A resized request changes action keys and re-executes its targets.
+
+A compile or Clippy OOM produces a request even without successful samples.
+Its minimum is the maximum observed total peak, including scheduler PSS from
+killed attempts, times 1.25 plus the existing 512 MiB allowance. If every
+attempt at a request ceiling was killed, add a further 512 MiB and reserve at
+least that failed ceiling plus 512 MiB. Round up to 256 MiB and cap at the
+smallest advertised memory budget of the sampled workers. OOM rows retain
+at least one 256 MiB increase over every failed ceiling, even when successful
+runs outnumber kills and the sampled peak missed the fatal allocation. They retain
+their in-force memory request and bypass sample-count and hysteresis limits;
+CPU continues to use successful p95 measurements. The evidence retains kills
+and their derived minimum, and the sizing check rejects requests below it.
+Existing target-kind, optimized and metadata overrides inherit the crate's
+OOM minimum so an unjoined kill cannot leave a cheaper execution path.
 
 If a measured compile is OOM-killed and cannot wait for a refresh, scale its
 first-party compile requests for one invocation:

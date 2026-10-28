@@ -4,7 +4,7 @@ load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load(":buildscript_manifest.bzl", "buildscript_manifest", "buildscript_sources")
 load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LINT_FLAGS", "LINTED_WORKSPACE_PACKAGES", "first_party_clippy_configuration")
 load(":deps.bzl", "PACKAGE_DEPS")
-load(":exec_sizes.bzl", "HELPER_BUDGET")
+load(":exec_sizes.bzl", "HELPER_BUDGET", "sized_exec_properties")
 load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
 load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
 load(":run_binary.bzl", "binary_run_attrs", "lash_run_binary")
@@ -295,7 +295,7 @@ def lash_rust_build_script(
         native.rust_binary,
         binary,
         binary + "__clippy",
-        {},
+        sized_exec_properties(package_name, "build_script_build"),
         clippy_configuration = first_party_clippy_configuration(manifest_dir),
         crate = "build_script_build",
         edition = "2024",
