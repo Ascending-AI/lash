@@ -17,9 +17,30 @@ use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LongText, ShortText};
 use lash_kernel_doc::heap::TextSummary;
 use lash_kernel_doc::heap_values::text_summary;
 
-use super::{Arena, Facts};
+use super::{Arena, BODY_SLOTS, Facts};
 
 impl Arena {
+    /// A resident text has no member handles, cold chunks or flat member
+    /// summary. Install those known facts without walking a general body.
+    fn insert_resident_text(&mut self, text: LongText) -> ArenaHandle {
+        debug_assert!(matches!(&*text.chunks, [Chunk::Resident(_)]));
+        self.resident = self
+            .resident
+            .saturating_add(BODY_SLOTS + text.summary.utf8_bytes / 16);
+        let handle = self.objects.insert(Body::LongText(text));
+        let index = handle.index() as usize;
+        if index >= self.facts.len() {
+            self.facts.resize_with(index + 1, Facts::default);
+        }
+        // Arena::free clears every released slot's facts. Fresh slots also
+        // start empty, so only the new token and zero-list membership change.
+        self.tokens += 1;
+        self.facts[index].token = self.tokens;
+        self.facts[index].zero = true;
+        self.zero.push(handle);
+        handle
+    }
+
     /// Joins resident text members with an inline separator. Admission sees
     /// the output work and installation bounds before allocation begins.
     pub fn join_text(
@@ -50,13 +71,10 @@ impl Arena {
         }
         let value = match ShortText::new(&joined) {
             Some(short) => Value::Text(short),
-            None => Value::LongText(self.insert(
-                Body::LongText(LongText {
-                    summary: text_summary(&joined),
-                    chunks: Box::new([Chunk::Resident(joined)]),
-                }),
-                Facts::default(),
-            )),
+            None => Value::LongText(self.insert_resident_text(LongText {
+                summary: text_summary(&joined),
+                chunks: Box::new([Chunk::Resident(joined)]),
+            })),
         };
         Some((value, bytes))
     }
@@ -74,17 +92,14 @@ impl Arena {
         if let Some(short) = ShortText::new(&joined) {
             return Some(Value::Text(short));
         }
-        Some(Value::LongText(self.insert(
-            Body::LongText(LongText {
-                summary: TextSummary {
-                    utf8_bytes: len as u64,
-                    chars: a.chars.checked_add(b.chars)?,
-                    utf16_units: a.utf16_units.checked_add(b.utf16_units)?,
-                },
-                chunks: Box::new([Chunk::Resident(joined)]),
-            }),
-            Facts::default(),
-        )))
+        Some(Value::LongText(self.insert_resident_text(LongText {
+            summary: TextSummary {
+                utf8_bytes: len as u64,
+                chars: a.chars.checked_add(b.chars)?,
+                utf16_units: a.utf16_units.checked_add(b.utf16_units)?,
+            },
+            chunks: Box::new([Chunk::Resident(joined)]),
+        })))
     }
 
     /// Whether long text `text` may give its storage to a concatenation of
@@ -118,7 +133,7 @@ impl Arena {
             return None;
         };
         let (made, len) = extended(text, part, || text_summary(part), admit)?;
-        Some((self.insert(Body::LongText(made), Facts::default()), len))
+        Some((self.insert_resident_text(made), len))
     }
 
     /// Extends with a resident text value, borrowing distinct long operands
@@ -142,7 +157,7 @@ impl Arena {
             return None;
         };
         let (made, len) = extended(left, part, || right.summary, admit)?;
-        Some((self.insert(Body::LongText(made), Facts::default()), len))
+        Some((self.insert_resident_text(made), len))
     }
 
     /// Gives `from` back the storage [`Self::extend_text`] gave `to`, cut
