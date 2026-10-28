@@ -70,6 +70,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
         .functions
         .extend(locals.into_iter().map(|f| (f.identity(), f)));
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: Default::default(),
     };
@@ -153,6 +154,7 @@ fn helper_view_reads_walk_admission_edges_once_per_link() {
     for document in [document, empty] {
         let id = document.identity();
         let link = Link {
+            helper_fills: Default::default(),
             document: id,
             fills: BTreeMap::new(),
         };

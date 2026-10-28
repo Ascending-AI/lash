@@ -40,6 +40,7 @@ fn fixture_link(document: &Document) -> lash::package::Link {
         })
         .collect();
     lash::package::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     }
@@ -231,9 +232,14 @@ fn coarse_eval() {
             .map(|site| {
                 let action = view.dataflow.actions.iter().find(|a| a.site == *site);
                 match &action.unwrap().callee {
-                    Some(view::CalleeView::Effect(name)) => {
-                        document.imports[&name.slot].name.member.as_str().to_owned()
-                    }
+                    Some(view::CalleeView::Effect(name)) => document.imports[&match name.slot {
+                        lash::package::OperationSlot::Import(slot) => slot,
+                        _ => panic!("authored operation"),
+                    }]
+                        .name
+                        .member
+                        .as_str()
+                        .to_owned(),
                     other => format!("{other:?}"),
                 }
             })
@@ -279,9 +285,13 @@ fn coarse_eval() {
                     .find(|action| action.site == *site)
                     .unwrap();
                 match &action.callee {
-                    Some(view::CalleeView::Effect(name)) => {
-                        document.imports[&name.slot].name.member.as_str()
-                    }
+                    Some(view::CalleeView::Effect(name)) => document.imports[&match name.slot {
+                        lash::package::OperationSlot::Import(slot) => slot,
+                        _ => panic!("authored operation"),
+                    }]
+                        .name
+                        .member
+                        .as_str(),
                     _ => "task",
                 }
             })
@@ -346,7 +356,8 @@ fn coarse_eval() {
                 .find(|(_, import)| import.name.member.as_str() == name)
                 .unwrap()
                 .0
-                .to_owned(),
+                .to_owned()
+                .into(),
         }))
     };
     assert_eq!(ordered, [effect("value")]);

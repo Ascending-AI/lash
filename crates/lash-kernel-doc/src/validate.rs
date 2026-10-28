@@ -169,17 +169,12 @@ fn validate_document_in(
         if !library_reach.insert(function) {
             continue;
         }
-        let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
-            (registered.callees().clone(), registered.imports().clone())
+        let callees = if let Some(registered) = catalog.registered(&function) {
+            registered.callees().clone()
         } else if let Some(definition) = catalog.definition(&function) {
             definition
                 .body()
-                .map(|body| {
-                    (
-                        body.functions.keys().copied().collect(),
-                        body.imports.clone(),
-                    )
-                })
+                .map(|body| body.functions.keys().copied().collect())
                 .unwrap_or_default()
         } else {
             return Err(invalid(
@@ -187,11 +182,6 @@ fn validate_document_in(
                 InvalidReason::FunctionNotResolved { function },
             ));
         };
-        for (slot, import) in imports {
-            if document.imports.get(&slot) != Some(&import) {
-                return Err(invalid(None, InvalidReason::Import { slot }));
-            }
-        }
         pending.extend(callees);
     }
     let context = crate::DocumentCatalog::new(document, catalog);

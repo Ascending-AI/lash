@@ -308,7 +308,7 @@ fn helper_operation_resolution_preserves_literal_values() {
 }
 
 /// FIG-7253 / D11: helper operations are supplied by their owner, without a
-/// shipped-package inventory. Resolution and dependency lifting preserve slots.
+/// shipped-package inventory. Body-local slots remain private to the helper.
 #[test]
 fn helper_operations_compose_owner_declarations_without_package_policy() {
     use crate::authoring::{HelperOperation, Imports, include_library_dependencies};
@@ -336,7 +336,7 @@ fn helper_operations_compose_owner_declarations_without_package_policy() {
     ).unwrap();
     let function = definitions[0].identity();
     let mut document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
-    let imports = Imports::default().reserving(operations.iter().map(|operation| operation.slot));
+    let imports = Imports::default();
     let authored = imports.operation(
         crate::service_name("customer", "write"),
         Signature {
@@ -344,14 +344,10 @@ fn helper_operations_compose_owner_declarations_without_package_policy() {
             result: Type::Null,
         },
     );
-    assert_ne!(authored, operations[0].slot);
+
     document.imports = imports.into_map();
     include_library_dependencies(&mut document, [function], &library).unwrap();
     let expected = crate::authoring::operation_imports(&operations).unwrap();
-    assert_eq!(
-        document.imports.get(&ImportSlot(0)),
-        expected.get(&ImportSlot(0))
-    );
     assert_eq!(definitions[0].body().unwrap().imports, expected);
     let unknown = define_functions(
         "function demo.unknown() -> Text\nkernel 1\nmetering statements\nbody { return perform third_party.missing() as Text }\n",
@@ -367,7 +363,7 @@ fn helper_operations_compose_owner_declarations_without_package_policy() {
     document
         .imports
         .insert(ImportSlot(0), document.imports[&authored].clone());
-    assert!(include_library_dependencies(&mut document, [function], &library).is_err());
+    include_library_dependencies(&mut document, [function], &library).unwrap();
 }
 
 /// FIG-7354: helper-native membership belongs to the immutable manifest;

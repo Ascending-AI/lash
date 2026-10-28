@@ -10,16 +10,8 @@ use {
 };
 
 #[derive(Clone, Debug, Default)]
-pub struct Imports(
-    std::cell::RefCell<BTreeMap<ImportSlot, Import>>,
-    std::collections::BTreeSet<ImportSlot>,
-);
+pub struct Imports(std::cell::RefCell<BTreeMap<ImportSlot, Import>>);
 impl Imports {
-    /// Reserve the helper owner's slots before allocating authored imports.
-    pub fn reserving(mut self, slots: impl IntoIterator<Item = ImportSlot>) -> Self {
-        self.1.extend(slots);
-        self
-    }
     pub fn insert(&self, import: Import) -> ImportSlot {
         let mut entries = self.0.borrow_mut();
         if let Some((slot, _)) = entries.iter().find(|(_, found)| **found == import) {
@@ -30,7 +22,7 @@ impl Imports {
                 .unwrap_or_else(|error| panic!("source admission bounds import count: {error}")),
         );
         let mut slot = slot;
-        while entries.contains_key(&slot) || self.1.contains(&slot) {
+        while entries.contains_key(&slot) {
             slot.0 += 1;
         }
         entries.insert(slot, import);
@@ -128,8 +120,8 @@ pub fn used_imports(block: &Block) -> std::collections::BTreeSet<ImportSlot> {
     used
 }
 
-/// One operation contract declared by the helper owner. Its slot belongs to
-/// the document assembly that composes these helpers with authored code.
+/// One operation contract declared by the helper owner. Its numeric slot is
+/// local to helper bodies; Links bind its declaration identity separately.
 #[derive(Clone, Debug)]
 pub struct HelperOperation {
     pub slot: ImportSlot,

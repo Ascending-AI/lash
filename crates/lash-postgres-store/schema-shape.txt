@@ -191,7 +191,7 @@ table lash_execution_resolutions
   column execution text not-null
   column link text not-null
   column record_json text not-null
-  column slot bigint not-null
+  column slot text not-null
   primary-key (execution, link, slot)
   foreign-key (execution) references lash_package_executions (execution) on delete cascade
 table lash_fleet_format

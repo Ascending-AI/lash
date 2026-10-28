@@ -700,6 +700,7 @@ async fn a_host_inline_start_realizes_once_across_a_crash_at_each_realization_wr
     // The Link is deterministic, so every independent store tests the same cut.
     let document = super::function_document(lash_kernel_doc::parse_definition(RUN).unwrap(), "run");
     let link = lash::package::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: Default::default(),
     };

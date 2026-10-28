@@ -246,6 +246,7 @@ pub(crate) fn program(
         })
         .collect();
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };

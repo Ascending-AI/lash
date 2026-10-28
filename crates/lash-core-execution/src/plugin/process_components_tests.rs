@@ -67,7 +67,7 @@ async fn an_internal_dynamic_path_is_refused_before_provider_resolution() {
         ).unwrap().with_execution(std::time::Duration::from_secs(30));
     let effect = lash_kernel_value::OperationUse {
         link: lash_kernel_value::LinkId::from_bytes([5; 32]),
-        slot: lash_kernel_value::ImportSlot(0),
+        slot: (lash_kernel_value::ImportSlot(0)).into(),
     };
     let registration = crate::DeferredToolProviderRegistration::new(resolver.clone())
         .with_dispatch_grant(crate::DispatchGrant::new(granted.clone(), |input| {

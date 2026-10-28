@@ -991,8 +991,10 @@ impl<'a> Walk<'a> {
             }) => (None, Some(effect)),
             Written::Statement(_) | Written::Nested(_) => (None, None),
         };
-        let signature = effect
-            .and_then(|slot| self.document.imports.get(slot))
+        let effect_use = effect.and_then(|slot| self.context.operation_use(&node.site.unit, *slot));
+        let signature = effect_use
+            .as_ref()
+            .and_then(|use_| self.context.operation_import(use_))
             .and_then(|import| match &import.kind {
                 lash_kernel_package::ImportKind::Operation { signature } => Some(signature),
                 _ => None,
@@ -1064,11 +1066,10 @@ impl<'a> Walk<'a> {
                 (Some(callee), params)
             }
             (Some(Callee::Value(_)), _) => (None, Vec::new()),
-            (None, Some(effect)) => (
-                Some(CalleeView::Effect(lash_kernel_value::OperationUse {
-                    link: self.context.reference.link(),
-                    slot: *effect,
-                })),
+            (None, Some(_)) => (
+                Some(CalleeView::Effect(
+                    effect_use.ok_or_else(|| mismatch(node))?,
+                )),
                 signature.map_or_else(Vec::new, |required| required.params.clone()),
             ),
             (None, None) => (None, Vec::new()),
@@ -1260,13 +1261,18 @@ fn applied_performs(
             continue;
         }
         if site.path.is_empty() {
-            if let Some(unit) = graph.unit(&site.unit) {
-                effects.extend(unit.effects.effects.iter().map(|slot| {
-                    lash_kernel_value::OperationUse {
-                        link: context.reference.link(),
-                        slot: *slot,
-                    }
+            if let Unit::Library(function) = &site.unit {
+                effects.extend(context.reached(lash_kernel_value::CallableId {
+                    link: context.reference.link(),
+                    function: *function,
                 }));
+            } else if let Some(unit) = graph.unit(&site.unit) {
+                effects.extend(
+                    unit.effects
+                        .effects
+                        .iter()
+                        .filter_map(|slot| context.operation_use(&site.unit, *slot)),
+                );
             }
             continue;
         }
@@ -1287,10 +1293,9 @@ fn applied_performs(
             let callee = match action {
                 Some(Derived::Statement(ActionNode::Perform { slot: effect, .. }))
                 | Some(Derived::Nested(ActNode::Perform { slot: effect, .. }, _)) => {
-                    effects.insert(lash_kernel_value::OperationUse {
-                        link: context.reference.link(),
-                        slot: *effect,
-                    });
+                    if let Some(use_) = context.operation_use(&node.site.unit, *effect) {
+                        effects.insert(use_);
+                    }
                     None
                 }
                 Some(Derived::Statement(

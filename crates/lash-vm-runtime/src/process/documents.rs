@@ -805,6 +805,7 @@ impl KernelDocuments {
         let old = content.link(predecessor).map_err(map_link_refusal)?;
         self.admit_identified_document(claim, document).await?;
         let next = Link {
+            helper_fills: old.helper_fills.clone(),
             document: document.id(),
             fills: old.fills.clone(),
         };
@@ -850,7 +851,14 @@ impl KernelDocuments {
             LinkPurpose::PackageCode { path } => (Some(path), None),
         };
         let link = namespace(&request.snapshot)
-            .fulfil(content, request.document, &request.context, own, attachment)
+            .fulfil(
+                content,
+                self.helpers.as_ref(),
+                request.document,
+                &request.context,
+                own,
+                attachment,
+            )
             .map_err(map_link_refusal)?;
         let id = link.identity();
         content.links.insert(id, link.clone());

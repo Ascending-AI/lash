@@ -83,6 +83,47 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn operation_imports(
+        &self,
+    ) -> impl Iterator<Item = (OperationUse, &lash_kernel_value::Import)> {
+        self.instances.iter().flat_map(|(link, instance)| {
+            self.documents[&instance.document]
+                .imports
+                .iter()
+                .filter(|(_, import)| {
+                    matches!(import.kind, lash_kernel_value::ImportKind::Operation { .. })
+                })
+                .map(move |(slot, import)| {
+                    (
+                        OperationUse {
+                            link: *link,
+                            slot: (*slot).into(),
+                        },
+                        import,
+                    )
+                })
+                .chain(instance.helper_operations.iter().map(move |(id, import)| {
+                    (
+                        OperationUse {
+                            link: *link,
+                            slot: lash_kernel_value::OperationSlot::Helper(*id),
+                        },
+                        import,
+                    )
+                }))
+        })
+    }
+
+    pub fn operation_import(&self, use_: &OperationUse) -> Option<&lash_kernel_value::Import> {
+        let instance = self.instances.get(&use_.link)?;
+        match use_.slot {
+            lash_kernel_value::OperationSlot::Import(slot) => {
+                self.documents.get(&instance.document)?.imports.get(&slot)
+            }
+            lash_kernel_value::OperationSlot::Helper(id) => instance.helper_operations.get(&id),
+        }
+    }
+
     pub fn helpers(&self) -> &Arc<lash_kernel_doc::BuildHelpers> {
         self.library.helpers()
     }
@@ -142,7 +183,7 @@ impl Program {
                     (ImportKind::Operation { .. }, Fill::Operation(_) | Fill::Deferred { .. }) => {
                         PreparedSlot::Operation(OperationUse {
                             link: *id,
-                            slot: *slot,
+                            slot: (*slot).into(),
                         })
                     }
                     (_, Fill::Export { link, export }) => {
@@ -208,12 +249,23 @@ impl Program {
                 };
                 slots.insert(*slot, prepared);
             }
+            let mut helper_operations = BTreeMap::new();
+            for (helper, binding) in &instance.helper_fills {
+                if *helper != lash_kernel_value::HelperOperationId::of_import(&binding.import)
+                    || !matches!(binding.import.kind, ImportKind::Operation { .. })
+                    || !matches!(binding.fill, Fill::Operation(_) | Fill::Deferred { .. })
+                {
+                    return Err(invalid("invalid helper operation binding"));
+                }
+                helper_operations.insert(*helper, binding.import.clone());
+            }
             instances.insert(
                 *id,
                 PreparedInstance {
                     link: *id,
                     document: instance.document,
                     slots,
+                    helper_operations,
                 },
             );
         }
@@ -293,11 +345,14 @@ impl Program {
         };
         if let lash_kernel_doc::Selection::Restored(selection) = &self.selection {
             for callable in &selection.live {
-                let document = self
+                let instance = self
                     .instances
                     .get(&callable.link)
-                    .and_then(|instance| self.documents.get(&instance.document))
                     .ok_or_else(|| invalid("retained callable Link is not loaded"))?;
+                let document = self
+                    .documents
+                    .get(&instance.document)
+                    .ok_or_else(|| invalid("retained callable document is not loaded"))?;
                 if document.functions.contains_key(&callable.function) {
                     continue;
                 }
@@ -317,8 +372,9 @@ impl Program {
                     if registered.kernel() != document.kernel() {
                         return Err(invalid("retained helper requires another kernel"));
                     }
-                    for (slot, import) in registered.imports() {
-                        if document.imports.get(slot) != Some(import) {
+                    for import in registered.imports().values() {
+                        let id = lash_kernel_value::HelperOperationId::of_import(import);
+                        if instance.helper_operations.get(&id) != Some(import) {
                             return Err(invalid("retained helper operation context differs"));
                         }
                     }
@@ -355,13 +411,20 @@ impl Program {
             if !document.imports.keys().eq(instance.slots.keys()) {
                 return Err(invalid("instance slots differ from declared Imports"));
             }
+            for (id, import) in &instance.helper_operations {
+                if *id != lash_kernel_value::HelperOperationId::of_import(import)
+                    || !matches!(import.kind, lash_kernel_value::ImportKind::Operation { .. })
+                {
+                    return Err(invalid("invalid prepared helper operation declaration"));
+                }
+            }
             for (slot, prepared) in &instance.slots {
                 let import = &document.imports[slot];
                 match (&import.kind, prepared) {
                     (
                         lash_kernel_value::names::ImportKind::Operation { .. },
                         PreparedSlot::Operation(use_),
-                    ) if use_.link == *link && use_.slot == *slot => {}
+                    ) if use_.link == *link && use_.slot == (*slot).into() => {}
                     (
                         lash_kernel_value::names::ImportKind::Code { .. },
                         PreparedSlot::Function { callable, export },
@@ -867,6 +930,8 @@ pub struct PreparedInstance {
     pub link: LinkId,
     pub document: DocumentId,
     pub slots: BTreeMap<ImportSlot, PreparedSlot>,
+    pub helper_operations:
+        BTreeMap<lash_kernel_value::HelperOperationId, lash_kernel_value::Import>,
 }
 
 /// Source-owned coordinates used only when callables cross a boundary.
@@ -874,4 +939,22 @@ pub struct PreparedInstance {
 pub struct FunctionOrigins {
     pub sites: BTreeMap<(LinkId, lash_kernel_value::sites::Site), lash_kernel_dialect::Written>,
     pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
+}
+
+impl PreparedInstance {
+    pub fn operation(&self, slot: lash_kernel_value::OperationSlot) -> Option<OperationUse> {
+        match slot {
+            lash_kernel_value::OperationSlot::Import(slot) => match self.slots.get(&slot)? {
+                PreparedSlot::Operation(use_) => Some(*use_),
+                _ => None,
+            },
+            lash_kernel_value::OperationSlot::Helper(id) => self
+                .helper_operations
+                .contains_key(&id)
+                .then_some(OperationUse {
+                    link: self.link,
+                    slot,
+                }),
+        }
+    }
 }

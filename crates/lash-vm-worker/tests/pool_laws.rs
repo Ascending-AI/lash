@@ -177,6 +177,7 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
         })
         .collect();
     let root = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };
@@ -633,7 +634,7 @@ fn admitted(
         .expect("the fixture imports host.echo");
     let expected = lash_kernel_value::OperationUse {
         link: linked(document.shared().as_ref().clone()).link,
-        slot: *slot,
+        slot: (*slot).into(),
     };
     assert_eq!(
         request.use_, expected,

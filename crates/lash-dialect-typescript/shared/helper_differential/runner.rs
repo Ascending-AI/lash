@@ -384,26 +384,14 @@ impl Runner {
 /// Bind the fixture's ordinary dialect reads by their exact linked uses.
 pub fn modes(program: &Program) -> lash_kernel_vm::EffectModes {
     program
-        .instances
-        .iter()
-        .flat_map(|(link, instance)| {
-            program.documents[&instance.document]
-                .imports
+        .operation_imports()
+        .filter_map(|(use_, import)| {
+            (lash_kernel_services::TYPESCRIPT
                 .iter()
-                .filter_map(move |(slot, import)| {
-                    (lash_kernel_services::TYPESCRIPT
-                        .iter()
-                        .chain(lash_kernel_services::PYTHON.iter())
-                        .any(|operation| operation.name == import.name)
-                        && import.name.member.as_str() != "sleep")
-                        .then_some((
-                            lash_kernel_value::OperationUse {
-                                link: *link,
-                                slot: *slot,
-                            },
-                            lash_kernel_value::OperationMode::Read,
-                        ))
-                })
+                .chain(lash_kernel_services::PYTHON.iter())
+                .any(|operation| operation.name == import.name)
+                && import.name.member.as_str() != "sleep")
+                .then_some((use_, lash_kernel_value::OperationMode::Read))
         })
         .collect()
 }

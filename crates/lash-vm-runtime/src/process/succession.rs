@@ -210,8 +210,11 @@ impl EngineSuccession for KernelSuccession {
                 let requested = content
                     .links
                     .get(&use_.link)
-                    .and_then(|link| content.documents.get(&link.document))
-                    .and_then(|document| document.imports.get(&use_.slot))
+                    .and_then(|link| {
+                        content.documents.get(&link.document).and_then(|document| {
+                            link.operation_import(&document.imports, use_.slot)
+                        })
+                    })
                     .map(|import| import.name.clone())
                     .ok_or_else(|| refuse("adopted use has no Import"))?;
                 Ok(ResolutionRecord {

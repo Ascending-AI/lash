@@ -63,6 +63,7 @@ pub fn embed<M: Machine>(
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };
@@ -136,21 +137,17 @@ pub fn embed<M: Machine>(
                 for request in park.requests.into_iter().rev() {
                     match request {
                         Request::Effect(request) => {
-                            let row = answers
-                                .iter()
-                                .position(|row| {
-                                    row.effect
-                                        == program.documents
-                                            [&program.instances[&request.use_.link].document]
-                                            .imports[&request.use_.slot]
-                                            .name
-                                            .member
-                                            .as_str()
-                                        && row.args == request.args
-                                })
-                                .ok_or_else(|| {
-                                    format!("no answer for {} {:?}", request.use_, request.args)
-                                })?;
+                            let row =
+                                answers
+                                    .iter()
+                                    .position(|row| {
+                                        program.operation_import(&request.use_).is_some_and(
+                                            |import| row.effect == import.name.member.as_str(),
+                                        ) && row.args == request.args
+                                    })
+                                    .ok_or_else(|| {
+                                        format!("no answer for {} {:?}", request.use_, request.args)
+                                    })?;
                             let answer = answers.remove(row);
                             machine
                                 .deliver(request.wait, answer.outcome)

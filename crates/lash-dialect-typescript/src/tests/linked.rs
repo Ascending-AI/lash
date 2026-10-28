@@ -73,11 +73,12 @@ pub(super) fn operation(use_: &OperationUse) -> EffectName {
 /// independently in the prepared library and contribute no retained Documents.
 pub(super) fn content(
     document: &lash_kernel_doc::Document,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
 ) -> (
     lash_kernel_package::LinkedContent,
     lash_kernel_value::LinkId,
 ) {
-    let link = link(document);
+    let link = link(document, catalog);
     let root = link.identity();
     let mut content = lash_kernel_package::LinkedContent::default();
     content
@@ -86,8 +87,31 @@ pub(super) fn content(
     content.links.insert(root, link);
     (content, root)
 }
-fn link(document: &lash_kernel_doc::Document) -> Link {
+fn link(
+    document: &lash_kernel_doc::Document,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
+) -> Link {
     Link {
+        helper_fills: lash_kernel_doc::helper_imports(document, catalog)
+            .unwrap_or_else(|error| panic!("scripted helper declarations: {error}"))
+            .into_iter()
+            .map(|(id, import)| {
+                let operation = lash_kernel_services::TYPESCRIPT
+                    .iter()
+                    .chain(lash_kernel_services::PYTHON.iter())
+                    .find(|operation| operation.name == import.name)
+                    .unwrap_or_else(|| {
+                        panic!("scripted helper service {} is not declared", import.name)
+                    });
+                (
+                    id,
+                    lash_kernel_value::HelperFill {
+                        import,
+                        fill: Fill::Operation(operation.requirement.clone()),
+                    },
+                )
+            })
+            .collect(),
         document: document.identity(),
         fills: document
             .imports
@@ -118,7 +142,7 @@ pub(super) fn program(
     document: Arc<lash_kernel_doc::Document>,
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
-    let (content, root) = content(&document);
+    let (content, root) = content(&document, library.helpers().as_ref());
     let mut program = lash_kernel_vm::Program::prepare(
         root,
         BTreeMap::from([(document.identity(), Arc::clone(&document))]),
@@ -133,12 +157,21 @@ pub(super) fn program(
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {
+            for (id, import) in &instance.helper_operations {
+                operations.insert(
+                    OperationUse {
+                        link: *link,
+                        slot: lash_kernel_value::OperationSlot::Helper(*id),
+                    },
+                    import.name.clone(),
+                );
+            }
             for (slot, import) in &program.documents[&instance.document].imports {
                 if matches!(import.kind, ImportKind::Operation { .. }) {
                     operations.insert(
                         OperationUse {
                             link: *link,
-                            slot: *slot,
+                            slot: (*slot).into(),
                         },
                         import.name.clone(),
                     );

@@ -66,8 +66,10 @@ Packages remain the distribution mechanism for user- and host-installed code.
 A Package Publication supplies scoped provenance and members; its presence does
 not put them in the Tool Catalog. Extra visible members do not enlarge a
 selected execution's reach. Links retain the full reached DAG, so calls and
-callbacks use their defining Link and Import slot, including after a cold
-restore. `OperationUse` preserves that identity, while a process permits one
+callbacks use their defining Link and operation identity, including after a cold
+restore. Authored operation uses name an Import slot; helper operation uses
+name the helper declaration content identity in a separate namespace. Helper
+fills stay explicit and per Link (FIG-7505). `OperationUse` preserves that identity, while a process permits one
 provider and tool per operation (ADR 0141 §5).
 
 A parked root records its HelperLibraryId. An equal installed identity requires

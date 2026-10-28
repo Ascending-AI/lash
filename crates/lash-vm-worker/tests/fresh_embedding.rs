@@ -128,6 +128,7 @@ fn a_host_native_library_binds_exact_declarations_and_runs_complete_documents() 
         serde_json::to_string(&lash_kernel_doc::print_definition(&width)).unwrap(),
     )).unwrap());
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::new(),
     };
@@ -453,6 +454,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
     ),
                layout: ExecutionStrategy| {
         let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: BTreeMap::new(),
         };

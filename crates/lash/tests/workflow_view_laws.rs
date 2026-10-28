@@ -90,6 +90,7 @@ fn holder(
         })
         .collect();
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };
@@ -233,6 +234,7 @@ async fn a_refused_source_map_publishes_no_document_or_link() {
             "a refused map publishes no Document"
         );
         let link = Link {
+            helper_fills: Default::default(),
             document: candidate.identity(),
             fills: Default::default(),
         };

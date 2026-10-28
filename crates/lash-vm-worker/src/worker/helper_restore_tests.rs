@@ -143,7 +143,7 @@ fn fixture() -> Fixture {
     let registry = image.registry().clone();
     let helpers = Arc::clone(image.helpers());
     let mut document = lash_kernel_doc::parse_document(&format!(
-        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\nimport 4294901762 operation typescript.sleep(milliseconds: Int) -> Null\n{definitions}main {{ let unused = invoke law.dead() let child = invoke law.parent() let saved = &law.saved let callback = &law.callback let value = invoke law.twice(callback, 7) let answer = apply child(value) let retained = saved return answer }}"
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x: Any) -> Any\n{definitions}main {{ let unused = invoke law.dead() let child = invoke law.parent() let saved = &law.saved let callback = &law.callback let value = invoke law.twice(callback, 7) let answer = apply child(value) let retained = saved return answer }}"
     )).unwrap();
     document.functions.retain(|id, _| !helpers.contains(id));
     document.library =
@@ -165,6 +165,25 @@ fn fixture() -> Fixture {
         })
         .collect();
     let link = Link {
+        helper_fills: lash_kernel_doc::helper_imports(&document, helpers.as_ref())
+            .unwrap()
+            .into_iter()
+            .map(|(id, import)| {
+                let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
+                    panic!("helper operation")
+                };
+                (
+                    id,
+                    lash_kernel_value::HelperFill {
+                        fill: Fill::Operation(OperationRequirement::new(
+                            signature.clone(),
+                            lash_kernel_value::ContractId::new("1"),
+                        )),
+                        import,
+                    },
+                )
+            })
+            .collect(),
         document: document.identity(),
         fills,
     };
@@ -336,6 +355,12 @@ impl Fixture {
             instances: wire::encode(
                 PayloadKind::Start,
                 &vec![lash_kernel_vm::PreparedInstance {
+                    helper_operations: self
+                        .link
+                        .helper_fills
+                        .iter()
+                        .map(|(id, binding)| (*id, binding.import.clone()))
+                        .collect(),
                     link: self.link.identity(),
                     document: self.document.identity(),
                     slots: self
@@ -351,7 +376,7 @@ impl Fixture {
                                 lash_kernel_vm::PreparedSlot::Operation(
                                     lash_kernel_value::OperationUse {
                                         link: self.link.identity(),
-                                        slot: *slot,
+                                        slot: (*slot).into(),
                                     },
                                 ),
                             )
@@ -543,7 +568,7 @@ fn an_unchanged_pinned_helper_survives_an_unrelated_library_change() {
 }
 
 /// A callback helper carries under an unchanged service contract. A changed
-/// fixed slot refuses before rewriting, and the original checkpoint still runs.
+/// helper fill refuses before rewriting, and the original checkpoint still runs.
 #[test]
 fn a_callback_helper_carries_only_with_its_original_operation_contract() {
     let fixture = fixture();
@@ -563,14 +588,13 @@ fn a_callback_helper_carries_only_with_its_original_operation_contract() {
     };
     for changed in [true, false] {
         let mut next = Link {
+            helper_fills: fixture.link.helper_fills.clone(),
             document: document.identity(),
             fills: fixture.link.fills.clone(),
         };
         if changed {
-            let Fill::Operation(requirement) = next
-                .fills
-                .get_mut(&lash_kernel_value::ImportSlot(0xffff0002))
-                .unwrap()
+            let Fill::Operation(requirement) =
+                &mut next.helper_fills.values_mut().next().unwrap().fill
             else {
                 panic!("operation")
             };
@@ -723,6 +747,7 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     );
 
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: Default::default(),
     };

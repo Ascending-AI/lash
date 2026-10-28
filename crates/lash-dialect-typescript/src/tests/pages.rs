@@ -119,31 +119,34 @@ pub(crate) fn reopen(
 }
 
 pub(crate) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::EffectModes {
-    program
-        .instances
-        .iter()
-        .flat_map(|(link, instance)| {
-            program.documents[&instance.document]
-                .imports
-                .iter()
-                .filter(|(_, import)| matches!(import.kind, ImportKind::Operation { .. }))
-                .map(move |(slot, import)| {
-                    let read = matches!(
-                        import.name.package.to_string().as_str(),
-                        "typescript" | "python"
-                    ) && matches!(import.name.member.as_str(), "clock" | "random");
-                    (
-                        OperationUse {
-                            link: *link,
-                            slot: *slot,
-                        },
-                        if read {
-                            OperationMode::Read
-                        } else {
-                            OperationMode::Waited
-                        },
-                    )
-                })
-        })
-        .collect()
+    let mut modes = std::collections::BTreeMap::new();
+    for (link, instance) in &program.instances {
+        for (slot, import) in program.documents[&instance.document]
+            .imports
+            .iter()
+            .map(|(slot, import)| (lash_kernel_value::OperationSlot::Import(*slot), import))
+            .chain(
+                instance
+                    .helper_operations
+                    .iter()
+                    .map(|(id, import)| (lash_kernel_value::OperationSlot::Helper(*id), import)),
+            )
+        {
+            if matches!(import.kind, ImportKind::Operation { .. }) {
+                let read = matches!(
+                    import.name.package.to_string().as_str(),
+                    "typescript" | "python"
+                ) && matches!(import.name.member.as_str(), "clock" | "random");
+                modes.insert(
+                    OperationUse { link: *link, slot },
+                    if read {
+                        OperationMode::Read
+                    } else {
+                        OperationMode::Waited
+                    },
+                );
+            }
+        }
+    }
+    modes
 }

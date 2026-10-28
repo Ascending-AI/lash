@@ -359,11 +359,7 @@ pub(crate) fn lower_with_calls(
         imported,
         library: environment.library,
         namespaces: environment.namespaces,
-        imports: lash_kernel_dialect::authoring::Imports::default().reserving(
-            lash_ext_py_helpers::package::helper_operations()
-                .iter()
-                .map(|operation| operation.slot),
-        ),
+        imports: lash_kernel_dialect::authoring::Imports::default(),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
         used: BTreeMap::new(),

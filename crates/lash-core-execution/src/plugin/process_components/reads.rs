@@ -40,7 +40,7 @@ impl EngineEffectReads for ProcessReads {
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<Result<serde_json::Value, EngineReadError>, PluginError> {
-        let effect = format!("{}:{}", use_.link, use_.slot.0);
+        let effect = format!("{}:{}", use_.link, use_.slot);
         let unavailable = |why: String| PluginError::Session(format!("read of `{effect}`: {why}"));
         let Some(fixed) = self.env.execution().fixed(use_) else {
             return Err(unavailable(

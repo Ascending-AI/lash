@@ -508,11 +508,11 @@ pub fn carry_checkpoint(
     carry.visit(&reads, |use_| {
         let successor = context.uses[use_];
         let mut key = successor.link.as_bytes().to_vec();
-        key.extend_from_slice(&successor.slot.0.to_be_bytes());
+        key.extend_from_slice(&lash_kernel_value::tokens::encode_body(&successor.slot));
         carried_reads.write(key, successor, &carry.access)?;
         if successor != *use_ && context.retained.iter().any(|held| held.link == use_.link) {
             let mut key = use_.link.as_bytes().to_vec();
-            key.extend_from_slice(&use_.slot.0.to_be_bytes());
+            key.extend_from_slice(&lash_kernel_value::tokens::encode_body(&use_.slot));
             carried_reads.write(key, *use_, &carry.access)?;
         }
         Ok(())
@@ -554,7 +554,7 @@ pub fn carry_checkpoint(
     Ok((page, lash_kernel_state::kernel_internals::checkpoint(root)))
 }
 
-/// The helper's exact validated static reach owns these service slots. An
+/// The helper's exact validated static reach owns these declarations. An
 /// equal library digest never authorizes rebinding an operation contract.
 fn check_helper_operation_context(
     root: lash_kernel_value::FunctionId,
@@ -573,12 +573,18 @@ fn check_helper_operation_context(
         let registered = helpers
             .registered(&function)
             .ok_or(ParkedRefusal::MissingHelper { function })?;
-        for slot in registered.imports().keys() {
+        for (slot, import) in registered.imports() {
+            let key = lash_kernel_value::OperationSlot::Helper(
+                lash_kernel_value::HelperOperationId::of_import(import),
+            );
             let before = links
                 .get(&predecessor)
-                .and_then(|link| link.fills.get(slot));
-            let after = links.get(&successor).and_then(|link| link.fills.get(slot));
-            if !matches!((before, after), (Some(Fill::Operation(before)), Some(Fill::Operation(after))) if before == after)
+                .and_then(|link| link.operation_fill(key));
+            let after = links
+                .get(&successor)
+                .and_then(|link| link.operation_fill(key));
+            if !matches!(before, Some(Fill::Operation(_) | Fill::Deferred { .. }))
+                || before != after
             {
                 return Err(ParkedRefusal::HelperOperationContext {
                     function,

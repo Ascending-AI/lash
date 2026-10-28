@@ -98,11 +98,13 @@ fn work_start(
         }),
     );
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: Default::default(),
     };
     let link_id = link.identity();
     let instances = vec![lash_kernel_vm::PreparedInstance {
+        helper_operations: Default::default(),
         link: link_id,
         document: document.identity(),
         slots: Default::default(),

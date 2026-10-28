@@ -1,7 +1,7 @@
 //! Immutable namespaces, fills and scoped deferred grants.
 //! A Link fills every document Import; selected execution reach is smaller.
 //! Publication context is trusted host provenance, never guest authorization.
-pub use crate::content_ids::{LinkId, PackageId};
+pub use crate::content_ids::{HelperOperationId, LinkId, PackageId};
 
 use crate::{TurnControls, identity::SessionId, names::*, operations::*, providers::*, types::*};
 
@@ -90,6 +90,34 @@ pub enum MemberKind {
 pub struct Link {
     pub document: DocumentId,
     pub fills: BTreeMap<ImportSlot, Fill>,
+    pub helper_fills: BTreeMap<crate::HelperOperationId, HelperFill>,
+}
+
+/// An explicit helper declaration and its host-chosen fill, scoped by its Link.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HelperFill {
+    pub import: Import,
+    pub fill: Fill,
+}
+
+impl Link {
+    pub fn operation_fill(&self, slot: OperationSlot) -> Option<&Fill> {
+        match slot {
+            OperationSlot::Import(slot) => self.fills.get(&slot),
+            OperationSlot::Helper(id) => self.helper_fills.get(&id).map(|binding| &binding.fill),
+        }
+    }
+    pub fn operation_import<'a>(
+        &'a self,
+        imports: &'a BTreeMap<ImportSlot, Import>,
+        slot: OperationSlot,
+    ) -> Option<&'a Import> {
+        match slot {
+            OperationSlot::Import(slot) => imports.get(&slot),
+            OperationSlot::Helper(id) => self.helper_fills.get(&id).map(|binding| &binding.import),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -265,7 +293,12 @@ record_codec!(Brand { package, name });
 
 record_codec!(Import { name, kind });
 
-record_codec!(Link { document, fills });
+record_codec!(Link {
+    document,
+    fills,
+    helper_fills
+});
+record_codec!(HelperFill { import, fill });
 
 record_codec!(Package { path, members });
 

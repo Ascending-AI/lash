@@ -160,6 +160,7 @@ fn probe(library: &PreparedLibrary, get: FunctionId, calls: usize) -> Option<u64
     let mut document = Document::new(NumberPolicy::BySpelling, body);
     document.library.insert(get);
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::new(),
     };

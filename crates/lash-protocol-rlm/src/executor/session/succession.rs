@@ -68,6 +68,7 @@ impl CodeModeExecutionState {
             let document =
                 lash_kernel_doc::IdentifiedDocument::new(plan.rewritten.document.clone());
             let next = lash_kernel_value::package::Link {
+                helper_fills: old.helper_fills.clone(),
                 document: document.id(),
                 fills: old.fills.clone(),
             };

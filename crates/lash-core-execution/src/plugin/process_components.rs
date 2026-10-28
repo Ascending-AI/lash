@@ -351,7 +351,7 @@ impl ProcessComponentRegistry {
                 crate::Judgement::ContractChanged { pinned, live } => {
                     return Err(EnginePortError::Refused(
                         AdmissionRefusal::ContractMismatch {
-                            use_: *use_,
+                            use_: Box::new(*use_),
                             pinned,
                             offered: live,
                         },

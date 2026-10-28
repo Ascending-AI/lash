@@ -300,11 +300,11 @@ async fn a_callable_reports_root_and_captured_operation_uses_before_save_and_lin
     );
     let root_use = OperationUse {
         link: function.callable.link,
-        slot: ImportSlot(0),
+        slot: (ImportSlot(0)).into(),
     };
     let capture_use = OperationUse {
         link: helper.callable.link,
-        slot: ImportSlot(0),
+        slot: (ImportSlot(0)).into(),
     };
     let mut expected = [root_use, capture_use];
     expected.sort();
@@ -383,11 +383,11 @@ async fn a_saved_callable_selects_routes_for_root_and_captured_links() {
     };
     let root_use = OperationUse {
         link: function.callable.link,
-        slot: ImportSlot(0),
+        slot: (ImportSlot(0)).into(),
     };
     let capture_use = OperationUse {
         link: helper.callable.link,
-        slot: ImportSlot(0),
+        slot: (ImportSlot(0)).into(),
     };
     let mut selected = BTreeMap::new();
     let mut uses = [root_use, capture_use];
@@ -525,11 +525,11 @@ async fn a_saved_callable_refuses_distinct_routes_for_the_same_operation() {
         };
         let root_use = OperationUse {
             link: function.callable.link,
-            slot: ImportSlot(0),
+            slot: (ImportSlot(0)).into(),
         };
         let capture_use = OperationUse {
             link: helper.callable.link,
-            slot: ImportSlot(0),
+            slot: (ImportSlot(0)).into(),
         };
         let selected = [
             (
@@ -569,7 +569,7 @@ async fn a_saved_callable_refuses_distinct_routes_for_the_same_operation() {
         assert!(!error.is_retryable());
         assert!(error.is_terminal());
         assert!(
-            matches!(error, lash::EmbedError::ConflictingOperationRoutes { operation, first, second } if *operation == echo_definitions()[0].manifest.operation && BTreeSet::from([first, second]) == BTreeSet::from([root_use, capture_use]))
+            matches!(error, lash::EmbedError::ConflictingOperationRoutes { operation, first, second } if *operation == echo_definitions()[0].manifest.operation && BTreeSet::from([*first, *second]) == BTreeSet::from([root_use, capture_use]))
         );
     }
     core.shutdown().await.unwrap();

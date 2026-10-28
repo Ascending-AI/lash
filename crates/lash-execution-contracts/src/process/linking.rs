@@ -179,7 +179,7 @@ pub enum AdmissionRefusal {
         use_: OperationUse,
     },
     ContractMismatch {
-        use_: OperationUse,
+        use_: Box<OperationUse>,
         pinned: ContractId,
         offered: ContractId,
     },

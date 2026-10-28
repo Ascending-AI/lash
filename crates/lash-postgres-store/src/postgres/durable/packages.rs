@@ -91,7 +91,7 @@ async fn load(
     let json: Option<String> = crate::observed_sql::query_scalar(SQL.load_resolution.sql())
         .bind(&key.execution.0)
         .bind(key.use_.link.to_string())
-        .bind(i64::from(key.use_.slot.0))
+        .bind(key.use_.slot.to_string())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
@@ -243,7 +243,7 @@ async fn commit_resolution(
     crate::observed_sql::query(SQL.insert_resolution.sql())
         .bind(&candidate.key.execution.0)
         .bind(candidate.key.use_.link.to_string())
-        .bind(i64::from(candidate.key.use_.slot.0))
+        .bind(candidate.key.use_.slot.to_string())
         .bind(json)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
@@ -400,7 +400,7 @@ pub(super) async fn seed(
     crate::observed_sql::query(SQL.insert_resolution.sql())
         .bind(&record.key.execution.0)
         .bind(record.key.use_.link.to_string())
-        .bind(i64::from(record.key.use_.slot.0))
+        .bind(record.key.use_.slot.to_string())
         .bind(json)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await

@@ -44,14 +44,27 @@ pub fn plan_adoption<T: Clone + Eq>(
             }
             continue;
         }
-        let import = old_doc.imports.get(&use_.slot);
-        let fill = old.fills.get(&use_.slot);
-        let candidates = new_doc
-            .imports
-            .iter()
-            .filter(|(slot, found)| Some(*found) == import && new.fills.get(slot) == fill)
-            .map(|(slot, _)| *slot)
-            .collect::<Vec<_>>();
+        let candidates = match use_.slot {
+            OperationSlot::Import(slot) => {
+                let import = old_doc.imports.get(&slot);
+                let fill = old.fills.get(&slot);
+                new_doc
+                    .imports
+                    .iter()
+                    .filter(|(slot, found)| Some(*found) == import && new.fills.get(slot) == fill)
+                    .map(|(slot, _)| OperationSlot::Import(*slot))
+                    .collect::<Vec<_>>()
+            }
+            OperationSlot::Helper(id) => {
+                let before = old.helper_fills.get(&id);
+                let after = new.helper_fills.get(&id);
+                if before.is_some() && before == after {
+                    vec![use_.slot]
+                } else {
+                    vec![]
+                }
+            }
+        };
         let [slot] = candidates.as_slice() else {
             return Err(HelperAdoptionRefusal::AmbiguousUse { use_: *use_ });
         };

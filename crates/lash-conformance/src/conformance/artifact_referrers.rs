@@ -712,6 +712,7 @@ where
             .await
             .expect("document");
         let link = Link {
+            helper_fills: Default::default(),
             document,
             fills: Default::default(),
         };
@@ -769,6 +770,7 @@ where
             .expect("publication");
         // An authored root is retained independently of the published package roots.
         let authored = Link {
+            helper_fills: Default::default(),
             document,
             fills: [(
                 ImportSlot(0),

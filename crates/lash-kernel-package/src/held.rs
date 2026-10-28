@@ -134,6 +134,17 @@ impl LinkedContent {
                 })?;
             crate::build::compatible(self, *slot, import, fill)?;
         }
+        for (id, binding) in &link.helper_fills {
+            if *id != lash_kernel_value::HelperOperationId::of_import(&binding.import)
+                || !matches!(binding.import.kind, ImportKind::Operation { .. })
+                || !matches!(binding.fill, Fill::Operation(_) | Fill::Deferred { .. })
+            {
+                return Err(LinkRefusal::InvalidDocument {
+                    message: "invalid helper operation binding".into(),
+                });
+            }
+            crate::build::compatible(self, ImportSlot(0), &binding.import, &binding.fill)?;
+        }
         Ok(())
     }
     /// The full retention DAG is deliberately broader than a selected executable reach.
@@ -323,7 +334,14 @@ impl LinkedContent {
                     required
                         .functions
                         .insert(function, registered.header().name.clone());
-                    required.imports.extend(registered.imports().keys());
+                    required
+                        .helper_imports
+                        .extend(registered.imports().values().map(|import| {
+                            (
+                                lash_kernel_value::HelperOperationId::of_import(import),
+                                import.clone(),
+                            )
+                        }));
                 }
                 // Ordinary Link operations and code retention stay authorized
                 // even when the current main has already passed their use.
@@ -376,6 +394,7 @@ impl LinkedContent {
                         for member in ty.members.values() {
                             let r = function_reach(document, member.function(), catalog, mode);
                             required.imports.extend(r.imports);
+                            required.helper_imports.extend(r.helper_imports);
                             required.functions.extend(r.functions);
                         }
                         required
@@ -411,6 +430,35 @@ impl LinkedContent {
                     reach.machine.natives.insert(*function);
                 }
             }
+            for (helper, import) in &required.helper_imports {
+                let binding = link
+                    .helper_fills
+                    .get(helper)
+                    .filter(|binding| binding.import == *import)
+                    .ok_or_else(|| LinkRefusal::InvalidDocument {
+                        message: format!("unfilled helper operation {}", import.name),
+                    })?;
+                let use_ = OperationUse {
+                    link: id,
+                    slot: OperationSlot::Helper(*helper),
+                };
+                let need = match &binding.fill {
+                    Fill::Operation(requirement) => OperationNeed::Fixed {
+                        name: import.name.clone(),
+                        requirement: requirement.clone(),
+                    },
+                    Fill::Deferred { provider } => OperationNeed::Deferred {
+                        name: import.name.clone(),
+                        grant: provider.clone(),
+                    },
+                    _ => {
+                        return Err(LinkRefusal::InvalidDocument {
+                            message: "helper operation is not an operation fill".into(),
+                        });
+                    }
+                };
+                reach.operations.insert(use_, need);
+            }
             for slot in required.imports {
                 let import =
                     document
@@ -426,7 +474,10 @@ impl LinkedContent {
                         slot,
                         name: import.name.clone(),
                     })?;
-                let use_ = OperationUse { link: id, slot };
+                let use_ = OperationUse {
+                    link: id,
+                    slot: slot.into(),
+                };
                 match fill {
                     Fill::Operation(requirement) => {
                         reach.operations.insert(

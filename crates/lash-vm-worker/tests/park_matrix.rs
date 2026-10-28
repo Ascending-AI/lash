@@ -172,7 +172,14 @@ main {{
     let link = lash_kernel_package::Namespace {
         advertisements: vec![(&context, &advertisement)],
     }
-    .fulfil(&content, document.identity(), &context, None, None)
+    .fulfil(
+        &content,
+        &document.functions,
+        document.identity(),
+        &context,
+        None,
+        None,
+    )
     .expect("the park fixture's published operations fulfil its imports");
     let id = link.identity();
     Program::prepare(
@@ -1450,7 +1457,9 @@ mod postgres {
 }
 
 fn operation_name(use_: lash_kernel_value::OperationUse) -> String {
-    program(NumberPolicy::BySpelling).document.imports[&use_.slot]
+    program(NumberPolicy::BySpelling)
+        .operation_import(&use_)
+        .expect("operation declaration")
         .name
         .to_string()
 }

@@ -124,16 +124,26 @@ impl ViewContext {
                 return None;
             }
             let same_bindings = definition.body().is_none_or(|body| {
-                body.imports.keys().all(|slot| {
+                body.imports.iter().all(|(slot, import)| {
+                    let key = if self
+                        .document(callable.link)
+                        .is_some_and(|document| document.functions.contains_key(&callable.function))
+                    {
+                        (*slot).into()
+                    } else {
+                        lash_kernel_value::OperationSlot::Helper(
+                            lash_kernel_value::HelperOperationId::of_import(import),
+                        )
+                    };
                     self.content
                         .links
                         .get(&callable.link)
-                        .and_then(|link| link.fills.get(slot))
+                        .and_then(|link| link.operation_fill(key))
                         == self
                             .content
                             .links
                             .get(&other.link)
-                            .and_then(|link| link.fills.get(slot))
+                            .and_then(|link| link.operation_fill(key))
                 })
             });
             same_bindings.then_some(display)
@@ -262,6 +272,33 @@ impl ViewContext {
         self.timers.extend(timers);
         self
     }
+    pub(crate) fn operation_use(
+        &self,
+        unit: &lash_kernel_value::sites::Unit,
+        slot: ImportSlot,
+    ) -> Option<lash_kernel_value::OperationUse> {
+        let link = self.reference.link();
+        let document = self.document(link)?;
+        let slot = match unit {
+            lash_kernel_value::sites::Unit::Library(function)
+                if !document.functions.contains_key(function) =>
+            {
+                let import = self.helpers.registered(function)?.imports().get(&slot)?;
+                lash_kernel_value::OperationSlot::Helper(
+                    lash_kernel_value::HelperOperationId::of_import(import),
+                )
+            }
+            _ => slot.into(),
+        };
+        Some(lash_kernel_value::OperationUse { link, slot })
+    }
+    pub(crate) fn operation_import(
+        &self,
+        use_: &lash_kernel_value::OperationUse,
+    ) -> Option<&lash_kernel_value::Import> {
+        let link = self.content.links.get(&use_.link)?;
+        link.operation_import(&self.document(use_.link)?.imports, use_.slot)
+    }
     pub(crate) fn is_timer(&self, use_: lash_kernel_value::OperationUse) -> bool {
         let Some(link) = self.content.links.get(&use_.link) else {
             return false;
@@ -269,10 +306,11 @@ impl ViewContext {
         let Some(document) = self.document(use_.link) else {
             return false;
         };
-        let Some(import) = document.imports.get(&use_.slot) else {
+        let Some(import) = link.operation_import(&document.imports, use_.slot) else {
             return false;
         };
-        let Some(lash_kernel_value::Fill::Operation(required)) = link.fills.get(&use_.slot) else {
+        let Some(lash_kernel_value::Fill::Operation(required)) = link.operation_fill(use_.slot)
+        else {
             return false;
         };
         self.content.packages.iter().any(|(id, package)| {

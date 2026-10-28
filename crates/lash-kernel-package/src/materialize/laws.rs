@@ -11,6 +11,7 @@ fn fixture() -> (LinkedContent, FunctionValue) {
         .functions
         .insert(definition.identity(), definition.clone());
     let link = lash_kernel_value::package::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::new(),
     };
@@ -62,7 +63,7 @@ fn open(
 }
 
 /// FIG-7475: two defining Links may reuse a slot for different tools while
-/// a reached helper retains its clock slot. Neither tool may be rebound.
+/// a reached helper keeps its separate clock declaration. Neither tool may be rebound.
 #[test]
 fn materialize_imports_preserves_link_scopes_and_helper_bindings() {
     let helper = parse_definition(
@@ -108,6 +109,7 @@ fn materialize_imports_preserves_link_scopes_and_helper_bindings() {
         library_requirements(&mut document, &helpers).unwrap();
         validate_document(&document, &helpers).unwrap();
         let link = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: BTreeMap::new(),
         };
@@ -124,10 +126,6 @@ fn materialize_imports_preserves_link_scopes_and_helper_bindings() {
     root.captures
         .insert(Name::new("other"), CaptureValue::Function(Box::new(second)));
     let opened = open(&content, &root, &helpers).unwrap();
-    assert_eq!(
-        opened.document.imports[&ImportSlot(0)].name.to_string(),
-        "typescript.clock"
-    );
     let calls: BTreeSet<_> = opened
         .document
         .units()
@@ -418,6 +416,7 @@ fn materialize_graph_preserves_instances_cycles_nested_code_and_surplus() {
     )
     .unwrap();
     let link = lash_kernel_value::package::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::new(),
     };

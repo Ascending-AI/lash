@@ -563,6 +563,7 @@ async fn holding_package_aliases_loads_each_distinct_link_once() {
     document.functions.insert(function.identity(), function);
     let document_id = document.identity();
     let link = Link {
+        helper_fills: Default::default(),
         document: document_id,
         fills: Default::default(),
     };

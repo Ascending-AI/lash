@@ -88,15 +88,55 @@ impl Namespace<'_> {
     pub fn fulfil(
         &self,
         content: &LinkedContent,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
         document: DocumentId,
         context: &PublicationContext,
         own_package: Option<&PackagePath>,
         attachment: Option<&Attachment>,
     ) -> Result<Link, LinkRefusal> {
+        let helpers = lash_kernel_doc::helper_imports(content.document(document)?, catalog)
+            .map_err(|error| LinkRefusal::InvalidDocument {
+                message: error.to_string(),
+            })?;
+        self.fulfil_declared(
+            content,
+            document,
+            context,
+            own_package,
+            attachment,
+            &helpers,
+        )
+    }
+    fn fulfil_declared(
+        &self,
+        content: &LinkedContent,
+        document: DocumentId,
+        context: &PublicationContext,
+        own_package: Option<&PackagePath>,
+        attachment: Option<&Attachment>,
+        helpers: &BTreeMap<lash_kernel_value::HelperOperationId, Import>,
+    ) -> Result<Link, LinkRefusal> {
         self.validate()?;
         let source = content.document(document)?;
         let mut fills = BTreeMap::new();
-        for (slot, import) in &source.imports {
+        let mut helper_fills = BTreeMap::new();
+        for (key, import) in source
+            .imports
+            .iter()
+            .map(|(slot, import)| (OperationSlot::Import(*slot), import))
+            .chain(
+                helpers
+                    .iter()
+                    .map(|(id, import)| (OperationSlot::Helper(*id), import)),
+            )
+        {
+            // A helper's local slot is not a use identity. Slot diagnostics for
+            // authored imports keep their original coordinate.
+            let diagnostic_slot = match key {
+                OperationSlot::Import(slot) => slot,
+                OperationSlot::Helper(_) => ImportSlot(0),
+            };
+            let slot = &diagnostic_slot;
             let mut chosen = None;
             for (owner, ad) in &self.advertisements {
                 if !scope_visible(owner, context) {
@@ -214,13 +254,30 @@ impl Namespace<'_> {
                     _ => {}
                 }
             }
-            fills.insert(
-                *slot,
-                chosen.ok_or_else(|| LinkRefusal::MissingImport {
-                    slot: *slot,
-                    name: import.name.clone(),
-                })?,
-            );
+            let fill = chosen.ok_or_else(|| LinkRefusal::MissingImport {
+                slot: *slot,
+                name: import.name.clone(),
+            })?;
+            match key {
+                OperationSlot::Import(slot) => {
+                    fills.insert(slot, fill);
+                }
+                OperationSlot::Helper(id) => {
+                    if !matches!(fill, Fill::Operation(_) | Fill::Deferred { .. }) {
+                        return Err(LinkRefusal::KindMismatch {
+                            slot: *slot,
+                            name: import.name.clone(),
+                        });
+                    }
+                    helper_fills.insert(
+                        id,
+                        HelperFill {
+                            import: import.clone(),
+                            fill,
+                        },
+                    );
+                }
+            }
         }
         if let Some(attachment) = attachment {
             let mut pending: Vec<_> = fills
@@ -250,7 +307,11 @@ impl Namespace<'_> {
                 }
             }
         }
-        Ok(Link { document, fills })
+        Ok(Link {
+            document,
+            fills,
+            helper_fills,
+        })
     }
     /// Validate a source execution's authored Link against its accepted
     /// publications. Only public members may supply authored cell Imports.
@@ -262,8 +323,17 @@ impl Namespace<'_> {
     ) -> Result<(), LinkRefusal> {
         self.validate()?;
         content.check_link(link)?;
-        for (slot, import) in &content.document(link.document)?.imports {
-            let pinned = &link.fills[slot];
+        for (import, pinned) in content
+            .document(link.document)?
+            .imports
+            .iter()
+            .map(|(slot, import)| (import, &link.fills[slot]))
+            .chain(
+                link.helper_fills
+                    .values()
+                    .map(|binding| (&binding.import, &binding.fill)),
+            )
+        {
             let found = self.advertisements.iter().any(|(context, ad)| match ad {
                 PackageAdvertisement::Enumerated(package)
                     if package.path == import.name.package =>
@@ -323,6 +393,31 @@ impl Namespace<'_> {
         }
         Ok(())
     }
+    /// Re-fulfil the declarations of an already admitted Link. Its helper
+    /// requirements stay exact; every fill is chosen from this namespace.
+    pub fn fulfil_existing(
+        &self,
+        content: &LinkedContent,
+        link: &Link,
+        context: &PublicationContext,
+        own_package: Option<&PackagePath>,
+        attachment: Option<&Attachment>,
+    ) -> Result<Link, LinkRefusal> {
+        content.check_link(link)?;
+        let helpers = link
+            .helper_fills
+            .iter()
+            .map(|(id, binding)| (*id, binding.import.clone()))
+            .collect();
+        self.fulfil_declared(
+            content,
+            link.document,
+            context,
+            own_package,
+            attachment,
+            &helpers,
+        )
+    }
     /// A live offer may serve a fresh Import while failing an existing C1 pin.
     pub fn validate_link(
         &self,
@@ -333,17 +428,28 @@ impl Namespace<'_> {
         attachment: Option<&Attachment>,
     ) -> Result<(), LinkRefusal> {
         content.check_link(link)?;
-        let offered = self.fulfil(content, link.document, context, own_package, attachment)?;
-        for (slot, pinned) in &link.fills {
-            match (pinned, &offered.fills[slot]) {
+        let offered = self.fulfil_existing(content, link, context, own_package, attachment)?;
+        for (slot, pinned, now) in link
+            .fills
+            .iter()
+            .map(|(slot, pinned)| (OperationSlot::Import(*slot), pinned, &offered.fills[slot]))
+            .chain(link.helper_fills.iter().map(|(id, binding)| {
+                (
+                    OperationSlot::Helper(*id),
+                    &binding.fill,
+                    &offered.helper_fills[id].fill,
+                )
+            }))
+        {
+            match (pinned, now) {
                 (Fill::Operation(before), Fill::Operation(now))
                     if before.contract != now.contract =>
                 {
                     return Err(LinkRefusal::ContractMismatch {
-                        use_: OperationUse {
+                        use_: Box::new(OperationUse {
                             link: link.identity(),
-                            slot: *slot,
-                        },
+                            slot,
+                        }),
                         pinned: before.contract.clone(),
                         offered: now.contract.clone(),
                     });

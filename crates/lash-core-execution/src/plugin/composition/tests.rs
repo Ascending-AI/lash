@@ -994,7 +994,7 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
                         [(
                             lash_kernel_value::OperationUse {
                                 link: lash_kernel_value::LinkId::from_bytes([6; 32]),
-                                slot: lash_kernel_value::ImportSlot(0),
+                                slot: (lash_kernel_value::ImportSlot(0)).into(),
                             },
                             definition,
                             route,

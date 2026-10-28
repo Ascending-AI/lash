@@ -967,8 +967,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_package_executions_open_actor ON lash_packag
 CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
     execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,
-    slot BIGINT NOT NULL CONSTRAINT lash_execution_resolutions_slot_check
-        CHECK (slot >= 0 AND slot <= 4294967295),
+    slot TEXT NOT NULL,
     record_json TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
 );

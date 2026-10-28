@@ -451,11 +451,7 @@ fn lower_beside_result(
         module,
         library: environment.library,
         namespaces: environment.namespaces,
-        imports: lash_kernel_dialect::authoring::Imports::default().reserving(
-            lash_ext_ts_helpers::package::helper_operations()
-                .iter()
-                .map(|operation| operation.slot),
-        ),
+        imports: lash_kernel_dialect::authoring::Imports::default(),
         local_functions: BTreeMap::new(),
         templates: BTreeMap::new(),
         local_notes: BTreeMap::new(),

@@ -761,6 +761,7 @@ mod tests {
         let identity = root.identity();
         let documents = BTreeMap::from([(identity, Arc::clone(&root))]);
         let link = Link {
+            helper_fills: Default::default(),
             document: identity,
             fills: BTreeMap::new(),
         }
@@ -768,6 +769,7 @@ mod tests {
         let instances = BTreeMap::from([(
             link,
             PreparedInstance {
+                helper_operations: Default::default(),
                 link,
                 document: identity,
                 slots: BTreeMap::new(),
@@ -877,6 +879,7 @@ mod tests {
             );
         }
         let helper_link = Link {
+            helper_fills: Default::default(),
             document: helpers.identity(),
             fills: BTreeMap::new(),
         };
@@ -894,6 +897,7 @@ mod tests {
         let mut previous = None;
         for (name, expected) in [("first", 4), ("second", 8)] {
             let link = Link {
+                helper_fills: Default::default(),
                 document: root.identity(),
                 fills: BTreeMap::from([(
                     ImportSlot(0),
@@ -958,6 +962,7 @@ mod tests {
         let document = Arc::new(Document::new(doc::NumberPolicy::BySpelling, vec![]));
         let identity = document.identity();
         let link = Link {
+            helper_fills: Default::default(),
             document: identity,
             fills: BTreeMap::new(),
         };
@@ -1039,6 +1044,7 @@ mod tests {
         let mut instances = Vec::new();
         for contract in ["first", "second"] {
             let link = Link {
+                helper_fills: Default::default(),
                 document: identity,
                 fills: BTreeMap::from([(
                     ImportSlot(0),
@@ -1052,13 +1058,14 @@ mod tests {
             instances.push(BTreeMap::from([(
                 link,
                 PreparedInstance {
+                    helper_operations: Default::default(),
                     link,
                     document: identity,
                     slots: BTreeMap::from([(
                         ImportSlot(0),
                         PreparedSlot::Operation(OperationUse {
                             link,
-                            slot: ImportSlot(0),
+                            slot: (ImportSlot(0)).into(),
                         }),
                     )]),
                 },

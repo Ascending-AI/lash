@@ -235,6 +235,7 @@ fn main() -> Outcome<()> {
         )?
         .map_err(|refusal| refusal.to_string())?;
         let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: BTreeMap::new(),
         };

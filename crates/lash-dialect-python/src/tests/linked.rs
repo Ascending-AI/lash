@@ -95,6 +95,26 @@ pub(super) fn program(
         .documents
         .insert(id, std::sync::Arc::clone(&document));
     let link = Link {
+        helper_fills: lash_kernel_doc::helper_imports(&document, library.helpers().as_ref())
+            .unwrap_or_else(|error| panic!("scripted helper declarations: {error}"))
+            .into_iter()
+            .map(|(id, import)| {
+                let operation = lash_kernel_services::TYPESCRIPT
+                    .iter()
+                    .chain(lash_kernel_services::PYTHON.iter())
+                    .find(|operation| operation.name == import.name)
+                    .unwrap_or_else(|| {
+                        panic!("scripted helper service {} is not declared", import.name)
+                    });
+                (
+                    id,
+                    lash_kernel_value::HelperFill {
+                        import,
+                        fill: Fill::Operation(operation.requirement.clone()),
+                    },
+                )
+            })
+            .collect(),
         document: id,
         fills,
     };
@@ -112,12 +132,21 @@ pub(super) fn program(
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {
+            for (id, import) in &instance.helper_operations {
+                operations.insert(
+                    OperationUse {
+                        link: *link,
+                        slot: lash_kernel_value::OperationSlot::Helper(*id),
+                    },
+                    import.name.clone(),
+                );
+            }
             for (slot, import) in &program.documents[&instance.document].imports {
                 if matches!(import.kind, ImportKind::Operation { .. }) {
                     operations.insert(
                         OperationUse {
                             link: *link,
-                            slot: *slot,
+                            slot: (*slot).into(),
                         },
                         import.name.clone(),
                     );
@@ -127,34 +156,37 @@ pub(super) fn program(
     });
     program
 }
-pub(super) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::EffectModes {
-    program
-        .instances
-        .iter()
-        .flat_map(|(link, instance)| {
-            program.documents[&instance.document]
-                .imports
-                .iter()
-                .filter(|(_, import)| matches!(import.kind, ImportKind::Operation { .. }))
-                .map(move |(slot, import)| {
-                    let read = matches!(
-                        import.name.package.to_string().as_str(),
-                        "typescript" | "python"
-                    ) && matches!(import.name.member.as_str(), "clock" | "random");
-                    (
-                        OperationUse {
-                            link: *link,
-                            slot: *slot,
-                        },
-                        if read {
-                            OperationMode::Read
-                        } else {
-                            OperationMode::Waited
-                        },
-                    )
-                })
-        })
-        .collect()
+pub(crate) fn modes(program: &lash_kernel_vm::Program) -> lash_kernel_vm::EffectModes {
+    let mut modes = std::collections::BTreeMap::new();
+    for (link, instance) in &program.instances {
+        for (slot, import) in program.documents[&instance.document]
+            .imports
+            .iter()
+            .map(|(slot, import)| (lash_kernel_value::OperationSlot::Import(*slot), import))
+            .chain(
+                instance
+                    .helper_operations
+                    .iter()
+                    .map(|(id, import)| (lash_kernel_value::OperationSlot::Helper(*id), import)),
+            )
+        {
+            if matches!(import.kind, ImportKind::Operation { .. }) {
+                let read = matches!(
+                    import.name.package.to_string().as_str(),
+                    "typescript" | "python"
+                ) && matches!(import.name.member.as_str(), "clock" | "random");
+                modes.insert(
+                    OperationUse { link: *link, slot },
+                    if read {
+                        OperationMode::Read
+                    } else {
+                        OperationMode::Waited
+                    },
+                );
+            }
+        }
+    }
+    modes
 }
 pub(super) fn read(
     use_: &OperationUse,

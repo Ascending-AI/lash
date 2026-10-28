@@ -37,6 +37,7 @@ fn relink_preserves_document_function_environment_and_nested_membership() {
         },
     );
     let pinned = |contract| Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::from([(
             ImportSlot(0),

@@ -12,6 +12,7 @@ use {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Requirements {
     pub imports: BTreeSet<ImportSlot>,
+    pub helper_imports: BTreeMap<lash_kernel_value::HelperOperationId, lash_kernel_value::Import>,
     pub functions: BTreeMap<FunctionId, FunctionName>,
 }
 /// References retain callable code; invocations alone can plan unrecorded reads.
@@ -190,18 +191,49 @@ fn follow_with(
                         std::sync::Arc::new(invoked_edges(definition))
                     }
                 };
-                required.imports.extend(&edges.imports);
+                let imports = catalog
+                    .registered(&id)
+                    .map(|registered| registered.imports().clone())
+                    .or_else(|| {
+                        catalog
+                            .definition(&id)
+                            .and_then(|definition| definition.body())
+                            .map(|body| body.imports.clone())
+                    })
+                    .unwrap_or_default();
+                for slot in &edges.imports {
+                    if let Some(import) = imports.get(slot) {
+                        required.helper_imports.insert(
+                            lash_kernel_value::HelperOperationId::of_import(import),
+                            import.clone(),
+                        );
+                    }
+                }
                 allowed.extend(&edges.functions);
                 pending.extend(&edges.functions);
             } else if let Some(registered) = catalog.registered(&id) {
-                required.imports.extend(registered.imports().keys());
+                required
+                    .helper_imports
+                    .extend(registered.imports().values().map(|import| {
+                        (
+                            lash_kernel_value::HelperOperationId::of_import(import),
+                            import.clone(),
+                        )
+                    }));
                 allowed.extend(registered.callees());
                 pending.extend(registered.callees());
             } else if let Some(body) = catalog
                 .definition(&id)
                 .and_then(lash_kernel_doc::FunctionDefinition::body)
             {
-                required.imports.extend(body.imports.keys());
+                required
+                    .helper_imports
+                    .extend(body.imports.values().map(|import| {
+                        (
+                            lash_kernel_value::HelperOperationId::of_import(import),
+                            import.clone(),
+                        )
+                    }));
                 allowed.extend(body.functions.keys());
                 pending.extend(body.functions.keys());
             }

@@ -203,21 +203,12 @@ impl PackagePublisher for ScopedPackagePublisher {
         let authoring = lash_kernel_package::Namespace { advertisements };
         for code in prepared.values() {
             let expected = authoring
-                .fulfil(
-                    &content,
-                    code.content.document,
-                    context,
-                    Some(&package.path),
-                    None,
-                )
+                .fulfil_existing(&content, &code.content, context, Some(&package.path), None)
                 .map_err(lash_vm_runtime::map_link_refusal)?;
             if expected != code.content {
-                return Err(EnginePortError::Refused(
-                    AdmissionRefusal::InvalidDocument {
-                        message: "prepared Link does not match its publisher's admitted Imports"
-                            .into(),
-                    },
-                ));
+                return Err(EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                    message: "prepared Link does not match its publisher's admitted imports and helper operations".into(),
+                }));
             }
         }
         content

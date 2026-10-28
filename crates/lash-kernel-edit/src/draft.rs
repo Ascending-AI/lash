@@ -75,11 +75,19 @@ impl Draft {
     pub fn relink(
         &self,
         content: &lash_kernel_package::LinkedContent,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
         namespace: &lash_kernel_package::Namespace<'_>,
         context: &lash_kernel_package::PublicationContext,
         attachment: Option<&lash_kernel_package::Attachment>,
     ) -> Result<lash_kernel_package::Link, lash_kernel_package::LinkRefusal> {
-        crate::relink::relink(&self.document, content, namespace, context, attachment)
+        crate::relink::relink(
+            &self.document,
+            content,
+            catalog,
+            namespace,
+            context,
+            attachment,
+        )
     }
 
     /// Applies `transaction` whole and publishes the result, or refuses it

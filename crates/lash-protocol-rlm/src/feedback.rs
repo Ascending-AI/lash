@@ -870,6 +870,7 @@ mod tests {
                 serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).unwrap();
             let document = parse_document(&format!("kernel 1\nnumbers by_spelling\ndefinition {definition_text}\nnative @{function}\nmain {{ return work.spin() }}")).unwrap();
             let link = lash_kernel_value::Link {
+                helper_fills: Default::default(),
                 document: document.identity(),
                 fills: Default::default(),
             };

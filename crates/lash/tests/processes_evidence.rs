@@ -1616,6 +1616,7 @@ mod named_component_laws {
         let requirement =
             lash_kernel_value::OperationRequirement::new(signature, definition.contract_id());
         let link = lash::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: [(
                 lash::package::ImportSlot(0),
@@ -1625,7 +1626,7 @@ mod named_component_laws {
         };
         let use_ = lash::package::OperationUse {
             link: link.identity(),
-            slot: lash::package::ImportSlot(0),
+            slot: (lash::package::ImportSlot(0)).into(),
         };
         let route = lash::tools::OperationRoute::advertised(provider, &definition, None);
         let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(

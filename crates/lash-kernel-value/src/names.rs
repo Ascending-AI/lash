@@ -403,10 +403,11 @@ pub enum ImportKind {
     schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-/// One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
+/// One authored import or helper operation declaration in one immutable Link.
+/// All dispatch, modes, recorded reads and waited outcomes use this identity.
 pub struct OperationUse {
     pub link: LinkId,
-    pub slot: ImportSlot,
+    pub slot: OperationSlot,
 }
 #[derive(
     Clone,
@@ -467,9 +468,47 @@ impl std::fmt::Display for QualifiedName {
     }
 }
 
+/// Disjoint operation namespaces. Helper bodies retain their own local import
+/// slots, but execution identifies their declarations by content.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum OperationSlot {
+    Import(ImportSlot),
+    Helper(crate::HelperOperationId),
+}
+impl From<ImportSlot> for OperationSlot {
+    fn from(slot: ImportSlot) -> Self {
+        Self::Import(slot)
+    }
+}
+impl std::fmt::Display for OperationSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Import(slot) => write!(f, "import:{}", slot.0),
+            Self::Helper(contract) => write!(f, "helper:{contract}"),
+        }
+    }
+}
 impl std::fmt::Display for OperationUse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.link, self.slot.0)
+        write!(f, "{}:{}", self.link, self.slot)
     }
 }
 

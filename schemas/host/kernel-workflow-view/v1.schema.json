@@ -1871,6 +1871,10 @@
       ],
       "type": "string"
     },
+    "HelperOperationId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "ImportSlot": {
       "description": "A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.",
       "format": "uint32",
@@ -2168,15 +2172,54 @@
       "minItems": 1,
       "type": "array"
     },
+    "OperationSlot": {
+      "description": "Disjoint operation namespaces. Helper bodies retain their own local import\nslots, but execution identifies their declarations by content.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "import",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ImportSlot"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "helper",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/HelperOperationId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "OperationUse": {
       "additionalProperties": false,
-      "description": "One operation Import in one immutable Link. All dispatch, modes and pins use this identity.",
+      "description": "One authored import or helper operation declaration in one immutable Link.\nAll dispatch, modes, recorded reads and waited outcomes use this identity.",
       "properties": {
         "link": {
           "$ref": "#/$defs/LinkId"
         },
         "slot": {
-          "$ref": "#/$defs/ImportSlot"
+          "$ref": "#/$defs/OperationSlot"
         }
       },
       "required": [

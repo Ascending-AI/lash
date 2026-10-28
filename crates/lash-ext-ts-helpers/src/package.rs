@@ -367,8 +367,8 @@ fn search(branches: &[(&str, String)], depth: usize, source: &mut String) {
 }
 
 /// Typed service declarations shared by helper loading and runtime publication.
-/// Slots are local to documents assembled by this dialect; authored imports
-/// reserve them before allocation.
+/// Numeric slots belong only to individual helper bodies. Links fill their
+/// declaration identities separately from authored imports.
 pub fn helper_operations() -> &'static [lash_kernel_dialect::authoring::HelperOperation] {
     &lash_kernel_services::TYPESCRIPT
 }

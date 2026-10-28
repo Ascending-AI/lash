@@ -116,6 +116,25 @@ impl Fixture {
             })
             .collect();
         let root = Link {
+            helper_fills: lash_kernel_doc::helper_imports(&document, &self.library)
+                .unwrap()
+                .into_iter()
+                .map(|(id, import)| {
+                    let ImportKind::Operation { signature } = &import.kind else {
+                        panic!("helper operation")
+                    };
+                    (
+                        id,
+                        lash_kernel_value::HelperFill {
+                            fill: Fill::Operation(lash_kernel_value::OperationRequirement::new(
+                                signature.clone(),
+                                lash_kernel_value::ContractId::new("fixture"),
+                            )),
+                            import,
+                        },
+                    )
+                })
+                .collect(),
             document: document.identity(),
             fills,
         };
@@ -190,27 +209,19 @@ fn start_target(
     target: Target,
 ) -> KernelMachine {
     let mut modes = BTreeMap::new();
-    for (link, instance) in &program.instances {
-        for (slot, import) in &program.documents[&instance.document].imports {
-            if matches!(import.kind, ImportKind::Operation { .. }) {
-                let use_ = OperationUse {
-                    link: *link,
-                    slot: *slot,
-                };
-                script.uses.insert(
-                    use_,
-                    format!("{}.{}", import.name.package, import.name.member),
-                );
-                modes.insert(
-                    use_,
-                    if import.name.member.as_str() == "sleep" {
-                        OperationMode::Waited
-                    } else {
-                        OperationMode::Read
-                    },
-                );
-            }
-        }
+    for (use_, import) in program.operation_imports() {
+        script.uses.insert(
+            use_,
+            format!("{}.{}", import.name.package, import.name.member),
+        );
+        modes.insert(
+            use_,
+            if import.name.member.as_str() == "sleep" {
+                OperationMode::Waited
+            } else {
+                OperationMode::Read
+            },
+        );
     }
     KernelMachine::start(
         program.clone(),

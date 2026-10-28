@@ -7,9 +7,17 @@ use lash_kernel_package::{
 pub fn relink(
     document: &Document,
     content: &LinkedContent,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
     namespace: &Namespace<'_>,
     context: &PublicationContext,
     attachment: Option<&Attachment>,
 ) -> Result<Link, LinkRefusal> {
-    namespace.fulfil(content, document.identity(), context, None, attachment)
+    namespace.fulfil(
+        content,
+        catalog,
+        document.identity(),
+        context,
+        None,
+        attachment,
+    )
 }

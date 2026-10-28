@@ -883,6 +883,7 @@ fn relink_rebinds_each_import_without_rewriting_document_or_function_ids() {
     let old = draft
         .relink(
             &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
             &Namespace {
                 advertisements: vec![(&owner, &a)],
             },
@@ -893,6 +894,7 @@ fn relink_rebinds_each_import_without_rewriting_document_or_function_ids() {
     let new = draft
         .relink(
             &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
             &Namespace {
                 advertisements: vec![(&owner, &b)],
             },
@@ -927,6 +929,7 @@ fn relink_rebinds_each_import_without_rewriting_document_or_function_ids() {
     assert!(matches!(
         draft.relink(
             &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
             &Namespace {
                 advertisements: vec![]
             },
@@ -957,6 +960,7 @@ fn relink_rebinds_each_import_without_rewriting_document_or_function_ids() {
     assert!(matches!(
         draft.relink(
             &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
             &Namespace {
                 advertisements: vec![(&owner, &incompatible)]
             },
@@ -993,6 +997,7 @@ fn relink_closure_keeps_alias_slots_and_transitive_link_pins() {
         let link = leaf_draft
             .relink(
                 &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
                 &Namespace {
                     advertisements: vec![(&owner, &ad)],
                 },
@@ -1056,6 +1061,7 @@ fn relink_closure_keeps_alias_slots_and_transitive_link_pins() {
         let link = draft
             .relink(
                 &content,
+            &BTreeMap::<lash_kernel_value::FunctionId, lash_kernel_doc::FunctionDefinition>::new(),
                 &Namespace {
                     advertisements: vec![(&code_owner, &code)],
                 },
@@ -1098,7 +1104,7 @@ fn relink_closure_keeps_alias_slots_and_transitive_link_pins() {
         let lash_kernel_package::OperationNeed::Fixed { requirement, .. } = &reached.operations
             [&OperationUse {
                 link,
-                slot: ImportSlot(0),
+                slot: (ImportSlot(0)).into(),
             }]
         else {
             panic!("fixed operation")

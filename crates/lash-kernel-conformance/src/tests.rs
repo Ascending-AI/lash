@@ -272,6 +272,7 @@ fn facade_delivery_contract() {
         })
         .collect();
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };

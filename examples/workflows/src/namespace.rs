@@ -97,7 +97,14 @@ impl FixtureNamespace {
                 .map(|(context, advertisement)| (context, advertisement))
                 .collect(),
         }
-        .fulfil(&content, id, &Self::context(), None, Some(&attachment))?;
+        .fulfil(
+            &content,
+            self.helpers.as_ref(),
+            id,
+            &Self::context(),
+            None,
+            Some(&attachment),
+        )?;
         let link = content.insert_link(link)?;
         Ok((content, link))
     }

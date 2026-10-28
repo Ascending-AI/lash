@@ -703,7 +703,7 @@ impl BackendRunner {
                     ),
                     use_: lash_kernel_value::names::OperationUse {
                         link: lash_kernel_value::package::LinkId::from_bytes([0; 32]),
-                        slot: lash_kernel_value::names::ImportSlot(0),
+                        slot: (lash_kernel_value::names::ImportSlot(0)).into(),
                     },
                 };
                 assert!(
@@ -867,6 +867,7 @@ impl BackendRunner {
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
                 let link = Link {
+                    helper_fills: Default::default(),
                     document,
                     fills: Default::default(),
                 };

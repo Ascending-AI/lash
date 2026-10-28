@@ -384,9 +384,13 @@ impl Engine {
                 Step::Parked(park) => {
                     let mut calls = Vec::new();
                     for Request::Effect(request) in park.requests {
-                        let import = &program.kernel.documents
-                            [&program.kernel.instances[&request.use_.link].document]
-                            .imports[&request.use_.slot];
+                        let import =
+                            program
+                                .kernel
+                                .operation_import(&request.use_)
+                                .ok_or_else(|| {
+                                    Fault::Kernel("operation declaration is absent".into())
+                                })?;
                         let args = request
                             .args
                             .into_iter()

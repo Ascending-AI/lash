@@ -996,10 +996,12 @@ mod work_laws {
             .expect("fixture")
             .insert(document.to_string(), vec![7]);
         let child = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
             document,
             fills: BTreeMap::new(),
         };
         let parent = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
             document,
             fills: [(
                 lash_kernel_value::names::ImportSlot(0),
@@ -1057,6 +1059,7 @@ mod work_laws {
         let store = CountedStorage::default();
         let document = lash_kernel_value::names::DocumentId::from_bytes([0x71; 32]);
         let link = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
             document,
             fills: BTreeMap::new(),
         };

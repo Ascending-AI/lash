@@ -1,7 +1,5 @@
 //! Statements and control: blocks, loops, `try`, calls and returns.
 
-use std::sync::Arc;
-
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{Measure, TaskId, Value};
 
@@ -1146,17 +1144,6 @@ impl KernelMachine {
         self.identify_values(std::slice::from_ref(value))?;
         self.flush_arena()?;
         let value = &self.page_form(value)?;
-        let instance = self
-            .program
-            .instances
-            .get(&effect.link)
-            .ok_or_else(|| fault("operation Link is not loaded"))?;
-        let document = Arc::clone(
-            self.program
-                .documents
-                .get(&instance.document)
-                .ok_or_else(|| fault("operation document is not loaded"))?,
-        );
         let library = self.program.library.clone();
         let mut heap = crate::crossing::CrossingHeap {
             heap: &mut self.heap,
@@ -1174,9 +1161,9 @@ impl KernelMachine {
         // Admission declared every operation a document or a body it
         // reaches performs; an argument past its parameters, or of an effect
         // the manifest does not list, is data.
-        let param = document
-            .imports
-            .get(&effect.slot)
+        let param = self
+            .program
+            .operation_import(effect)
             .and_then(|import| match &import.kind {
                 lash_kernel_value::names::ImportKind::Operation { signature } => {
                     signature.params.get(index)

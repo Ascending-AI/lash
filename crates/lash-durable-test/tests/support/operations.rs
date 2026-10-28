@@ -31,6 +31,7 @@ fn content(definition: &ToolDefinition) -> (lash_kernel_doc::Document, Link) {
         },
     );
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::from([(
             ImportSlot(0),
@@ -46,7 +47,7 @@ fn content(definition: &ToolDefinition) -> (lash_kernel_doc::Document, Link) {
 pub fn use_for(definition: &ToolDefinition) -> OperationUse {
     OperationUse {
         link: content(definition).1.identity(),
-        slot: ImportSlot(0),
+        slot: (ImportSlot(0)).into(),
     }
 }
 

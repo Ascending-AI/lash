@@ -108,3 +108,15 @@ impl HelperLibraryId {
         Self::from_bytes(*hash.finalize().as_bytes())
     }
 }
+
+digest!(/// Identity of a helper operation declaration, independent of its local body slot.
+ HelperOperationId);
+
+impl HelperOperationId {
+    pub fn of_import(import: &crate::Import) -> Self {
+        Self::from_bytes(blake3::derive_key(
+            "lash.helper-operation",
+            &crate::tokens::encode_body(import),
+        ))
+    }
+}

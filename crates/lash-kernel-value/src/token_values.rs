@@ -720,7 +720,7 @@ impl TokenCodec for crate::OperationUse {
         input.expect_struct(2)?;
         Ok(Self {
             link: crate::LinkId::decode(input)?,
-            slot: crate::ImportSlot::decode(input)?,
+            slot: crate::OperationSlot::decode(input)?,
         })
     }
 }
@@ -750,5 +750,40 @@ impl TokenCodec for crate::HelperLibraryId {
             .try_into()
             .map_err(|_| TokenError::Invalid("a HelperLibraryId is 32 bytes".into()))?;
         Ok(Self::from_bytes(bytes))
+    }
+}
+
+impl TokenCodec for crate::HelperOperationId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.bytes(self.as_bytes());
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(Self::from_bytes(
+            input
+                .bytes()?
+                .try_into()
+                .map_err(|_| invalid("a HelperOperationId is 32 bytes"))?,
+        ))
+    }
+}
+impl TokenCodec for crate::OperationSlot {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Import(slot) => {
+                out.sum(0, 1);
+                slot.encode(out);
+            }
+            Self::Helper(id) => {
+                out.sum(1, 1);
+                id.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        match input.sum()? {
+            (0, 1) => Ok(Self::Import(crate::ImportSlot::decode(input)?)),
+            (1, 1) => Ok(Self::Helper(crate::HelperOperationId::decode(input)?)),
+            _ => Err(invalid("unknown operation namespace or arity")),
+        }
     }
 }

@@ -373,7 +373,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     let epoch = claimed[0].epoch;
     let use_ = OperationUse {
         link: LinkId::from_bytes([71; 32]),
-        slot: ImportSlot(3),
+        slot: (ImportSlot(3)).into(),
     };
     let requested = QualifiedName {
         package: lash_kernel_value::names::PackagePath::parse("wip")
@@ -493,7 +493,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         expected_revision: revision,
     };
     let mut foreign = candidate.clone();
-    foreign.key.use_.slot = ImportSlot(4);
+    foreign.key.use_.slot = ImportSlot(4).into();
     let refused = resolutions.commit(&owner, foreign).await;
     super::ensure!(
         matches!(
@@ -608,7 +608,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     let mut successor = registration.clone();
     successor.uses.clear();
     let successor_use = OperationUse {
-        slot: ImportSlot(5),
+        slot: (ImportSlot(5)).into(),
         ..use_
     };
     successor.uses.insert(
@@ -822,6 +822,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
         "failed closure left a root behind"
     );
     let link = Link {
+        helper_fills: Default::default(),
         document,
         fills: Default::default(),
     };
@@ -872,6 +873,7 @@ pub async fn a_publication_retains_its_complete_content_dag(
     };
     let inner_key = packages.publish(&configured, &inner_publication).await?;
     let outer = Link {
+        helper_fills: Default::default(),
         document,
         fills: [(
             ImportSlot(0),

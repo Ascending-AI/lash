@@ -85,7 +85,7 @@ fn load(tx: &Connection, key: &ResolutionKey) -> Answer<Option<ResolutionRecord>
             rusqlite::params![
                 key.execution.0,
                 key.use_.link.to_string(),
-                i64::from(key.use_.slot.0)
+                key.use_.slot.to_string()
             ],
             |row| row.get(0),
         )
@@ -244,7 +244,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                     .execute(rusqlite::params![
                         candidate.key.execution.0,
                         candidate.key.use_.link.to_string(),
-                        i64::from(candidate.key.use_.slot.0),
+                        candidate.key.use_.slot.to_string(),
                         json
                     ])?;
                 let requires = match owner_requires(tx, &owner.actor, None)? {
@@ -407,7 +407,7 @@ pub(super) fn seed(
         .execute(rusqlite::params![
             record.key.execution.0,
             record.key.use_.link.to_string(),
-            i64::from(record.key.use_.slot.0),
+            record.key.use_.slot.to_string(),
             json
         ])?;
     Ok(Ok(()))

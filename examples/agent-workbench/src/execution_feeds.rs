@@ -675,6 +675,7 @@ mod tests {
         ))
         .expect("the document parses");
         let link = lash::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: Default::default(),
         }

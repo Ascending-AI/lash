@@ -552,7 +552,7 @@ impl Embedder {
                     (
                         lash_kernel_value::OperationUse {
                             link: program.link,
-                            slot: *slot,
+                            slot: (*slot).into(),
                         },
                         lash_kernel_value::package::OperationMode::Read,
                     )
@@ -837,7 +837,10 @@ pub(crate) fn start_machine(
     )
 }
 
-fn operation_name(slot: lash_kernel_value::ImportSlot) -> &'static str {
+fn operation_name(slot: lash_kernel_value::OperationSlot) -> &'static str {
+    let lash_kernel_value::OperationSlot::Import(slot) = slot else {
+        panic!("unknown helper operation {slot:?}")
+    };
     match slot.0 {
         0 => "echo",
         1 => "boom",
@@ -870,6 +873,7 @@ pub(crate) fn program(document: Arc<Document>, library: PreparedLibrary) -> Prog
         })
         .collect();
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };

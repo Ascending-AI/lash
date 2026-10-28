@@ -712,6 +712,8 @@ export type FunctionTarget = ({
 
 export type HeaderRole = ("condition" | "iterable");
 
+export type HelperOperationId = string;
+
 /**
  * A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
  */
@@ -803,11 +805,24 @@ export type NodeCoverage = {
 export type NonEmptySites = Array<Site>;
 
 /**
- * One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
+ * Disjoint operation namespaces. Helper bodies retain their own local import
+ * slots, but execution identifies their declarations by content.
+ */
+export type OperationSlot = ({
+  "kind": "import";
+  "value": ImportSlot;
+} | {
+  "kind": "helper";
+  "value": HelperOperationId;
+});
+
+/**
+ * One authored import or helper operation declaration in one immutable Link.
+ * All dispatch, modes, recorded reads and waited outcomes use this identity.
  */
 export type OperationUse = {
   "link": LinkId;
-  "slot": ImportSlot;
+  "slot": OperationSlot;
 };
 
 export type Param = {

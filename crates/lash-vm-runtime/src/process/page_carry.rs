@@ -474,12 +474,12 @@ pub async fn carry_parked_checkpoint(
             let old = context
                 .links
                 .get(&before.link)
-                .and_then(|link| link.fills.get(&before.slot));
+                .and_then(|link| link.operation_fill(before.slot));
             let new = program.instances.get(&after.link).and_then(|instance| {
                 context
                     .links
                     .get(&instance.link)
-                    .and_then(|link| link.fills.get(&after.slot))
+                    .and_then(|link| link.operation_fill(after.slot))
             });
             if old.is_none()
                 || old != new
@@ -809,10 +809,12 @@ mod tests {
         before.library.insert(FunctionId::from_bytes([47; 32]));
         let after = Document::new(NumberPolicy::BySpelling, vec![]);
         let old = Link {
+            helper_fills: Default::default(),
             document: before.identity(),
             fills: BTreeMap::new(),
         };
         let next = Link {
+            helper_fills: Default::default(),
             document: after.identity(),
             fills: BTreeMap::new(),
         };

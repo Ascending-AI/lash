@@ -620,6 +620,25 @@ pub(crate) mod tests {
             })
             .collect();
         let root = lash_kernel_value::Link {
+            helper_fills: lash_kernel_doc::helper_imports(&document, library.registry().as_ref())
+                .expect("helper declarations")
+                .into_iter()
+                .map(|(id, import)| {
+                    let ImportKind::Operation { signature } = &import.kind else {
+                        panic!("helper operation")
+                    };
+                    (
+                        id,
+                        lash_kernel_value::HelperFill {
+                            fill: Fill::Operation(OperationRequirement::new(
+                                signature.clone(),
+                                lash_kernel_value::ContractId::new("1"),
+                            )),
+                            import,
+                        },
+                    )
+                })
+                .collect(),
             document: document.identity(),
             fills,
         };

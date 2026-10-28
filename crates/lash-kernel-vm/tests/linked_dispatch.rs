@@ -271,11 +271,13 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         ))
     };
     let imported_link = Link {
+        helper_fills: Default::default(),
         document: imported.identity(),
         fills: BTreeMap::from([(ImportSlot(0), requirement())]),
     };
     let b = imported_link.identity();
     let caller_link = Link {
+        helper_fills: Default::default(),
         document: caller.identity(),
         fills: BTreeMap::from([
             (ImportSlot(0), requirement()),
@@ -323,7 +325,7 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         first.use_,
         OperationUse {
             link: b,
-            slot: ImportSlot(0)
+            slot: ImportSlot(0).into()
         }
     );
     let checkpoint = machine
@@ -341,7 +343,7 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         second.use_,
         OperationUse {
             link: a,
-            slot: ImportSlot(0)
+            slot: ImportSlot(0).into()
         }
     );
     machine
@@ -402,6 +404,7 @@ fn callable_start_installs_the_captured_environment() {
     );
     let document_id = document.identity();
     let link = Link {
+        helper_fills: Default::default(),
         document: document_id,
         fills: BTreeMap::from([(
             ImportSlot(0),
@@ -564,6 +567,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         }),
     );
     let imported_link = Link {
+        helper_fills: Default::default(),
         document: imported.identity(),
         fills: BTreeMap::from([(
             ImportSlot(0),
@@ -613,6 +617,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         ]),
     );
     let caller_link = Link {
+        helper_fills: Default::default(),
         document: caller.identity(),
         fills: BTreeMap::from([(
             ImportSlot(0),
@@ -659,7 +664,7 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
             asked.use_,
             OperationUse {
                 link: b,
-                slot: ImportSlot(0)
+                slot: ImportSlot(0).into()
             }
         );
         let checkpoint = machine
@@ -748,6 +753,7 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
         );
         let child_id = child.identity();
         let child_link = Link {
+            helper_fills: Default::default(),
             document: child_id,
             fills: BTreeMap::new(),
         };
@@ -796,6 +802,7 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
         );
         let root_id = root.identity();
         let link = Link {
+            helper_fills: Default::default(),
             document: root_id,
             fills: BTreeMap::from([(
                 ImportSlot(0),
@@ -936,6 +943,7 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             }),
         );
         let link = Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: BTreeMap::new(),
         };
@@ -1106,6 +1114,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             }),
         );
         let link = Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: BTreeMap::from([(
                 ImportSlot(0),
@@ -1184,6 +1193,7 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
                 );
                 let caller_id = caller.identity();
                 let caller_link = Link {
+                    helper_fills: Default::default(),
                     document: caller_id,
                     fills: BTreeMap::from([(
                         ImportSlot(0),
@@ -1384,6 +1394,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                 }),
             );
             let callee_link = Link {
+                helper_fills: Default::default(),
                 document: callee.identity(),
                 fills: BTreeMap::new(),
             };
@@ -1478,6 +1489,7 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                     .expect("a valid callable token is admitted at the public Fn boundary");
             }
             let caller_link = Link {
+                helper_fills: Default::default(),
                 document: caller.identity(),
                 fills: BTreeMap::from([(
                     ImportSlot(0),
@@ -1601,6 +1613,7 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
     );
     doc.requires.natives.insert(unused_id);
     let link = Link {
+        helper_fills: Default::default(),
         document: doc.identity(),
         fills: BTreeMap::new(),
     };
@@ -1710,6 +1723,7 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
             BTreeMap::new()
         };
         let link = Link {
+            helper_fills: Default::default(),
             document: id,
             fills,
         };
@@ -1811,6 +1825,7 @@ fn entry_wrong_input_is_refused_before_body_execution() {
     );
     let id = document.identity();
     let link = Link {
+        helper_fills: Default::default(),
         document: id,
         fills: BTreeMap::new(),
     };

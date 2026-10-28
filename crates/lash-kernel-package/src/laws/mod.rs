@@ -84,12 +84,28 @@ fn l_admit_contract_fresh_fulfilment_accepts_c2_but_existing_link_keeps_c1() {
     let old = Namespace {
         advertisements: vec![(&owner, &a)],
     }
-    .fulfil(&content, id, &consumer, None, None)
+    .fulfil(
+        &content,
+        &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+        id,
+        &consumer,
+        None,
+        None,
+    )
     .unwrap();
     let current = Namespace {
         advertisements: vec![(&owner, &b)],
     };
-    let fresh = current.fulfil(&content, id, &consumer, None, None).unwrap();
+    let fresh = current
+        .fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &consumer,
+            None,
+            None,
+        )
+        .unwrap();
     assert_ne!(old.identity(), fresh.identity());
     assert_eq!(old.document, fresh.document);
     assert!(matches!(
@@ -113,7 +129,14 @@ fn l_dispatch_one_document_linked_twice_keeps_independent_operation_uses() {
         let link = Namespace {
             advertisements: vec![(&owner, &ad)],
         }
-        .fulfil(&content, id, &consumer, None, None)
+        .fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &consumer,
+            None,
+            None,
+        )
         .unwrap();
         roots.push(content.insert_link(link).unwrap());
     }
@@ -161,19 +184,47 @@ fn l_internal_requires_exact_package_and_publisher() {
         advertisements: vec![(&owner, &ad)],
     };
     assert!(
-        ns.fulfil(&content, id, &owner, Some(&path("service")), None)
-            .is_ok()
+        ns.fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &owner,
+            Some(&path("service")),
+            None
+        )
+        .is_ok()
     );
     assert!(matches!(
-        ns.fulfil(&content, id, &foreign, Some(&path("service")), None),
+        ns.fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &foreign,
+            Some(&path("service")),
+            None
+        ),
         Err(LinkRefusal::NotVisible { .. })
     ));
     assert!(matches!(
-        ns.fulfil(&content, id, &owner, Some(&path("service.child")), None),
+        ns.fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &owner,
+            Some(&path("service.child")),
+            None
+        ),
         Err(LinkRefusal::NotVisible { .. })
     ));
     assert!(matches!(
-        ns.fulfil(&content, id, &owner, None, None),
+        ns.fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &owner,
+            None,
+            None
+        ),
         Err(LinkRefusal::NotVisible { .. })
     ));
 }
@@ -211,12 +262,26 @@ fn l_deferred_attach_pins_the_grant_without_resolving() {
         deferred: BTreeSet::new(),
     };
     assert!(matches!(
-        ns.fulfil(&content, id, &consumer, None, Some(&attachment)),
+        ns.fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &consumer,
+            None,
+            Some(&attachment)
+        ),
         Err(LinkRefusal::UndeclaredDeferred { .. })
     ));
     attachment.deferred.insert(path("wip"));
     let link = ns
-        .fulfil(&content, id, &consumer, None, Some(&attachment))
+        .fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            id,
+            &consumer,
+            None,
+            Some(&attachment),
+        )
         .unwrap();
     let Fill::Deferred { provider } = &link.fills[&ImportSlot(0)] else {
         panic!("deferred")
@@ -240,7 +305,14 @@ fn l_start_sync_data_export_needs_no_main() {
     let link = Namespace {
         advertisements: vec![(&owner, &ad)],
     }
-    .fulfil(&content, id, &consumer, None, None)
+    .fulfil(
+        &content,
+        &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+        id,
+        &consumer,
+        None,
+        None,
+    )
     .unwrap();
     let root = content.insert_link(link).unwrap();
     assert!(
@@ -316,7 +388,14 @@ fn l_internal_forged_link_cannot_publish_another_owners_internal_fill() {
         advertisements: vec![(&owner, &service)],
     };
     let forged = snapshot
-        .fulfil(&content, document, &owner, Some(&path("service")), None)
+        .fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            document,
+            &owner,
+            Some(&path("service")),
+            None,
+        )
         .unwrap();
     let link = content.insert_link(forged).unwrap();
     let counterfeit = Package {
@@ -350,6 +429,7 @@ fn label_keys_cannot_name_unknown_members_or_replace_public_member_labels() {
         .insert_document(doc.clone(), &doc.functions)
         .unwrap();
     let link = Link {
+        helper_fills: Default::default(),
         document,
         fills: BTreeMap::from([(
             ImportSlot(0),
@@ -404,7 +484,14 @@ fn authored_origin_requires_public_imports_and_the_accepted_contract_pin() {
         advertisements: vec![(&provider, &public)],
     };
     let link = namespace
-        .fulfil(&content, document, &context("app", "host"), None, None)
+        .fulfil(
+            &content,
+            &BTreeMap::<FunctionId, FunctionDefinition>::new(),
+            document,
+            &context("app", "host"),
+            None,
+            None,
+        )
         .unwrap();
     namespace.validate_authored_origin(&content, &link).unwrap();
     for denied in [&internal, &changed] {
@@ -444,6 +531,7 @@ fn label_definition_index_visits_each_document_once() {
     let mut members = BTreeMap::new();
     for contract in ["c1", "c2"] {
         let link = Link {
+            helper_fills: Default::default(),
             document,
             fills: [(
                 ImportSlot(0),
@@ -498,6 +586,7 @@ fn fresh_inspection_refuses_missing_declared_helpers() {
     document.library.insert(FunctionId::from_bytes([61; 32]));
     lash_kernel_doc::validate_document_structure(&document).unwrap();
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: BTreeMap::new(),
     };
@@ -531,6 +620,7 @@ fn materialize_values_exposes_frozen_initializers() {
             .unwrap();
     let doc = document(definition.clone());
     let link = Link {
+        helper_fills: Default::default(),
         document: doc.identity(),
         fills: BTreeMap::new(),
     };
@@ -586,6 +676,7 @@ fn helper_native_debt_is_owned_by_its_exact_library_manifest() {
     )).unwrap();
     doc.requires.natives.insert(function);
     let link = Link {
+        helper_fills: Default::default(),
         document: doc.identity(),
         fills: BTreeMap::new(),
     };
@@ -618,6 +709,7 @@ fn concurrent_inspections_keep_selectors_and_current_inputs_isolated() {
     let mut doc = document(first);
     doc.functions.insert(ids[1], second);
     let link = Link {
+        helper_fills: Default::default(),
         document: doc.identity(),
         fills: BTreeMap::new(),
     };

@@ -169,7 +169,7 @@ impl StepRequest {
     #[must_use]
     pub fn operation(&self) -> String {
         match self {
-            Self::Tool { use_, .. } => format!("{}:{}", use_.link, use_.slot.0),
+            Self::Tool { use_, .. } => format!("{}:{}", use_.link, use_.slot),
             Self::Engine { kind, .. } => kind.0.clone(),
         }
     }

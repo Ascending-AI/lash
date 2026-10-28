@@ -339,6 +339,7 @@ mod work_laws {
             .await
             .unwrap();
         let link = lash_kernel_value::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: Default::default(),
         };

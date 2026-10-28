@@ -71,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_package_executions_open_actor ON package_executio
 CREATE TABLE IF NOT EXISTS execution_resolutions (
     execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,
-    slot INTEGER NOT NULL CHECK (slot >= 0 AND slot <= 4294967295),
+    slot TEXT NOT NULL,
     record_json TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
 );

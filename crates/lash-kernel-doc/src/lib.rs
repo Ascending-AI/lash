@@ -127,7 +127,7 @@ pub use number::{
 };
 pub use released::{
     BodyCensus, BuildHelpers, DocumentChecks, ImageError, LibraryRequirementRefusal, MissingHelper,
-    ReleasedFunctions, library_requirements,
+    ReleasedFunctions, helper_imports, library_requirements,
 };
 
 pub use text::{

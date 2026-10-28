@@ -47,7 +47,12 @@ impl Host for World {
         _: &lash_kernel_value::sites::PositionLabel,
         _: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
-        let value = match use_.slot.0 {
+        let lash_kernel_value::OperationSlot::Import(slot) = use_.slot else {
+            return Err(lash_kernel_vm::HostFault::new(
+                "unexpected helper operation",
+            ));
+        };
+        let value = match slot.0 {
             2 => Datum::Timestamp(lash_kernel_doc::Timestamp {
                 nanoseconds: lash_kernel_doc::Integer::new(self.seed),
             }),
@@ -142,7 +147,7 @@ fn observe_in<M: Machine>(
                 .then_some((
                     lash_kernel_value::OperationUse {
                         link: program.link,
-                        slot: *slot,
+                        slot: (*slot).into(),
                     },
                     lash_kernel_value::OperationMode::Read,
                 ))
@@ -201,7 +206,7 @@ fn observe_in<M: Machine>(
             for request in requests {
                 let (wait, outcome) = match request {
                     Request::Effect(effect) => {
-                        let data = if effect.use_.slot == lash_kernel_value::ImportSlot(1) {
+                        let data = if effect.use_.slot == lash_kernel_value::ImportSlot(1).into() {
                             Datum::Null
                         } else {
                             effect.args.first().cloned().unwrap_or(Datum::Null)

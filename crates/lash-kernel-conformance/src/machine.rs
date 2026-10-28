@@ -221,6 +221,7 @@ pub(crate) fn prepare_document(
         })
         .collect::<Option<BTreeMap<_, _>>>()?;
     let link = Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills,
     };
@@ -252,10 +253,9 @@ pub(crate) fn run_program_in<M: Machine>(
 ) -> Result<Observations, HarnessError> {
     let env = &case.environment;
     if env.reads.iter().any(|name| {
-        !program.document.imports.values().any(|import| {
-            matches!(import.kind, lash_kernel_value::ImportKind::Operation { .. })
-                && name.as_str() == import.name.to_string()
-        })
+        !program
+            .operation_imports()
+            .any(|(_, import)| name.as_str() == import.name.to_string())
     }) {
         return Ok(refused());
     }
@@ -276,23 +276,13 @@ pub(crate) fn run_program_in<M: Machine>(
         session: None,
         owner: crate::pages::OWNER,
         modes: program
-            .document
-            .imports
-            .iter()
+            .operation_imports()
             .filter(|(_, import)| {
                 env.reads
                     .iter()
                     .any(|name| name.as_str() == import.name.to_string())
             })
-            .map(|(slot, _)| {
-                (
-                    lash_kernel_value::OperationUse {
-                        link: program.link,
-                        slot: *slot,
-                    },
-                    lash_kernel_value::package::OperationMode::Read,
-                )
-            })
+            .map(|(use_, _)| (use_, lash_kernel_value::OperationMode::Read))
             .collect(),
         host: Vec::new(),
     };
@@ -309,22 +299,8 @@ pub(crate) fn run_program_in<M: Machine>(
         fault: None,
         printed: run.printed,
         operations: program
-            .instances
-            .iter()
-            .flat_map(|(link, instance)| {
-                program.documents[&instance.document]
-                    .imports
-                    .iter()
-                    .map(move |(slot, import)| {
-                        (
-                            lash_kernel_value::OperationUse {
-                                link: *link,
-                                slot: *slot,
-                            },
-                            import.name.to_string(),
-                        )
-                    })
-            })
+            .operation_imports()
+            .map(|(use_, import)| (use_, import.name.to_string()))
             .collect(),
     };
     let mut batches = env.deliveries.iter();

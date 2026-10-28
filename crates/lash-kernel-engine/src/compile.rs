@@ -84,37 +84,49 @@ impl Engine {
         } else {
             Target::Main
         };
+        let fill = |import: &lash_kernel_value::Import| -> Result<Fill, Diagnostic> {
+            let ImportKind::Operation { signature } = &import.kind else {
+                return Err(diagnostic(
+                    "simple programs accept only declared external operations".into(),
+                ));
+            };
+            let external = operations
+                .iter()
+                .find(|(name, _)| {
+                    name.package == import.name.package
+                        && name.name == import.name.member
+                        && import.name.type_member.is_none()
+                })
+                .map(|(_, external)| *external)
+                .ok_or_else(|| diagnostic("undeclared external import".into()))?;
+            if &external.signature != signature {
+                return Err(diagnostic("external signature differs from import".into()));
+            }
+            Ok(Fill::Operation(OperationRequirement::new(
+                signature.clone(),
+                external.contract.clone(),
+            )))
+        };
         let fills = document
             .imports
             .iter()
-            .map(|(slot, import)| {
-                let ImportKind::Operation { signature } = &import.kind else {
-                    return Err(diagnostic(
-                        "simple programs accept only declared external operations".into(),
-                    ));
-                };
-                let external = operations
-                    .iter()
-                    .find(|(name, _)| {
-                        name.package == import.name.package
-                            && name.name == import.name.member
-                            && import.name.type_member.is_none()
-                    })
-                    .map(|(_, external)| *external)
-                    .ok_or_else(|| diagnostic("undeclared external import".into()))?;
-                if &external.signature != signature {
-                    return Err(diagnostic("external signature differs from import".into()));
-                }
+            .map(|(slot, import)| Ok((*slot, fill(import)?)))
+            .collect::<Result<BTreeMap<_, _>, Diagnostic>>()?;
+        let helper_fills = lash_kernel_doc::helper_imports(&document, &self.installed.names)
+            .map_err(|error| diagnostic(error.to_string()))?
+            .into_iter()
+            .map(|(id, import)| {
                 Ok((
-                    *slot,
-                    Fill::Operation(OperationRequirement::new(
-                        signature.clone(),
-                        external.contract.clone(),
-                    )),
+                    id,
+                    lash_kernel_value::HelperFill {
+                        fill: fill(&import)?,
+                        import,
+                    },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
+            .collect::<Result<BTreeMap<_, _>, Diagnostic>>()?;
         let link = lash_kernel_value::Link {
+            helper_fills,
             document: lowered.document.id(),
             fills,
         };

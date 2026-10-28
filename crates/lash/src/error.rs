@@ -29,8 +29,8 @@ pub enum EmbedError {
     )]
     ConflictingOperationRoutes {
         operation: Box<lash_kernel_value::names::QualifiedOperation>,
-        first: lash_kernel_value::names::OperationUse,
-        second: lash_kernel_value::names::OperationUse,
+        first: Box<lash_kernel_value::names::OperationUse>,
+        second: Box<lash_kernel_value::names::OperationUse>,
     },
 
     /// Opaque workflow bytes failed receipt validation before publication.

@@ -36,8 +36,6 @@ pub enum MaterializeRefusal {
     #[error("missing construction helper {name}")]
     ConstructionHelperMissing { name: FunctionName },
     #[error(transparent)]
-    LibraryRequirements(#[from] LibraryRequirementRefusal),
-    #[error(transparent)]
     DocumentValidation(#[from] Invalid),
     #[error(transparent)]
     Package(#[from] LinkRefusal),
@@ -488,47 +486,13 @@ pub fn materialize_workflow(
         .filter(|id| helpers.contains(id))
         .collect();
     document.library.0.extend(used_helpers);
-    // Helper bodies retain their fixed import slots. Assign those first, then
-    // relocate the copied imports and every reference to them as one document.
-    let authored_imports = std::mem::take(&mut document.imports);
     lash_kernel_doc::library_requirements(&mut document, helpers).map_err(
         |refusal| match refusal {
             lash_kernel_doc::LibraryRequirementRefusal::MissingHelper { function } => {
                 MaterializeRefusal::MissingHelper { function }
             }
-            refusal => MaterializeRefusal::LibraryRequirements(refusal),
         },
     )?;
-    let mut relocated = BTreeMap::new();
-    let mut next = ImportSlot(0);
-    for (old, import) in authored_imports {
-        while document.imports.contains_key(&next) {
-            next.0 += 1;
-        }
-        document.imports.insert(next, import);
-        relocated.insert(old, next);
-    }
-    let slot = |slot| relocated[&slot];
-    let ids = BTreeMap::new();
-    for definition in document.functions.values_mut() {
-        if let Some(body) = definition.body_mut() {
-            remap(NodeMut::Block(&mut body.block), &ids, &slot);
-            body.imports = std::mem::take(&mut body.imports)
-                .into_iter()
-                .map(|(old, import)| (slot(old), import))
-                .collect();
-        }
-    }
-    if let Some(main) = &mut document.main {
-        remap(NodeMut::Block(main), &ids, &slot);
-    }
-    for export in document.exports.values_mut() {
-        if let Export::Function(function) = export {
-            for target in function.convention.targets_mut() {
-                remap_target(target, &ids, &slot);
-            }
-        }
-    }
     let reidentified = document
         .reidentify_functions()
         .map_err(|message| MaterializeRefusal::Reidentification { message })?;

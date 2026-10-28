@@ -577,8 +577,8 @@ impl HostArtifacts {
                 {
                     return Err(crate::EmbedError::ConflictingOperationRoutes {
                         operation: Box::new(operation),
-                        first,
-                        second: *use_,
+                        first: Box::new(first),
+                        second: Box::new(*use_),
                     });
                 }
             }

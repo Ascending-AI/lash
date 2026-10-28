@@ -264,7 +264,14 @@ pub(super) async fn publish(
     let link = Namespace {
         advertisements: vec![(&context, &advertisement)],
     }
-    .fulfil(&content, id, &context, None, Some(&attachment))
+    .fulfil(
+        &content,
+        &document.functions,
+        id,
+        &context,
+        None,
+        Some(&attachment),
+    )
     .unwrap();
     let root = content.insert_link(link.clone()).unwrap();
     let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -379,7 +386,7 @@ pub(super) fn finish(
             request.use_,
             lash_kernel_value::OperationUse {
                 link,
-                slot: ImportSlot(0)
+                slot: ImportSlot(0).into()
             },
             "preexisting closures keep their defining Link; resumed frames use the successor"
         );

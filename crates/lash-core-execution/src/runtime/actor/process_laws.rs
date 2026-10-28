@@ -315,7 +315,7 @@ fn law_use(tool: &str) -> lash_kernel_value::OperationUse {
             id[..bytes.len()].copy_from_slice(bytes);
             id
         }),
-        slot: lash_kernel_value::ImportSlot(0),
+        slot: (lash_kernel_value::ImportSlot(0)).into(),
     }
 }
 

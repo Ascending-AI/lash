@@ -1086,6 +1086,7 @@ mod tests {
     fn overlay_for(text: &str) -> Overlay {
         let document = lash::workflow::document::parse_document(text).unwrap();
         let link = lash::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: Default::default(),
         }
@@ -1106,6 +1107,7 @@ mod tests {
         content.links.insert(
             link,
             lash::package::Link {
+                helper_fills: Default::default(),
                 document: holder.identity(),
                 fills: Default::default(),
             },

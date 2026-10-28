@@ -556,9 +556,8 @@ impl KernelMachine {
                 .program
                 .instances
                 .get(&use_.link)
-                .and_then(|instance| instance.slots.get(&use_.slot));
-            if !matches!(declared, Some(crate::interface::PreparedSlot::Operation(found)) if *found == use_)
-            {
+                .and_then(|instance| instance.operation(use_.slot));
+            if !matches!(declared, Some(found) if found == use_) {
                 return Err(StartError::UndeclaredRead { use_ });
             }
             if mode == lash_kernel_value::package::OperationMode::Read {
@@ -589,32 +588,41 @@ impl KernelMachine {
     fn operation(
         &mut self,
         task: TaskId,
-        slot: lash_kernel_value::names::ImportSlot,
-    ) -> Result<lash_kernel_value::names::OperationUse, Halt> {
-        let link = self.frame(task)?.link;
-        self.operation_in_link(link, slot)
-    }
-
-    fn operation_in_link(
-        &self,
-        link: lash_kernel_value::LinkId,
         slot: lash_kernel_value::ImportSlot,
+        unit: &lash_kernel_value::sites::Unit,
     ) -> Result<lash_kernel_value::OperationUse, Halt> {
-        match self
+        let link = self.frame(task)?.link;
+        let instance = self
             .program
             .instances
             .get(&link)
-            .and_then(|instance| instance.slots.get(&slot))
-        {
-            Some(crate::interface::PreparedSlot::Operation(use_))
-                if use_.link == link && use_.slot == slot =>
+            .ok_or_else(|| fault("operation context is not loaded"))?;
+        let key = match unit {
+            lash_kernel_value::sites::Unit::Library(function)
+                if !self.program.documents[&instance.document]
+                    .functions
+                    .contains_key(function) =>
             {
-                Ok(*use_)
+                let registered = self
+                    .program
+                    .helpers()
+                    .registered(function)
+                    .or_else(|| self.program.library.registry().get(function))
+                    .ok_or_else(|| fault("helper operation body is not loaded"))?;
+                let import = registered
+                    .imports()
+                    .get(&slot)
+                    .ok_or_else(|| fault("helper does not declare this operation"))?;
+                lash_kernel_value::OperationSlot::Helper(
+                    lash_kernel_value::HelperOperationId::of_import(import),
+                )
             }
-            _ => Err(fault(
-                "perform slot is not an operation of the running Link",
-            )),
-        }
+            _ => slot.into(),
+        };
+        instance
+            .operation(key)
+            .filter(|use_| use_.link == link && use_.slot == key)
+            .ok_or_else(|| fault("perform has no explicit operation fill in its defining Link"))
     }
 
     /// The task `task`: the running task through its cursor
@@ -1447,7 +1455,7 @@ impl KernelMachine {
 
 fn operation_key(use_: &lash_kernel_value::names::OperationUse) -> Vec<u8> {
     let mut key = use_.link.as_bytes().to_vec();
-    key.extend_from_slice(&use_.slot.0.to_be_bytes());
+    key.extend_from_slice(&lash_kernel_value::tokens::encode_body(&use_.slot));
     key
 }
 

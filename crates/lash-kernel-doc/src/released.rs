@@ -22,7 +22,7 @@
 //! - the names, one UTF-8 text the name ranges index;
 //! - the blob the other ranges index.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{FunctionDefinition, ValidatedFunctions};
 use lash_kernel_value::names::FunctionId;
@@ -605,25 +605,51 @@ impl crate::FunctionCatalog for BuildHelpers {
 pub enum LibraryRequirementRefusal {
     #[error("missing build helper {function}")]
     MissingHelper { function: FunctionId },
-    #[error("incompatible operation bindings at {slot:?}")]
-    IncompatibleImport {
-        slot: lash_kernel_value::names::ImportSlot,
-    },
 }
 
-/// The one projection of a document's build-library closure: each reached
-/// helper's kernel version and lifted operation imports. Native-only helper
-/// debt belongs to the library identity that executable reach names, never
-/// to the document, so authoring, materialization, printing and reading
-/// all agree on `requires`.
-///
-/// # Errors
-///
-/// A reached helper the catalog does not hold, or two helpers binding one
-/// import slot differently.
+/// Project the kernel versions of the exact helper closure, without copying
+/// helper imports into the authored document.
 pub fn library_requirements(
     document: &mut crate::Document,
     catalog: &dyn crate::FunctionCatalog,
+) -> Result<(), LibraryRequirementRefusal> {
+    let mut kernels = BTreeSet::new();
+    helper_closure(document, catalog, |_, header, _| {
+        kernels.insert(header.kernel);
+    })?;
+    document.requires.kernels.extend(kernels);
+    Ok(())
+}
+
+/// The helper operation declarations a Link must explicitly fill. Body-local
+/// numeric slots never become authored imports or execution identities.
+pub fn helper_imports(
+    document: &crate::Document,
+    catalog: &dyn crate::FunctionCatalog,
+) -> Result<
+    BTreeMap<lash_kernel_value::HelperOperationId, lash_kernel_value::Import>,
+    LibraryRequirementRefusal,
+> {
+    let mut imports = BTreeMap::new();
+    helper_closure(document, catalog, |_, _, required| {
+        for import in required.values() {
+            imports.insert(
+                lash_kernel_value::HelperOperationId::of_import(import),
+                import.clone(),
+            );
+        }
+    })?;
+    Ok(imports)
+}
+
+fn helper_closure(
+    document: &crate::Document,
+    catalog: &dyn crate::FunctionCatalog,
+    mut visit: impl FnMut(
+        FunctionId,
+        &crate::FunctionHeader,
+        &BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
+    ),
 ) -> Result<(), LibraryRequirementRefusal> {
     let mut pending: Vec<_> = document.library.iter().copied().collect();
     let mut seen = BTreeSet::new();
@@ -633,7 +659,6 @@ pub fn library_requirements(
         }
         let missing = || LibraryRequirementRefusal::MissingHelper { function };
         let header = catalog.header(&function).ok_or_else(missing)?;
-        document.requires.kernels.insert(header.kernel);
         let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
             (registered.callees().clone(), registered.imports().clone())
         } else {
@@ -649,18 +674,8 @@ pub fn library_requirements(
                 })
                 .unwrap_or_default()
         };
+        visit(function, &header, &imports);
         pending.extend(callees);
-        for (slot, import) in imports {
-            match document.imports.get(&slot) {
-                Some(previous) if *previous != import => {
-                    return Err(LibraryRequirementRefusal::IncompatibleImport { slot });
-                }
-                Some(_) => {}
-                None => {
-                    document.imports.insert(slot, import);
-                }
-            }
-        }
     }
     Ok(())
 }

@@ -335,7 +335,17 @@ fn check_controls(
             for slot in crate::authoring::used_imports(&body.block) {
                 let use_ = lash_kernel_value::OperationUse {
                     link: callable.link,
-                    slot,
+                    slot: if document.functions.contains_key(&id) {
+                        slot.into()
+                    } else {
+                        let import = body
+                            .imports
+                            .get(&slot)
+                            .ok_or_else(|| unreadable("helper operation is not declared"))?;
+                        lash_kernel_value::OperationSlot::Helper(
+                            lash_kernel_value::HelperOperationId::of_import(import),
+                        )
+                    },
                 };
                 if left
                     .controls

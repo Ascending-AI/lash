@@ -93,7 +93,7 @@ fn outcome(
 fn operation() -> lash_kernel_value::names::OperationUse {
     lash_kernel_value::names::OperationUse {
         link: lash_kernel_value::package::LinkId::from_bytes([1; 32]),
-        slot: lash_kernel_value::names::ImportSlot(0),
+        slot: (lash_kernel_value::names::ImportSlot(0)).into(),
     }
 }
 

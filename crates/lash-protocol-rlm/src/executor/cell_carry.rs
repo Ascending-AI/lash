@@ -35,9 +35,10 @@ pub(super) async fn carry(
     if envelope.document.kernel() == kernel.writes().number() {
         return Ok(());
     }
+    let predecessor_document = envelope.document.id();
     let refusal = |reason: String| {
         Error::Migration(lash_vm_runtime::KernelMigrationRefusal::Succession {
-            document: envelope.document.id(),
+            document: predecessor_document,
             reason,
         })
     };
@@ -75,6 +76,7 @@ pub(super) async fn carry(
     let predecessor = envelope.link;
     let next_document = lash_kernel_doc::IdentifiedDocument::new(plan.rewritten.document.clone());
     let next = lash_kernel_value::package::Link {
+        helper_fills: content.links[&predecessor].helper_fills.clone(),
         document: next_document.id(),
         fills: content.links[&predecessor].fills.clone(),
     };
@@ -380,7 +382,10 @@ pub(super) async fn carry(
         envelope.environment.registry,
     ));
     for (use_, entry) in adopted.resolutions {
-        let requested = content.documents[&content.links[&use_.link].document].imports[&use_.slot]
+        let link = &content.links[&use_.link];
+        let requested = link
+            .operation_import(&content.documents[&link.document].imports, use_.slot)
+            .ok_or_else(|| refusal("adopted operation declaration is absent".into()))?
             .name
             .clone();
         tx.seed_resolution(lash_core_store::resolutions::ResolutionRecord {

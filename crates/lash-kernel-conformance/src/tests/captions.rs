@@ -569,7 +569,7 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             let lash_kernel_doc::Export::Function(entry) = export else {
                 continue;
             };
-            let (content, link) = crate::linked::content(document);
+            let (content, link) = crate::linked::content(document, dialect.environment.library);
             let reference = lash_kernel_value::LinkedStart {
                 link,
                 selector: lash_kernel_value::StartSelector::Main,

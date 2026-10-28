@@ -176,7 +176,7 @@ fn the_contract_refuses_under_the_shared_codes() {
 
 fn selected_operations(source: &str, entry: &str) -> Vec<String> {
     let lowered = module(source).expect("reach witness lowers");
-    let (content, root) = super::linked::content(&lowered.document);
+    let (content, root) = super::linked::content(&lowered.document, super::library());
     let reach = content
         .inspect(
             root,
@@ -1024,6 +1024,7 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
     };
     let presentation = closure.presentation.as_ref().unwrap();
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: lowered.document.identity(),
         fills: Default::default(),
     };
@@ -1384,7 +1385,7 @@ const values = { first };
 await control.finish(values[key]);"#,
     )
     .expect("the tool-and-finish cell lowers");
-    let (content, root) = super::linked::content(&lowered.document);
+    let (content, root) = super::linked::content(&lowered.document, super::library());
     let reach = content
         .inspect_invocations(
             root,
@@ -1415,7 +1416,7 @@ await control.finish(values[key]);"#,
 fn direct_service_calls_still_plan_their_reads() {
     let lowered = super::lower_with_effects("await control.finish([Math.random(), Date.now()]);")
         .expect("direct reads lower");
-    let (content, root) = super::linked::content(&lowered.document);
+    let (content, root) = super::linked::content(&lowered.document, super::library());
     let reach = content
         .inspect_invocations(
             root,
@@ -1504,4 +1505,28 @@ fn numeric_operators_and_primitive_text_methods_print_as_written() {
         .unwrap_or_else(|refused| panic!("`{expression}` must print: {refused}"));
         assert_eq!(printed.source, source);
     }
+}
+
+/// FIG-7475: an authored import at the former clock slot cannot replace a helper's service.
+#[test]
+fn authored_import_at_former_helper_slot_runs_with_clock() {
+    let lowered = super::lower_with_effects("await control.finish(Date.now());").unwrap();
+    let mut document = lowered.document.document().clone();
+    let import = document
+        .imports
+        .values()
+        .find(|import| import.name.package.to_string() == "control")
+        .unwrap()
+        .clone();
+    document
+        .imports
+        .insert(lash_kernel_value::ImportSlot(0), import);
+    lash_kernel_doc::library_requirements(&mut document, super::library()).unwrap();
+    lash_kernel_doc::validate_document(&document, super::library()).unwrap();
+    assert_eq!(
+        super::machine::end("await control.finish(Date.now());"),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(
+            lash_kernel_doc::Float::new(0.0)
+        )),
+    );
 }

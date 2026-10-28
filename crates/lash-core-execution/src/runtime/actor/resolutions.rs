@@ -286,7 +286,7 @@ pub fn start_requirements(
                 if fixed.requirement != *requirement {
                     return Err(EnginePortError::Refused(
                         AdmissionRefusal::ContractMismatch {
-                            use_: *use_,
+                            use_: Box::new(*use_),
                             pinned: requirement.contract.clone(),
                             offered: fixed.requirement.contract.clone(),
                         },

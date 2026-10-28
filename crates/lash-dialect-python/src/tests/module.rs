@@ -973,6 +973,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
     };
     let document = lowered.document.document().clone();
     let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
         document: document.identity(),
         fills: Default::default(),
     };

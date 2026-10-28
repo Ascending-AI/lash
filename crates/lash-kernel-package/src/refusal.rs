@@ -41,7 +41,7 @@ pub enum LinkRefusal {
     UndeclaredDeferred { path: PackagePath },
     #[error("operation {use_:?} pins {pinned}, offered {offered}")]
     ContractMismatch {
-        use_: OperationUse,
+        use_: Box<OperationUse>,
         pinned: ContractId,
         offered: ContractId,
     },

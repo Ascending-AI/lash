@@ -38,7 +38,7 @@ async fn answer(response: reqwest::Response) -> Value {
     body
 }
 
-// OperationUse is (Link, ImportSlot), not a display-name string. Resolve
+// OperationUse includes a Link and a tagged slot. Resolve
 // each action's slot in the body the action's Site owns.
 fn echo_action(workflow: &Value) -> &Value {
     use lash::workflow::document::{Document, Site, Unit};
@@ -54,6 +54,9 @@ fn echo_action(workflow: &Value) -> &Value {
             };
             let use_: lash::package::OperationUse =
                 serde_json::from_value(effect.clone()).expect("a typed operation use");
+            let lash::package::OperationSlot::Import(slot) = use_.slot else {
+                return false;
+            };
             let site: Site =
                 serde_json::from_value(action["site"].clone()).expect("the action site");
             let imports = match site.unit {
@@ -66,7 +69,7 @@ fn echo_action(workflow: &Value) -> &Value {
                 _ => &document.imports,
             };
             imports
-                .get(&use_.slot)
+                .get(&slot)
                 .is_some_and(|import| import.name.to_string() == "corpus.echo")
         })
         .expect("the fixture's corpus.echo action")

@@ -122,6 +122,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
         (host, None),
     ] {
         let link = lash::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: Default::default(),
         };

@@ -50,7 +50,7 @@ fn sealed() -> ParkedPage {
 fn operation_use() -> lash_kernel_value::OperationUse {
     lash_kernel_value::OperationUse {
         link: lash_kernel_value::LinkId::from_bytes([1; 32]),
-        slot: lash_kernel_value::ImportSlot(0),
+        slot: (lash_kernel_value::ImportSlot(0)).into(),
     }
 }
 fn admitted(identity: EffectId) -> Admission {
@@ -432,4 +432,291 @@ fn withdrawn_operation_waits_drop_late_outcomes() {
         input.deliver[0].wait,
         lash_kernel_value::sites::testkit::wait_id(3)
     );
+}
+
+/// FIG-7505: an escaped helper uses its defining Link's fill for reads and
+/// waited calls, including after a cold checkpoint restore.
+#[test]
+fn a_helper_called_from_another_link_keeps_its_defining_fills() {
+    use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+    use lash_kernel_doc::{Action, Callee, Closure, Datum, Expr, FunctionExport, Rhs, Stmt};
+    use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+    use lash_kernel_value::*;
+    use lash_kernel_vm::{Host, KernelMachine, Machine, Outcome, Request, Step};
+    use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+
+    #[derive(Clone, Default)]
+    struct Pages(Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
+    impl PageSource for Pages {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            Ok(pages
+                .iter()
+                .map(|page| {
+                    self.0
+                        .borrow()
+                        .get(&page.id)
+                        .cloned()
+                        .ok_or(HeapFault::Missing { page: page.id })
+                })
+                .collect())
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            let mut bytes = body.kind.0.to_be_bytes().to_vec();
+            bytes.extend_from_slice(&body.tokens);
+            let page = PageRef {
+                id: PageId(lash_kernel_doc::heap_values::key_digest(&bytes)),
+                grant: PageGrant::NONE,
+            };
+            self.0.borrow_mut().insert(
+                page.id,
+                PageAnswer {
+                    page,
+                    kind: body.kind,
+                    tokens: body.tokens.into(),
+                    children: body.children,
+                },
+            );
+            Ok(page)
+        }
+    }
+    struct Reads {
+        a: LinkId,
+        seen: Vec<OperationUse>,
+    }
+    impl Host for Reads {
+        fn print(&mut self, _: &Datum) {}
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+        fn perform(
+            &mut self,
+            use_: &OperationUse,
+            _: &[Datum],
+            _: &lash_kernel_value::sites::PositionLabel,
+            _: &lash_kernel_value::sites::Site,
+        ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+            self.seen.push(*use_);
+            Ok(Ok(Datum::Int(
+                if use_.link == self.a { 11 } else { 22 }.into(),
+            )))
+        }
+    }
+    let helper = lash_kernel_doc::parse_definition("function helper.read() -> Int\nkernel 1\nmetering statements\nimport 0 operation service.read() -> Int\nbody { return perform 0() as Int }").unwrap();
+    let helper_id = helper.identity();
+    let import = helper.body().unwrap().imports[&ImportSlot(0)].clone();
+    let operation = HelperOperationId::of_import(&import);
+    let mut factory = lash_kernel_doc::parse_definition(
+        "function local.make() -> Any\nkernel 1\nmetering statements\nbody { return null }",
+    )
+    .unwrap();
+    if let lash_kernel_doc::Implementation::Guest { body, .. } = &mut factory.implementation {
+        body.functions.insert(helper_id, helper.name.clone());
+        body.block = vec![Stmt::Return {
+            value: Expr::Closure(Box::new(Closure {
+                function: helper_id,
+                presentation: None,
+            })),
+        }];
+    }
+    let factory_id = factory.identity();
+    let mut a = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    a.main = None;
+    a.functions.insert(factory_id, factory.clone());
+    a.library.insert(helper_id);
+    a.exports.insert(
+        Name::new("make"),
+        lash_kernel_doc::Export::Function(FunctionExport {
+            function: factory_id,
+            signature: factory.signature.clone(),
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    let binding = |contract| {
+        BTreeMap::from([(
+            operation,
+            HelperFill {
+                import: import.clone(),
+                fill: Fill::Operation(OperationRequirement::new(
+                    Signature {
+                        params: vec![],
+                        result: Type::Int,
+                    },
+                    ContractId::new(contract),
+                )),
+            },
+        )])
+    };
+    let a_link = Link {
+        document: a.identity(),
+        fills: BTreeMap::new(),
+        helper_fills: binding("context.a"),
+    };
+    let mut b = lash_kernel_doc::Document::new(
+        lash_kernel_doc::NumberPolicy::BySpelling,
+        vec![
+            Stmt::Let {
+                name: Name::new("callback"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Import(ImportSlot(0)),
+                    args: vec![],
+                }),
+            },
+            Stmt::Let {
+                name: Name::new("from_a"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Value(Name::new("callback")),
+                    args: vec![],
+                }),
+            },
+            Stmt::Let {
+                name: Name::new("from_b"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Local(helper_id),
+                    args: vec![],
+                }),
+            },
+            Stmt::Return {
+                value: Expr::List(vec![
+                    Expr::Variable(Name::new("from_a")),
+                    Expr::Variable(Name::new("from_b")),
+                ]),
+            },
+        ],
+    );
+    b.library.insert(helper_id);
+    b.imports.insert(
+        ImportSlot(0),
+        Import {
+            name: QualifiedName {
+                package: PackagePath::parse("library").unwrap(),
+                member: Segment::new("make").unwrap(),
+                type_member: None,
+            },
+            kind: ImportKind::Code {
+                signature: factory.signature,
+                convention: Convention::Direct,
+            },
+        },
+    );
+    let a_id = a_link.identity();
+    let b_link = Link {
+        document: b.identity(),
+        fills: BTreeMap::from([(
+            ImportSlot(0),
+            Fill::Export {
+                link: a_id,
+                export: ExportName {
+                    name: Name::new("make"),
+                    member: None,
+                },
+            },
+        )]),
+        helper_fills: binding("context.b"),
+    };
+    let b_id = b_link.identity();
+    let mut registry = lash_kernel_doc::FunctionRegistry::default();
+    registry.register(helper, None).unwrap();
+    let helpers =
+        Arc::new(lash_kernel_doc::BuildHelpers::new(registry.clone(), [helper_id]).unwrap());
+    let library = lash_kernel_vm::PreparedLibrary::with_helpers(Arc::new(registry), helpers);
+    let program = lash_kernel_vm::Program::prepare(
+        b_id,
+        BTreeMap::from([(a.identity(), Arc::new(a)), (b.identity(), Arc::new(b))]),
+        &BTreeMap::from([(a_id, a_link), (b_id, b_link)]),
+        PageId([8; 32]),
+        library,
+        lash_kernel_doc::Selection::Fresh,
+    )
+    .unwrap();
+    let use_a = OperationUse {
+        link: a_id,
+        slot: OperationSlot::Helper(operation),
+    };
+    let use_b = OperationUse {
+        link: b_id,
+        slot: OperationSlot::Helper(operation),
+    };
+    for read in [false, true] {
+        let pages = Pages::default();
+        let mut host = Reads {
+            a: a_id,
+            seen: vec![],
+        };
+        let mut start = lash_kernel_vm::CellStart {
+            owner: PageId([9; 32]),
+            target: lash_kernel_vm::Target::Main,
+            args: vec![],
+            session: None,
+            modes: BTreeMap::new(),
+            host: vec![],
+        };
+        if read {
+            start
+                .modes
+                .extend([(use_a, OperationMode::Read), (use_b, OperationMode::Read)]);
+        }
+        let bounds = lash_kernel_vm::Bounds {
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
+            charge: lash_kernel_vm::Charge::Exact,
+            charge_limit: 1_000_000,
+            memory: 64 << 20,
+            call_depth: 100,
+            live_tasks: 10,
+            requests_per_park: 10,
+            join_members: 10,
+        };
+        let mut machine =
+            KernelMachine::start(program.clone(), bounds, start, Box::new(pages.clone())).unwrap();
+        let mut waited = vec![];
+        loop {
+            match machine.run(&mut host, u64::MAX).unwrap() {
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    let [Request::Effect(request)] = park.requests.as_slice() else {
+                        panic!("one helper operation")
+                    };
+                    waited.push(request.use_);
+                    let checkpoint = machine.checkpoint().unwrap().checkpoint();
+                    drop(machine);
+                    let mut restored = program.clone();
+                    restored.selection =
+                        lash_kernel_doc::Selection::Restored(lash_kernel_doc::RestoreSelection {
+                            live: [a_id, b_id]
+                                .into_iter()
+                                .map(|link| CallableId {
+                                    link,
+                                    function: helper_id,
+                                })
+                                .collect(),
+                            pins: [helper_id].into(),
+                        });
+                    machine =
+                        KernelMachine::open(restored, bounds, &checkpoint, Box::new(pages.clone()))
+                            .unwrap();
+                    machine
+                        .deliver(
+                            request.wait,
+                            Outcome::Completed(Datum::Int(
+                                if request.use_.link == a_id { 11 } else { 22 }.into(),
+                            )),
+                        )
+                        .unwrap();
+                }
+                Step::Ended(lash_kernel_vm::End::Finished(done)) => {
+                    assert_eq!(
+                        done.result,
+                        Datum::List(vec![Datum::Int(11.into()), Datum::Int(22.into())])
+                    );
+                    assert_eq!(if read { &host.seen } else { &waited }, &[use_a, use_b]);
+                    break;
+                }
+                other => panic!("unexpected helper result: {other:?}"),
+            }
+        }
+    }
 }

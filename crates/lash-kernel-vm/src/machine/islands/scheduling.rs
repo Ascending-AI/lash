@@ -218,7 +218,7 @@ impl KernelMachine {
             ActionKind::Perform {
                 slot, args, result, ..
             } => {
-                let effect = self.operation(task, *slot)?;
+                let effect = self.operation(task, *slot, &action.site.unit)?;
                 let values = self.perform_atoms(task, exe, args)?;
                 let mut copied = Vec::with_capacity(values.len());
                 for (index, value) in values.iter().enumerate() {
@@ -384,7 +384,7 @@ impl KernelMachine {
                 Ok(self.answered_at(flow, at, args))
             }
             NestedKind::Perform { slot, result, .. } => {
-                let effect = self.operation(task, *slot)?;
+                let effect = self.operation(task, *slot, &site.unit)?;
                 let mut copied = Vec::with_capacity(count);
                 for at in args..args + count {
                     let value = self.take(at);

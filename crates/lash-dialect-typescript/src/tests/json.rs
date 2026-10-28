@@ -125,7 +125,7 @@ fn program(
         &["fast", "walk", "admits", "draw", "idle"],
         super::library(),
     );
-    let (mut content, root) = super::linked::content(&document);
+    let (mut content, root) = super::linked::content(&document, super::library());
     let mut pending = roots.iter().copied().collect::<Vec<_>>();
     let mut visited = BTreeSet::new();
     while let Some(id) = pending.pop() {
@@ -670,7 +670,7 @@ fn smith_values() -> (Vec<Datum>, lash_kernel_package::LinkedContent) {
         };
         // Printed functions retain their original callable identities and captures.
         // Keep the producing code alongside the values for the consumer's decoder.
-        let (content, _) = super::linked::content(&smith.document);
+        let (content, _) = super::linked::content(&smith.document, super::library());
         retained.documents.extend(content.documents);
         retained.links.extend(content.links);
         let program =

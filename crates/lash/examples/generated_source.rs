@@ -117,6 +117,7 @@ async fn measure(iterations: u32) -> Result<()> {
         let nodes = count(Node::Block(document.main.as_deref().unwrap_or_default()));
         let document_bytes = document.canonical_bytes().len();
         let link = lash::package::Link {
+            helper_fills: Default::default(),
             document: document.identity(),
             fills: Default::default(),
         };

@@ -126,11 +126,11 @@ mod tests {
         let two = make("two", serde_json::json!({"type":"integer"}));
         let use_one = OperationUse {
             link: LinkId::from_bytes([1; 32]),
-            slot: ImportSlot(4),
+            slot: (ImportSlot(4)).into(),
         };
         let use_two = OperationUse {
             link: LinkId::from_bytes([2; 32]),
-            slot: ImportSlot(9),
+            slot: (ImportSlot(9)).into(),
         };
         let need = |candidate: &AdvertisedRoute| OperationNeed::Fixed {
             name: QualifiedName {

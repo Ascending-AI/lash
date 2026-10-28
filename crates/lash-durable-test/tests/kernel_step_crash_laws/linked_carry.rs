@@ -109,6 +109,7 @@ impl Fixture {
         .unwrap();
         let mut add = |document: Document| {
             let link = Link {
+                helper_fills: Default::default(),
                 document: document.identity(),
                 fills: [(
                     ImportSlot(0),
@@ -258,11 +259,11 @@ impl Fixture {
                         matches!(fill, Fill::Operation(_) | Fill::Deferred { .. }).then_some((
                             lash_kernel_value::OperationUse {
                                 link: *link,
-                                slot: *slot,
+                                slot: (*slot).into(),
                             },
                             lash_kernel_value::OperationUse {
                                 link: if *link == self.from { self.to } else { *link },
-                                slot: *slot,
+                                slot: (*slot).into(),
                             },
                         ))
                     })
@@ -359,7 +360,7 @@ impl Fixture {
                 request.use_,
                 lash_kernel_value::OperationUse {
                     link: self.leaf,
-                    slot: ImportSlot(0)
+                    slot: ImportSlot(0).into()
                 }
             );
             machine

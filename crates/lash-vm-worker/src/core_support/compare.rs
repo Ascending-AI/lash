@@ -165,6 +165,27 @@ impl Kernel {
         let document = Arc::clone(lowered.document.shared());
         let _scope = Scope::new("linking", &mut phases);
         let link = Link {
+            helper_fills: lash_kernel_doc::helper_imports(
+                &document,
+                self.library.helpers().as_ref(),
+            )
+            .map_err(failure)?
+            .into_iter()
+            .map(|(id, import)| {
+                let operation = lash_ext_py_helpers::package::helper_operations()
+                    .iter()
+                    .chain(lash_ext_ts_helpers::package::helper_operations())
+                    .find(|operation| operation.name == import.name)
+                    .ok_or_else(|| failure("unknown helper operation"))?;
+                Ok((
+                    id,
+                    lash_kernel_value::HelperFill {
+                        import,
+                        fill: Fill::Operation(operation.requirement.clone()),
+                    },
+                ))
+            })
+            .collect::<Result<_>>()?,
             document: document.identity(),
             fills: document
                 .imports

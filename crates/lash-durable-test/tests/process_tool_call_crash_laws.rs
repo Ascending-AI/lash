@@ -1680,7 +1680,7 @@ impl DynamicCalls {
         };
         let use_ = lash::package::OperationUse {
             link: start.link,
-            slot: lash::package::ImportSlot(0),
+            slot: (lash::package::ImportSlot(0)).into(),
         };
         violations.extend(match (self.grant, self.document) {
             (Grant::Pure, RESOLVING) => self.resolved_laws(&answer),
