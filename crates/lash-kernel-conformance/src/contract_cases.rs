@@ -648,9 +648,9 @@ impl lash_kernel_vm::Host for ProbeHost {
 fn identity_document(shard: &Shard) {
     let document = doc(&shard.cases[0].document);
     let expected = if shard.rule == "K-ID-001" {
-        "533b53b1de8d536798c7e13d50d285f873727f1f420e56c1e66fcfef48d4fd2a"
+        "0845bde1ecc19dff264e6028a0d714d39c679b4488fae96fd3b2cd04f1cb957e"
     } else {
-        "240417163be94e730d29eb8c8720d3305293a0b4367fe8551913ed5d2649a176"
+        "ce73d2ca581933f571913032b48d0fd10eb2009e170faa6f35a07a9095acc7e0"
     };
     assert_eq!(document.identity().to_string(), expected);
     // K-ID-003: the canonical form is the document's logical token body,

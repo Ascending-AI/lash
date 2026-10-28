@@ -402,6 +402,7 @@ fn document_identities(root: &std::path::Path) -> Result<(), Box<dyn std::error:
                 let link = lash_kernel_value::Link {
                     document: document.identity(),
                     fills: Default::default(),
+                    helper_fills: Default::default(),
                 }
                 .identity()
                 .to_string();

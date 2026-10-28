@@ -151,9 +151,14 @@ impl BatchSugar {
 
 /// Plugin factory that installs the standard-protocol driver,
 /// session plugin, and native tool catalog.
-#[derive(Default)]
 pub struct StandardProtocolPluginFactory {
     config: StandardProtocolConfig,
+}
+
+impl Default for StandardProtocolPluginFactory {
+    fn default() -> Self {
+        Self::with_config(StandardProtocolConfig::default())
+    }
 }
 
 /// A host's standard-protocol configuration. The renderer and tool
@@ -551,6 +556,13 @@ impl StandardProtocolPluginFactory {
     }
 
     pub fn with_config(config: StandardProtocolConfig) -> Self {
+        // Immutable configured metadata belongs to factory preparation, before
+        // lazy session binding can charge its compilation to the first turn.
+        if let BatchSugar::Enabled { max_members } = config.batch
+            && max_members.get() <= BATCH_MEMBER_CEILING
+        {
+            let _ = batch_tool_definition(max_members);
+        }
         Self { config }
     }
 }
@@ -721,7 +733,9 @@ impl StandardProtocolPlugin {
             .session(move |_this, _state| Ok(Arc::new(StandardProtocolSession)))?;
 
         reg.protocol().protocol_driver(move |this, _state| {
-            Ok(Arc::new(StandardProtocolDriver::new(this.config.clone())))
+            Ok(Arc::new(StandardProtocolDriver {
+                config: this.config.clone(),
+            }))
         })?;
 
         reg.tools().provider(
@@ -765,19 +779,6 @@ impl ProtocolSessionPlugin for StandardProtocolSession {
 
 struct StandardProtocolDriver {
     config: StandardProtocolConfig,
-    batch_tool: Option<lash_vocabulary::tool_contract::ModelTool>,
-}
-
-impl StandardProtocolDriver {
-    fn new(config: StandardProtocolConfig) -> Self {
-        let batch_tool = match config.batch {
-            BatchSugar::Enabled { max_members } => {
-                Some(batch_tool_definition(max_members).model_tool())
-            }
-            BatchSugar::Disabled => None,
-        };
-        Self { config, batch_tool }
-    }
 }
 
 impl ProtocolDriverPlugin for StandardProtocolDriver {
@@ -850,18 +851,19 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             input.tool_catalog.as_ref()
         };
         let catalog_specs = catalog.model_tool_specs();
-        let tool_specs = match &self.batch_tool {
-            Some(model_tool) => {
+        let tool_specs = match self.config.batch {
+            BatchSugar::Enabled { max_members } => {
+                let model_tool = batch_tool_definition(max_members).model_tool();
                 let mut specs = catalog_specs.as_ref().clone();
                 specs.push(lash_core::llm::types::LlmToolSpec {
                     name: batch::BATCH_TOOL_NAME.to_owned(),
-                    description: model_tool.description.clone(),
-                    input_schema: model_tool.input_schema.clone(),
-                    output_schema: model_tool.output_schema.clone(),
+                    description: model_tool.description,
+                    input_schema: model_tool.input_schema,
+                    output_schema: model_tool.output_schema,
                 });
                 Arc::new(specs)
             }
-            None => catalog_specs,
+            BatchSugar::Disabled => catalog_specs,
         };
         TurnDriverPreamble {
             config: TurnDriverConfig {

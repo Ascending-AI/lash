@@ -766,8 +766,9 @@ and worker binaries must match, as the host-upgrade entry describes.
 
 Counted node startup initializes the five JSON Schema meta-validator engines;
 counted workers initialize them before installing their resource observer.
-The standard protocol driver prepares its optional batch declaration at
-construction and clones its admitted model-tool schemas into preambles.
+The standard protocol factory prepares its configured batch declaration
+at construction. Lazy session binding and preambles then
+use the existing immutable admitted-definition cache.
 Separate targeted stacks identified 3,152-byte rehashes in lazy meta-validator
 and batch-schema admission. Startup pays that metadata work; workload schema
 admission and validation remain complete. No steady-turn speedup is claimed
@@ -799,7 +800,7 @@ The combined ordinary population has these host allocation medians:
 Five ordinary captures at clean `f088bd47dd` matched every counted summary
 and every turn/compaction record across four workloads: 1,280 turns and
 15 compactions. Their executable digest is identical and no diagnostic
-probe or attribution mode is enabled. The refresh updates 34 medians,
+probe or attribution mode is enabled. The first refresh updates 34 medians,
 sets zero measured noise and retains the tighter prior/observed depth
 slopes. The TypeScript host slope is 23,795.667 B per prior turn and remains
 within the existing allowance around the retained 23,166.143 B baseline.
