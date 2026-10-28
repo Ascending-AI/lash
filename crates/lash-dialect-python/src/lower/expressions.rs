@@ -641,27 +641,31 @@ impl Lowerer<'_> {
         let header = self.for_header(&first.iter)?;
         let renames = self.renames.len();
         let mut declared = Vec::new();
-        for generator in generators {
-            let mut names = Vec::new();
-            target_names(&generator.target, &mut names);
-            for name in names {
-                let renamed =
-                    self.fresh(&crate::constructs::collections::COMPREHENSION.binding_base(&name));
-                self.emit(Stmt::Let {
-                    name: renamed.clone(),
-                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-                });
-                self.unbound_renames.insert(renamed.clone());
-                declared.push(renamed.clone());
-                self.renames.push((name, renamed));
+        let result = self.aside(|this| {
+            for generator in generators {
+                let mut names = Vec::new();
+                target_names(&generator.target, &mut names);
+                for name in names {
+                    let renamed = this
+                        .fresh(&crate::constructs::collections::COMPREHENSION.binding_base(&name));
+                    this.emit(Stmt::Let {
+                        name: renamed.clone(),
+                        value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+                    });
+                    this.unbound_renames.insert(renamed.clone());
+                    declared.push(renamed.clone());
+                    this.renames.push((name, renamed));
+                }
             }
-        }
-        let result = self.generators(generators, Some(header), &collect, &target);
+            this.generators(generators, Some(header), &collect, &target)
+        });
         self.renames.truncate(renames);
         for renamed in &declared {
             self.unbound_renames.remove(renamed);
         }
-        result.map(|()| out)
+        let (body, ()) = result?;
+        self.append(self.finish_declarations(body, None));
+        Ok(out)
     }
 
     /// The clauses of a comprehension from `generators` on. `header` is

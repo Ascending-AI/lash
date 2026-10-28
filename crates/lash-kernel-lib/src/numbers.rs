@@ -850,7 +850,7 @@ fn kind_name(kind: ValueKind) -> Value {
 /// A word's digits in `radix`, lower-case and signed as
 /// [`integer_text`] spells them, when they fit a short text: one held in
 /// the value, which takes no room.
-fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
+pub(crate) fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
     let mut bytes = [0u8; ShortText::MAX];
     let mut at = bytes.len();
     let mut rest = word.unsigned_abs();

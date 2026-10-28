@@ -476,7 +476,10 @@ impl Out<'_, '_> {
             }
         }
         match value {
-            Value::Int(number) => self.push(&number.to_string()),
+            Value::Int(number) => match crate::numbers::short_digits(*number, 10) {
+                Some(digits) => self.push(digits.as_str()),
+                None => self.push(&number.to_string()),
+            },
             Value::BigInt(_) => {
                 let Some(number) = self.args.integer(value)? else {
                     return Err(NativeError::Malformed("an integer names another body"));

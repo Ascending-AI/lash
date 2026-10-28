@@ -34,6 +34,7 @@ except ValueError:
 # Token scanning preserves escapes and both sides of the inline integer range.
 print(json.loads(json.dumps(['a"b', 'a\\b', 'line\nbreak', 'é'], ensure_ascii=False)))
 print(json.loads('[0,-0,9223372036854775807,-9223372036854775808,9223372036854775808,-9223372036854775809]'))
+print(json.dumps([0, -1, 99999999999999, -99999999999999, 1000000000000000, -9223372036854775808, 9223372036854775807]))
 print(json.loads('[1.0,1e0,-0.0,1E-9]'))
 for invalid in ['01', '-01', '1.', '1e', '1e+', '+1', '.5']:
     try:
