@@ -287,31 +287,26 @@ pub(super) fn frame(
     slots.fresh(code.slots_by_at.len());
     for (at, value) in slots.values.iter_mut().enumerate() {
         let info = &code.slots[code.slots_by_at[at] as usize];
-        *value = match record.bindings.get(&info.key, access)? {
-            None => SlotState::Empty,
-            Some(BindingRecord {
-                value: BoundRecord::Value(value),
-                ..
-            }) => SlotState::Value(admit(arena, access, &value)?),
-            Some(BindingRecord {
-                value: bound @ (BoundRecord::Shared(_) | BoundRecord::Captured(_)),
-                ..
-            }) => {
-                let borrowed = code
-                    .captures
-                    .iter()
-                    .any(|capture| capture.inner_at as usize == at);
-                let id = match bound {
-                    BoundRecord::Captured(id) if borrowed => id,
-                    BoundRecord::Shared(id) if !borrowed => id,
-                    _ => {
-                        return Err(malformed(
-                            "binding capture ownership disagrees with its source",
-                        )
-                        .into());
-                    }
-                };
+        let borrowed = code
+            .captures
+            .iter()
+            .any(|capture| capture.inner_at as usize == at);
+        let bound = record.bindings.get(&info.key, access)?.map(|row| row.value);
+        *value = match bound {
+            None if !borrowed => SlotState::Empty,
+            Some(BoundRecord::Value(value)) if !borrowed && !info.shared => {
+                SlotState::Value(admit(arena, access, &value)?)
+            }
+            Some(BoundRecord::Shared(id)) if !borrowed && info.shared => {
                 SlotState::Cell(admit_cell(arena, id))
+            }
+            Some(BoundRecord::Captured(id)) if borrowed && info.shared => {
+                SlotState::Cell(admit_cell(arena, id))
+            }
+            _ => {
+                return Err(
+                    malformed("binding capture ownership disagrees with its source").into(),
+                );
             }
         };
     }
@@ -340,4 +335,81 @@ pub(super) fn frame(
         held: Vec::new(),
         owned: true,
     }))
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+    use crate::Step;
+    use crate::laws::embedder::Embedder;
+    use lash_kernel_doc::TaskId;
+
+    /// K-BND-003 / K-EVAL-008: a stored borrowed capture must still be the
+    /// source's cell owner. Ordinary values and missing captures cannot stand
+    /// in for it and change either its price or its identity on restore.
+    #[test]
+    fn restored_capture_ownership_is_checked_against_the_source() {
+        let definition = "function outer(held: Any) -> Any\nkernel 1\nmetering statements\nbody { let f = fn() { let w = perform 0(null) as Any return held } return apply f() }";
+        let mut run = Embedder::new(&format!(
+            "definition {}\nmain {{ let answer = call outer(7) return answer }}",
+            serde_json::to_string(definition).unwrap(),
+        ));
+        assert!(matches!(run.run(), Step::Parked(_)));
+        run.checkpoint();
+        let machine = &mut run.machine;
+        let access = machine.heap.pages().clone();
+        let exe = Arc::clone(&machine.exe);
+        let rows = machine.task(TaskId::MAIN).unwrap().frames.rows.clone();
+        let original = (0..rows.len())
+            .map(|at| row::<FrameRecord>(&rows, at, &access).unwrap())
+            .find(|record| !record.capture_names.is_empty())
+            .expect("the called closure has a captured variable");
+        let mut captured = None;
+        original
+            .bindings
+            .visit(&access, &mut |key, binding| {
+                if let BoundRecord::Captured(id) = binding.value {
+                    captured = Some((key.to_vec(), binding.clone(), id));
+                }
+                true
+            })
+            .unwrap();
+        let (key, binding, id) = captured.expect("the source capture has a borrowed row");
+        assert!(
+            frame(
+                &original,
+                Arrival::Requested,
+                &access,
+                &exe,
+                &mut Arena::new()
+            )
+            .is_ok()
+        );
+        for replacement in [
+            Some(BoundRecord::Value(PageValue::Null)),
+            Some(BoundRecord::Shared(id)),
+            None,
+        ] {
+            let mut forged = original.clone();
+            match replacement {
+                Some(value) => {
+                    let mut binding = binding.clone();
+                    binding.value = value;
+                    forged
+                        .bindings
+                        .write(key.clone(), binding, &access)
+                        .unwrap();
+                }
+                None => {
+                    forged.bindings.remove(&key, &access).unwrap();
+                }
+            }
+            assert!(
+                matches!(frame(&forged, Arrival::Requested, &access, &exe, &mut Arena::new()),
+                    Err(Unrestored::Fault(HeapFault::Malformed(problem)))
+                        if problem == "binding capture ownership disagrees with its source"),
+                "a substituted capture was accepted"
+            );
+        }
+    }
 }

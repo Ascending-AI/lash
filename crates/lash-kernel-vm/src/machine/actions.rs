@@ -428,6 +428,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         for (index, atom) in atoms.iter().enumerate() {
             let value = self.atom(task, exe, atom)?;
+            self.regs.source_atom(index, value).map_err(fault)?;
             self.put(at + index, value);
         }
         Ok(())
@@ -443,17 +444,19 @@ impl KernelMachine {
         atoms: &[Atom],
     ) -> Eval<Vec<Value>> {
         let mut values = Vec::with_capacity(atoms.len());
-        for atom in atoms {
+        for (index, atom) in atoms.iter().enumerate() {
             if self.paced {
                 self.charged += 1;
             } else {
                 self.charge_boundary(1)?;
             }
             self.observe_expression();
-            values.push(match atom {
+            let value = match atom {
                 Atom::Var(var) => self.read_var(task, exe, var)?,
                 Atom::Literal(value) => self.literal(value)?,
-            });
+            };
+            self.regs.source_atom(index, value).map_err(fault)?;
+            values.push(value);
         }
         Ok(values)
     }

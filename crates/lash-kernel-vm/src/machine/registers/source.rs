@@ -9,6 +9,8 @@ use std::sync::Arc;
 pub(super) struct Operands {
     values: Vec<Operand>,
     positions: Vec<usize>,
+    atoms: Vec<Value>,
+    atom_site: Option<Site>,
     pub(super) active: bool,
 }
 struct Operand {
@@ -22,6 +24,8 @@ impl Operands {
             self.positions[operand.reg.ix()] = usize::MAX;
         }
         self.values.clear();
+        self.atoms.clear();
+        self.atom_site = None;
         self.active = false;
     }
     pub(super) fn begin(
@@ -55,6 +59,21 @@ impl Operands {
         }
         Ok(())
     }
+    pub(super) fn begin_atoms(&mut self, site: &Site) -> Result<(), &'static str> {
+        if !self.active || self.atom_site.is_some() {
+            return Err("action atoms have no vacant source owner");
+        }
+        self.atom_site = Some(site.clone());
+        Ok(())
+    }
+    pub(super) fn atom(&mut self, index: usize, value: Value) -> Result<(), &'static str> {
+        if self.atom_site.is_none() || self.atoms.len() != index {
+            return Err("action atom has no ordered source role");
+        }
+        self.atoms.push(value);
+        Ok(())
+    }
+
     pub(super) fn complete(
         &mut self,
         stream: &Stream,
@@ -71,6 +90,10 @@ impl Operands {
         if matches!(op, Op::End) {
             self.clear();
             return Ok(());
+        }
+        if matches!(op, Op::Act) {
+            self.atoms.clear();
+            self.atom_site = None;
         }
         let range = match op {
             Op::MakeTuple { items }
@@ -170,10 +193,11 @@ impl Operands {
         for operand in &self.values {
             visit(&operand.value);
         }
+        self.atoms.iter().for_each(visit);
     }
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.values.is_empty() && self.atoms.is_empty()
     }
 }
 

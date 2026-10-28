@@ -267,5 +267,38 @@ mod laws {
         machine.regs.put(19, held);
         machine.regs.source_complete(&stream, 1).unwrap();
         assert_eq!(normalized_operands(machine), baseline, "consumed storage");
+
+        let action_site = Site::new(Unit::Main, vec![0, 0]);
+        machine.regs.source_atoms_begin(&action_site).unwrap();
+        let exe = Arc::clone(&machine.exe);
+        let atoms = [
+            crate::compile::Atom::Literal(crate::compile::Constant::Resident(Value::Bool(true))),
+            crate::compile::Atom::Literal(crate::compile::Constant::Deferred(
+                lash_kernel_doc::Literal::Text("abcd".into()),
+            )),
+        ];
+        let args = machine
+            .perform_atoms(lash_kernel_doc::TaskId::MAIN, &exe, &atoms)
+            .unwrap();
+        assert_eq!(args.len(), 2);
+        assert_eq!(
+            normalized_operands(machine),
+            (baseline.0 + 36, baseline.1),
+            "perform arguments need source owners even outside the register window"
+        );
+        let action = Stream {
+            ops: vec![Op::Act],
+            source_sites: vec![Some(Arc::new(action_site))],
+            ..Default::default()
+        };
+        machine.regs.put(0, Value::Null);
+        machine.regs.source_complete(&action, 0).unwrap();
+        assert_eq!(
+            normalized_operands(machine),
+            (baseline.0 + 16, baseline.1),
+            "only the completed action result remains"
+        );
+        machine.regs.kill_statement();
+        assert_eq!(normalized_operands(machine), baseline);
     }
 }

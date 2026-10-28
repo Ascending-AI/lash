@@ -212,6 +212,17 @@ impl Registers {
         self.source.begin(stream, stmt, pc, &self.values)
     }
 
+    pub(super) fn source_atoms_begin(
+        &mut self,
+        site: &lash_kernel_value::sites::Site,
+    ) -> Result<(), &'static str> {
+        self.source.begin_atoms(site)
+    }
+
+    pub(super) fn source_atom(&mut self, index: usize, value: Value) -> Result<(), &'static str> {
+        self.source.atom(index, value)
+    }
+
     pub(super) fn source_complete(
         &mut self,
         stream: &crate::compile::Stream,
