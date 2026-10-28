@@ -523,8 +523,8 @@ impl SqlitePauses {
 pub(crate) struct ConnectionHooks {
     pub(crate) pauses: Option<SqlitePauses>,
     /// Run every call to its answer before its caller goes on
-    /// ([`crate::SqliteStoreSetOptions::inline_calls`]).
-    pub(crate) inline_calls: bool,
+    /// ([`crate::SqliteStoreSetOptions::synchronous_replies`]).
+    pub(crate) synchronous_replies: bool,
 }
 
 impl crate::SqliteStoreSet {

@@ -404,7 +404,7 @@ pub(crate) struct SqliteConnection {
     #[cfg(feature = "testing")]
     pauses: Option<crate::testing::SqlitePauses>,
     #[cfg(feature = "testing")]
-    inline_calls: bool,
+    synchronous_replies: bool,
 }
 
 impl SqliteConnection {
@@ -506,12 +506,9 @@ impl SqliteConnection {
         lash_core_ids::perf_witness::startup::record(
             lash_core_ids::perf_witness::startup::Phase::StoreOpenStarted,
         );
-        let inner = AsyncConnection::start_configured(
-            move || open_connection(path, rusqlite::OpenFlags::default()),
-            #[cfg(feature = "testing")]
-            hooks.inline_calls,
-        )
-        .await?;
+        let inner =
+            AsyncConnection::start(move || open_connection(path, rusqlite::OpenFlags::default()))
+                .await?;
         #[cfg(feature = "perf-witness")]
         lash_core_ids::perf_witness::startup::record(
             lash_core_ids::perf_witness::startup::Phase::StoreOpened,
@@ -590,7 +587,7 @@ impl SqliteConnection {
             #[cfg(feature = "testing")]
             pauses: hooks.pauses,
             #[cfg(feature = "testing")]
-            inline_calls: hooks.inline_calls,
+            synchronous_replies: hooks.synchronous_replies,
         })
     }
 
@@ -615,25 +612,21 @@ impl SqliteConnection {
     pub(crate) async fn open_readonly_with_issuing(
         target: &DatabaseTarget,
         operational: crate::SqliteOperationalSettings,
-        #[cfg(feature = "testing")] inline_calls: bool,
+        #[cfg(feature = "testing")] synchronous_replies: bool,
     ) -> tokio_rusqlite::Result<Self> {
         operational.validate()?;
 
         let gate = write_gate(target);
         let setup_gate = Arc::clone(&gate);
         let uri = target.read_only_uri();
-        let inner = AsyncConnection::start_configured(
-            move || {
-                open_connection(
-                    uri,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-                )
-            },
-            #[cfg(feature = "testing")]
-            inline_calls,
-        )
+        let inner = AsyncConnection::start(move || {
+            open_connection(
+                uri,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+            )
+        })
         .await?;
         inner
             .call(move |c| {
@@ -685,7 +678,7 @@ impl SqliteConnection {
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]
-            inline_calls,
+            synchronous_replies,
         })
     }
 
@@ -796,7 +789,7 @@ impl SqliteConnection {
         closed
     }
 
-    /// Run `f` on the connection thread; with inline calls, to its answer
+    /// Run `f` on the connection thread; with synchronous replies, to its answer
     /// before the caller goes on.
     async fn run<T, F>(&self, f: F) -> tokio_rusqlite::Result<T>
     where
@@ -838,8 +831,8 @@ impl SqliteConnection {
             })
         };
         #[cfg(feature = "testing")]
-        if self.inline_calls {
-            return self.inner.call_inline(f);
+        if self.synchronous_replies {
+            return self.inner.call_synchronous(f).await;
         }
         self.inner.call(f).await
     }
@@ -1024,16 +1017,14 @@ impl SqliteConnection {
         F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
         #[cfg(feature = "testing")]
-        if self.inline_calls {
-            let (answer, result) = worker::inline_reply();
+        if self.synchronous_replies {
+            let (answer, result) = self.inner.synchronous_reply();
             flatten(
                 self.inner
-                    .write_inline(
-                        batch::Member::new(&self.writer, f, move |value| {
-                            answer.send(value);
-                        }),
-                        result.disposal(),
-                    )
+                    .write(batch::Member::new(&self.writer, f, move |value| {
+                        answer.send(value);
+                    }))
+                    .await
                     .map(Ok),
             )?;
             return result.recv().unwrap_or_else(|_| closed());
@@ -1044,6 +1035,7 @@ impl SqliteConnection {
                 .write(batch::Member::new(&self.writer, f, move |value| {
                     let _ = answer.send(value);
                 }))
+                .await
                 .map(Ok),
         )?;
         result.await.unwrap_or_else(|_| closed())

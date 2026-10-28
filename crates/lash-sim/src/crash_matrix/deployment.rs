@@ -292,7 +292,7 @@ fn wait_out_renders(clock: &SimClock) {
 pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableStore>), String> {
     wait_out_renders(&clock);
     let options = lash_sqlite_store::SqliteStoreSetOptions {
-        inline_calls: true,
+        synchronous_replies: true,
         ..lash_sqlite_store::SqliteStoreSetOptions::memory()
     };
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(options, clock)
@@ -322,7 +322,7 @@ pub async fn sqlite_file(
     wait_out_renders(&clock);
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let options = lash_sqlite_store::SqliteStoreSetOptions {
-        inline_calls: true,
+        synchronous_replies: true,
         ..lash_sqlite_store::SqliteStoreSetOptions::standard(
             lash_sqlite_store::SqliteSynchronous::Full,
         )

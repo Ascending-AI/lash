@@ -823,11 +823,19 @@ worker medians to the new construction machinery. It does not assign the
 individual numerical contributions to each internal mechanism.
 The original full-path law separately checks the compiled baseline.
 
-The counted SQLite fixture uses a serial inline queue. Production retains
-its unbounded queue and asynchronous batching. This gate measures counted
-workload and durable operations under serial execution; it does not qualify
-production queue block allocation, contention, batching opportunities or
-scheduling latency. Warmturn's retained-byte cache-tail fix remains in effect.
+SQLite uses one fixed 256-entry command ring in production and counted replay.
+Async admission waits for a free slot when the writer falls behind. Both paths
+release capacity on dequeue and group the writes already queued behind the
+writer, using the same batch limits and transaction implementation. The ring
+reuses its storage rather than allocating blocks as scheduling changes.
+
+Counted replay retains synchronous replies and waits for callback disposal.
+The durable simulation and crash matrix need those replies so their virtual
+clocks cannot advance during SQLite work. This test-only option changes reply
+waiting, not the queue or write batching. Serial replay measures the production
+queue's allocation cost; concurrent durable performance rows separately measure
+batch sizes and throughput. Serial replay does not qualify production contention
+or scheduling latency. Warmturn's retained-byte cache-tail fix remains in effect.
 No PostgreSQL or quiet-host wall-time acceptance is claimed.
 
 The compatible full-width unsigned CPU encoding removes one byte per receipt.

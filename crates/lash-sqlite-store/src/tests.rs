@@ -1299,21 +1299,21 @@ fn a_registry_sql_fault_is_a_retryable_store_fault_at_the_plugin_boundary() {
 }
 
 /// A session's delete and fork run on the store's own writer connection, so
-/// they keep the store set's connection hooks: with inline calls each one
+/// they keep the store set's connection hooks: with synchronous replies each one
 /// answers at its first poll, before its caller's runtime runs anything
 /// else, and a simulation's clock never moves while one is pending
 /// (FIG-5284).
 #[tokio::test]
-async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
+async fn a_session_delete_and_fork_preserve_synchronous_replies_on_the_store_connection() {
     let stores = SqliteStoreSet::memory_with_options_and_clock(
         SqliteStoreSetOptions {
-            inline_calls: true,
+            synchronous_replies: true,
             ..SqliteStoreSetOptions::memory()
         },
         Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
-    .expect("open an inline store set");
+    .expect("open a store set with synchronous replies");
     let store = stores.session_store_factory();
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
 

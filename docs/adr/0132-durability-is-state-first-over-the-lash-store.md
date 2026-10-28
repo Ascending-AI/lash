@@ -496,6 +496,12 @@ also corrupt the database. Both are explicit weaker contracts: losing a
 recorded start after its body ran can admit that body again. The host still
 states the SQLite mode explicitly; there is no default (D-DEFAULTS2).
 
+SQLite connections admit commands through a fixed 256-entry ring (FIG-7518).
+A full ring suspends the calling future until a slot is free. Dequeue returns
+the slot before executing the command, so callers can enqueue writes behind
+an active writer. The ring's storage is reused, including in counted replay;
+there is no unbounded queue or separate serial write implementation.
+
 The SQLite writer group-commits (FIG-5958): the writes already queued when it
 becomes free share one `BEGIN IMMEDIATE`, one writer fence and one durable
 `COMMIT`, each in its own savepoint, so one member's refusal undoes only that

@@ -53,7 +53,7 @@ fn sqlite_options(counted: bool) -> lash_sqlite_store::SqliteStoreSetOptions {
         lash_sqlite_store::SqliteSynchronous::Normal,
     );
     if counted {
-        options.inline_calls = true;
+        options.synchronous_replies = true;
         options.store.connection_policy.wal_autocheckpoint_pages = 0;
         options.store.connection_policy.operational.wake_poll = Duration::from_secs(24 * 60 * 60);
     }

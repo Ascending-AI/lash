@@ -107,7 +107,7 @@ pub fn wait_out_renders(clock: &SimClock) {
 pub async fn memory(clock: Arc<SimClock>) -> SqliteStoreSet {
     wait_out_renders(&clock);
     let options = SqliteStoreSetOptions {
-        inline_calls: true,
+        synchronous_replies: true,
         ..SqliteStoreSetOptions::memory()
     };
     let stores = SqliteStoreSet::memory_with_options_and_clock(options, clock)
@@ -124,7 +124,7 @@ pub async fn memory(clock: Arc<SimClock>) -> SqliteStoreSet {
 pub async fn file(path: impl AsRef<Path>, clock: Arc<SimClock>) -> SqliteStoreSet {
     wait_out_renders(&clock);
     let options = SqliteStoreSetOptions {
-        inline_calls: true,
+        synchronous_replies: true,
         ..SqliteStoreSetOptions::standard(lash_sqlite_store::SqliteSynchronous::Normal)
     };
     let stores = SqliteStoreSet::open_with_options_and_clock(path, options, clock)

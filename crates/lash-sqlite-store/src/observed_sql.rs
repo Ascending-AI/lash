@@ -857,9 +857,9 @@ mod tests {
                 .await
                 .unwrap();
         }
-        for inline in [true, false] {
+        for synchronous in [true, false] {
             let mut options = crate::SqliteStoreSetOptions::memory();
-            options.inline_calls = inline;
+            options.synchronous_replies = synchronous;
             let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
                 options,
                 std::sync::Arc::new(lash_core_ids::clock::SystemClock),
@@ -901,7 +901,7 @@ mod tests {
             assert_eq!(injected[0].counts.selects, 1);
             assert_eq!(injected[0].counts.rows_returned, 1);
             eprintln!(
-                "REPLAY_SQL_SHAPES inline={inline} {}",
+                "REPLAY_SQL_SHAPES synchronous={synchronous} {}",
                 serde_json::to_string(&shapes).unwrap()
             );
         }

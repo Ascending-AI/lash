@@ -26,7 +26,7 @@ pub(crate) async fn paused_file_store(
             lash_core_store::store::FleetFormat::writable(),
             crate::testing::ConnectionHooks {
                 pauses: Some(pauses.clone()),
-                inline_calls: false,
+                synchronous_replies: false,
             },
         )
         .await

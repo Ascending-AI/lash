@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use tokio::sync::oneshot;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use super::batch::{self, Member};
 
@@ -9,52 +9,92 @@ type Work = Box<dyn FnOnce(&mut rusqlite::Connection) + Send>;
 
 enum Command {
     Call(Work),
-    #[cfg(feature = "testing")]
-    Inline(Work, Arc<dyn std::any::Any + Send + Sync>),
     /// A write transaction: it may share a batch with the writes queued
     /// behind it (FIG-5958).
     Write(Member),
     Close(oneshot::Sender<rusqlite::Result<()>>),
 }
 
-enum Sender {
-    Queued(mpsc::Sender<Command>),
-    #[cfg(feature = "testing")]
-    Inline(mpsc::SyncSender<Command>),
+// One fixed ring per connection. Admission waits in the calling future,
+// never on an executor thread. A dequeued command releases its slot before
+// running, so writes behind the active writer can still share a commit.
+const QUEUE_CAPACITY: usize = 256;
+
+type Queued = (Command, OwnedSemaphorePermit);
+
+struct Sender {
+    commands: mpsc::SyncSender<Queued>,
+    slots: Arc<Semaphore>,
+}
+
+struct Receiver {
+    commands: mpsc::Receiver<Queued>,
+    slots: Arc<Semaphore>,
 }
 
 impl Sender {
-    fn send(&self, command: Command) -> tokio_rusqlite::Result<()> {
-        match self {
-            Self::Queued(sender) => sender.send(command),
-            #[cfg(feature = "testing")]
-            Self::Inline(sender) => sender.send(command),
-        }
-        .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)
+    async fn send(&self, command: Command) -> tokio_rusqlite::Result<()> {
+        let slot = Arc::clone(&self.slots)
+            .acquire_owned()
+            .await
+            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)?;
+        self.enqueue(command, slot)
+    }
+
+    fn enqueue(&self, command: Command, slot: OwnedSemaphorePermit) -> tokio_rusqlite::Result<()> {
+        // Each ring entry owns a permit. Holding one proves the ring has
+        // room, including when several callers acquire concurrently.
+        self.commands
+            .try_send((command, slot))
+            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)
+    }
+
+    #[cfg(test)]
+    fn try_send(&self, command: Command) -> tokio_rusqlite::Result<()> {
+        let slot = Arc::clone(&self.slots)
+            .try_acquire_owned()
+            .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)?;
+        self.enqueue(command, slot)
     }
 }
 
-fn channel(#[cfg(feature = "testing")] inline_calls: bool) -> (Sender, mpsc::Receiver<Command>) {
-    #[cfg(feature = "testing")]
-    if inline_calls {
-        // Inline issuing waits for each answer before sending the next call.
-        // One reusable slot avoids unbounded-channel block allocation cycles
-        // moving with the number of calls in a counted fixture's cold turn.
-        let (sender, receiver) = mpsc::sync_channel(1);
-        return (Sender::Inline(sender), receiver);
+impl Receiver {
+    fn recv(&self) -> Result<Command, mpsc::RecvError> {
+        self.commands.recv().map(|(command, _slot)| command)
     }
-    let (sender, receiver) = mpsc::channel();
-    (Sender::Queued(sender), receiver)
+
+    fn try_recv(&self) -> Result<Command, mpsc::TryRecvError> {
+        self.commands.try_recv().map(|(command, _slot)| command)
+    }
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        // A failed open, callback panic or close must also release callers
+        // waiting for admission, even when no ring entry becomes free.
+        self.slots.close();
+    }
+}
+
+fn channel() -> (Sender, Receiver) {
+    let (commands, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
+    let slots = Arc::new(Semaphore::new(QUEUE_CAPACITY));
+    (
+        Sender {
+            commands,
+            slots: Arc::clone(&slots),
+        },
+        Receiver {
+            commands: receiver,
+            slots,
+        },
+    )
 }
 
 /// The writes queued right behind `first` that may join its batch, taken
 /// in queue order without waiting: from `held` first, then the channel. The
 /// first command that cannot join stays at the head of `held`.
-fn gather(
-    first: Member,
-    held: &mut VecDeque<Command>,
-    receiver: &mpsc::Receiver<Command>,
-) -> Vec<Member> {
+fn gather(first: Member, held: &mut VecDeque<Command>, receiver: &Receiver) -> Vec<Member> {
     let limit = first.limit();
     let mut members = vec![first];
     while members.len() < limit {
@@ -77,6 +117,8 @@ fn gather(
 }
 
 struct Owner {
+    #[cfg(feature = "testing")]
+    completion: Arc<std::sync::atomic::AtomicU64>,
     sender: Option<Sender>,
     thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -106,42 +148,56 @@ impl Drop for Owner {
     }
 }
 
-// The counted fixture blocks its issuing thread, but must not allocate a
-// channel waiter only when the worker loses the race to answer.
+// Simulations and counted replay wait for replies without advancing their
+// executor or allocating a waiter depending on which thread answers first.
 #[cfg(feature = "testing")]
-struct InlineAnswer<T> {
-    result: Mutex<Option<Result<T, ()>>>,
+struct SynchronousAnswer<T> {
+    completion: Arc<std::sync::atomic::AtomicU64>,
+    result: Mutex<Option<Result<(T, u64), ()>>>,
     ready: std::sync::Condvar,
 }
 
 #[cfg(feature = "testing")]
-pub(super) struct InlineReply<T>(Arc<InlineAnswer<T>>);
+pub(super) struct SynchronousReply<T>(Arc<SynchronousAnswer<T>>);
 
 #[cfg(feature = "testing")]
-pub(super) struct InlineResult<T>(Arc<InlineAnswer<T>>);
+pub(super) struct SynchronousResult<T>(Arc<SynchronousAnswer<T>>);
+
+// Advance even if a callback panics, so no synchronous reply can wait for
+// a disposal boundary that the worker will never reach.
+#[cfg(feature = "testing")]
+struct Completed(Arc<std::sync::atomic::AtomicU64>);
 
 #[cfg(feature = "testing")]
-pub(super) fn inline_reply<T>() -> (InlineReply<T>, InlineResult<T>) {
-    let answer = Arc::new(InlineAnswer {
-        result: Mutex::new(None),
-        ready: std::sync::Condvar::new(),
-    });
-    (InlineReply(Arc::clone(&answer)), InlineResult(answer))
+impl Completed {
+    fn advance(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
 }
 
 #[cfg(feature = "testing")]
-impl<T> InlineReply<T> {
+impl Drop for Completed {
+    fn drop(&mut self) {
+        self.advance();
+    }
+}
+
+#[cfg(feature = "testing")]
+impl<T> SynchronousReply<T> {
     pub(super) fn send(self, result: T) {
         *self
             .0
             .result
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(result));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok((
+            result,
+            self.0.completion.load(std::sync::atomic::Ordering::Relaxed),
+        )));
     }
 }
 
 #[cfg(feature = "testing")]
-impl<T> Drop for InlineReply<T> {
+impl<T> Drop for SynchronousReply<T> {
     fn drop(&mut self) {
         let mut result = self
             .0
@@ -157,7 +213,7 @@ impl<T> Drop for InlineReply<T> {
 }
 
 #[cfg(feature = "testing")]
-impl<T> InlineResult<T> {
+impl<T> SynchronousResult<T> {
     pub(super) fn recv(self) -> Result<T, ()> {
         let mut result = self
             .0
@@ -171,21 +227,14 @@ impl<T> InlineResult<T> {
                 .wait(result)
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
-        let value = result.take().ok_or(())?;
+        let (value, epoch) = result.take().ok_or(())??;
         drop(result);
-        // The worker's last owner is released after the boxed command and
-        // its captures. A reply alone precedes that disposal.
-        while Arc::strong_count(&self.0) != 1 {
+        // The entire command, including a write batch's temporary vectors,
+        // must be disposed before the counted fixture cuts retained bytes.
+        while self.0.completion.load(std::sync::atomic::Ordering::Acquire) == epoch {
             std::thread::yield_now();
         }
-        value
-    }
-}
-
-#[cfg(feature = "testing")]
-impl<T: Send + 'static> InlineResult<T> {
-    pub(super) fn disposal(&self) -> Arc<dyn std::any::Any + Send + Sync> {
-        self.0.clone()
+        Ok(value)
     }
 }
 
@@ -196,23 +245,12 @@ impl Connection {
     pub(super) async fn start(
         open: impl FnOnce() -> rusqlite::Result<rusqlite::Connection> + Send + 'static,
     ) -> rusqlite::Result<Self> {
-        Self::start_configured(
-            open,
-            #[cfg(feature = "testing")]
-            false,
-        )
-        .await
-    }
-
-    pub(super) async fn start_configured(
-        open: impl FnOnce() -> rusqlite::Result<rusqlite::Connection> + Send + 'static,
-        #[cfg(feature = "testing")] inline_calls: bool,
-    ) -> rusqlite::Result<Self> {
-        let (sender, receiver) = channel(
-            #[cfg(feature = "testing")]
-            inline_calls,
-        );
+        let (sender, receiver) = channel();
         let (opened, ready) = oneshot::channel();
+        #[cfg(feature = "testing")]
+        let completion = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        #[cfg(feature = "testing")]
+        let completed = Completed(Arc::clone(&completion));
         let worker = thread::Builder::new()
             .name("lash-sqlite".into())
             .spawn(move || {
@@ -230,11 +268,6 @@ impl Connection {
                 while let Some(command) = held.pop_front().or_else(|| receiver.recv().ok()) {
                     match command {
                         Command::Call(work) => work(&mut connection),
-                        #[cfg(feature = "testing")]
-                        Command::Inline(work, disposal) => {
-                            work(&mut connection);
-                            drop(disposal);
-                        }
                         Command::Write(first) => {
                             let members = gather(first, &mut held, &receiver);
                             for unrun in batch::run(&mut connection, members).into_iter().rev() {
@@ -252,10 +285,14 @@ impl Connection {
                             }
                         },
                     }
+                    #[cfg(feature = "testing")]
+                    completed.advance();
                 }
             })
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         let connection = Self(Arc::new(Owner {
+            #[cfg(feature = "testing")]
+            completion,
             sender: Some(sender),
             thread: Mutex::new(Some(worker)),
         }));
@@ -273,7 +310,8 @@ impl Connection {
         let (answer, result) = oneshot::channel();
         self.send(Command::Call(Box::new(move |connection| {
             let _ = answer.send(work(connection));
-        })))?;
+        })))
+        .await?;
         result
             .await
             .map_err(|_| tokio_rusqlite::Error::ConnectionClosed)?
@@ -283,50 +321,53 @@ impl Connection {
     /// [`Self::call`], blocking the caller's thread until the connection
     /// thread answers.
     #[cfg(feature = "testing")]
-    pub(super) fn call_inline<T, F>(&self, work: F) -> tokio_rusqlite::Result<T>
+    pub(super) async fn call_synchronous<T, F>(&self, work: F) -> tokio_rusqlite::Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
     {
-        let (answer, result) = inline_reply();
-        self.send(Command::Inline(
-            Box::new(move |connection| {
-                answer.send(work(connection));
-            }),
-            result.disposal(),
-        ))?;
+        let (answer, result) = self.synchronous_reply();
+        self.send(Command::Call(Box::new(move |connection| {
+            answer.send(work(connection));
+        })))
+        .await?;
         result
             .recv()
             .map_err(|()| tokio_rusqlite::Error::ConnectionClosed)?
             .map_err(tokio_rusqlite::Error::Error)
     }
 
-    /// Queue `member` as a write transaction; it answers through its own
-    /// reply once its batch is settled.
-    pub(super) fn write(&self, member: Member) -> tokio_rusqlite::Result<()> {
-        self.send(Command::Write(member))
+    #[cfg(feature = "testing")]
+    pub(super) fn synchronous_reply<T>(&self) -> (SynchronousReply<T>, SynchronousResult<T>) {
+        let answer = Arc::new(SynchronousAnswer {
+            completion: Arc::clone(&self.0.completion),
+            result: Mutex::new(None),
+            ready: std::sync::Condvar::new(),
+        });
+        (
+            SynchronousReply(Arc::clone(&answer)),
+            SynchronousResult(answer),
+        )
     }
 
-    #[cfg(feature = "testing")]
-    pub(super) fn write_inline(
-        &self,
-        member: Member,
-        disposal: Arc<dyn std::any::Any + Send + Sync>,
-    ) -> tokio_rusqlite::Result<()> {
-        self.send(Command::Inline(
-            Box::new(move |connection| {
-                let mut members = vec![member];
-                while !members.is_empty() {
-                    members = batch::run(connection, members);
-                }
-            }),
-            disposal,
-        ))
+    /// Queue `member` as a write transaction; it answers through its own
+    /// reply once its batch is settled.
+    pub(super) async fn write(&self, member: Member) -> tokio_rusqlite::Result<()> {
+        self.send(Command::Write(member)).await
+    }
+
+    #[cfg(test)]
+    pub(super) fn try_write(&self, member: Member) -> tokio_rusqlite::Result<()> {
+        self.0
+            .sender
+            .as_ref()
+            .ok_or(tokio_rusqlite::Error::ConnectionClosed)?
+            .try_send(Command::Write(member))
     }
 
     pub(super) async fn close(self) -> tokio_rusqlite::Result<()> {
         let (answer, result) = oneshot::channel();
-        if self.send(Command::Close(answer)).is_err() {
+        if self.send(Command::Close(answer)).await.is_err() {
             self.0.join();
             return Ok(());
         }
@@ -339,7 +380,7 @@ impl Connection {
         }
     }
 
-    fn send(&self, command: Command) -> tokio_rusqlite::Result<()> {
+    async fn send(&self, command: Command) -> tokio_rusqlite::Result<()> {
         // Capture before enqueue, transfer the clock with the work, and close
         // it on the worker even if the awaiting caller was cancelled.
         #[cfg(feature = "perf-witness")]
@@ -367,6 +408,7 @@ impl Connection {
             .as_ref()
             .ok_or(tokio_rusqlite::Error::ConnectionClosed)?
             .send(command)
+            .await
     }
 }
 
@@ -400,6 +442,7 @@ mod tests {
                 entered.send(()).expect("signal blocked writer");
                 released.recv().expect("release writer");
             })))
+            .await
             .expect("block worker");
         blocked.await.expect("worker entered");
         let reader = connection.clone();
@@ -433,22 +476,6 @@ mod drop_tests {
     use crate::conn::tests::installed;
     use crate::conn::{SqliteConnectionPolicy, SqliteSynchronous};
     use crate::location::DatabaseTarget;
-
-    /// INLINE-REPLY: a panicked worker callback releases its blocked caller,
-    /// preserving the channel-disconnection behavior of the counted fixture.
-    #[tokio::test]
-    async fn an_inline_callback_panic_releases_its_caller() {
-        let connection =
-            super::Connection::start_configured(rusqlite::Connection::open_in_memory, true)
-                .await
-                .expect("open inline connection");
-        let result = connection.call_inline::<(), _>(|_| panic!("failed callback"));
-        assert!(matches!(
-            result,
-            Err(tokio_rusqlite::Error::ConnectionClosed)
-        ));
-        connection.close().await.expect("join the failed worker");
-    }
 
     async fn rows(connection: &crate::conn::SqliteConnection) -> i64 {
         connection

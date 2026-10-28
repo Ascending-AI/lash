@@ -45,14 +45,14 @@ pub struct SqliteStoreSetOptions {
     /// every session store its factory opens.
     #[cfg(feature = "testing")]
     pub pauses: Option<crate::testing::SqlitePauses>,
-    /// Run every call of the store set's connections to its answer before
-    /// its caller goes on, blocking the caller's thread as an in-process
-    /// database would. A simulation on one runtime thread then sees each
-    /// store call finish in the order it issued them, before its virtual
-    /// clock can move. Never combine with `pauses`: a paused call would
-    /// block its caller's thread.
+    /// Block for each reply and callback disposal after admission to the
+    /// production queue. Single-thread simulations need this so virtual time
+    /// cannot advance during SQLite work; counted replay needs a stable
+    /// disposal boundary. Queue capacity, ordering and group commit are the
+    /// production implementation. Never combine with `pauses`, whose release
+    /// may need the blocked issuing thread.
     #[cfg(feature = "testing")]
-    pub inline_calls: bool,
+    pub synchronous_replies: bool,
     /// Observes, pauses, crashes or fails the open-time migration at each of
     /// its steps.
     #[cfg(feature = "testing")]
@@ -72,7 +72,7 @@ impl SqliteStoreSetOptions {
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]
-            inline_calls: false,
+            synchronous_replies: false,
             #[cfg(feature = "testing")]
             migration_hook: None,
         }
@@ -91,7 +91,7 @@ impl SqliteStoreSetOptions {
             #[cfg(feature = "testing")]
             pauses: None,
             #[cfg(feature = "testing")]
-            inline_calls: false,
+            synchronous_replies: false,
             #[cfg(feature = "testing")]
             migration_hook: None,
         }
@@ -262,7 +262,7 @@ impl SqliteStoreSet {
                 #[cfg(feature = "testing")]
                 crate::testing::ConnectionHooks {
                     pauses: options.pauses.clone(),
-                    inline_calls: options.inline_calls,
+                    synchronous_replies: options.synchronous_replies,
                 },
             )
             .await?,

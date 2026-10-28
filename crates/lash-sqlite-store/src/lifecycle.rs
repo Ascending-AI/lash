@@ -198,7 +198,7 @@ impl SqliteStore {
         #[cfg(feature = "testing")] hooks: crate::testing::ConnectionHooks,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let inline_calls = hooks.inline_calls;
+        let synchronous_replies = hooks.synchronous_replies;
         #[cfg(feature = "testing")]
         let conn =
             SqliteConnection::open_with_hooks(core.target(), options.connection_policy, hooks)
@@ -213,7 +213,7 @@ impl SqliteStore {
                 core.target(),
                 options.connection_policy.operational,
                 #[cfg(feature = "testing")]
-                inline_calls,
+                synchronous_replies,
             )
             .await?;
             readers.push(reader);

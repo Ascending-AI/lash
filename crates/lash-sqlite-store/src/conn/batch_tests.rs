@@ -85,7 +85,7 @@ impl World {
     {
         self.writer
             .inner
-            .write(Member::new(&self.writer.writer, body, reply))
+            .try_write(Member::new(&self.writer.writer, body, reply))
             .expect("queue a write");
     }
 
