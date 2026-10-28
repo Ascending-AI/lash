@@ -516,5 +516,37 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
         153,
         &access,
     );
+    let across_seal = ledger
+        .prepare(
+            [Change::Roots(vec![(owner(1), Some(Holding::scalar(17)))])],
+            &access,
+        )
+        .unwrap()
+        .admit(163)
+        .unwrap_or_else(|_| panic!("copy did not fit"));
     assert!(ledger.seal(&access, budget()).unwrap().is_some());
+    let published = std::cell::Cell::new(false);
+    assert!(
+        matches!(
+            ledger.publish(across_seal, || published.set(true)),
+            Err(HeapFault::Malformed(_))
+        ),
+        "seal is a hard handoff, even when all logical holdings stay equal"
+    );
+    assert!(
+        !published.get(),
+        "a stale journal cannot publish semantic changes"
+    );
+    assert_eq!(ledger.balance().unwrap(), before);
+    let fresh = ledger
+        .prepare(
+            [Change::Roots(vec![(owner(1), Some(Holding::scalar(17)))])],
+            &access,
+        )
+        .unwrap()
+        .admit(163)
+        .unwrap_or_else(|_| panic!("copy did not fit"));
+    ledger.publish(fresh, || published.set(true)).unwrap();
+    assert!(published.get());
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 163);
 }

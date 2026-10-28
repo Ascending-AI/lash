@@ -379,6 +379,18 @@ impl Ledger {
         })
     }
     pub fn commit(&mut self, accepted: Accepted) -> Result<(), HeapFault> {
+        self.publish(accepted, || {})
+    }
+    /// Publish a fully staged semantic edit with the matching ledger journal.
+    /// All fallible preparation, including shared charge admission, must finish
+    /// before this call. Validate before invoking the infallible publication;
+    /// no allocation or fallible check follows the semantic edit. The callback
+    /// cannot borrow this ledger to advance it between validation and commit.
+    pub fn publish(
+        &mut self,
+        accepted: Accepted,
+        semantic: impl FnOnce(),
+    ) -> Result<(), HeapFault> {
         let Prepared {
             identity,
             revision,
@@ -392,6 +404,7 @@ impl Ledger {
             .revision
             .checked_add(1)
             .ok_or_else(|| invalid("logical revision overflow"))?;
+        semantic();
         self.state = next;
         self.revision = revision;
         Ok(())
@@ -401,6 +414,9 @@ impl Ledger {
         access: &Access<'_>,
         budget: SealBudget,
     ) -> Result<Option<LedgerRoot>, HeapFault> {
+        // A seal ends the active borrowed execution view even if its budget
+        // yields. Outstanding admissions cannot survive the handoff.
+        self.handoff()?;
         if self.state.owners.live_members(access)? != 0 {
             return Err(invalid("transient source owners at seal"));
         }
