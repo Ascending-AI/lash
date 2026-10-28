@@ -880,7 +880,12 @@ impl<'e> Build<'e> {
                     field: *field,
                     pc: *pc,
                     inputs: None,
-                    cache: false,
+                    cache: index.is_some_and(|index| {
+                        operands.iter().any(|operand| {
+                            operand.reg == index
+                                && matches!(operand.kind, Kind::Const(Value::Text(_)))
+                        })
+                    }),
                     finish: None,
                 });
                 self.emit(Op::Done {

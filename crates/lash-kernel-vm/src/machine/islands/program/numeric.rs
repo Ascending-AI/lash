@@ -184,16 +184,9 @@ impl Build<'_> {
             }
             let begin = self.ops[at - 3].begin.take();
             let live = self.ops[at - 3].live.clone();
-            let Op::Store { inputs, cache, .. } = &mut self.ops[at].op else {
+            let Op::Store { inputs, .. } = &mut self.ops[at].op else {
                 unreachable!()
             };
-            *cache = matches!(
-                reads[index],
-                Read::Literal {
-                    value: Value::Text(_),
-                    ..
-                }
-            );
             *inputs = Some(Box::new(StoreInputs {
                 reads,
                 roles: [target, index, value],
