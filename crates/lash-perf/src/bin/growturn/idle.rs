@@ -151,8 +151,12 @@ async fn boot(
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
+    // Isolate facade and durable residency from the serving default
+    // that deliberately keeps idle actor owners hot for one hour.
+    let mut settings = lash::durable::DurableSettings::standard();
+    settings.owner_retention.idle = Duration::ZERO;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-        .config(lash::durable::DurableSettings::standard())
+        .config(settings)
         .build()?;
     let (builder, pool) = if args.idle.idle_protocol == Protocol::Code {
         let service = lash_perf::cell_bounds::subprocess(&args.vm_worker);
@@ -297,6 +301,7 @@ fn identity(args: &Args) -> Result<Value> {
         "executable":executable,"executable_sha256":hash(&executable)?,
         "worker_sha256":if args.idle.idle_protocol == Protocol::Code { Some(hash(&args.vm_worker)?) } else {None},
         "store":"SQLite file, synchronous FULL", "database":args.database,
+        "owner_idle_evict_ms":0,
         "allocator":lash_perf::ALLOCATION_MODE, "trim_scope":"host glibc only; workers untrimmed",
         "history_turns":args.idle.history_turns,"model_calls_per_completed_turn":2,"tool_rounds_per_completed_turn":1,
         "payload_bytes":args.payload_bytes,"pending_extra_turn":args.idle.idle_mode == Mode::Pending,
