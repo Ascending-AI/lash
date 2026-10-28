@@ -857,3 +857,41 @@ refresh records the seven changed medians, including the transport reductions.
 Measured noise stays zero, and every depth-slope baseline keeps the tighter
 old/observed value. Hard budgets, tolerance rules, known breaches, the blessing
 guard and all strict determinism assertions remain unchanged.
+
+
+### Shared SQLite queue calibration, FIG-7518
+
+Production and counted replay use the same bounded ring and write batching.
+Only reply waiting remains synchronous in counted replay and virtual-clock
+simulations. Five captures of `72752d3350` agree on every counted summary and
+turn/compaction record, covering 1,280 turns and 15 compactions.
+
+Controls at each intervening main commit isolate the pre-existing drift.
+`1ed4108991` changes Python collection lowering and resident helpers: Python
+adds 1,078 IPC bytes, three written rows, 618 SQL-bound bytes, 10,625 retained
+facade bytes, 132,966 worker allocation bytes and 1,033 worker allocations to
+its medians. TypeScript worker bytes rise by 4,798 and allocations by 134;
+its host allocation median falls by 5,316 bytes. `4c13beaf2a` changes no counted
+median. `13c6be0c63` adds 480 TypeScript and 208 Python worker bytes, with no
+other counted median changes.
+
+Against that exact parent, the queue commit changes only host allocation
+metrics, including at every measured turn and compaction:
+
+| Workload | Allocated bytes per turn, change | Allocations per turn, change |
+| --- | ---: | ---: |
+| chat-short | +56,496 | -5 |
+| chat-long-compacting | +77,296 | -7 |
+| ts-codemode | +127,680 | -14 |
+| py-codemode | +124,704 | -14 |
+
+Async admission adds future state, while writes no longer allocate a separate
+inline-dispatch closure. The controls attribute the combined change, without
+claiming a numerical split between those internal mechanisms. SQL, IPC, worker
+allocations and retained bytes match the parent at every counted record.
+
+The refreshed baseline uses the five matching medians with zero measured noise
+and preserves the tighter prior or observed depth slopes. Hard budgets,
+tolerances, the normal blessing guard and strict determinism checks are unchanged.
+The source controls, raw captures and attribution are retained at
+`/workspace/notes/lash/tasks/lanes/r33/sqlqueue-evidence/`.
