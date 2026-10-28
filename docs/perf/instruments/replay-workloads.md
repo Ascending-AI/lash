@@ -782,3 +782,27 @@ Draft 2020-12 meta-validator initialization, accounting for an intermittent
 Actual workload schemas retain their full admission and validation paths.
 The final ordinary law runs against the compiled baseline; rejected earlier
 populations remain diagnostic evidence.
+
+The TypeScript parser now uses one reusable mutex/condition-variable
+request/response slot. Its previous rendezvous response channel, introduced
+in `ce55f7e26da`, allocated a four-entry waiter vector only when a receive
+first blocked. A comparison of every 96-byte allocation stack in the affected
+worker interval identified exactly one added stack in the higher sample,
+through `std::sync::mpmc::zero::Channel::recv` and `Parser::parse`. The slot
+removes that scheduling-dependent allocation without moving parsing out of
+the measured worker. Stack limits, one parser thread, diagnostics and joined
+shutdown are preserved.
+
+The standard protocol driver prepares its optional batch declaration at
+construction and clones the admitted model-tool schemas into preambles.
+A separate first-turn 3,152-byte allocation came from jsonschema's pending
+node-table rehash during the former lazy bootstrap admission. Preparing the
+immutable declaration makes the startup boundary include that metadata work.
+It does not remove schema admission or claim a steady-turn speedup.
+
+The counted SQLite fixture uses a serial inline queue and complete command
+disposal before reply return. Production retains its unbounded queue and
+asynchronous batching. This gate measures the counted workload and its
+durable operations under serial execution. It does not qualify production
+queue block allocation, contention, batching opportunities or scheduling
+latency. Warmturn's retained-byte cache-tail fix remains in effect.

@@ -298,14 +298,13 @@ fn a_disabled_batch_is_an_ordinary_tool_call() {
 fn the_preamble_offers_batch_only_when_enabled() {
     let catalog = lash_core::ToolCatalog::default();
     let build = |batch: BatchSugar| {
-        StandardProtocolDriver {
-            config: StandardProtocolConfig::default().batch(batch),
-        }
-        .build_preamble(ProtocolBuildInput {
-            tool_catalog: Arc::new(catalog.clone()),
-            plugin_extensions: Default::default(),
-            writer_formats: lash_core::build_newest_writer_formats(),
-        })
+        StandardProtocolDriver::new(StandardProtocolConfig::default().batch(batch)).build_preamble(
+            ProtocolBuildInput {
+                tool_catalog: Arc::new(catalog.clone()),
+                plugin_extensions: Default::default(),
+                writer_formats: lash_core::build_newest_writer_formats(),
+            },
+        )
     };
     let enabled = build(BatchSugar::Enabled {
         max_members: std::num::NonZeroUsize::new(8).expect("non-zero"),

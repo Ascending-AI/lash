@@ -1,3 +1,5 @@
+use std::sync::{Arc, Condvar, Mutex};
+
 use super::{
     Diagnostic, DiagnosticCode, ParserStack, Program, SourceLimits, guard_source_nesting,
     guard_source_size, parse_source,
@@ -14,9 +16,59 @@ pub(crate) struct Parser {
 }
 
 struct ParseThread {
-    requests: Option<std::sync::mpsc::SyncSender<String>>,
-    responses: Option<std::sync::mpsc::Receiver<Result<Program, Diagnostic>>>,
+    exchange: Arc<Exchange>,
     handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct Exchange {
+    state: Mutex<ParseState>,
+    ready: Condvar,
+}
+
+#[derive(Default)]
+enum ParseState {
+    #[default]
+    Idle,
+    Request(String),
+    Response(Result<Program, Diagnostic>),
+    Closed,
+}
+
+impl Exchange {
+    fn serve(&self, limits: SourceLimits) {
+        loop {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            while matches!(*state, ParseState::Idle | ParseState::Response(_)) {
+                state = self
+                    .ready
+                    .wait(state)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+            let ParseState::Request(source) = std::mem::replace(&mut *state, ParseState::Idle)
+            else {
+                return;
+            };
+            drop(state);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                parse_source(&source, limits)
+            }))
+            .unwrap_or_else(|_| Err(parser_failed()));
+            drop(source);
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if matches!(*state, ParseState::Closed) {
+                return;
+            }
+            *state = ParseState::Response(result);
+            self.ready.notify_all();
+        }
+    }
 }
 
 impl Parser {
@@ -55,22 +107,14 @@ impl Parser {
                     )
                 })?;
             let limits = self.limits;
-            let (requests, incoming) = std::sync::mpsc::sync_channel::<String>(0);
-            let (outgoing, responses) = std::sync::mpsc::sync_channel(0);
+            // One serial caller and one parser share a reusable slot. Channel
+            // rendezvous waiters otherwise allocate only when a handoff blocks.
+            let exchange = Arc::new(Exchange::default());
+            let serving = Arc::clone(&exchange);
             let handle = std::thread::Builder::new()
                 .name("typescript-parse".to_owned())
                 .stack_size(stack_size)
-                .spawn(move || {
-                    for source in incoming {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            parse_source(&source, limits)
-                        })).unwrap_or_else(|_| Err(parser_failed()));
-                        drop(source);
-                        if outgoing.send(result).is_err() {
-                            break;
-                        }
-                    }
-                })
+                .spawn(move || serving.serve(limits))
                 .map_err(|error| Diagnostic::new(
                     DiagnosticCode::ParseResourcesUnavailable,
                     format!("the TypeScript parser could not reserve {stack_size} bytes of stack for a {}-byte source: {error}", source.len()),
@@ -78,24 +122,31 @@ impl Parser {
                 ))?;
             self.spawns += 1;
             self.thread = Some(ParseThread {
-                requests: Some(requests),
-                responses: Some(responses),
+                exchange,
                 handle: Some(handle),
             });
         }
         let thread = self.thread.as_ref().ok_or_else(parser_failed)?;
-        thread
-            .requests
-            .as_ref()
-            .ok_or_else(parser_failed)?
-            .send(source.to_owned())
-            .map_err(|_| parser_failed())?;
-        thread
-            .responses
-            .as_ref()
-            .ok_or_else(parser_failed)?
-            .recv()
-            .map_err(|_| parser_failed())?
+        let exchange = &thread.exchange;
+        let mut state = exchange
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(*state, ParseState::Closed) {
+            return Err(parser_failed());
+        }
+        *state = ParseState::Request(source.to_owned());
+        exchange.ready.notify_all();
+        while !matches!(*state, ParseState::Response(_) | ParseState::Closed) {
+            state = exchange
+                .ready
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        match std::mem::replace(&mut *state, ParseState::Idle) {
+            ParseState::Response(result) => result,
+            _ => Err(parser_failed()),
+        }
     }
 }
 
@@ -109,10 +160,12 @@ fn parser_failed() -> Diagnostic {
 
 impl Drop for ParseThread {
     fn drop(&mut self) {
-        // Close both rendezvous channels before joining, including the result
-        // channel so an abandoned result cannot keep the thread blocked.
-        self.requests.take();
-        self.responses.take();
+        *self
+            .exchange
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ParseState::Closed;
+        self.exchange.ready.notify_all();
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }

@@ -100,9 +100,7 @@ fn run_options_apply_over_the_recorded_render_field_by_field() {
 /// namespace it cannot read is corruption, not a refused shape.
 #[test]
 fn a_refused_render_is_typed_and_an_unreadable_namespace_is_corruption() {
-    let driver = StandardProtocolDriver {
-        config: StandardProtocolConfig::default(),
-    };
+    let driver = StandardProtocolDriver::new(StandardProtocolConfig::default());
     let namespace = |recorded: &StandardRecordedConfig| {
         lash_core::ProtocolTurnOptions::typed(recorded).expect("the namespace encodes")
     };

@@ -45,12 +45,10 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120)),
     ]);
-    let preamble = StandardProtocolDriver {
-        config: StandardProtocolConfig {
-            batch: BatchSugar::Disabled,
-            ..StandardProtocolConfig::default()
-        },
-    }
+    let preamble = StandardProtocolDriver::new(StandardProtocolConfig {
+        batch: BatchSugar::Disabled,
+        ..StandardProtocolConfig::default()
+    })
     .build_preamble(ProtocolBuildInput {
         tool_catalog: Arc::new(catalog.clone()),
         plugin_extensions: Default::default(),
@@ -116,7 +114,7 @@ fn provider_native_schemas_are_byte_identical_to_the_canonical_contract() {
         docs.text
     );
     assert!(docs.text.contains("and?: list[Filter]"), "{}", docs.text);
-    let preamble = StandardProtocolDriver { config }.build_preamble(ProtocolBuildInput {
+    let preamble = StandardProtocolDriver::new(config).build_preamble(ProtocolBuildInput {
         tool_catalog: Arc::new(catalog),
         plugin_extensions: Default::default(),
         writer_formats: lash_core::build_newest_writer_formats(),
@@ -165,12 +163,10 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         tool_presentation::validate_discovery(&manifests, discovery.as_ref()).unwrap();
         // The catalog's inline (or every) member, plus the `batch` sugar.
         let expected = if discovery.is_some() { 2 } else { 3 };
-        let driver = StandardProtocolDriver {
-            config: StandardProtocolConfig {
-                discovery,
-                ..StandardProtocolConfig::default()
-            },
-        };
+        let driver = StandardProtocolDriver::new(StandardProtocolConfig {
+            discovery,
+            ..StandardProtocolConfig::default()
+        });
         let preamble = driver.build_preamble(ProtocolBuildInput {
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
@@ -232,9 +228,7 @@ fn the_provider_catalog_drives_all_standard_projections() {
     .with_execution(std::time::Duration::from_secs(1));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![definition]);
     let config = StandardProtocolConfig::default().batch(BatchSugar::Disabled);
-    let driver = StandardProtocolDriver {
-        config: config.clone(),
-    };
+    let driver = StandardProtocolDriver::new(config.clone());
     assert_eq!(
         *driver.model_catalog(&catalog).tool_names(),
         ["tools__search"]
