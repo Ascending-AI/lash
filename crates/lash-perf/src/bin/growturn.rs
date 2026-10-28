@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[path = "growturn/idle.rs"]
+mod idle;
 #[path = "growturn/measure.rs"]
 mod measure;
 #[path = "growturn/native.rs"]
@@ -35,6 +37,8 @@ enum Phase {
     Resume,
     /// Grow and durably delete K sessions in one core, without handoffs.
     Sessions,
+    /// Fixed-history populations, sampled at authoritative idle boundaries.
+    IdlePopulation,
 }
 
 #[derive(Parser)]
@@ -50,6 +54,8 @@ struct Args {
     /// Close facade handles but retain durable sessions in --phase sessions.
     #[arg(long)]
     retain_sessions: bool,
+    #[command(flatten)]
+    idle: idle::Options,
     #[arg(long, default_value_t = 1024)]
     payload_bytes: usize,
     #[arg(long, default_value_t = 10)]
@@ -284,6 +290,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
     let mut core = boot(args, Arc::clone(&meter), "growturn-first").await?;
     meter.sample("boot", 0)?;
     match args.phase {
+        Phase::IdlePopulation => unreachable!("idle population owns its core"),
         Phase::Sessions => {
             for ordinal in 1..=args.sessions {
                 meter.opened();
@@ -442,7 +449,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
         "shutdown",
         match args.phase {
             Phase::Start => args.rounds * 3 / 4,
-            Phase::Resume | Phase::Sessions => args.rounds,
+            Phase::Resume | Phase::Sessions | Phase::IdlePopulation => args.rounds,
         },
     )?;
     if args.trim_at_idle {
@@ -451,7 +458,7 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             "shutdown-trimmed",
             match args.phase {
                 Phase::Start => args.rounds * 3 / 4,
-                Phase::Resume | Phase::Sessions => args.rounds,
+                Phase::Resume | Phase::Sessions | Phase::IdlePopulation => args.rounds,
             },
         )?;
     }
@@ -491,8 +498,12 @@ async fn main() -> Result<()> {
     };
     let meter = Arc::new(measure::Meter::new(&args)?);
     meter.install_profile(profile);
-    meter.sample("process-baseline", 0)?;
-    let result = run(&args, Arc::clone(&meter)).await;
+    let result = if matches!(args.phase, Phase::IdlePopulation) {
+        idle::run(&args, &meter).await
+    } else {
+        meter.sample("process-baseline", 0)?;
+        run(&args, Arc::clone(&meter)).await
+    };
     if let Err(error) = &result {
         meter.failure(error)?;
     }

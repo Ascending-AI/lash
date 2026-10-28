@@ -88,7 +88,7 @@ impl Meter {
         }
         Ok(())
     }
-    fn write(&self, row: &Value) -> Result<()> {
+    pub(super) fn write(&self, row: &Value) -> Result<()> {
         let mut out = self.out.lock_recover();
         serde_json::to_writer(&mut *out, row)?;
         writeln!(out)?;
@@ -117,6 +117,14 @@ impl Meter {
     }
 
     pub fn sample(&self, phase: &str, done: usize) -> Result<()> {
+        self.population_sample(phase, done, Value::Null)
+    }
+    pub(super) fn population_sample(
+        &self,
+        phase: &str,
+        done: usize,
+        population: Value,
+    ) -> Result<()> {
         let alloc = lash_perf::GLOBAL_ALLOCATOR.stats();
         let native = self
             .native_memory_dir
@@ -141,7 +149,7 @@ impl Meter {
         } else {
             None
         };
-        self.write(&json!({"kind":"checkpoint", "phase":phase, "rounds":self.rounds,
+        self.write(&json!({"kind":"checkpoint", "population":population, "phase":phase, "rounds":self.rounds,
             "rounds_done":done, "payload_bytes":self.bytes, "pid":std::process::id(),
             "model_request_text_bytes":self.request_text_bytes.load(std::sync::atomic::Ordering::Relaxed),
             "cumulative_model_request_text_bytes":self.cumulative_request_text_bytes.load(std::sync::atomic::Ordering::Relaxed),
@@ -161,7 +169,7 @@ impl Meter {
             "allocation_scope":"cumulative traffic, not temporary live bytes or unique payload bytes"}))
     }
 }
-fn store(path: &std::path::Path) -> Result<Value> {
+pub(super) fn store(path: &std::path::Path) -> Result<Value> {
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(std::time::Duration::from_secs(15))?;
     // One read transaction makes all store quantities describe the same head.
@@ -243,7 +251,7 @@ fn process(pid: u32, role: &str) -> Result<Value> {
         "descriptors":count("fd")?, "threads":count("task")?}),
     )
 }
-fn processes() -> Result<Vec<Value>> {
+pub(super) fn processes() -> Result<Vec<Value>> {
     let host = std::process::id();
     let mut rows = vec![process(host, "host")?];
     // Children can be spawned by any Tokio thread, so inspect every task's
