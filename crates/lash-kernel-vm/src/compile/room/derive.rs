@@ -1,7 +1,7 @@
 //! Formation reads the unchanged source tree before layout placement.
 use super::*;
 
-pub(super) fn body(authority: &Description, pool: &doc::constant_pool::ConstantPool) -> SourceRoom {
+pub(super) fn body(authority: &Description) -> SourceRoom {
     let source = &authority.site;
     let body = &authority.body;
     let params = &authority.params;
@@ -96,26 +96,18 @@ pub(super) fn body(authority: &Description, pool: &doc::constant_pool::ConstantP
         } else {
             match node {
                 doc::Node::Action(action) => {
-                    let n =
-                        atoms(action)
-                            .iter()
-                            .enumerate()
-                            .fold(Amount::default(), |a, (i, atom)| match atom {
-                                doc::Atom::Literal(l)
-                                    if !matches!(l, doc::Literal::Function(_)) =>
-                                {
-                                    let mut a = a;
-                                    a.fixed += i128::from(Cost::REFERENCE);
-                                    a
-                                }
-                                doc::Atom::Literal(_) | doc::Atom::Variable(_) => a.term(
-                                    Measure::Local(Owner::Atom {
-                                        at: site.clone(),
-                                        index: i as u32,
-                                    }),
-                                    1,
-                                ),
-                            });
+                    let n = atoms(action).iter().enumerate().fold(
+                        Amount::default(),
+                        |amount, (index, _)| {
+                            amount.term(
+                                Measure::Local(Owner::Atom {
+                                    at: site.clone(),
+                                    index: index as u32,
+                                }),
+                                1,
+                            )
+                        },
+                    );
                     events.push(event(&site, Phase::Enter, Box::new([]), None, n.clone(), n));
                 }
                 doc::Node::Expr(doc::Expr::Act(_)) => events.push(event(
@@ -285,7 +277,7 @@ pub(super) fn body(authority: &Description, pool: &doc::constant_pool::ConstantP
                     Amount::default().term(release([pending]), -1),
                 ));
             }
-            let (peak, delta) = formula(authority, &site, node, &ins, pool);
+            let (peak, delta) = formula(authority, &site, node, &ins);
             events.push(event(
                 &site,
                 Phase::Commit,
@@ -379,35 +371,19 @@ fn formula(
     site: &Site,
     node: doc::Node<'_>,
     ins: &[Owner],
-    pool: &doc::constant_pool::ConstantPool,
 ) -> (Amount, Amount) {
     let cells = &authority.shared;
     let calls = &authority.calls;
-    let source = &authority.site;
     let zero = Amount::default();
     let result = || Amount::default().term(Measure::Local(operand(site)), 1);
     let consumed = || release(ins.iter().cloned());
     match node {
         doc::Node::Expr(expr) => match expr {
-            doc::Expr::Literal(doc::Literal::Function(_)) => (result(), result()),
-            doc::Expr::Literal(_) => (
+            doc::Expr::Literal(_) | doc::Expr::Variable(_) => (result(), result()),
+            doc::Expr::Tuple(_) => (
                 Amount::fixed(Cost::REFERENCE),
-                Amount::fixed(Cost::REFERENCE),
+                result().term(consumed(), -1),
             ),
-            doc::Expr::Variable(_) => (result(), result()),
-            doc::Expr::Tuple(_) => {
-                let n = Amount::fixed(Cost::REFERENCE);
-                let coordinate = doc::constant_pool::PoolCoordinate {
-                    path: site.path[source.path.len()..].to_vec(),
-                    atom: None,
-                };
-                let delta = if pool.at(&coordinate).is_some() {
-                    n.clone().term(consumed(), -1)
-                } else {
-                    n.clone()
-                };
-                (n, delta)
-            }
             doc::Expr::List(_) | doc::Expr::Set(_) | doc::Expr::Map(_) | doc::Expr::Record(_) => {
                 let n = Amount::fixed(Cost::OBJECT + Cost::REFERENCE)
                     .term(Measure::Members(site.clone()), 1);

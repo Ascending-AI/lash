@@ -1055,6 +1055,7 @@ fn room_finally_departure() {
     impl Facts for Values {
         fn measure(&self, m: &Measure) -> Option<i128> {
             match m {
+                Measure::Local(_) => Some(16),
                 Measure::Release(owners) => Some(
                     owners
                         .iter()

@@ -422,19 +422,14 @@ fn obligations(
             }
         }
         (doc::Node::Action(action), Phase::Enter) => {
-            for (i, atom) in atoms(action).iter().enumerate() {
-                match atom {
-                    doc::Atom::Literal(l) if !matches!(l, doc::Literal::Function(_)) => {
-                        p += i128::from(Cost::REFERENCE)
-                    }
-                    doc::Atom::Literal(_) | doc::Atom::Variable(_) => peak.push((
-                        Measure::Local(Owner::Atom {
-                            at: site.clone(),
-                            index: i as u32,
-                        }),
-                        1,
-                    )),
-                }
+            for (index, _) in atoms(action).iter().enumerate() {
+                peak.push((
+                    Measure::Local(Owner::Atom {
+                        at: site.clone(),
+                        index: index as u32,
+                    }),
+                    1,
+                ));
             }
             d = p;
             delta = peak.clone();
@@ -447,8 +442,9 @@ fn obligations(
                 delta.push((value, 1));
             }
             doc::Expr::Literal(_) => {
-                p = Cost::REFERENCE.into();
-                d = p;
+                let value = Measure::Local(operand(site));
+                peak.push((value.clone(), 1));
+                delta.push((value, 1));
             }
             doc::Expr::Variable(_) | doc::Expr::Member(_) | doc::Expr::Act(_) => {
                 let value = Measure::Local(operand(site));
@@ -460,26 +456,8 @@ fn obligations(
             }
             doc::Expr::Tuple(_) => {
                 p = Cost::REFERENCE.into();
-                d = p;
-                let mut components = vec![expr];
-                let mut closed = true;
-                while let Some(e) = components.pop() {
-                    match e {
-                        doc::Expr::Literal(doc::Literal::Function(_)) => {
-                            closed = false;
-                            break;
-                        }
-                        doc::Expr::Literal(_) => {}
-                        doc::Expr::Tuple(items) => components.extend(items),
-                        _ => {
-                            closed = false;
-                            break;
-                        }
-                    }
-                }
-                if closed {
-                    delta.push((consumed(), -1));
-                }
+                delta.push((Measure::Local(operand(site)), 1));
+                delta.push((consumed(), -1));
             }
             doc::Expr::List(_) | doc::Expr::Map(_) | doc::Expr::Set(_) | doc::Expr::Record(_) => {
                 p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);

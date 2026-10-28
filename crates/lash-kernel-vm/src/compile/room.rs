@@ -531,7 +531,6 @@ impl Source {
                 .and_then(|p| p.template.as_ref()?.heap.as_ref()?.copy),
             _ => None,
         };
-        let pool = doc::constant_pool::ConstantPool::extract(owner, body);
         let mut source = Description {
             owner,
             site: site.clone(),
@@ -550,7 +549,7 @@ impl Source {
                 exits: Box::new([]),
             },
         };
-        source.room = derive::body(&source, &pool);
+        source.room = derive::body(&source);
         source
     }
     pub(crate) fn verify(&self) -> Result<(), Refused> {
