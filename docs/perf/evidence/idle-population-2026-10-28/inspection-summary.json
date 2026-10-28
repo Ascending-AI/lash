@@ -1,0 +1,44 @@
+{
+  "finding": "Pending unacknowledged wake marker causes release and immediate reclaim",
+  "first_owned_ordinals": [
+    2,
+    14,
+    16,
+    19,
+    23,
+    25
+  ],
+  "first_owned_epochs": [
+    13629,
+    12791,
+    12667,
+    12459,
+    12165,
+    12053
+  ],
+  "first_watermarks": {
+    "mail_seq": 21,
+    "acked_seq": 20,
+    "actor_mail_rows": 0
+  },
+  "first_pending_waits": 25,
+  "first_wait_kinds": [
+    "tool_completion"
+  ],
+  "worker_processes": 0,
+  "rerun_sessions": 25,
+  "rerun_owned": 0,
+  "rerun_states": {
+    "waiting": 25
+  },
+  "deterministic_across_one_rerun": false,
+  "inspection_scope": "one rerun of original Standard pending mode with identical executable SHA256, 20 turns and 1024-byte payload; no runtime fix; first epochs show release/reclaim churn, not one immortal task; post-exit actor rows are durable evidence, not a live task snapshot",
+  "paths": [
+    "crates/lash-core-execution/src/runtime/actor/round/runner.rs:338",
+    "crates/lash-core/src/runtime/durable/session/run.rs:111",
+    "crates/lash-durable/src/tx.rs:721",
+    "crates/lash-store-sql/src/durable/mod.rs:170",
+    "crates/lash-store-sql/src/durable/mod.rs:201"
+  ],
+  "retention": "transient actor activation, session projection and round tasks repeatedly rebuilt; 25 durable tool_completion waits with 1-hour deadline; Standard mode has no VM workers; zero idle policy returns before the hot-wait polling branch; no retained actor_mail payload rows"
+}

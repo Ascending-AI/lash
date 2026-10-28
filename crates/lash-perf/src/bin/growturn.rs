@@ -486,7 +486,9 @@ async fn main() -> Result<()> {
     let profile = if args.profile_from_round == 0 {
         Some(lash_perf::perf_support::dhat::ProfileWindow::start(
             "growturn-host",
-            if args.profile_at_close {
+            if matches!(args.phase, Phase::IdlePopulation) {
+                "process-setup-through-final-idle-population-before-usability-and-teardown"
+            } else if args.profile_at_close {
                 "process-setup-through-durable-close-before-core-shutdown"
             } else {
                 "process-setup-through-core-shutdown-before-runtime-drop"

@@ -1,0 +1,466 @@
+[
+  {
+    "population": "code-durable-only",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1135.96,
+        "worker_rss_kib_per_session": 189.92,
+        "total_rss_kib_per_session": 1325.88,
+        "host_rss_baseline_kib": 127516,
+        "host_rss_end_kib": 241112,
+        "worker_rss_end_kib": 54872,
+        "rust_requested_bytes_per_session": 628623.17,
+        "sqlite_requested_bytes_per_session": 106447.04,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137109,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 0,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1234.32,
+        "worker_rss_kib_per_session": 189.92,
+        "total_rss_kib_per_session": 1424.24,
+        "host_rss_baseline_kib": 111416,
+        "host_rss_end_kib": 234848,
+        "worker_rss_end_kib": 54872,
+        "rust_requested_bytes_per_session": 625769.42,
+        "sqlite_requested_bytes_per_session": 103433.52,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137109,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 0,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      }
+    }
+  },
+  {
+    "population": "code-held",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1636.68,
+        "worker_rss_kib_per_session": 187.12,
+        "total_rss_kib_per_session": 1823.8,
+        "host_rss_baseline_kib": 127236,
+        "host_rss_end_kib": 290904,
+        "worker_rss_end_kib": 54516,
+        "rust_requested_bytes_per_session": 1167026.72,
+        "sqlite_requested_bytes_per_session": 106033.12,
+        "facade_live_bytes": 116728135,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137105,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 100,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1726.04,
+        "worker_rss_kib_per_session": 187.12,
+        "total_rss_kib_per_session": 1913.16,
+        "host_rss_baseline_kib": 111248,
+        "host_rss_end_kib": 283852,
+        "worker_rss_end_kib": 54516,
+        "rust_requested_bytes_per_session": 1164529.77,
+        "sqlite_requested_bytes_per_session": 103069.28,
+        "facade_live_bytes": 116728135,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137105,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 100,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      }
+    }
+  },
+  {
+    "population": "code-parked",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1166.96,
+        "worker_rss_kib_per_session": 186.76,
+        "total_rss_kib_per_session": 1353.72,
+        "host_rss_baseline_kib": 127272,
+        "host_rss_end_kib": 243968,
+        "worker_rss_end_kib": 54468,
+        "rust_requested_bytes_per_session": 684733.74,
+        "sqlite_requested_bytes_per_session": 106167.44,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137105,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 0,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1247.04,
+        "worker_rss_kib_per_session": 186.76,
+        "total_rss_kib_per_session": 1433.8,
+        "host_rss_baseline_kib": 111476,
+        "host_rss_end_kib": 236180,
+        "worker_rss_end_kib": 54468,
+        "rust_requested_bytes_per_session": 682545.49,
+        "sqlite_requested_bytes_per_session": 103123.44,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137065,
+        "history_max_bytes": 137105,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "endpoint": "actor owners released; workers idle",
+          "held_facade_handles": 0,
+          "idle_workers": 1,
+          "materialized_session_owners": 0,
+          "pending_tool_waits": 0,
+          "queued_worker_items": 0,
+          "workers": 1
+        }
+      }
+    }
+  },
+  {
+    "population": "code-pending",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1320.56,
+        "worker_rss_kib_per_session": 1815.4,
+        "total_rss_kib_per_session": 3135.96,
+        "host_rss_baseline_kib": 127420,
+        "host_rss_end_kib": 259476,
+        "worker_rss_end_kib": 217452,
+        "rust_requested_bytes_per_session": 695008.5,
+        "sqlite_requested_bytes_per_session": 119147.2,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137101,
+        "history_max_bytes": 137111,
+        "residency": {
+          "actor_owners": 6,
+          "actor_states": {
+            "owned": 6,
+            "waiting": 94
+          },
+          "endpoint": "owners retained while waiting; committed pending keys; actor churn may persist",
+          "held_facade_handles": 0,
+          "idle_workers": 4,
+          "materialized_session_owners": 4,
+          "pending_tool_waits": 100,
+          "queued_worker_items": 0,
+          "workers": 4
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1419.28,
+        "worker_rss_kib_per_session": 1815.4,
+        "total_rss_kib_per_session": 3234.68,
+        "host_rss_baseline_kib": 111208,
+        "host_rss_end_kib": 253136,
+        "worker_rss_end_kib": 217452,
+        "rust_requested_bytes_per_session": 712475.53,
+        "sqlite_requested_bytes_per_session": 124125.76,
+        "facade_live_bytes": null,
+        "history_min_bytes": 137101,
+        "history_max_bytes": 137111,
+        "residency": {
+          "actor_owners": 6,
+          "actor_states": {
+            "owned": 6,
+            "waiting": 94
+          },
+          "endpoint": "owners retained while waiting; committed pending keys; actor churn may persist",
+          "held_facade_handles": 0,
+          "idle_workers": 4,
+          "materialized_session_owners": 4,
+          "pending_tool_waits": 100,
+          "queued_worker_items": 0,
+          "workers": 4
+        }
+      }
+    }
+  },
+  {
+    "population": "standard-durable-only",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1199.96,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1199.96,
+        "host_rss_baseline_kib": 43772,
+        "host_rss_end_kib": 163768,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 636243.7,
+        "sqlite_requested_bytes_per_session": 103683.2,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1104.08,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1104.08,
+        "host_rss_baseline_kib": 44672,
+        "host_rss_end_kib": 155080,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 632093.22,
+        "sqlite_requested_bytes_per_session": 100638.88,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      }
+    }
+  },
+  {
+    "population": "standard-held",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1510.16,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1510.16,
+        "host_rss_baseline_kib": 44028,
+        "host_rss_end_kib": 195044,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 939994.02,
+        "sqlite_requested_bytes_per_session": 103385.76,
+        "facade_live_bytes": 93998021,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 100,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1418.56,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1418.56,
+        "host_rss_baseline_kib": 44828,
+        "host_rss_end_kib": 186684,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 935859.1,
+        "sqlite_requested_bytes_per_session": 100341.68,
+        "facade_live_bytes": 93998021,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 100,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      }
+    }
+  },
+  {
+    "population": "standard-parked",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1213.32,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1213.32,
+        "host_rss_baseline_kib": 43912,
+        "host_rss_end_kib": 165244,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 671013.14,
+        "sqlite_requested_bytes_per_session": 103682.72,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1131.56,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1131.56,
+        "host_rss_baseline_kib": 44684,
+        "host_rss_end_kib": 157840,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 666923.15,
+        "sqlite_requested_bytes_per_session": 100638.64,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 0,
+          "actor_states": {
+            "idle": 100
+          },
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 0,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      }
+    }
+  },
+  {
+    "population": "standard-pending",
+    "policies": {
+      "before-current-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1418.12,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1418.12,
+        "host_rss_baseline_kib": 43852,
+        "host_rss_end_kib": 185664,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 653027.09,
+        "sqlite_requested_bytes_per_session": 114575.04,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 33,
+          "actor_states": {
+            "owned": 33,
+            "waiting": 67
+          },
+          "endpoint": "owners retained while waiting; committed pending keys; actor churn may persist",
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 18,
+          "pending_tool_waits": 100,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      },
+      "after-trim": {
+        "sessions": 100,
+        "host_rss_kib_per_session": 1290.08,
+        "worker_rss_kib_per_session": 0.0,
+        "total_rss_kib_per_session": 1290.08,
+        "host_rss_baseline_kib": 44760,
+        "host_rss_end_kib": 173768,
+        "worker_rss_end_kib": 0,
+        "rust_requested_bytes_per_session": 674885.3,
+        "sqlite_requested_bytes_per_session": 103077.44,
+        "facade_live_bytes": null,
+        "history_min_bytes": 68191,
+        "history_max_bytes": 68191,
+        "residency": {
+          "actor_owners": 33,
+          "actor_states": {
+            "owned": 33,
+            "waiting": 67
+          },
+          "endpoint": "owners retained while waiting; committed pending keys; actor churn may persist",
+          "held_facade_handles": 0,
+          "idle_workers": 0,
+          "materialized_session_owners": 18,
+          "pending_tool_waits": 100,
+          "queued_worker_items": 0,
+          "workers": 0
+        }
+      }
+    }
+  }
+]

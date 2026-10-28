@@ -1,0 +1,353 @@
+{
+  "population": "code-pending",
+  "sessions": 25,
+  "history_turns": 20,
+  "source": {
+    "allocator": "dhat-heap+stats_alloc",
+    "cpu": "model name\t: AMD Ryzen 9 5950X 16-Core Processor",
+    "database": "/workspace/kiln/lash/forks/r36-idlepop/.kiln/idlepop-heap-run/sessions.sqlite",
+    "executable": "/workspace/kiln/lash/forks/r36-idlepop/buck-out/kiln/art/root/36995f4f20665c3a/crates/lash-perf/__growturn__bin__fv_b03695e7__/growturn",
+    "executable_sha256": "c8c3f706f5e3ca34f11e6b55d34dcca757b10ebefa33c4bf85f68a62196a13e3",
+    "history_turns": 20,
+    "host": "turbo2-sam",
+    "kernel": "Linux 6.8.0-137-generic x86_64 GNU/Linux",
+    "maximum_sessions": 25,
+    "mode": "Pending",
+    "model_calls_per_completed_turn": 2,
+    "owner_idle_evict_ms": 0,
+    "payload_bytes": 1024,
+    "pending_extra_turn": true,
+    "protocol": "Code",
+    "source_commit": "320c41fe51b19deeac1ec2d5cd18f08ccd87d764",
+    "source_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source_dirty": false,
+    "store": "SQLite file, synchronous FULL",
+    "tool_rounds_per_completed_turn": 1,
+    "trim_scope": "host glibc only; workers untrimmed",
+    "wave_size": 25,
+    "worker_sha256": "392920d2d9c476224307a7fccf9b9affb6f6024d538f5ba1ff9663d1bd9d6c6a"
+  },
+  "actual_window": "host process setup through final idle-population sample, before resolving sample completion, reopen probe or core teardown",
+  "legacy_receipt_label": "process-setup-through-core-shutdown-before-runtime-drop; corrected for future idle-population runs",
+  "end_live_bytes": 73600819,
+  "global_peak_live_bytes": 75640434,
+  "residency": {
+    "actor_owners": 0,
+    "actor_states": {
+      "waiting": 25
+    },
+    "endpoint": "owners retained while waiting; committed pending keys; actor churn may persist",
+    "held_facade_handles": 0,
+    "idle_workers": 1,
+    "materialized_session_owners": 0,
+    "pending_tool_waits": 25,
+    "queued_worker_items": 0,
+    "workers": 1
+  },
+  "scope": "host Rust allocations only; worker RSS and SQLite/native allocations are separate; profiler bookkeeping changes RSS; N25 endpoint had no actor owners and one idle worker, unlike the primary N100 endpoint",
+  "profile_sha256": "ded48e44183fa98ddfd825874367a7920611cba353fdea03c619ef9d88ffd679",
+  "compressed_profile_sha256": "1a10ac93a513bd88044281d07b86b314e51cc27e5ba4f85f443d39614e5d5c10",
+  "top_end_live_sites": [
+    {
+      "end_live_bytes": 7346921,
+      "end_live_blocks": 1,
+      "total_requested_bytes": 7347177,
+      "project_frame_previews": [
+        "0x5cdfd8d2b96f: encode<lash_vm_protocol::codec::{impl#1}::encode_pool_start::Part> (lash-vm-protocol/src/codec.rs:196:25)",
+        "0x5cdfd8d492ca: {closure#0} (lash-vm-protocol/src/codec.rs:175:30)",
+        "0x5cdfd8d492ca: {closure#0}<&[u8], core::result::Result<alloc::vec::Vec<u8, alloc::alloc::Global>, lash_protocol_types::engine_fault::CodecRefusal>, (), core::ops::control_flow::ControlFlow<core::ops::control_flow::ControlFlow<alloc::vec::Vec<u8, alloc::alloc::Global>, ()>, ()>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}, core::iter::adapters::{impl#0}::try_fold::{closure_env#0}<core::iter::adapters::map::Map<core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{imp",
+        "0x5cdfd8d492ca: try_fold<core::slice::iter::Chunks<u8>, (), core::iter::adapters::map::map_try_fold::{closure_env#0}<&[u8], core::result::Result<alloc::vec::Vec<u8, alloc::alloc::Global>, lash_protocol_types::engine_fault::CodecRefusal>, (), core::ops::control_flow::ControlFlow<core::ops::control_flow::ControlFlow<alloc::vec::Vec<u8, alloc::alloc::Global>, ()>, ()>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}, core::iter::adapters::{impl#0}::try_fold::{closure_env#0}<co",
+        "0x5cdfd8d492ca: try_fold<core::result::Result<alloc::vec::Vec<u8, alloc::alloc::Global>, lash_protocol_types::engine_fault::CodecRefusal>, core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}, (), core::iter::adapters::{impl#0}::try_fold::{closure_env#0}<core::iter::adapters::map::Map<core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}>, core::result::Result<core::convert::Infallible, lash_protocol_t",
+        "0x5cdfd8d4a828: try_fold<core::iter::adapters::map::Map<core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}>, core::result::Result<core::convert::Infallible, lash_protocol_types::engine_fault::CodecRefusal>, (), core::iter::traits::iterator::Iterator::try_for_each::call::{closure_env#0}<alloc::vec::Vec<u8, alloc::alloc::Global>, core::ops::control_flow::ControlFlow<alloc::vec::Vec<u8, alloc::alloc::Global>, ()>, fn(alloc::vec::Vec<u8, alloc::alloc",
+        "0x5cdfd8d4a828: try_for_each<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}>, core::result::Result<core::convert::Infallible, lash_protocol_types::engine_fault::CodecRefusal>>, fn(alloc::vec::Vec<u8, alloc::alloc::Global>) -> core::ops::control_flow::ControlFlow<alloc::vec::Vec<u8, alloc::alloc::Global>, ()>, core::ops::control_flow::ControlFlow<alloc::vec::Vec<u8, alloc::alloc",
+        "0x5cdfd8d4a828: next<core::iter::adapters::map::Map<core::slice::iter::Chunks<u8>, lash_vm_protocol::codec::{impl#1}::encode_pool_start::{closure_env#0}>, core::result::Result<core::convert::Infallible, lash_protocol_types::engine_fault::CodecRefusal>> (iter/adapters/mod.rs:177:14)"
+      ]
+    },
+    {
+      "end_live_bytes": 7346912,
+      "end_live_blocks": 1,
+      "total_requested_bytes": 7346912,
+      "project_frame_previews": [
+        "0x5cdfd833621c: with_helpers<alloc::collections::btree::set::BTreeSet<lash_kernel_value::names::FunctionId, alloc::alloc::Global>> (lash-vm-client/src/packages.rs:162:26)",
+        "0x5cdfd833621c: {closure#0} (lash-vm-client/src/packages.rs:34:17)",
+        "0x5cdfd833621c: {closure#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}> (src/sync/once_lock.rs:321:50)",
+        "0x5cdfd833621c: {closure#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}>, !> (src/sync/once_lock.rs:543:19)",
+        "0x5cdfd833621c: {closure#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}>, !>> (src/syn",
+        "0x5cdfd832db42: call_once_force<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}>, !>> (src",
+        "0x5cdfd832db42: initialize<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}>, !> (src/sync/once_lock.rs:542:19)",
+        "0x5cdfd8307b6e: get_or_try_init<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::sync::Arc<lash_vm_client::packages::WorkerLibrary, alloc::alloc::Global>, lash_kernel_releases::LibraryError>, lash_vm_client::packages::{impl#0}::built::{closure_env#0}>, !> (src/sync/once_lock.rs:410:14)"
+      ]
+    },
+    {
+      "end_live_bytes": 4781760,
+      "end_live_blocks": 2679,
+      "total_requested_bytes": 4781760,
+      "project_frame_previews": [
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfd8b2fe61: with_capacity<lash_kernel_doc::ast::Stmt> (src/vec/mod.rs:522:9)",
+        "0x5cdfd8b2fe61: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1195:25)",
+        "0x5cdfd8bb85ea: decode (lash-kernel-doc/src/graph_codec_forms.rs:1038:20)",
+        "0x5cdfd8bb8c3e: decode (lash-kernel-doc/src/graph_codec_forms.rs:1098:31)",
+        "0x5cdfd8bb92f4: decode (lash-kernel-doc/src/graph_codec_forms.rs:1197:29)",
+        "0x5cdfd8b76ffe: decode_body_with_limits<lash_kernel_doc::function::FunctionDefinition> (lash-kernel-value/src/tokens.rs:1072:17)"
+      ]
+    },
+    {
+      "end_live_bytes": 4247680,
+      "end_live_blocks": 6637,
+      "total_requested_bytes": 4247680,
+      "project_frame_previews": [
+        "0x5cdfd9a39195: new<alloc::sync::ArcInner<lash_core::runtime::observation::replay::SessionObservationEvent>> (alloc/src/boxed.rs:286:19)",
+        "0x5cdfd9a39195: new<lash_core::runtime::observation::replay::SessionObservationEvent> (alloc/src/sync.rs:431:25)",
+        "0x5cdfd9a39195: call_once<fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, (lash_core::runtime::observation::replay::SessionObservationEvent)> (src/ops/function.rs:250:5)",
+        "0x5cdfd9a39195: map<lash_core::runtime::observation::replay::SessionObservationEvent, lash_core::runtime::observation::replay::SessionCursorError, alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>> (core/src/result.rs:836:25)",
+        "0x5cdfd9a39195: {closure#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, lash_core::runtime::observation::replay::SessionCursorError>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::",
+        "0x5cdfd9a39195: {closure#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, !>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc",
+        "0x5cdfd9a39195: try_fold<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::enumerate::{impl#1}::try_fold::enumerate::{closure_env#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::Sess",
+        "0x5cdfd96b7c0c: try_fold<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::map::map_try_fold::{closure_env#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::Ses"
+      ]
+    },
+    {
+      "end_live_bytes": 3466096,
+      "end_live_blocks": 7277,
+      "total_requested_bytes": 3466096,
+      "project_frame_previews": [
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfd8b2fe61: with_capacity<lash_kernel_doc::ast::Stmt> (src/vec/mod.rs:522:9)",
+        "0x5cdfd8b2fe61: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1195:25)",
+        "0x5cdfd8b74a47: {closure#0} (lash-kernel-doc/src/graph_codec_forms.rs:815:33)",
+        "0x5cdfd8b74a47: nested<lash_kernel_doc::ast::Stmt, lash_kernel_doc::graph_codec::forms::{impl#20}::decode::{closure_env#0}> (lash-kernel-value/src/tokens.rs:644:13)",
+        "0x5cdfd8b2fed9: decode (lash-kernel-doc/src/graph_codec_forms.rs:781:15)",
+        "0x5cdfd8b2fed9: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1197:24)"
+      ]
+    },
+    {
+      "end_live_bytes": 1897472,
+      "end_live_blocks": 4353,
+      "total_requested_bytes": 1897472,
+      "project_frame_previews": [
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfd8b2fe61: with_capacity<lash_kernel_doc::ast::Stmt> (src/vec/mod.rs:522:9)",
+        "0x5cdfd8b2fe61: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1195:25)",
+        "0x5cdfd8b74a47: {closure#0} (lash-kernel-doc/src/graph_codec_forms.rs:815:33)",
+        "0x5cdfd8b74a47: nested<lash_kernel_doc::ast::Stmt, lash_kernel_doc::graph_codec::forms::{impl#20}::decode::{closure_env#0}> (lash-kernel-value/src/tokens.rs:644:13)",
+        "0x5cdfd8b2fed9: decode (lash-kernel-doc/src/graph_codec_forms.rs:781:15)",
+        "0x5cdfd8b2fed9: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1197:24)"
+      ]
+    },
+    {
+      "end_live_bytes": 1438880,
+      "end_live_blocks": 2645,
+      "total_requested_bytes": 1438880,
+      "project_frame_previews": [
+        "0x5cdfd8b4226f: try_new_uninit_in<alloc::collections::btree::node::LeafNode<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName>, alloc::alloc::Global> (alloc/src/boxed.rs:614:19)",
+        "0x5cdfd8b4226f: new_uninit_in<alloc::collections::btree::node::LeafNode<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName>, alloc::alloc::Global> (alloc/src/boxed.rs:581:15)",
+        "0x5cdfd8b4226f: new<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName, alloc::alloc::Global> (collections/btree/node.rs:87:24)",
+        "0x5cdfd8b4226f: new_leaf<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName, alloc::alloc::Global> (collections/btree/node.rs:225:29)",
+        "0x5cdfd8b4226f: insert_entry<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName, alloc::alloc::Global> (btree/map/entry.rs:452:44)",
+        "0x5cdfd8aed7ca: insert<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName, alloc::alloc::Global> (btree/map/entry.rs:426:14)",
+        "0x5cdfd8aed7ca: insert<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName, alloc::alloc::Global> (collections/btree/map.rs:1052:23)",
+        "0x5cdfd8af68c5: decode<lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName> (lash-kernel-value/src/token_values.rs:90:17)"
+      ]
+    },
+    {
+      "end_live_bytes": 1322880,
+      "end_live_blocks": 2067,
+      "total_requested_bytes": 1322880,
+      "project_frame_previews": [
+        "0x5cdfd9a39195: new<alloc::sync::ArcInner<lash_core::runtime::observation::replay::SessionObservationEvent>> (alloc/src/boxed.rs:286:19)",
+        "0x5cdfd9a39195: new<lash_core::runtime::observation::replay::SessionObservationEvent> (alloc/src/sync.rs:431:25)",
+        "0x5cdfd9a39195: call_once<fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, (lash_core::runtime::observation::replay::SessionObservationEvent)> (src/ops/function.rs:250:5)",
+        "0x5cdfd9a39195: map<lash_core::runtime::observation::replay::SessionObservationEvent, lash_core::runtime::observation::replay::SessionCursorError, alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>> (core/src/result.rs:836:25)",
+        "0x5cdfd9a39195: {closure#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, lash_core::runtime::observation::replay::SessionCursorError>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::",
+        "0x5cdfd9a39195: {closure#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, !>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc",
+        "0x5cdfd9a39195: try_fold<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::enumerate::{impl#1}::try_fold::enumerate::{closure_env#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::Sess",
+        "0x5cdfd96b7c0c: try_fold<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::map::map_try_fold::{closure_env#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::Ses"
+      ]
+    },
+    {
+      "end_live_bytes": 1317120,
+      "end_live_blocks": 2058,
+      "total_requested_bytes": 1317120,
+      "project_frame_previews": [
+        "0x5cdfd9a39195: new<alloc::sync::ArcInner<lash_core::runtime::observation::replay::SessionObservationEvent>> (alloc/src/boxed.rs:286:19)",
+        "0x5cdfd9a39195: new<lash_core::runtime::observation::replay::SessionObservationEvent> (alloc/src/sync.rs:431:25)",
+        "0x5cdfd9a39195: call_once<fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, (lash_core::runtime::observation::replay::SessionObservationEvent)> (src/ops/function.rs:250:5)",
+        "0x5cdfd9a39195: map<lash_core::runtime::observation::replay::SessionObservationEvent, lash_core::runtime::observation::replay::SessionCursorError, alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, fn(lash_core::runtime::observation::replay::SessionObservationEvent) -> alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>> (core/src/result.rs:836:25)",
+        "0x5cdfd9a39195: {closure#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, lash_core::runtime::observation::replay::SessionCursorError>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::",
+        "0x5cdfd9a39195: {closure#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, !>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc",
+        "0x5cdfd9a39195: try_fold<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::enumerate::{impl#1}::try_fold::enumerate::{closure_env#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::Sess",
+        "0x5cdfd96b7c0c: try_fold<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::map::map_try_fold::{closure_env#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::Ses"
+      ]
+    },
+    {
+      "end_live_bytes": 1033200,
+      "end_live_blocks": 1575,
+      "total_requested_bytes": 1033200,
+      "project_frame_previews": [
+        "0x5cdfd661d691: new<lash_trace::language_execution::LanguageExecutionObservation> (alloc/src/boxed.rs:286:19)",
+        "0x5cdfd661d691: {closure#2} (lash/src/language_observation.rs:265:79)",
+        "0x5cdfd661d691: enqueue<(lash_kernel_value::identity::SessionId, lash_core::runtime::observation::replay::LiveReplayEventDraft), lash::language_observation::{impl#0}::enqueue_language::{closure_env#2}> (src/language_observation/ingress.rs:46:41)",
+        "0x5cdfd65898c8: enqueue<(lash_kernel_value::identity::SessionId, lash_core::runtime::observation::replay::LiveReplayEventDraft), lash::language_observation::{impl#0}::enqueue_language::{closure_env#2}> (src/language_observation/worker.rs:95:50)",
+        "0x5cdfd66805c7: enqueue_language (lash/src/language_observation.rs:260:30)",
+        "0x5cdfd66805c7: observe (lash/src/language_observation.rs:302:22)",
+        "0x5cdfd78f0ff0: observe_product<lash_core_execution::plugin::registry::{impl#3}::observe_language::{closure_env#0}<lash_protocol_rlm::executor::trace::{impl#0}::emit_now::{closure_env#0}>> (src/trace/emitter.rs:156:22)",
+        "0x5cdfd754cb6f: observe_language<lash_protocol_rlm::executor::trace::{impl#0}::emit_now::{closure_env#0}> (src/plugin/registry.rs:622:40)"
+      ]
+    },
+    {
+      "end_live_bytes": 1013104,
+      "end_live_blocks": 2753,
+      "total_requested_bytes": 1013104,
+      "project_frame_previews": [
+        "0x5cdfd8ae41b7: try_new_uninit_in<alloc::collections::btree::node::LeafNode<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST>, alloc::alloc::Global> (alloc/src/boxed.rs:614:19)",
+        "0x5cdfd8ae41b7: new_uninit_in<alloc::collections::btree::node::LeafNode<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST>, alloc::alloc::Global> (alloc/src/boxed.rs:581:15)",
+        "0x5cdfd8ae41b7: new<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global> (collections/btree/node.rs:87:24)",
+        "0x5cdfd8ae41b7: new_leaf<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global> (collections/btree/node.rs:225:29)",
+        "0x5cdfd8ae41b7: new<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global> (collections/btree/node.rs:592:9)",
+        "0x5cdfd8ae41b7: bulk_build_from_sorted_iter<lash_kernel_value::names::FunctionId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global, core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<lash_kernel_value::names::FunctionId, alloc::alloc::Global>, alloc::collections::btree::set::{impl#16}::from_sorted_iter::{closure_env#0}<lash_kernel_value::names::FunctionId, alloc::alloc::Global, alloc::vec::into_iter::IntoIter<lash_kernel_value::names::FunctionId, alloc::alloc::Glob",
+        "0x5cdfd8b471f6: from_sorted_iter<lash_kernel_value::names::FunctionId, alloc::alloc::Global, alloc::vec::into_iter::IntoIter<lash_kernel_value::names::FunctionId, alloc::alloc::Global>> (collections/btree/set.rs:1487:19)",
+        "0x5cdfd8b471f6: from_iter<lash_kernel_value::names::FunctionId, core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<(lash_kernel_value::names::FunctionId, lash_kernel_value::names::FunctionName), alloc::alloc::Global>, lash_kernel_doc::released::{impl#2}::from_frame::{closure_env#0}>> (collections/btree/set.rs:1480:9)"
+      ]
+    },
+    {
+      "end_live_bytes": 938144,
+      "end_live_blocks": 3086,
+      "total_requested_bytes": 938144,
+      "project_frame_previews": [
+        "0x5cdfd8bc6811: new<alloc::sync::ArcInner<lash_kernel_doc::function::FunctionDefinition>> (alloc/src/boxed.rs:286:19)",
+        "0x5cdfd8bc6811: new<lash_kernel_doc::function::FunctionDefinition> (alloc/src/sync.rs:431:25)",
+        "0x5cdfd8bc6811: {closure#0} (lash-kernel-doc/src/native.rs:233:35)",
+        "0x5cdfd8bc6811: {closure#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, lash_kernel_doc::native::{impl#2}::definition::{closure_env#0}> (src/sync/once_lock.rs:321:50)",
+        "0x5cdfd8bc6811: {closure#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, lash_kernel_doc::native::{impl#2}::definition::{closure_env#0}>, !> (src/sync/once_lock.rs:543:19)",
+        "0x5cdfd8bc6811: {closure#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, lash_kernel_doc::native::{impl#2}::definition::{closure_env#0}>, !>> (src/sync/once.rs:226:40)",
+        "0x5cdfd8bba560: call_once_force<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, lash_kernel_doc::native::{impl#2}::definition::{closure_env#0}>, !>> (src/sync/once.rs:226:20)",
+        "0x5cdfd8bba560: initialize<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<alloc::sync::Arc<lash_kernel_doc::function::FunctionDefinition, alloc::alloc::Global>, lash_kernel_doc::native::{impl#2}::definition::{closure_env#0}>, !> (src/sync/once_lock.rs:542:19)"
+      ]
+    },
+    {
+      "end_live_bytes": 906304,
+      "end_live_blocks": 2397,
+      "total_requested_bytes": 906304,
+      "project_frame_previews": [
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfd8b2fe61: with_capacity_in<lash_kernel_doc::ast::Stmt, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfd8b2fe61: with_capacity<lash_kernel_doc::ast::Stmt> (src/vec/mod.rs:522:9)",
+        "0x5cdfd8b2fe61: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1195:25)",
+        "0x5cdfd8b74a47: {closure#0} (lash-kernel-doc/src/graph_codec_forms.rs:815:33)",
+        "0x5cdfd8b74a47: nested<lash_kernel_doc::ast::Stmt, lash_kernel_doc::graph_codec::forms::{impl#20}::decode::{closure_env#0}> (lash-kernel-value/src/tokens.rs:644:13)",
+        "0x5cdfd8b2fed9: decode (lash-kernel-doc/src/graph_codec_forms.rs:781:15)",
+        "0x5cdfd8b2fed9: decode<lash_kernel_doc::ast::Stmt> (lash-kernel-value/src/tokens.rs:1197:24)"
+      ]
+    },
+    {
+      "end_live_bytes": 819200,
+      "end_live_blocks": 25,
+      "total_requested_bytes": 1635200,
+      "project_frame_previews": [
+        "0x5cdfdb183c2f: to_vec<lash_core_store::environment::EnvironmentBody> (serde_json-1.0.150.crate/src/ser.rs:2217:22)",
+        "0x5cdfdb183c2f: to_string<lash_core_store::environment::EnvironmentBody> (serde_json-1.0.150.crate/src/ser.rs:2249:20)",
+        "0x5cdfdb183c2f: {closure#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}> (src/sync/once_lock.rs:321:50)",
+        "0x5cdfdb183c2f: {closure#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}>, !> (src/sync/once_lock.rs:543:19)",
+        "0x5cdfdb183c2f: {closure#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}>, !>> (src/sync/once.rs:226:40)",
+        "0x5cdfdb135df4: call_once_force<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}>, !>> (src/sync/once.rs:226:20)",
+        "0x5cdfdb135df4: initialize<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}>, !> (src/sync/once_lock.rs:542:19)",
+        "0x5cdfdb5cc17a: get_or_try_init<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<core::result::Result<alloc::string::String, lash_core_store::environment::assembly::AssemblyRefusal>, lash_core_store::environment::{impl#3}::canonical_json::{closure_env#0}>, !> (src/sync/once_lock.rs:410:14)"
+      ]
+    },
+    {
+      "end_live_bytes": 731416,
+      "end_live_blocks": 6695,
+      "total_requested_bytes": 731416,
+      "project_frame_previews": [
+        "0x5cdfd8b2fb9e: with_capacity_in<lash_kernel_doc::ast::Expr, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfd8b2fb9e: with_capacity_in<lash_kernel_doc::ast::Expr, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfd8b2fb9e: with_capacity<lash_kernel_doc::ast::Expr> (src/vec/mod.rs:522:9)",
+        "0x5cdfd8b2fb9e: decode<lash_kernel_doc::ast::Expr> (lash-kernel-value/src/tokens.rs:1195:25)",
+        "0x5cdfd8b744d4: {closure#0} (lash-kernel-doc/src/graph_codec_forms.rs:578:27)",
+        "0x5cdfd8b744d4: nested<lash_kernel_doc::ast::Expr, lash_kernel_doc::graph_codec::forms::{impl#15}::decode::{closure_env#0}> (lash-kernel-value/src/tokens.rs:644:13)",
+        "0x5cdfd8b749d8: decode (lash-kernel-doc/src/graph_codec_forms.rs:558:15)",
+        "0x5cdfd8b749d8: {closure#0} (lash-kernel-doc/src/graph_codec_forms.rs:814:32)"
+      ]
+    },
+    {
+      "end_live_bytes": 614400,
+      "end_live_blocks": 25,
+      "total_requested_bytes": 1224000,
+      "project_frame_previews": [
+        "0x5cdfd96ffc0f: grow_one<lash_core_execution::runtime::effect::envelope::AssistantResponseHookEvents, alloc::alloc::Global> (src/raw_vec/mod.rs:188:29)",
+        "0x5cdfd96ff0c6: grow<lash_core::runtime::observation::replay::StoredObservationEvent, alloc::alloc::Global> (collections/vec_deque/mod.rs:2797:18)",
+        "0x5cdfd99395cb: push_back_mut<lash_core::runtime::observation::replay::StoredObservationEvent, alloc::alloc::Global> (collections/vec_deque/mod.rs:2295:18)",
+        "0x5cdfd99395cb: push_back<lash_core::runtime::observation::replay::StoredObservationEvent, alloc::alloc::Global> (collections/vec_deque/mod.rs:2276:22)",
+        "0x5cdfd99395cb: update<(), lash_core::runtime::observation::replay::{impl#70}::publish::{async_block#0}::{closure_env#9}> (observation/replay/retention.rs:163:22)",
+        "0x5cdfd66e5b15: poll<alloc::boxed::Box<(dyn core::future::future::Future<Output=core::result::Result<alloc::vec::Vec<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, alloc::alloc::Global>, lash_core::runtime::observation::replay::LiveReplayStoreError>> + core::marker::Send), alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd66e96fa: {async_block#1} (lash/src/send.rs:495:18)",
+        "0x5cdfd66e96fa: {async_fn#0} (lash/src/send.rs:505:10)"
+      ]
+    },
+    {
+      "end_live_bytes": 605568,
+      "end_live_blocks": 498,
+      "total_requested_bytes": 908352,
+      "project_frame_previews": [
+        "0x5cdfdb6678d3: with_capacity_in<lash_core_store::transcript::TranscriptEntry, alloc::alloc::Global> (src/raw_vec/mod.rs:177:20)",
+        "0x5cdfdb6678d3: with_capacity_in<lash_core_store::transcript::TranscriptEntry, alloc::alloc::Global> (src/vec/mod.rs:975:20)",
+        "0x5cdfdb6678d3: with_capacity<lash_core_store::transcript::TranscriptEntry> (src/vec/mod.rs:522:9)",
+        "0x5cdfdb6678d3: from_iter<lash_core_store::transcript::TranscriptEntry, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>, lash_core_store::transcript::{impl#3}::fold::{closure_env#0}<alloc::vec::Vec<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>>>, core::result::Result<core::convert::Infallible, lash_protocol_types::session_model::StoredDataCorrupt",
+        "0x5cdfdb6678d3: from_iter<lash_core_store::transcript::TranscriptEntry, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>, lash_core_store::transcript::{impl#3}::fold::{closure_env#0}<alloc::vec::Vec<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>>>, core::result::Result<core::convert::Infallible, lash_protocol_types::session_model::StoredDataCorrupt",
+        "0x5cdfdb147c07: from_iter<lash_core_store::transcript::TranscriptEntry, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>, lash_core_store::transcript::{impl#3}::fold::{closure_env#0}<alloc::vec::Vec<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>>>, core::result::Result<core::convert::Infallible, lash_protocol_types::session_model::StoredDataCorrupt",
+        "0x5cdfdb147c07: collect<core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>, lash_core_store::transcript::{impl#3}::fold::{closure_env#0}<alloc::vec::Vec<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>>>, core::result::Result<core::convert::Infallible, lash_protocol_types::session_model::StoredDataCorruption>>, alloc::vec::Vec<lash_core_store::transcri",
+        "0x5cdfdb147c07: {closure#0}<lash_core_store::transcript::TranscriptEntry, lash_protocol_types::session_model::StoredDataCorruption, alloc::vec::Vec<lash_core_store::transcript::TranscriptEntry, alloc::alloc::Global>, core::iter::adapters::map::Map<alloc::vec::into_iter::IntoIter<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Global>, lash_core_store::transcript::{impl#3}::fold::{closure_env#0}<alloc::vec::Vec<&lash_core_store::session_graph::SessionNodeRecord, alloc::alloc::Gl"
+      ]
+    },
+    {
+      "end_live_bytes": 602040,
+      "end_live_blocks": 2595,
+      "total_requested_bytes": 602040,
+      "project_frame_previews": [
+        "0x5cdfd99394f2: update<(), lash_core::runtime::observation::replay::{impl#70}::publish::{async_block#0}::{closure_env#9}> (observation/replay/retention.rs:163:22)",
+        "0x5cdfd96d57b7: poll<alloc::boxed::Box<(dyn core::future::future::Future<Output=core::result::Result<alloc::vec::Vec<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, alloc::alloc::Global>, lash_core::runtime::observation::replay::LiveReplayStoreError>> + core::marker::Send), alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd92c5873: poll<alloc::boxed::Box<lash_core::runtime::durable::services::live_observer::{async_block_env#0}, alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd946212a: {async_block#0}<(), lash_core::runtime::durable::services::live_observer::{async_block_env#0}> (src/operational_metrics/turn.rs:287:28)",
+        "0x5cdfd946212a: poll<lash_core_ids::operational_metrics::turn::carry::{async_block_env#0}<(), lash_core::runtime::durable::services::live_observer::{async_block_env#0}>> (tracing-0.1.44.crate/src/instrument.rs:321:15)",
+        "0x5cdfd97ed8b1: {closure#0}<tracing::instrument::Instrumented<lash_core_ids::operational_metrics::turn::carry::{async_block_env#0}<(), lash_core::runtime::durable::services::live_observer::{async_block_env#0}>>, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle, alloc::alloc::Global>> (runtime/task/core.rs:375:24)",
+        "0x5cdfd97ed8b1: with_mut<tokio::runtime::task::core::Stage<tracing::instrument::Instrumented<lash_core_ids::operational_metrics::turn::carry::{async_block_env#0}<(), lash_core::runtime::durable::services::live_observer::{async_block_env#0}>>>, core::task::poll::Poll<()>, tokio::runtime::task::core::{impl#6}::poll::{closure_env#0}<tracing::instrument::Instrumented<lash_core_ids::operational_metrics::turn::carry::{async_block_env#0}<(), lash_core::runtime::durable::services::live_observer::{async_",
+        "0x5cdfd97ed8b1: poll<tracing::instrument::Instrumented<lash_core_ids::operational_metrics::turn::carry::{async_block_env#0}<(), lash_core::runtime::durable::services::live_observer::{async_block_env#0}>>, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle, alloc::alloc::Global>> (runtime/task/core.rs:364:30)"
+      ]
+    },
+    {
+      "end_live_bytes": 584056,
+      "end_live_blocks": 6637,
+      "total_requested_bytes": 929180,
+      "project_frame_previews": [
+        "0x5cdfd9a39113: new<&alloc::string::String, &lash_kernel_value::identity::SessionId> (runtime/observation/replay.rs:58:14)",
+        "0x5cdfd9a39113: {closure#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, lash_core::runtime::observation::replay::SessionCursorError>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::",
+        "0x5cdfd9a39113: {closure#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::ops::control_flow::ControlFlow<core::result::Result<alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, !>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc",
+        "0x5cdfd9a39113: try_fold<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::enumerate::{impl#1}::try_fold::enumerate::{closure_env#0}<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::Sess",
+        "0x5cdfd96b7c0c: try_fold<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>>, core::iter::adapters::map::map_try_fold::{closure_env#0}<(usize, lash_core::runtime::observation::replay::LiveReplayEventDraft), core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::Ses",
+        "0x5cdfd96b7c0c: try_fold<core::result::Result<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, lash_core::runtime::observation::replay::SessionCursorError>, core::iter::adapters::enumerate::Enumerate<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>>, lash_core::runtime::observation::replay::{impl#70}::publish::{async_block#0}::{closure_env#6}, alloc::vec::in_place_drop::In",
+        "0x5cdfd96b7c0c: try_fold<core::iter::adapters::map::Map<core::iter::adapters::enumerate::Enumerate<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>>, lash_core::runtime::observation::replay::{impl#70}::publish::{async_block#0}::{closure_env#6}>, core::result::Result<core::convert::Infallible, lash_core::runtime::observation::replay::SessionCursorError>, alloc::vec::in_place_drop::InPlaceDrop<alloc::sync::Arc<lash_core::runtime::",
+        "0x5cdfd96b7c0c: collect_in_place<alloc::sync::Arc<lash_core::runtime::observation::replay::SessionObservationEvent, alloc::alloc::Global>, core::iter::adapters::GenericShunt<core::iter::adapters::map::Map<core::iter::adapters::enumerate::Enumerate<alloc::vec::into_iter::IntoIter<lash_core::runtime::observation::replay::LiveReplayEventDraft, alloc::alloc::Global>>, lash_core::runtime::observation::replay::{impl#70}::publish::{async_block#0}::{closure_env#6}>, core::result::Result<core::convert::I"
+      ]
+    },
+    {
+      "end_live_bytes": 574000,
+      "end_live_blocks": 25,
+      "total_requested_bytes": 574000,
+      "project_frame_previews": [
+        "0x5cdfdb0dc981: prepare (lash-durable/src/environment.rs:338:39)",
+        "0x5cdfd92af9ed: poll<alloc::boxed::Box<lash_core::runtime::turn_driver::handlers::{impl#0}::handle_execution_environment_sync_effect::{async_fn_env#0}, alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd926a0a1: poll<alloc::boxed::Box<(dyn core::future::future::Future<Output=core::result::Result<(), lash_core::runtime::durable::session::TurnError>> + core::marker::Send), alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd9466ca7: poll<alloc::boxed::Box<lash_core::runtime::durable::phases::phase_loop::{async_fn_env#0}, alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd9466ca7: poll<lash_core::runtime::durable::phases::run_phases::{async_fn_env#0}> (tracing-0.1.44.crate/src/instrument.rs:321:15)",
+        "0x5cdfd917a80d: poll<alloc::boxed::Box<tracing::instrument::Instrumented<lash_core::runtime::durable::phases::run_phases::{async_fn_env#0}>, alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd98ade81: poll<alloc::boxed::Box<lash_core::runtime::durable::session::run::{impl#0}::run_turn::{async_fn#0}::{async_block_env#0}, alloc::alloc::Global>> (src/future/future.rs:133:9)",
+        "0x5cdfd98ade81: {async_block#0}<core::result::Result<lash_core::runtime::durable::session::Pass, lash_core::runtime::durable::session::TurnError>, lash_core::runtime::durable::session::run::{impl#0}::run_turn::{async_fn#0}::{async_block_env#0}> (src/operational_metrics/turn.rs:197:28)"
+      ]
+    }
+  ],
+  "frame_preview_scope": "shortened previews; complete stacks and frame table are in host.dhat.json.gz"
+}

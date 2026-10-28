@@ -254,3 +254,136 @@ A live graph snapshot keeps the newest cached window warm through its
 shared reader lease; the last graph reader evicts it. A reopen then reloads
 its window from stored bytes. This lease is in-memory ownership only and
 is absent from the graph's serialized representation.
+
+## Fixed-history idle populations
+
+`growturn --phase idle-population` varies session count while keeping 20 completed
+turns per session. Each turn makes two scripted model calls and one tool round
+returning the same 1,024-byte string. Content-addressed storage can share that
+payload. Code mode runs a real TypeScript cell and reports its worker processes
+separately. There is no inference, network tool or database server in this SQLite
+population.
+
+Run each combination in a fresh process and database. Reuse the optimized build
+above, and keep the 8 GiB address-space cap:
+
+```sh
+for protocol in standard code; do
+  for mode in held parked durable-only pending; do
+    D="$PWD/.kiln/idlepop/$protocol-$mode"
+    mkdir -p "$D"
+    (ulimit -v 8388608; "$B" --phase idle-population \
+      --idle-protocol "$protocol" --idle-mode "$mode" \
+      --sessions 100 --wave-size 25 --history-turns 20 --payload-bytes 1024 \
+      --database "$D/sessions.sqlite" --vm-worker "$W" \
+      --native-memory-dir "$D/native" --trim-at-idle --out "$D/points.jsonl")
+  done
+done
+```
+
+Held mode keeps actual live facades after adopting the completed durable head.
+Parked mode keeps the lightweight handles returned by `park()`. Durable-only
+mode drops every facade. These modes require released actor owners and idle
+workers, checked through actor rows, weak plugin inventories and pool counters.
+The instrument explicitly sets `owner_retention.idle = 0`; the serving default
+is one hour. Other serving budgets stay standard.
+
+Pending mode adds one unfinished turn after the same completed history and
+requires one committed pending completion per session and idle workers. Its
+endpoint is labelled **owners retained while waiting**. Owner state, epoch,
+wake backlog, local owner-idle observation and completion identity are recorded
+per session. Actors may churn while waiting; this endpoint does not claim
+released owners or CPU quiescence. The named finding below explains the observed
+wake-marker churn. Each run reopens a session and completes another tool turn;
+pending runs also resolve one recorded completion before that probe.
+
+The JSONL reuses growturn's allocator, SQLite and process receipts. It adds
+host/kernel/CPU, source commit and executable hashes, per-session graph body
+bytes and completed-turn counts, actual model/tool call counts and residency.
+`facade_live_bytes` uses replay's definition: net live host Rust demand since
+before opening real facades, sampled with the handles retained. It includes
+shared host and harness demand. It is reported beside RSS, not as an RSS
+component.
+
+Every N has a sample before its current trim and another after host
+`malloc_trim(0)`. Earlier waves were trimmed: "without-trim" means before the
+current trim, not a separate never-trimmed process. Workers are untrimmed.
+Rust and SQLite requested bytes, allocator capacity and RSS overlap or describe
+different quantities and must not be added together. The sampler includes its
+own observation buffers. No threshold, capacity promise or timing claim follows
+from this run.
+
+
+### Recorded population on 2026-10-28
+
+The [raw JSONL points and summary](../evidence/idle-population-2026-10-28/)
+contain one completed population per protocol and residency mode at N = 0, 25,
+50, 75 and 100, before and after trim. Each session has 20 completed turns.
+There are 80 primary memory points, 16,000 completed history turns and eight
+successful end probes. Host `turbo2-sam`, `AMD Ryzen 9 5950X 16-Core Processor`, SQLite FULL, full optimized builds,
+and two Tokio threads were used. No repeat was used for these capacity points.
+The separate 25-session pending diagnostic and its one authorized rerun are
+identified as inspection evidence, not additional capacity sweep repetitions.
+
+Each column subtracts its own post-boot N=0 RSS and divides by 100; these are
+endpoint deltas, not fitted slopes. Before-trim points follow earlier trimmed
+waves. After-trim deltas can be larger when trim removes more baseline memory.
+RSS sums count shared pages in each process and are not unique physical RAM.
+
+| Protocol / residency | Before current trim, KiB/session | After trim, KiB/session | Host / workers after trim, KiB/session | Actor owners | Idle workers / final worker RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| standard-held | 1,510.16 | 1,418.56 | 1,418.56 / 0.00 | 0 | 0 / 0.00 |
+| standard-parked | 1,213.32 | 1,131.56 | 1,131.56 / 0.00 | 0 | 0 / 0.00 |
+| standard-durable-only | 1,199.96 | 1,104.08 | 1,104.08 / 0.00 | 0 | 0 / 0.00 |
+| standard-pending | 1,418.12 | 1,290.08 | 1,290.08 / 0.00 | 33 | 0 / 0.00 |
+| code-held | 1,823.80 | 1,913.16 | 1,726.04 / 187.12 | 0 | 1 / 53.24 |
+| code-parked | 1,353.72 | 1,433.80 | 1,247.04 / 186.76 | 0 | 1 / 53.19 |
+| code-durable-only | 1,325.88 | 1,424.24 | 1,234.32 / 189.92 | 0 | 1 / 53.59 |
+| code-pending | 3,135.96 | 3,234.68 | 1,419.28 / 1,815.40 | 6 | 4 / 212.36 |
+
+Code pending is the largest observed summed-RSS delta: **3,234.68 KiB/session**
+after trim, comprising 1,419.28 KiB host and 1,815.40 KiB worker delta. Its pool
+grew from one worker to four, all idle at the endpoint. This amortizes pool
+warmup and growth across 100 sessions; it is not a worker permanently assigned
+to every session. Pending Standard had 33 owned and 67 waiting actors; pending
+Code had six owned and 94 waiting actors. Both are labelled owners retained
+while waiting, with 100 committed completion keys and no worker work queued.
+
+Held Standard's `facade_live_bytes` was 93,998,021 bytes. The raw points also
+publish this quantity for held Code, process allocator demand, SQLite demand
+and the actual history-size ranges. The three completed non-pending Standard
+populations use source `fdb6dddebb0e`; the other populations use
+`320c41fe51b1`, which fixes the script's handling of Code feedback and adds the
+pending census. Both have the same runtime base `a8d4ea28a9d9`; each point
+records its full source and executable identities. Completed populations were
+preserved rather than repeated after the instrument-only correction.
+
+See [Pending wake markers repeatedly reclaim suspended sessions](../evidence/idle-population-2026-10-28/pending-wake-finding.md)
+for the bounded inspection. The first 25-session diagnostic had six actors
+cycling through ownership at epochs 12,053 to 13,629 with a wake/acknowledgement
+gap; the identical-binary rerun released all 25. No runtime fix is included.
+
+One separate optimized, symbolized DHAT capture of code pending at N=25 ends
+before the sample resolution, reopen probe and teardown. It contains
+73,600,819 bytes live at that endpoint, with a 75,640,434-byte simultaneous
+heap peak. Its largest individual retained allocation sites are:
+
+| Host allocation owner / site | End-live bytes |
+| --- | ---: |
+| Encoded worker pool bootstrap frame, `codec.rs:196` | 7,346,921 |
+| Shared `WorkerLibrary::with_helpers` image, `packages.rs:162` | 7,346,912 |
+| Decoded `ast::Stmt` vector site, `tokens.rs:1195` | 4,781,760 |
+| Live replay `SessionObservationEvent` site, `replay.rs:1202` | 4,247,680 |
+
+These are individual stack sites, not complete owner totals. The first two are
+shared startup costs; no per-session attribution is inferred from them. The
+profile's 25-session endpoint had zero actor owners and one idle worker, so it
+does not attribute the larger primary population's owner churn or four-worker
+RSS. DHAT covers host Rust requests, not worker heaps, SQLite allocations or
+allocator slack. The [compressed raw profile](../evidence/idle-population-2026-10-28/host.dhat.json.gz),
+[heap summary and stack previews](../evidence/idle-population-2026-10-28/heap-summary.json)
+and [heap points](../evidence/idle-population-2026-10-28/heap-points.jsonl)
+preserve that scope. The raw DHAT receipt carries the older growing-turn window
+label; the actual idle-population boundary above follows the instrument's
+explicit `finish_profile` before the probe. Future idle-population receipts
+now name that boundary directly. No optimization was made.
