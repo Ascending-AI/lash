@@ -677,7 +677,10 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
 
     #[inline(always)]
     fn operator_value(&mut self, site: &OperatorSite, values: &[Value], covered: bool) -> Answer {
-        let typed = if OBSERVING || (site.root.is_some() && self.accounting) {
+        if site.root.is_some() && self.accounting {
+            return self.scalar_root_operator(site, values);
+        }
+        let typed = if OBSERVING {
             None
         } else {
             match values {
@@ -699,7 +702,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 .or_else(|| site.entry.call(values))
                 .map(Ok)
                 .unwrap_or_else(|| self.operate(site, values))
-        } else if OBSERVING || (site.root.is_some() && self.accounting) {
+        } else if OBSERVING {
             self.covered = false;
             self.operate(site, values)
         } else {
@@ -1420,6 +1423,8 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
 
 #[cfg(test)]
 thread_local! {
+    /// Certified scalar root calls committed through shared admission.
+    pub(crate) static DIRECT_SCALAR_ROOTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Real iterations executed in unboxed typed registers.
     pub(crate) static TYPED_REPEATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Collection operations answered without a heap context.

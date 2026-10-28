@@ -1,5 +1,6 @@
 //! Immediate partial calls carry a value; buffering and heap work keep
 //! their own physical frames. Source admission and completion are shared.
+use super::super::admission::DepthNeed;
 use super::super::compiled::CallSite;
 use super::*;
 use crate::compile::LibId;
@@ -65,6 +66,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         regs: &mut [Value],
         edge: (u64, Option<usize>),
     ) -> Result<bool, Stop> {
+        if self.accounting
+            && let Some(answer) = self.scalar_call_answer_values(site, lib, extra, args, regs, edge)
+        {
+            return answer;
+        }
         if !self.accounting {
             let function = self.exe.lib(lib);
             let Some((prepared, _)) = function.specialization.prepared.as_ref() else {
@@ -84,6 +90,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
         }
         self.heap_call_answer_values(site, (lib, extra), args, regs, edge)
+    }
+
+    #[inline(never)]
+    fn scalar_call_answer_values(
+        &mut self,
+        site: &CallSite,
+        lib: LibId,
+        extra: u32,
+        args: &[Value],
+        regs: &mut [Value],
+        (before, occurrence): (u64, Option<usize>),
+    ) -> Option<Result<bool, Stop>> {
+        let resources = self.direct_resources(DepthNeed::Exact(extra), 0)?;
+        let (value, units) = self.source_scalar_answer(lib, args, site.checked)?;
+        let admitted = self.admit_direct_source(resources, occurrence, before, units, None)?;
+        Some(self.commit_admission(admitted, occurrence).map(|()| {
+            #[cfg(test)]
+            super::super::DIRECT_SCALAR_ROOTS.with(|calls| calls.set(calls.get() + 1));
+            self.publish_call_answer(site, regs, value);
+            true
+        }))
     }
 
     #[inline(never)]
@@ -156,10 +183,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.count(at)?;
         }
         self.root_arguments(before);
-        regs[site.reg as usize] = finish(self);
+        let value = finish(self);
+        self.publish_call_answer(site, regs, value);
+        Ok(true)
+    }
+
+    #[inline(always)]
+    fn publish_call_answer(&mut self, site: &CallSite, regs: &mut [Value], value: Value) {
+        regs[site.reg as usize] = value;
         if site.after != 0 {
             self.admit(site.after);
         }
-        Ok(true)
     }
 }

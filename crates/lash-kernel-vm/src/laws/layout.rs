@@ -682,6 +682,7 @@ fn observe_scalar_bounded(
 /// source layout, with and without a tape, warm or cold.
 #[test]
 fn scalar_layouts_agree() {
+    crate::machine::islands::DIRECT_SCALAR_ROOTS.with(|calls| calls.set(0));
     for (case, body) in [
         "let i = 0 let target = 0 let a = 0.1 let s = 0.0 while flat.lt(i, 5) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } do perform 0((i, target, s, a)) as Any return (i, target, s, a)",
         "let i = 9223372036854775806 let target = 0 let s = -0.0 while flat.lt(i, 9223372036854775807) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(s, -0.0)) } return (i, target, s)",
@@ -702,6 +703,7 @@ fn scalar_layouts_agree() {
         "let i = 0 let s = 0 while flat.lt(i, 3) { set s = flat.add(s, 1.0) set i = flat.add(i, 1) } return s",
         "let i = 0 let s = 9223372036854775806 try { while flat.lt(i, 3) { set s = flat.add(s, 1) set i = flat.add(i, 1) } } catch err { print (s, i) } return (s, i)",
         "let i = 0.0 let s = 1.5 try { while flat.lt(i, 3.0) { set i = flat.add(i, 1.0) set s = flat.rem(s, 2.0) } } catch err { print (s, i) } return (s, i)",
+        "let answer = invoke flat.add(4, 2) do perform 0(answer) as Any return answer",
     ].into_iter().enumerate() {
         let source = scalar_document(body);
         for record in [false, true] {
@@ -712,6 +714,7 @@ fn scalar_layouts_agree() {
             }
         }
     }
+    assert!(crate::machine::islands::DIRECT_SCALAR_ROOTS.with(|calls| calls.get()) > 0);
 }
 
 fn call_probes(

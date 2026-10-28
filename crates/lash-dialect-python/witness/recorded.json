@@ -661,7 +661,7 @@
   },
   {
    "name": "numeric_register_boundaries",
-   "source": "async def compute():\n    a = -0.0\n    b = 0.5\n    for i in range(3):\n        a += b * b\n        b += 1\n    print(a, b)\n    negative = -0.0\n    print(negative * 1.0, negative + -0.0, -negative)\n    infinite = 1e309\n    other = -1e309\n    print(infinite * 2.0, other + 1.0, infinite - infinite)\n    mixed = 0.5\n    mixed *= 2\n    print(mixed + 9007199254740993)\n    try:\n        print(a / 0.0)\n    except ZeroDivisionError:\n        print('zero division')\n    print(await host.echo(str(a)))\n    return a + b\nprint(await compute())\n\nvalue = 0.5\nfor i in range(2):\n    if i == 1:\n        value = 'a'\n    value += value\nprint(value)\n\ndef outer():\n    x = 0.5\n    def change():\n        nonlocal x\n        x = 'a'\n    change()\n    x += 'b'\n    print(x)\nouter()\n\ndef maybe(flag):\n    if flag:\n        x = 0.5\n    try:\n        x += 1.0\n        print(x)\n    except UnboundLocalError:\n        print('unbound')\nmaybe(False)\nmaybe(True)\n\nasync def accumulate():\n    values = [1, 2, 3]\n    alias = values\n    total = 0\n    for i in range(3):\n        total += values[i]\n        if i == 0:\n            alias[1] = 0.5\n        if i == 1:\n            alias[2] = await host.echo(4)\n    print(total)\n    alias[0] = 'bad'\n    try:\n        total += values[0]\n    except TypeError as error:\n        print(type(error).__name__, str(error))\n    return total\nprint(await accumulate())\n\ncounter = -2\nbefore = 99\nafter = 99\nwhile counter < 3:\n    before = counter\n    counter += 1\n    after = counter\nprint(await host.echo(str((counter, before, after))))\n\ncounter = 9223372036854775806\nbefore = 0\nafter = 0\nwhile counter < 9223372036854775807:\n    before = counter\n    counter += 2\n    after = counter\nprint(await host.echo(str((counter, before, after))))\n\ncounter = 0.0\nbefore = -1.0\nafter = -1.0\nwhile counter < 0.5:\n    before = counter\n    counter += 0.1\n    after = counter\nprint(counter, before, after)\n",
+   "source": "async def compute():\n    a = -0.0\n    b = 0.5\n    for i in range(3):\n        a += b * b\n        b += 1\n    print(a, b)\n    negative = -0.0\n    print(negative * 1.0, negative + -0.0, -negative)\n    infinite = 1e309\n    other = -1e309\n    print(infinite * 2.0, other + 1.0, infinite - infinite)\n    mixed = 0.5\n    mixed *= 2\n    print(mixed + 9007199254740993)\n    try:\n        print(a / 0.0)\n    except ZeroDivisionError:\n        print('zero division')\n    print(await host.echo(str(a)))\n    return a + b\nprint(await compute())\n\nvalue = 0.5\nfor i in range(2):\n    if i == 1:\n        value = 'a'\n    value += value\nprint(value)\n\ndef outer():\n    x = 0.5\n    def change():\n        nonlocal x\n        x = 'a'\n    change()\n    x += 'b'\n    print(x)\nouter()\n\ndef maybe(flag):\n    if flag:\n        x = 0.5\n    try:\n        x += 1.0\n        print(x)\n    except UnboundLocalError:\n        print('unbound')\nmaybe(False)\nmaybe(True)\n\nasync def accumulate():\n    values = [1, 2, 3]\n    alias = values\n    total = 0\n    for i in range(3):\n        total += values[i]\n        if i == 0:\n            alias[1] = 0.5\n        if i == 1:\n            alias[2] = await host.echo(4)\n    print(total)\n    alias[0] = 'bad'\n    try:\n        total += values[0]\n    except TypeError as error:\n        print(type(error).__name__, str(error))\n    return total\nprint(await accumulate())\n\ncounter = -2\nbefore = 99\nafter = 99\nwhile counter < 3:\n    before = counter\n    counter += 1\n    after = counter\nprint(await host.echo(str((counter, before, after))))\n\ncounter = 9223372036854775806\nbefore = 0\nafter = 0\nwhile counter < 9223372036854775807:\n    before = counter\n    counter += 2\n    after = counter\nprint(await host.echo(str((counter, before, after))))\n\ncounter = 0.0\nbefore = -1.0\nafter = -1.0\nwhile counter < 0.5:\n    before = counter\n    counter += 0.1\n    after = counter\nprint(counter, before, after)\n\ndef captured_root():\n    value = 0\n    def step(fail):\n        nonlocal value\n        value += 1\n        if fail:\n            return 1 + 'bad'\n        return value\n    try:\n        step(True)\n    except TypeError:\n        print('after failed step', value)\n    print(step(False), step(False))\n    return value\nprint(await host.echo(captured_root()))\n\ndef captured_overflow():\n    value = 9223372036854775806\n    def step():\n        nonlocal value\n        value += 2\n        return value\n    return step()\nprint(captured_overflow())\n",
    "deliveries": [],
    "epochs": [
     {
@@ -721,10 +721,24 @@
      "delivered": [
       "host.echo:(9223372036854775808, 9223372036854775806, 9223372036854775808)"
      ],
-     "asked": [],
+     "asked": [
+      "host.echo:3"
+     ],
      "logged": [
       "(9223372036854775808, 9223372036854775806, 9223372036854775808)",
-      "0.5 0.4 0.5"
+      "0.5 0.4 0.5",
+      "after failed step 1",
+      "2 3"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:3"
+     ],
+     "asked": [],
+     "logged": [
+      "3",
+      "9223372036854775808"
      ]
     }
    ],

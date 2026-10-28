@@ -94,3 +94,28 @@ while counter < 0.5:
     counter += 0.1
     after = counter
 print(counter, before, after)
+
+def captured_root():
+    value = 0
+    def step(fail):
+        nonlocal value
+        value += 1
+        if fail:
+            return 1 + 'bad'
+        return value
+    try:
+        step(True)
+    except TypeError:
+        print('after failed step', value)
+    print(step(False), step(False))
+    return value
+print(await host.echo(captured_root()))
+
+def captured_overflow():
+    value = 9223372036854775806
+    def step():
+        nonlocal value
+        value += 2
+        return value
+    return step()
+print(captured_overflow())
