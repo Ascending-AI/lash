@@ -373,8 +373,12 @@ class FreezeVerdicts(Fixture):
         self.write("crates/demo/src/migrate.rs", MIGRATIONS)
         self.write("crates/demo/schema.sql", SCHEMA)
         self.write("crates/lash-postgres-store/schema.sql",
+                   "-- lash-postgres-store schema, component version 7.\n"
                    "INSERT INTO lash_schema_versions (component, version, min_reader) "
                    "VALUES ('lash-postgres-store', 7, 7);\n")
+        self.write("crates/lash-postgres-store/teardown.sql",
+                   "-- lash-postgres-store teardown, component version 7.\nDROP TABLE demo;\n")
+        self.write("crates/lash-postgres-store/schema-shape.txt", "version 7\ntable demo\n")
         base = self.commit("schema and provisioning stamp")
         self.write("crates/demo/schema.sql", WIDER_SCHEMA)
         automatic.apply(self.repo, base)
@@ -382,6 +386,12 @@ class FreezeVerdicts(Fixture):
                       (self.repo / "crates/demo/src/schema.rs").read_text())
         self.assertIn("VALUES ('lash-postgres-store', 8, 8)",
                       (self.repo / "crates/lash-postgres-store/schema.sql").read_text())
+        self.assertTrue((self.repo / "crates/lash-postgres-store/schema.sql").read_text()
+                        .startswith("-- lash-postgres-store schema, component version 8.\n"))
+        self.assertEqual((self.repo / "crates/lash-postgres-store/teardown.sql").read_text(),
+                         "-- lash-postgres-store teardown, component version 8.\nDROP TABLE demo;\n")
+        self.assertEqual((self.repo / "crates/lash-postgres-store/schema-shape.txt").read_text(),
+                         "version 8\ntable demo\n")
         head = self.commit("automatic schema stamp")
         self.assertEqual(self.run_command(base, head, strict=False).returncode, 0)
         strict = self.run_command(base, head)
@@ -393,6 +403,12 @@ class FreezeVerdicts(Fixture):
         automatic.apply(self.repo, head)
         self.assertIn("VALUES ('lash-postgres-store', 9, 9)",
                       (self.repo / "crates/lash-postgres-store/schema.sql").read_text())
+        self.assertTrue((self.repo / "crates/lash-postgres-store/schema.sql").read_text()
+                        .startswith("-- lash-postgres-store schema, component version 9.\n"))
+        self.assertEqual((self.repo / "crates/lash-postgres-store/teardown.sql").read_text(),
+                         "-- lash-postgres-store teardown, component version 9.\nDROP TABLE demo;\n")
+        self.assertEqual((self.repo / "crates/lash-postgres-store/schema-shape.txt").read_text(),
+                         "version 9\ntable demo\n")
 
     def test_a_frozen_wire_schema_uses_its_complete_host_reset_witness(self) -> None:
         import apply_format_witnesses as automatic

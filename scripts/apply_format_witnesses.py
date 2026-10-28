@@ -130,8 +130,8 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
             if before != after:
                 changed[surface.key] = (surface, before, after)
 
-    # Keep PostgreSQL's provisioning stamp identical to its descriptor. It is
-    # embedded SQL, whereas SQLite provisions from its Rust descriptor.
+    # PostgreSQL embeds its descriptor in provisioning and artifact metadata;
+    # readers reject a shape stamp that lags even when the catalog is unchanged.
     postgres = next((row for row in changed.values() if row[0].constant == "POSTGRES_SCHEMA_VERSION"), None)
     if postgres:
         path = "crates/lash-postgres-store/schema.sql"
@@ -144,9 +144,24 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
             if matches != 1:
                 raise gate.CheckError("cannot locate PostgreSQL provisioning stamp")
             files[path] = text
+        for artifact, pattern, replacement in (
+            ("schema.sql", r"(?m)^-- lash-postgres-store schema, component version \d+\.$",
+             f"-- lash-postgres-store schema, component version {postgres[2]}."),
+            ("teardown.sql", r"(?m)^-- lash-postgres-store teardown, component version \d+\.$",
+             f"-- lash-postgres-store teardown, component version {postgres[2]}."),
+            ("schema-shape.txt", r"(?m)^version \d+$", f"version {postgres[2]}"),
+        ):
+            path = f"crates/lash-postgres-store/{artifact}"
+            text = PlannedView(repo, files).content(path)
+            if text is None:
+                raise gate.CheckError(f"cannot read PostgreSQL artifact {path}")
+            text, matches = re.subn(pattern, replacement, text)
+            if matches != 1:
+                raise gate.CheckError(f"cannot locate PostgreSQL artifact stamp in {path}")
+            files[path] = text
 
     # The loop's last projection already checked the complete planned tree.
-    # Only the SQL seed adjustment can have changed it since that check.
+    # Only PostgreSQL artifact stamps can have changed it since that check.
     final = PlannedView(repo, files)
     if postgres:
         result = gate.check_views(base_view, final, strict=False)
