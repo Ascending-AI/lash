@@ -49,6 +49,7 @@ pub(crate) mod kind_test;
 mod library;
 pub(crate) use library::{Lib, LibRun};
 mod frame;
+mod holding_sites;
 mod lazy;
 pub use lazy::body_census;
 mod loop_plans;
@@ -190,6 +191,15 @@ impl Tables {
                         test,
                         regs: stmt.regs,
                     };
+                    assert!(
+                        self.stream
+                            .verify_holding_sites(&code.source_room, ranges.main)
+                            && ranges.test.is_none_or(|test| self
+                                .stream
+                                .verify_holding_sites(&code.source_room, test)),
+                        "source holding coordinates at {}",
+                        code.site
+                    );
                     stmts.push((ranges, code.slots.len()));
                     pending.extend(stmt.form.blocks());
                 }
@@ -894,6 +904,9 @@ pub(crate) enum Var {
 #[derive(Default)]
 pub(crate) struct Stream {
     pub(crate) ops: Vec<Op>,
+    /// Exact source coordinates recorded during lowering, before placement.
+    /// Charge-region heads have no source holding event of their own.
+    pub(crate) source_sites: Vec<Option<Arc<Site>>>,
     pub(crate) consts: Vec<Constant>,
     pub(crate) names: Vec<BindingName>,
     pub(crate) fields: Vec<Field>,

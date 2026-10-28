@@ -338,7 +338,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
         LOOP,
         WALK,
         ISLAND,
-        "main { let x = pair.twice(3) let ys = [x, x] return text.join(ys, \"-\") }",
+        "main { let x = pair.twice(3) let ys = let(y = x, if(true, [y, x], [x])) return text.join(ys, \"-\") }",
     ] {
         let (program, _) = Embedder::with(
             text,
@@ -349,6 +349,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
         )
         .program(true);
         let mut canonical = std::collections::BTreeMap::new();
+        let mut holding_sites = std::collections::BTreeMap::new();
         for layout in [0, 1, 3, 17] {
             let program = super::embedder::program(
                 std::sync::Arc::clone(&program.document),
@@ -381,6 +382,33 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 let code = exe.code(CodeId(index as u32));
                 code.source_room.verify().unwrap();
                 let key = (code.source_room.owner, code.source_room.site.clone());
+                let mut sites = std::collections::BTreeMap::new();
+                let mut blocks = vec![code.body];
+                while let Some(block) = blocks.pop() {
+                    for stmt in &exe.block(block).stmts {
+                        let (stream, stmt, _) = exe.statement(*stmt);
+                        let mut ranges = vec![stmt.ops];
+                        if let crate::compile::Form::While { test, .. } = stmt.form {
+                            ranges.push(test);
+                        }
+                        for range in ranges {
+                            for pc in range.start..range.end() {
+                                let op = stream.ops[pc as usize];
+                                if matches!(op, lash_kernel_exec::Op::Region { .. }) {
+                                    assert!(stream.source_sites[pc as usize].is_none());
+                                    continue;
+                                }
+                                let site = stream.source_sites[pc as usize].as_ref().unwrap();
+                                *sites.entry((site.as_ref().clone(), op.kind())).or_insert(0) += 1;
+                            }
+                        }
+                        blocks.extend(stmt.form.blocks());
+                    }
+                }
+                let holding_key = (key.clone(), code.capture_names.clone());
+                if let Some(previous) = holding_sites.insert(holding_key, sites.clone()) {
+                    assert_eq!(previous, sites, "source events survive physical layouts");
+                }
                 if let Some(previous) = canonical.get(&key) {
                     assert_eq!(
                         previous, &code.source_room.room,

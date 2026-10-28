@@ -314,7 +314,7 @@ fn obligations(
             p = i128::from(Cost::FRAME);
             for name in &source.params {
                 if source.shared.get(&(site.clone(), name.clone())) == Some(&true) {
-                    p += i128::from(Cost::OBJECT);
+                    p += i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 }
             }
             d = p;
@@ -334,14 +334,14 @@ fn obligations(
         }
         (doc::Node::Expr(doc::Expr::Let { name, .. }), Phase::Test) => {
             if source.shared.get(&(site.clone(), name.clone())) == Some(&true) {
-                p = Cost::OBJECT.into();
+                p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
         }
         (doc::Node::Stmt(doc::Stmt::For { binding, via, .. }), Phase::Test) => {
             let at = child(site, 1);
             if source.shared.get(&(at.clone(), binding.clone())) == Some(&true) {
-                p = Cost::OBJECT.into();
+                p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
             let local = Measure::Local(Owner::Binding {
@@ -417,7 +417,7 @@ fn obligations(
             if let Some(c) = &t.catch
                 && source.shared.get(&(child(site, 1), c.binding.clone())) == Some(&true)
             {
-                p = Cost::OBJECT.into();
+                p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                 d = p;
             }
         }
@@ -529,7 +529,7 @@ fn obligations(
         (doc::Node::Stmt(stmt), Phase::Commit) => match stmt {
             doc::Stmt::Let { name, .. } => {
                 if source.shared.get(&(site.clone(), name.clone())) == Some(&true) {
-                    p = Cost::OBJECT.into();
+                    p = i128::from(Cost::OBJECT) + i128::from(Cost::REFERENCE);
                     d = p;
                 }
                 if source.persistent.contains_key(site) {

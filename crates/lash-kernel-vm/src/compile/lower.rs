@@ -26,6 +26,8 @@ use lash_kernel_exec::{
 };
 use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::names::Name;
+use lash_kernel_value::sites::Site;
+use std::sync::Arc;
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
@@ -40,6 +42,8 @@ use crate::functions::brand_built;
 struct Ops {
     metered: bool,
     ops: Vec<Op>,
+    source_sites: Vec<Option<Arc<Site>>>,
+    source: Arc<Site>,
     regs: u32,
     regions: Regions,
     /// Whether the last region is open: the ops since its head stand in it.
@@ -73,6 +77,7 @@ impl Ops {
             self.open = false;
         }
         self.ops.push(op);
+        self.source_sites.push(Some(Arc::clone(&self.source)));
     }
 
     /// Ends the open region: what follows is a jump's target.
@@ -101,6 +106,7 @@ impl Ops {
                 region: RegionIx(u32::MAX),
                 total: 0,
             });
+            self.source_sites.push(None);
             self.open = true;
         }
         let at = self.ops.len() as u32;
@@ -153,6 +159,7 @@ impl Ops {
         self.open = other.open;
         self.regs = self.regs.max(other.regs);
         self.ops.append(&mut other.ops);
+        self.source_sites.append(&mut other.source_sites);
         other.regions.clear();
         (other.ops, other.regions)
     }
@@ -372,6 +379,7 @@ impl Compiler<'_> {
                     None => {
                         let name = self.name(Name::new(format!("{policy:?}")));
                         ops.ops.pop();
+                        ops.source_sites.pop();
                         ops.push(Op::Unbound { dst: Reg(0), name });
                         Form::Plain
                     }
@@ -412,6 +420,7 @@ impl Compiler<'_> {
         let len = ops.ops.len() as u32;
         place_regions(&mut ops, &mut self.stream.regions, start);
         self.stream.ops.append(&mut ops.ops);
+        self.stream.source_sites.append(&mut ops.source_sites);
         self.spare.push(ops.ops);
         ops.regions.clear();
         self.spare_regions.push(ops.regions);
@@ -493,6 +502,8 @@ impl Compiler<'_> {
         Ops {
             metered: self.metered,
             ops: self.spare.pop().unwrap_or_default(),
+            source_sites: Vec::new(),
+            source: Arc::new(self.site()),
             regs: 0,
             regions: self.spare_regions.pop().unwrap_or_default(),
             open: false,
@@ -509,7 +520,8 @@ impl Compiler<'_> {
 
     /// A right-hand side, its value in register 0.
     fn rhs(&mut self, ops: &mut Ops, rhs: &doc::Rhs) -> Form {
-        match rhs {
+        let enclosing = std::mem::replace(&mut ops.source, Arc::new(self.site()));
+        let form = match rhs {
             doc::Rhs::Expr(expr) => {
                 self.expr(ops, expr, Reg(0));
                 Form::Plain
@@ -520,7 +532,9 @@ impl Compiler<'_> {
                 ops.uses(Reg(0));
                 Form::Action(action)
             }
-        }
+        };
+        ops.source = enclosing;
+        form
     }
 
     /// A member's target into `at` and its index into the register after,
@@ -738,6 +752,7 @@ impl Compiler<'_> {
     /// An expression's value into register `dst`, charged before its
     /// sub-expressions.
     fn expr(&mut self, ops: &mut Ops, expr: &doc::Expr, dst: Reg) {
+        let enclosing = std::mem::replace(&mut ops.source, Arc::new(self.site()));
         ops.charge();
         ops.uses(dst);
         let live = self.live.len();
@@ -820,6 +835,7 @@ impl Compiler<'_> {
                     // Keep its original code position without requiring dead code.
                     let name = self.name(Name::new(closure.function.to_string()));
                     ops.push(Op::Unbound { dst, name });
+                    ops.source = enclosing;
                     return;
                 };
                 let definition = registered.definition();
@@ -973,6 +989,7 @@ impl Compiler<'_> {
             }
         }
         self.live.truncate(live);
+        ops.source = enclosing;
     }
 
     /// Reads a variable into `dst`.

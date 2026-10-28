@@ -634,7 +634,7 @@ fn release(owners: impl IntoIterator<Item = Owner>) -> Measure {
 }
 fn shared(shared: &BTreeMap<(Site, Name), bool>, site: &Site, name: &Name) -> u64 {
     if shared.get(&(site.clone(), name.clone())) == Some(&true) {
-        Cost::OBJECT
+        Cost::OBJECT + Cost::REFERENCE
     } else {
         0
     }
