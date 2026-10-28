@@ -93,7 +93,11 @@ fn tools(bytes: usize, counts: Arc<ScriptCounts>) -> Result<Arc<dyn lash::tools:
         Tools { bytes, counts },
     )))
 }
-fn provider(protocol: Protocol, counts: Arc<ScriptCounts>) -> lash_core::provider::ProviderHandle {
+fn provider(
+    protocol: Protocol,
+    counts: Arc<ScriptCounts>,
+    meter: Arc<measure::Meter>,
+) -> lash_core::provider::ProviderHandle {
     let builder = lash_core::testing::TestProvider::builder()
         .kind("idle-population-script")
         .options(super::ProviderOptions {
@@ -102,7 +106,9 @@ fn provider(protocol: Protocol, counts: Arc<ScriptCounts>) -> lash_core::provide
         });
     builder.complete(move |request: LlmRequest| {
         let counts = Arc::clone(&counts);
+        let meter = Arc::clone(&meter);
         async move {
+            meter.model_request(&request);
             counts.model_calls.fetch_add(1, Ordering::Relaxed);
             let current = request.messages.iter().rposition(|m| {
                 m.role == LlmRole::User && m.blocks.iter().any(|b| matches!(b, LlmContentBlock::Text { .. }))
@@ -126,7 +132,7 @@ fn provider(protocol: Protocol, counts: Arc<ScriptCounts>) -> lash_core::provide
             } else {
                 lash::direct::LlmOutputPart::ToolCall {
                     call_id: "idlepop-call".into(),
-                    tool_name: if pending { "idle_wait" } else { "idle_payload" }.into(),
+                    tool_name: if pending { "tools__idle_wait" } else { "tools__idle_payload" }.into(),
                     input_json: "{}".into(), replay: None,
                 }
             };
@@ -138,6 +144,7 @@ fn provider(protocol: Protocol, counts: Arc<ScriptCounts>) -> lash_core::provide
 async fn boot(
     args: &Args,
     counts: Arc<ScriptCounts>,
+    meter: Arc<measure::Meter>,
 ) -> Result<(lash::LashCore, Option<lash::vm::WorkerPool>)> {
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         &args.database,
@@ -174,7 +181,7 @@ async fn boot(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
-            provider(args.idle.idle_protocol, Arc::clone(&counts)),
+            provider(args.idle.idle_protocol, Arc::clone(&counts), meter),
             super::metadata()?,
         )
         .tools(
@@ -325,7 +332,7 @@ fn history(args: &Args, count: usize) -> Result<Value> {
     )
 }
 
-pub(super) async fn run(args: &Args, meter: &measure::Meter) -> Result<()> {
+pub(super) async fn run(args: &Args, meter: &Arc<measure::Meter>) -> Result<()> {
     ensure!(
         args.sessions <= 2000 && args.idle.history_turns > 0 && args.idle.wave_size > 0,
         "idle population requires 1..=2000 sessions, positive history and wave size"
@@ -336,7 +343,7 @@ pub(super) async fn run(args: &Args, meter: &measure::Meter) -> Result<()> {
     );
     let identity = identity(args)?;
     let counts = Arc::new(ScriptCounts::default());
-    let (core, pool) = boot(args, Arc::clone(&counts)).await?;
+    let (core, pool) = boot(args, Arc::clone(&counts), Arc::clone(meter)).await?;
     let baseline = lash_perf::GLOBAL_ALLOCATOR.stats();
     let mut held = Vec::new();
     let mut parks = Vec::new();
