@@ -5,7 +5,7 @@ mod classify;
 mod format;
 mod json;
 #[cfg(test)]
-mod laws;
+pub(crate) mod laws;
 mod resources;
 mod text;
 
@@ -394,6 +394,8 @@ fn sequence_values(args: &Args<'_>, value: &Value) -> Result<Vec<Value>, NativeE
     for chunk in sequence.chunks() {
         items.extend_from_slice(chunk?);
     }
+    #[cfg(test)]
+    let _snapshot = crate::native_contract_laws::scratch_values(*args, &items);
     Ok(items)
 }
 

@@ -83,6 +83,8 @@ fn bytes_arg<'call>(args: &Args<'call>, index: usize) -> Result<Cow<'call, [u8]>
     bytes_view(args, index)?.whole()
 }
 fn from_octets(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+    #[cfg(test)]
+    let mut _prefix = crate::native_contract_laws::scratch(0);
     let bytes: Result<Vec<_>, _> = sequence(&call.args, 0)?
         .iter()
         .map(|value| {
@@ -92,9 +94,14 @@ fn from_octets(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
                 _ => return Err(raise("type_error", "expected integer octet")),
             }
             .ok_or_else(|| raise("number_range", "octet is outside 0..255"))
+            .inspect(|_| {
+                #[cfg(test)]
+                _prefix.grow(1);
+            })
         })
         .collect();
-    Ok(call.new.bytes(&bytes?))
+    let bytes = bytes?;
+    Ok(call.new.bytes(&bytes))
 }
 
 fn slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -114,6 +121,8 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         .map_err(|_| crate::exhausted())?;
     out.extend_from_slice(&bytes);
     out.extend_from_slice(&other);
+    #[cfg(test)]
+    let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
     Ok(call.new.bytes(&out))
 }
 fn compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

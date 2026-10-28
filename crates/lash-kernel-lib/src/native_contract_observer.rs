@@ -74,6 +74,25 @@ fn rechunk(
                     vec![Chunk::Resident(whole)].into_boxed_slice()
                 };
             }
+            Body::Bytes(bytes) => {
+                let whole: Vec<_> = bytes
+                    .chunks
+                    .iter()
+                    .flat_map(|chunk| match chunk {
+                        Chunk::Resident(bytes) => bytes.as_ref(),
+                        _ => panic!("resident bytes"),
+                    })
+                    .copied()
+                    .collect();
+                bytes.chunks = if split {
+                    whole
+                        .chunks(64)
+                        .map(|piece| Chunk::Resident(piece.to_vec().into_boxed_slice()))
+                        .collect()
+                } else {
+                    vec![Chunk::Resident(whole.into_boxed_slice())].into_boxed_slice()
+                };
+            }
             Body::Error(error) => pending.extend([error.kind, error.message, error.data]),
             _ => {}
         }
@@ -100,7 +119,41 @@ fn local(value: &Datum) -> u64 {
 fn value_cost(bench: &Bench, value: &Value) -> u64 {
     match value {
         Value::Function(_) => Cost::REFERENCE + 64,
-        Value::ObjectRef(_) | Value::TaskRef(_) | Value::Closure(_) => Cost::REFERENCE,
+        Value::ObjectRef(_)
+        | Value::TaskRef(_)
+        | Value::Closure(_)
+        | Value::List(_)
+        | Value::Map(_)
+        | Value::Set(_)
+        | Value::Record(_) => Cost::REFERENCE,
+        Value::Task(_) => Cost::REFERENCE,
+        Value::Tuple(id) => {
+            let lash_kernel_doc::arena::Body::Tuple(sequence) = bench.arena().body(*id).unwrap()
+            else {
+                panic!("tuple body")
+            };
+            Cost::REFERENCE
+                + sequence
+                    .chunks
+                    .iter()
+                    .map(|chunk| match chunk {
+                        lash_kernel_doc::arena::Chunk::Resident(values) => {
+                            values.iter().map(|v| value_cost(bench, v)).sum::<u64>()
+                        }
+                        _ => panic!("resident tuple"),
+                    })
+                    .sum::<u64>()
+        }
+        Value::Error(id) => {
+            let lash_kernel_doc::arena::Body::Error(error) = bench.arena().body(*id).unwrap()
+            else {
+                panic!("error body")
+            };
+            value_cost(bench, &error.kind)
+                + value_cost(bench, &error.message)
+                + value_cost(bench, &error.data)
+                - Cost::REFERENCE
+        }
         _ => local(&bench.datum(value).unwrap()),
     }
 }
@@ -117,6 +170,17 @@ pub(crate) fn check_case(
         .into_iter()
         .map(|value| bench.build(&value).unwrap())
         .collect();
+    check_values(native, name, bench, values, reset, peak)
+}
+
+pub(crate) fn check_values(
+    native: &dyn lash_kernel_doc::NativeFunction,
+    name: &str,
+    mut bench: Bench,
+    values: Vec<Value>,
+    reset: impl Fn(),
+    peak: impl Fn() -> u64,
+) -> Option<Contract> {
     let (prediction, _) = bench
         .run(&values, u64::MAX, |args, _| native.resource_contract(args))
         .unwrap();
@@ -215,8 +279,6 @@ pub(crate) fn check_case(
         ),
         Err(error) => panic!("{name}: execution {error:?}"),
     };
-    assert_eq!(contract.exit, exit, "{name} exit");
-    assert_eq!(contract.output.bytes, output, "{name} output occurrence");
     let mut actual = Vec::new();
     for (handle, object) in &built {
         let (kind, members) = match object {
@@ -251,131 +313,130 @@ pub(crate) fn check_case(
         };
         actual.push((*handle, kind, members));
     }
-    let events: Vec<_> = contract
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            Event::Entity {
-                owner,
-                kind,
-                members,
-                release,
-            } => Some((owner, kind, members, release)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(events.len(), actual.len(), "{name} fresh identities");
-    let mut reachable = Vec::new();
-    let mut pending: Vec<_> = output_value.into_iter().copied().collect();
-    while let Some(value) = pending.pop() {
-        if let Some((handle, _, members)) = actual
-            .iter()
-            .find(|(handle, _, _)| Some(*handle) == value.handle())
-            && !reachable.contains(handle)
-        {
-            reachable.push(*handle);
-            pending.extend(members);
+    let actual_scratch = peak();
+    let verify = |contract: &Contract| -> Result<(), String> {
+        let fail = |what: &str| Err(format!("{name}: {what}"));
+        if contract.exit != exit {
+            return fail("exit");
         }
-    }
-    let mut retained = output;
-    for ((_, expected_kind, expected_members, release), (handle, kind, members)) in
-        events.iter().zip(&actual)
-    {
-        assert_eq!(
-            release.is_none(),
-            reachable.contains(handle),
-            "{name} entity exit lifetime"
-        );
-        assert_eq!(**expected_kind, *kind, "{name} entity kind/names");
-        assert_eq!(
-            expected_members.len(),
-            members.len(),
-            "{name} direct members"
-        );
-        let bytes: u64 = members.iter().map(|value| value_cost(&bench, value)).sum();
-        for (expected, value) in expected_members.iter().zip(members) {
-            assert_eq!(
-                expected.bytes,
-                value_cost(&bench, value),
-                "{name} member occurrence"
-            );
-            let mutable = matches!(
+        if contract.output.bytes != output {
+            return Err(format!(
+                "{name}: output occurrence declared {} observed {output}",
+                contract.output.bytes
+            ));
+        }
+        let events: Vec<_> = contract
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Entity {
+                    owner,
+                    kind,
+                    members,
+                    release,
+                } => Some((owner, kind, members, release)),
+                _ => None,
+            })
+            .collect();
+        if events.len() != actual.len() {
+            return fail("fresh identities");
+        }
+        let origin = |value: &Value| {
+            if !matches!(
                 value,
                 Value::List(_)
                     | Value::Map(_)
                     | Value::Set(_)
                     | Value::Record(_)
                     | Value::Closure(_)
-            );
-            let fresh = actual
+            ) {
+                return Origin::Immutable;
+            }
+            match actual
                 .iter()
-                .any(|(handle, _, _)| Some(*handle) == value.handle());
-            assert_eq!(
-                matches!(expected.origin, Origin::Alias),
-                mutable && !fresh,
-                "{name} member alias"
-            );
-            if let Origin::Fresh(owner) = expected.origin {
-                let target = events
-                    .iter()
-                    .zip(&actual)
-                    .find(|((candidate, _, _, _), _)| **candidate == owner)
-                    .unwrap()
-                    .1
-                    .0;
-                assert_eq!(value.handle(), Some(target), "{name} fresh member target");
+                .position(|(handle, _, _)| Some(*handle) == value.handle())
+            {
+                Some(at) => Origin::Fresh(*events[at].0),
+                None => Origin::Alias,
             }
-            assert_eq!(
-                matches!(expected.origin, Origin::Fresh(_)),
-                mutable && fresh,
-                "{name} member identity"
-            );
-        }
-        if reachable.contains(handle) {
-            retained += Cost::object(bytes);
-            if let Entity::Record { field_name_bytes } = kind {
-                retained += field_name_bytes;
+        };
+        let mut reachable = Vec::new();
+        let mut pending: Vec<_> = output_value.into_iter().copied().collect();
+        while let Some(value) = pending.pop() {
+            if let Some((handle, _, members)) = actual.iter().find(|(handle, _, _)| Some(*handle) == value.handle())
+                && !reachable.contains(handle)
+            {
+                reachable.push(*handle);
+                pending.extend(members);
             }
         }
+        let mut retained = output;
+        for ((_, kind, members, release), (handle, actual_kind, actual_members)) in
+            events.iter().zip(&actual)
+        {
+            if *kind != actual_kind || members.len() != actual_members.len() {
+                return fail("entity kind or direct members");
+            }
+            for (member, value) in members.iter().zip(actual_members) {
+                if member.bytes != value_cost(&bench, value) || member.origin != origin(value) {
+                    return fail("member occurrence or identity");
+                }
+            }
+            if release.is_none() != reachable.contains(handle) {
+                return fail("entity lifetime");
+            }
+            if reachable.contains(handle) {
+                retained +=
+                    Cost::object(actual_members.iter().map(|v| value_cost(&bench, v)).sum());
+                if let Entity::Record { field_name_bytes } = actual_kind {
+                    retained += field_name_bytes;
+                }
+            }
+        }
+        if contract.retained_bytes() != Some(retained) {
+            return fail("retained holdings or invalid schedule");
+        }
+        if let Some(value) = output_value
+            && contract.output.origin != origin(value)
+        {
+            return fail("output identity");
+        }
+        if contract
+            .peak_scratch_bytes()
+            .is_none_or(|bound| actual_scratch > bound)
+        {
+            return Err(format!(
+                "{name}: observed scratch {actual_scratch} exceeds {:?}",
+                contract.peak_scratch_bytes()
+            ));
+        }
+        Ok(())
+    };
+    verify(&contract).unwrap_or_else(|error| panic!("{error}: {contract:?}"));
+    if actual_scratch > 0 {
+        let mut bad = contract.clone();
+        bad.events
+            .retain(|event| !matches!(event, Event::Scratch { .. }));
+        assert!(
+            verify(&bad).is_err(),
+            "{name}: omitted observed scratch was accepted"
+        );
     }
-    assert_eq!(
-        contract.retained_bytes(),
-        Some(retained),
-        "{name} retained holdings"
-    );
-    if let Some(value) = output_value {
-        if let Origin::Fresh(owner) = contract.output.origin {
-            let target = events
-                .iter()
-                .zip(&actual)
-                .find(|((candidate, _, _, _), _)| **candidate == owner)
-                .unwrap()
-                .1
-                .0;
-            assert_eq!(value.handle(), Some(target), "{name} output target");
-        }
-        let fresh = actual
+    if !actual.is_empty() {
+        let mut bad = contract.clone();
+        let at = bad
+            .events
             .iter()
-            .any(|(handle, _, _)| Some(*handle) == value.handle());
-        let mutable = matches!(
-            value,
-            Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) | Value::Closure(_)
-        );
-        assert_eq!(
-            matches!(contract.output.origin, Origin::Fresh(_)),
-            fresh,
-            "{name} output identity"
-        );
-        assert_eq!(
-            matches!(contract.output.origin, Origin::Alias),
-            mutable && !fresh,
-            "{name} output alias"
+            .position(|event| matches!(event, Event::Entity { .. }))
+            .unwrap();
+        bad.events.remove(at);
+        assert!(
+            verify(&bad).is_err(),
+            "{name}: omitted observed entity was accepted"
         );
     }
-    let actual_scratch = peak();
-    assert!(
-        actual_scratch <= contract.peak_scratch_bytes().unwrap(),
-        "{name}: actual scratch {actual_scratch} exceeds {contract:?}"
-    );
+    let mut understated = contract.clone();
+    understated.output.bytes -= 1;
+    verify(&understated).expect_err("actual-event oracle accepted an understated output");
     Some(contract)
 }

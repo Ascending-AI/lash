@@ -1,18 +1,18 @@
 //! JSON reads its text in place, without an input copy.
-use super::{Json, raise, room};
-use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
+use super::{Json, Room, raise, room};
+use lash_kernel_doc::{NativeError, NumberToken, Retry};
 use std::borrow::Cow;
 
-struct Parser<'text, 'read, 'call> {
+struct Parser<'text, 'read, R: Room> {
     input: &'text [u8],
     cursor: usize,
-    new: &'read mut Nursery<'call>,
+    new: &'read mut R,
     depth_limit: usize,
     /// The room the first refused reservation asked for, and what the
     /// reservations after it would have added.
     refused: Option<(u64, u64)>,
 }
-impl<'text> Parser<'text, '_, '_> {
+impl<'text, R: Room> Parser<'text, '_, R> {
     fn byte(&mut self) -> Result<Option<u8>, NativeError> {
         Ok(self.input.get(self.cursor).copied())
     }
@@ -20,6 +20,8 @@ impl<'text> Parser<'text, '_, '_> {
     /// continues, counting the room the rest would take. Infrastructure
     /// causes end the read unchanged.
     fn keep(&mut self, node: &Json<'_>, name: usize) -> Result<bool, NativeError> {
+        #[cfg(test)]
+        let _node = crate::native_contract_laws::scratch(node.observed_bytes() + name as u64);
         let bytes = match node {
             Json::Text(text) => text.len(),
             Json::Number(token) => token.len(),
@@ -73,6 +75,8 @@ impl<'text> Parser<'text, '_, '_> {
                         .map_err(|_| syntax())?;
                     return Ok(Cow::Borrowed(text));
                 }
+                #[cfg(test)]
+                let _unescape = crate::native_contract_laws::scratch((self.cursor - start) as u64);
                 return serde_json::from_slice::<String>(&self.input[start..self.cursor])
                     .map(Cow::Owned)
                     .map_err(|_| syntax());
@@ -98,6 +102,8 @@ impl<'text> Parser<'text, '_, '_> {
             Some(b'[') => {
                 self.cursor += 1;
                 let mut items = Vec::new();
+                #[cfg(test)]
+                let mut _items = crate::native_contract_laws::scratch(16);
                 if self.take(b']')? {
                     return Ok(Json::Array(items));
                 }
@@ -105,6 +111,8 @@ impl<'text> Parser<'text, '_, '_> {
                     let item = self.value(depth + 1)?;
                     if self.keep(&item, 0)? {
                         items.push(item);
+                        #[cfg(test)]
+                        _items.resize(16 + items.iter().map(Json::observed_bytes).sum::<u64>());
                     }
                     if self.take(b']')? {
                         return Ok(Json::Array(items));
@@ -117,20 +125,33 @@ impl<'text> Parser<'text, '_, '_> {
             Some(b'{') => {
                 self.cursor += 1;
                 let mut fields: Vec<(Cow<'text, str>, Json<'text>)> = Vec::new();
+                #[cfg(test)]
+                let mut _fields = crate::native_contract_laws::scratch(16);
                 if self.take(b'}')? {
                     return Ok(Json::Object(fields));
                 }
                 loop {
                     let name = self.string()?;
+                    #[cfg(test)]
+                    let _name = crate::native_contract_laws::scratch(name.len() as u64);
                     if !self.take(b':')? {
                         return Err(syntax());
                     }
                     let value = self.value(depth + 1)?;
+                    #[cfg(test)]
+                    drop(_name);
                     if let Some((_, old)) = fields.iter_mut().find(|(key, _)| *key == name) {
                         *old = value;
                     } else if self.keep(&value, name.len())? {
                         fields.push((name, value));
                     }
+                    #[cfg(test)]
+                    _fields.resize(
+                        16 + fields
+                            .iter()
+                            .map(|(name, value)| name.len() as u64 + value.observed_bytes())
+                            .sum::<u64>(),
+                    );
                     if self.take(b'}')? {
                         return Ok(Json::Object(fields));
                     }
@@ -181,7 +202,7 @@ pub(super) fn syntax() -> NativeError {
 pub(super) fn read<'text>(
     text: &'text str,
     depth_limit: usize,
-    new: &mut Nursery<'_>,
+    new: &mut impl Room,
 ) -> Result<Json<'text>, NativeError> {
     let mut parser = Parser {
         input: text.as_bytes(),

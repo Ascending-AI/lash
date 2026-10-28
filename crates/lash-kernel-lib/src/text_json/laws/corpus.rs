@@ -31,11 +31,15 @@ fn scalar(datum: &lash_kernel_doc::Datum) -> bool {
     )
 }
 
-#[test]
-fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
-    use lash_kernel_doc::{Bytes, Datum, Float, Integer, Measure, Operand};
+type Case = (
+    &'static str,
+    String,
+    Vec<Datum>,
+    Result<Datum, &'static str>,
+);
+pub(crate) fn cases() -> Vec<Case> {
+    use lash_kernel_doc::{Bytes, Datum, Float, Integer};
 
-    use num_traits::ToPrimitive;
     let t = |s: &str| Datum::Text(s.to_owned());
     let i = |n: i64| Datum::Int(Integer::from(n));
     let b = |bytes: &[u8]| Datum::Bytes(Bytes::new(bytes.to_vec()));
@@ -498,6 +502,14 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             Err("type_error"),
         ),
     ]);
+    cases
+}
+
+#[test]
+fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
+    use lash_kernel_doc::{Measure, Operand};
+    use num_traits::ToPrimitive;
+    let cases = cases();
     let mut registry = FunctionRegistry::new();
     register_text_json(&mut registry).unwrap();
     let mut exercised = std::collections::BTreeSet::new();

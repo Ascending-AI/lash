@@ -106,7 +106,11 @@ impl Walk<'_, '_> {
 }
 
 fn classify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let args = &call.args;
+    classify_value(call.args)
+}
+
+pub(super) fn classify_value(args: Args<'_>) -> Result<Value, NativeError> {
+    let args = &args;
     let depth = count_arg(args, 1)?;
     if !(1..=64).contains(&depth) {
         return Err(raise("number_range", "classification needs 1..64 levels"));

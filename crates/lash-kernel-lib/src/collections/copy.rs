@@ -40,6 +40,8 @@ struct Copy<'a, 'call> {
 }
 impl Copy<'_, '_> {
     fn value(&mut self, value: &Value, depth: usize) -> Result<Value, NativeError> {
+        #[cfg(test)]
+        let _frame = crate::native_contract_laws::scratch(4 * 16);
         let limit = depth_limit(self.args);
         if depth > limit {
             return Err(raise(
@@ -74,7 +76,28 @@ impl Copy<'_, '_> {
         }
     }
     fn items(&mut self, items: &[Value], depth: usize) -> Result<Vec<Value>, NativeError> {
-        items.iter().map(|x| self.value(x, depth + 1)).collect()
+        #[cfg(test)]
+        let _members = crate::native_contract_laws::scratch_values(*self.args, items);
+        #[cfg(test)]
+        let mut _completed = Vec::new();
+        #[cfg(test)]
+        let mut _prefix = crate::native_contract_laws::scratch(0);
+        items
+            .iter()
+            .map(|x| {
+                let value = self.value(x, depth + 1)?;
+                #[cfg(test)]
+                {
+                    _completed.push(value);
+                    _prefix.resize(crate::native_contract_laws::new_values_bytes(
+                        *self.args,
+                        self.new,
+                        &_completed,
+                    ));
+                }
+                Ok(value)
+            })
+            .collect()
     }
     fn pairs(
         &mut self,
@@ -82,6 +105,15 @@ impl Copy<'_, '_> {
         depth: usize,
         keys: bool,
     ) -> Result<Vec<(Value, Value)>, NativeError> {
+        #[cfg(test)]
+        let _pairs = crate::native_contract_laws::scratch_values(
+            *self.args,
+            &pairs.iter().flat_map(|(a, b)| [*a, *b]).collect::<Vec<_>>(),
+        );
+        #[cfg(test)]
+        let mut _completed = Vec::new();
+        #[cfg(test)]
+        let mut _prefix = crate::native_contract_laws::scratch(0);
         pairs
             .iter()
             .map(|(key, value)| {
@@ -90,7 +122,26 @@ impl Copy<'_, '_> {
                 } else {
                     *key
                 };
-                Ok((key, self.value(value, depth + 1)?))
+                #[cfg(test)]
+                {
+                    _completed.push(key);
+                    _prefix.resize(crate::native_contract_laws::new_values_bytes(
+                        *self.args,
+                        self.new,
+                        &_completed,
+                    ));
+                }
+                let value = self.value(value, depth + 1)?;
+                #[cfg(test)]
+                {
+                    _completed.push(value);
+                    _prefix.resize(crate::native_contract_laws::new_values_bytes(
+                        *self.args,
+                        self.new,
+                        &_completed,
+                    ));
+                }
+                Ok((key, value))
             })
             .collect()
     }
@@ -144,7 +195,24 @@ pub(super) fn holds_none(
     let mut active: Vec<ArenaHandle> = Vec::new();
     let mut read = std::collections::HashSet::new();
     let mut pending = vec![Visit::Value(*value, 0)];
-    while let Some(visit) = pending.pop() {
+    while !pending.is_empty() {
+        #[cfg(test)]
+        let _frontier = crate::native_contract_laws::scratch_values(
+            *args,
+            &pending
+                .iter()
+                .filter_map(|visit| match visit {
+                    Visit::Value(value, _) => Some(*value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        );
+        #[cfg(test)]
+        let _visited =
+            crate::native_contract_laws::scratch((active.len() + read.len()) as u64 * 16);
+        let visit = pending
+            .pop()
+            .unwrap_or_else(|| unreachable!("nonempty frontier"));
         let (value, depth) = match visit {
             Visit::Value(value, depth) => (value, depth),
             Visit::Leave(id) => {

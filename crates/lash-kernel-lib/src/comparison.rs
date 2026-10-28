@@ -139,6 +139,10 @@ pub(crate) fn compare_reading(
     // The list pairs being compared, innermost last.
     let mut active: Vec<(ArenaHandle, ArenaHandle)> = Vec::new();
     while let Some(step) = pending.pop() {
+        #[cfg(test)]
+        let _steps = crate::native_contract_laws::ordering_scratch(
+            (3 * (pending.len() + 1) + 2 * active.len()) as u64 * 16,
+        );
         let (a, b, member) = match step {
             Step::Leave => {
                 active.pop();

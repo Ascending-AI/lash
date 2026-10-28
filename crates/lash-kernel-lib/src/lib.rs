@@ -14,6 +14,7 @@ pub use helpers::{KERNEL_NAME_FAMILIES, KernelHelper};
 mod math;
 mod numbers;
 mod numeric;
+mod resource_contracts;
 mod text_json;
 
 pub use brand::{implement_brands, register_brands};

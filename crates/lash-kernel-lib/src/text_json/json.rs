@@ -15,6 +15,31 @@ use num_traits::ToPrimitive;
 
 use super::{Function, arg, definition, materialized_text, raise, room, text_arg};
 
+/// Host allocation guards are separate from a logical description. The
+/// input-only reader/writer uses NoRoom and never creates a Nursery.
+trait Room {
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
+    fn read_whole(&mut self, bytes: u64) -> Result<(), NativeError>;
+}
+impl Room for Nursery<'_> {
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        Nursery::reserve(self, values, bytes)
+    }
+    fn read_whole(&mut self, bytes: u64) -> Result<(), NativeError> {
+        Nursery::read_whole(self, bytes)
+    }
+}
+struct NoRoom;
+impl Room for NoRoom {
+    fn reserve(&mut self, _: u64, _: u64) -> Result<(), NativeError> {
+        Ok(())
+    }
+    fn read_whole(&mut self, _: u64) -> Result<(), NativeError> {
+        Ok(())
+    }
+}
+pub(super) mod resources;
+
 /// Whether `error` is a stated-type mismatch a union tries past, rather
 /// than a cause that ends the call.
 fn raised(error: &NativeError) -> bool {
@@ -60,7 +85,7 @@ fn convert_number(
     token: &str,
     expected: &Type,
     policy: NumberPolicy,
-    new: &mut Nursery<'_>,
+    new: &mut impl Room,
 ) -> Result<Number, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
@@ -104,13 +129,15 @@ fn mismatch() -> NativeError {
     raise("effect_result", "JSON value does not fit the stated type")
 }
 
-fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeError> {
+fn exact_integer(token: &str, new: &mut impl Room) -> Result<BigInt, NativeError> {
     let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
     let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
     let negative = mantissa.starts_with('-');
     let mantissa = mantissa.strip_prefix('-').unwrap_or(mantissa);
     let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
     let mut digits = format!("{whole}{fraction}");
+    #[cfg(test)]
+    let mut _digits = crate::native_contract_laws::scratch(digits.len() as u64);
     if digits.bytes().all(|b| b == b'0') {
         return Ok(BigInt::from(0));
     }
@@ -133,8 +160,12 @@ fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeErr
         new.reserve(0, room(add).saturating_mul(2))?;
         digits.try_reserve(add).map_err(|_| crate::exhausted())?;
         digits.extend(std::iter::repeat_n('0', add));
+        #[cfg(test)]
+        _digits.resize(digits.len() as u64);
     }
     let value = digits.parse::<BigInt>().map_err(|_| mismatch())?;
+    #[cfg(test)]
+    let _integer = crate::native_contract_laws::scratch(16 + value.bits().div_ceil(8));
     Ok(if negative { -value } else { value })
 }
 
@@ -146,6 +177,22 @@ enum Json<'text> {
     Text(Cow<'text, str>),
     Array(Vec<Json<'text>>),
     Object(Vec<(Cow<'text, str>, Json<'text>)>),
+}
+
+#[cfg(test)]
+impl Json<'_> {
+    fn observed_bytes(&self) -> u64 {
+        16 + match self {
+            Json::Text(s) => s.len() as u64,
+            Json::Number(s) => s.len() as u64,
+            Json::Array(xs) => xs.iter().map(Self::observed_bytes).sum(),
+            Json::Object(xs) => xs
+                .iter()
+                .map(|(key, value)| key.len() as u64 + value.observed_bytes())
+                .sum(),
+            _ => 0,
+        }
+    }
 }
 
 mod reader;
@@ -311,23 +358,50 @@ pub fn parse_json(
     Ok(build(checked, new))
 }
 
-/// The text `stringify` writes. A shared object is written once for every
-/// place that holds it, so the text can outgrow the value: each piece is
-/// reserved, as text and as the buffer it is built in, before it is appended.
-struct Out<'a, 'call> {
-    text: String,
+/// Native calls build text; a resource query counts the same semantic pieces.
+trait TextOutput {
+    fn push_str(&mut self, piece: &str) -> Result<(), NativeError>;
+    fn len(&self) -> usize;
+}
+impl TextOutput for String {
+    fn push_str(&mut self, piece: &str) -> Result<(), NativeError> {
+        String::push_str(self, piece);
+        Ok(())
+    }
+    fn len(&self) -> usize {
+        String::len(self)
+    }
+}
+#[derive(Default)]
+struct Count(usize);
+impl TextOutput for Count {
+    fn push_str(&mut self, piece: &str) -> Result<(), NativeError> {
+        self.0 = self
+            .0
+            .checked_add(piece.len())
+            .ok_or_else(crate::exhausted)?;
+        Ok(())
+    }
+    fn len(&self) -> usize {
+        self.0
+    }
+}
+struct Out<'a, 'call, R: Room, S: TextOutput> {
+    text: S,
     args: &'a Args<'call>,
-    new: &'a mut Nursery<'call>,
+    new: &'a mut R,
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
     encoding: Option<Encoding>,
 }
 
-impl Out<'_, '_> {
+impl<R: Room, S: TextOutput> Out<'_, '_, R, S> {
     fn push(&mut self, piece: &str) -> Result<(), NativeError> {
         self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece);
+        self.text.push_str(piece)?;
+        #[cfg(test)]
+        let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
         Ok(())
     }
 
@@ -343,7 +417,9 @@ impl Out<'_, '_> {
                 }
             });
         self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece);
+        self.text.push_str(piece)?;
+        #[cfg(test)]
+        let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
         Ok(())
     }
 
@@ -459,6 +535,8 @@ impl Out<'_, '_> {
                             .saturating_add(1),
                     )?;
                     let text = integer_digits(&number, self.new)?;
+                    #[cfg(test)]
+                    let _digits = crate::native_contract_laws::scratch(text.len() as u64);
                     let digits = text.strip_prefix('-').unwrap_or(&text);
                     let trimmed = digits.trim_end_matches('0');
                     let (digits, exponent) = if trimmed.is_empty() {
@@ -485,6 +563,8 @@ impl Out<'_, '_> {
                     return Err(NativeError::Malformed("an integer names another body"));
                 };
                 let text = integer_digits(&number, self.new)?;
+                #[cfg(test)]
+                let _digits = crate::native_contract_laws::scratch(text.len() as u64);
                 self.push(&text)
             }
             Value::Float(number) => self.push(&number.to_string()),
@@ -511,7 +591,7 @@ fn text_copy<'call>(
 /// ([`Nursery::read_whole`]).
 fn text_held<'call>(
     args: &Args<'call>,
-    new: &mut Nursery<'_>,
+    new: &mut impl Room,
     text: &'call Value,
 ) -> Result<Cow<'call, str>, NativeError> {
     match args.text(text)? {
@@ -524,7 +604,7 @@ fn text_held<'call>(
 }
 
 /// `number`'s digits, as the heap copied a paged integer out to spell it.
-fn integer_digits(number: &Integer, new: &mut Nursery<'_>) -> Result<String, NativeError> {
+fn integer_digits(number: &Integer, new: &mut impl Room) -> Result<String, NativeError> {
     new.read_whole(number.bits().div_ceil(8))?;
     Ok(number.to_string())
 }
@@ -551,7 +631,7 @@ fn write(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_>,
+    out: &mut Out<'_, '_, impl Room, impl TextOutput>,
 ) -> Result<(), NativeError> {
     let limit = out.args.limits().document_depth().min(64);
     if depth > limit {
@@ -561,6 +641,8 @@ fn write(
         ));
     }
     let args = out.args;
+    #[cfg(test)]
+    let _frame = crate::native_contract_laws::scratch(4 * 16);
     match value {
         Value::Null => out.push("null")?,
         Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
@@ -626,6 +708,14 @@ fn write(
                     }
                     out.raw_numbers("record", raw_numbers) && !verbatim
                 };
+                #[cfg(test)]
+                let _fields = crate::native_contract_laws::scratch_values(
+                    *args,
+                    &fields
+                        .iter()
+                        .flat_map(|(a, b)| [**a, **b])
+                        .collect::<Vec<_>>(),
+                );
                 out.push("{")?;
                 for (index, (name, value)) in fields.iter().enumerate() {
                     if index != 0 {
@@ -651,8 +741,10 @@ fn write_array(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_>,
+    out: &mut Out<'_, '_, impl Room, impl TextOutput>,
 ) -> Result<(), NativeError> {
+    #[cfg(test)]
+    let _items = crate::native_contract_laws::scratch_values(*out.args, items);
     out.push("[")?;
     for (index, value) in items.iter().enumerate() {
         if index != 0 {
@@ -758,6 +850,8 @@ fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 fn parse_binary64(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = text_arg(&call.args, 0)?;
     let json = read(&text, call.args.limits().document_depth(), call.new)?;
+    #[cfg(test)]
+    let _parsed = crate::native_contract_laws::scratch(json.observed_bytes());
     decode_with_numbers(
         &json,
         &Type::Float,
@@ -780,6 +874,8 @@ fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeError> {
     let text = text_arg(&call.args, 0)?;
     let json = read(&text, call.args.limits().document_depth(), call.new)?;
+    #[cfg(test)]
+    let _parsed = crate::native_contract_laws::scratch(json.observed_bytes());
     let numbers = match materialized_text(&call.args, call.new, 1)?.as_ref() {
         "int" => Type::Int,
         "float" => Type::Float,
@@ -810,21 +906,54 @@ fn decode_with_numbers(
         }
         Json::Number(token) => Ok(convert_number(token, numbers, policy, new)?.store(new)),
         Json::Array(items) => {
+            #[cfg(test)]
+            let mut _completed = Vec::new();
+            #[cfg(test)]
+            let mut _prefix = crate::native_contract_laws::scratch(0);
             let values = items
                 .iter()
-                .map(|item| decode_with_numbers(item, numbers, policy, maps, ieee, new))
+                .map(|item| {
+                    let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                    #[cfg(test)]
+                    {
+                        _completed.push(value);
+                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                            new,
+                            &_completed,
+                        ));
+                    }
+                    Ok::<Value, NativeError>(value)
+                })
                 .collect::<Result<_, _>>()?;
             Ok(new.allocate(NewObject::List(values)))
         }
         Json::Object(fields) => {
+            #[cfg(test)]
+            let mut _completed = Vec::new();
+            #[cfg(test)]
+            let mut _prefix = crate::native_contract_laws::scratch(0);
             let values = fields
                 .iter()
                 .map(|(key, item)| {
                     let key = new.text(key);
-                    Ok((
-                        key,
-                        decode_with_numbers(item, numbers, policy, maps, ieee, new)?,
-                    ))
+                    #[cfg(test)]
+                    {
+                        _completed.push(key);
+                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                            new,
+                            &_completed,
+                        ));
+                    }
+                    let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                    #[cfg(test)]
+                    {
+                        _completed.push(value);
+                        _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
+                            new,
+                            &_completed,
+                        ));
+                    }
+                    Ok::<(Value, Value), NativeError>((key, value))
                 })
                 .collect::<Result<_, NativeError>>()?;
             Ok(new.allocate(if maps {
@@ -901,7 +1030,7 @@ impl DecimalLayout {
         self,
         mut value: u64,
         negative: bool,
-        out: &mut Out<'_, '_>,
+        out: &mut Out<'_, '_, impl Room, impl TextOutput>,
     ) -> Result<(), NativeError> {
         let mut scratch = [0u8; 20];
         let mut start = scratch.len();
@@ -964,7 +1093,7 @@ impl DecimalLayout {
         negative: bool,
         digits: &str,
         exponent: i64,
-        out: &mut Out<'_, '_>,
+        out: &mut Out<'_, '_, impl Room, impl TextOutput>,
     ) -> Result<(), NativeError> {
         if negative && (digits != "0" || self.negative_zero) {
             out.push("-")?;

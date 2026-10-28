@@ -452,6 +452,12 @@ pub(super) fn functions<T>(
 /// would read no value whose kind `kinds` names, and copy without raising.
 struct HoldsNone;
 impl NativeFunction for HoldsNone {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::holds_none(args).map(Some)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         let kinds = nth(args.values(), 1)?;
@@ -1059,6 +1065,12 @@ struct SortByKeys {
     utf16: bool,
 }
 impl NativeFunction for SortByKeys {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::sort(args, self.utf16).map(Some)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         let values = args.values();
@@ -1070,19 +1082,36 @@ impl NativeFunction for SortByKeys {
                 "sort_by_keys takes two lists and a bool",
             ));
         };
+        #[cfg(test)]
+        let _sorting = crate::native_contract_laws::sorting();
         let listed = items(&args, listed)?;
         let ranks = items(&args, ranks)?;
         if listed.len() != ranks.len() {
             return Err(raise("type_error", "every item needs exactly one key"));
         }
+        #[cfg(test)]
+        let _items = crate::native_contract_laws::scratch_values(args, &listed);
+        #[cfg(test)]
+        let _keys = crate::native_contract_laws::scratch_values(args, &ranks);
         let n = listed.len();
         let mut sorted: Vec<usize> = (0..n).collect();
+        #[cfg(test)]
+        let _permutation = crate::native_contract_laws::scratch_indices(&sorted);
         // Homogeneous resident keys have a total, infallible order. Their
         // comparisons are unobservable. Cache integer keys once while
         // retaining stable ties and the same completion formula.
         if !self.utf16 && ranks.iter().all(|rank| matches!(rank, Value::Int(_))) {
             let key = |at: &usize| match ranks[*at] {
-                Value::Int(value) => value,
+                Value::Int(value) => {
+                    #[cfg(test)]
+                    {
+                        crate::native_contract_laws::CachedKey::new(value, *at)
+                    }
+                    #[cfg(not(test))]
+                    {
+                        value
+                    }
+                }
                 _ => unreachable!("the complete key list was checked"),
             };
             if *descending {
@@ -1108,6 +1137,8 @@ impl NativeFunction for SortByKeys {
             )));
         }
         let mut out = vec![0; n];
+        #[cfg(test)]
+        let mut _merge = crate::native_contract_laws::scratch_indices(&out);
         let mut width = 1;
         while width < n {
             let mut start = 0;
@@ -1143,10 +1174,22 @@ impl NativeFunction for SortByKeys {
                         left += 1;
                     }
                     dest += 1;
+                    #[cfg(test)]
+                    _merge.resize(
+                        out.iter()
+                            .map(|n| 16 + u64::from(usize::BITS - n.leading_zeros()).div_ceil(8))
+                            .sum(),
+                    );
                 }
                 out[dest..dest + (mid - left)].copy_from_slice(&sorted[left..mid]);
                 dest += mid - left;
                 out[dest..dest + (end - right)].copy_from_slice(&sorted[right..end]);
+                #[cfg(test)]
+                _merge.resize(
+                    out.iter()
+                        .map(|n| 16 + u64::from(usize::BITS - n.leading_zeros()).div_ceil(8))
+                        .sum(),
+                );
                 start = end;
             }
             std::mem::swap(&mut sorted, &mut out);
@@ -1159,6 +1202,12 @@ impl NativeFunction for SortByKeys {
 }
 struct IndexOfRange;
 impl NativeFunction for IndexOfRange {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::index_range(args).map(Some)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         index_of_range(call)
     }
@@ -1215,6 +1264,12 @@ fn index_of_range(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 /// dialect's tokens or kind names are recognized here.
 struct IdentityKey;
 impl NativeFunction for IdentityKey {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::identity(args).map(Some)
+    }
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let values = call.args.values();
         let value = *nth(values, 0)?;
@@ -1267,6 +1322,8 @@ fn project_identity(
     call: &mut NativeCall<'_, '_>,
 ) -> Result<Value, NativeError> {
     let args = call.args;
+    #[cfg(test)]
+    let _frame = crate::native_contract_laws::scratch(4 * 16);
     if depth > args.limits().value_depth().min(128) {
         return Err(raise(
             "too_deep",
@@ -1280,10 +1337,18 @@ fn project_identity(
     match value {
         Value::Tuple(_) => {
             let members = items(&args, value)?;
+            #[cfg(test)]
+            let _members = crate::native_contract_laws::scratch_values(args, &members);
             call.new.reserve(members.len() as u64, 0)?;
             let mut projected = Vec::with_capacity(members.len());
+            #[cfg(test)]
+            let mut _projected = crate::native_contract_laws::scratch(0);
             for item in &members {
                 projected.push(project_identity(item, absent, tag, depth + 1, call)?);
+                #[cfg(test)]
+                _projected.resize(crate::native_contract_laws::new_values_bytes(
+                    args, call.new, &projected,
+                ));
             }
             Ok(call.new.allocate(NewObject::Tuple(projected)))
         }

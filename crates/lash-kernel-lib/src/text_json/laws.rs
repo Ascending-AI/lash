@@ -1,6 +1,6 @@
 //! Named text/JSON rules exercised on an arena bench, called as the machine
 //! calls a native.
-mod corpus;
+pub(crate) mod corpus;
 mod json;
 mod lab;
 mod paged;

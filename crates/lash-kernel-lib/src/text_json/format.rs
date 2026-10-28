@@ -74,6 +74,8 @@ fn decimal_parts(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let Value::Float(number) = arg(call.args.values(), 0)? else {
         return Err(raise("type_error", "expected float"));
     };
+    #[cfg(test)]
+    let _digits = crate::native_contract_laws::scratch(17);
     let mut scratch = [0; 17];
     let (kind, negative, digits, exponent) = match number.decimal_parts(&mut scratch) {
         Some((negative, digits, exponent)) => ("finite", negative, digits, exponent),
@@ -110,6 +112,8 @@ fn fixed(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             };
             call.new.read_whole(integer.bits().div_ceil(8))?;
             let whole = integer.to_string();
+            #[cfg(test)]
+            let _whole = crate::native_contract_laws::scratch(whole.len() as u64);
             if precision == 0 {
                 whole
             } else {
@@ -136,6 +140,8 @@ fn fixed(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         }
         _ => return Err(raise("type_error", "expected number")),
     };
+    #[cfg(test)]
+    let _buffer = crate::native_contract_laws::scratch(text.len() as u64);
     Ok(call.new.text(&text))
 }
 
@@ -168,6 +174,8 @@ fn precise(
     let mut out = text_buffer(new, size)?;
     // Writing to a `String` does not fail.
     write(&mut out).map_err(|_| crate::exhausted())?;
+    #[cfg(test)]
+    let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
     Ok(out)
 }
 
