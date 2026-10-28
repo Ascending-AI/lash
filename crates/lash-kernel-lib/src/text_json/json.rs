@@ -15,29 +15,6 @@ use num_traits::ToPrimitive;
 
 use super::{Function, arg, definition, materialized_text, raise, room, text_arg};
 
-/// Host allocation guards are separate from a logical description. The
-/// input-only reader/writer uses NoRoom and never creates a Nursery.
-trait Room {
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
-    fn read_whole(&mut self, bytes: u64) -> Result<(), NativeError>;
-}
-impl Room for Nursery<'_> {
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
-        Nursery::reserve(self, values, bytes)
-    }
-    fn read_whole(&mut self, bytes: u64) -> Result<(), NativeError> {
-        Nursery::read_whole(self, bytes)
-    }
-}
-struct NoRoom;
-impl Room for NoRoom {
-    fn reserve(&mut self, _: u64, _: u64) -> Result<(), NativeError> {
-        Ok(())
-    }
-    fn read_whole(&mut self, _: u64) -> Result<(), NativeError> {
-        Ok(())
-    }
-}
 pub(super) mod resources;
 
 /// Whether `error` is a stated-type mismatch a union tries past, rather
@@ -85,7 +62,7 @@ fn convert_number(
     token: &str,
     expected: &Type,
     policy: NumberPolicy,
-    new: &mut impl Room,
+    new: &mut Nursery<'_>,
 ) -> Result<Number, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
@@ -129,7 +106,7 @@ fn mismatch() -> NativeError {
     raise("effect_result", "JSON value does not fit the stated type")
 }
 
-fn exact_integer(token: &str, new: &mut impl Room) -> Result<BigInt, NativeError> {
+fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeError> {
     let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
     let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
     let negative = mantissa.starts_with('-');
@@ -358,48 +335,22 @@ pub fn parse_json(
     Ok(build(checked, new))
 }
 
-/// Native calls build text; a resource query counts the same semantic pieces.
-trait TextOutput {
-    fn push_str(&mut self, piece: &str) -> Result<(), NativeError>;
-    fn len(&self) -> usize;
-}
-impl TextOutput for String {
-    fn push_str(&mut self, piece: &str) -> Result<(), NativeError> {
-        String::push_str(self, piece);
-        Ok(())
-    }
-    fn len(&self) -> usize {
-        String::len(self)
-    }
-}
-#[derive(Default)]
-struct Count(usize);
-impl TextOutput for Count {
-    fn push_str(&mut self, piece: &str) -> Result<(), NativeError> {
-        self.0 = self
-            .0
-            .checked_add(piece.len())
-            .ok_or_else(crate::exhausted)?;
-        Ok(())
-    }
-    fn len(&self) -> usize {
-        self.0
-    }
-}
-struct Out<'a, 'call, R: Room, S: TextOutput> {
-    text: S,
+/// The text `stringify` writes. Input-only resource counting has its own
+/// model, so the native keeps its concrete nursery and text operations.
+struct Out<'a, 'call> {
+    text: String,
     args: &'a Args<'call>,
-    new: &'a mut R,
+    new: &'a mut Nursery<'call>,
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
     encoding: Option<Encoding>,
 }
 
-impl<R: Room, S: TextOutput> Out<'_, '_, R, S> {
+impl Out<'_, '_> {
     fn push(&mut self, piece: &str) -> Result<(), NativeError> {
         self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece)?;
+        self.text.push_str(piece);
         #[cfg(test)]
         let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
         Ok(())
@@ -417,7 +368,7 @@ impl<R: Room, S: TextOutput> Out<'_, '_, R, S> {
                 }
             });
         self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece)?;
+        self.text.push_str(piece);
         #[cfg(test)]
         let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
         Ok(())
@@ -591,7 +542,7 @@ fn text_copy<'call>(
 /// ([`Nursery::read_whole`]).
 fn text_held<'call>(
     args: &Args<'call>,
-    new: &mut impl Room,
+    new: &mut Nursery<'_>,
     text: &'call Value,
 ) -> Result<Cow<'call, str>, NativeError> {
     match args.text(text)? {
@@ -604,7 +555,7 @@ fn text_held<'call>(
 }
 
 /// `number`'s digits, as the heap copied a paged integer out to spell it.
-fn integer_digits(number: &Integer, new: &mut impl Room) -> Result<String, NativeError> {
+fn integer_digits(number: &Integer, new: &mut Nursery<'_>) -> Result<String, NativeError> {
     new.read_whole(number.bits().div_ceil(8))?;
     Ok(number.to_string())
 }
@@ -631,7 +582,7 @@ fn write(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_, impl Room, impl TextOutput>,
+    out: &mut Out<'_, '_>,
 ) -> Result<(), NativeError> {
     let limit = out.args.limits().document_depth().min(64);
     if depth > limit {
@@ -741,7 +692,7 @@ fn write_array(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_, impl Room, impl TextOutput>,
+    out: &mut Out<'_, '_>,
 ) -> Result<(), NativeError> {
     #[cfg(test)]
     let _items = crate::native_contract_laws::scratch_values(*out.args, items);
@@ -1030,7 +981,7 @@ impl DecimalLayout {
         self,
         mut value: u64,
         negative: bool,
-        out: &mut Out<'_, '_, impl Room, impl TextOutput>,
+        out: &mut Out<'_, '_>,
     ) -> Result<(), NativeError> {
         let mut scratch = [0u8; 20];
         let mut start = scratch.len();
@@ -1093,7 +1044,7 @@ impl DecimalLayout {
         negative: bool,
         digits: &str,
         exponent: i64,
-        out: &mut Out<'_, '_, impl Room, impl TextOutput>,
+        out: &mut Out<'_, '_>,
     ) -> Result<(), NativeError> {
         if negative && (digits != "0" || self.negative_zero) {
             out.push("-")?;

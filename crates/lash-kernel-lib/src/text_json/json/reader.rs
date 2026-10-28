@@ -1,18 +1,18 @@
 //! JSON reads its text in place, without an input copy.
-use super::{Json, Room, raise, room};
-use lash_kernel_doc::{NativeError, NumberToken, Retry};
+use super::{Json, raise, room};
+use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
 use std::borrow::Cow;
 
-struct Parser<'text, 'read, R: Room> {
+struct Parser<'text, 'read, 'call> {
     input: &'text [u8],
     cursor: usize,
-    new: &'read mut R,
+    new: &'read mut Nursery<'call>,
     depth_limit: usize,
     /// The room the first refused reservation asked for, and what the
     /// reservations after it would have added.
     refused: Option<(u64, u64)>,
 }
-impl<'text, R: Room> Parser<'text, '_, R> {
+impl<'text> Parser<'text, '_, '_> {
     fn byte(&mut self) -> Result<Option<u8>, NativeError> {
         Ok(self.input.get(self.cursor).copied())
     }
@@ -202,7 +202,7 @@ pub(super) fn syntax() -> NativeError {
 pub(super) fn read<'text>(
     text: &'text str,
     depth_limit: usize,
-    new: &mut impl Room,
+    new: &mut Nursery<'_>,
 ) -> Result<Json<'text>, NativeError> {
     let mut parser = Parser {
         input: text.as_bytes(),

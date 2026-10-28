@@ -805,6 +805,82 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
     ] {
         cases.push((name.to_owned(), args));
     }
+    // Exponent signs/widths, fractional suffixes and UTF-16 escapes are
+    // separate byte obligations in the independent JSON counting model.
+    for (from, until) in [(-5, 21), (1, 1), (0, 0)] {
+        for (ascii, plus, negative_zero, width, fractional) in [
+            (false, false, false, 0, false),
+            (true, true, true, 4, true),
+            (false, true, false, 2, false),
+        ] {
+            let layout = Datum::Tuple(vec![
+                int(from),
+                int(until),
+                Datum::Bool(plus),
+                Datum::Bool(negative_zero),
+            ]);
+            let value = Datum::List(vec![
+                Datum::Float(Float::new(-0.0)),
+                Datum::Float(Float::new(1e-12)),
+                Datum::Float(Float::new(1e24)),
+                Datum::Float(Float::new(0.1)),
+                Datum::Float(Float::new(f64::from_bits(1))),
+                Datum::Float(Float::new(f64::MAX)),
+                int(0),
+                int(100),
+                Datum::Int(Integer::parse("123456789012345678900000").unwrap()),
+                text("λ😀\0\"\\\n"),
+            ]);
+            let style = Datum::Tuple(vec![
+                Datum::Bool(ascii),
+                text(", "),
+                text(": "),
+                int(width),
+                Datum::Bool(fractional),
+                Datum::Tuple(vec![text("reserved"), text("other"), text("private")]),
+            ]);
+            cases.push((
+                "json.encode".to_owned(),
+                vec![value.clone(), layout.clone(), style],
+            ));
+            cases.push((
+                "json.render".to_owned(),
+                vec![
+                    value,
+                    Datum::Set(if ascii { vec![text("list")] } else { vec![] }),
+                    Datum::Absent,
+                    layout,
+                ],
+            ));
+        }
+    }
+    for (name, args) in [
+        (
+            "json.parse",
+            vec![text("[1,2]"), text("invalid"), text("by_spelling")],
+        ),
+        (
+            "json.parse",
+            vec![text("[1,2]"), text("int"), text("invalid")],
+        ),
+        (
+            "json.parse",
+            vec![
+                text(r#"{"a":1,"b":[],"a":["last"]}"#),
+                text("number"),
+                text("by_spelling"),
+            ],
+        ),
+        (
+            "json.stringify",
+            vec![Datum::List(vec![
+                text("prefix"),
+                Datum::Bytes(Bytes::new(vec![1])),
+            ])],
+        ),
+    ] {
+        cases.push((name.to_owned(), args));
+    }
     for (name, args) in cases {
         assert!(
             check_case(registry, &name, args).is_some(),
@@ -814,6 +890,27 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
     }
     // A copied shared child has one fresh identity; a later cycle retires the
     // already completed child on the raised exit.
+    for cycle in [false, true] {
+        let mut bench = heap();
+        let child = decode(
+            &mut bench,
+            Datum::Record(vec![("child".into(), text("λ😀"))]),
+        );
+        let root = bench
+            .run(&[child], u64::MAX, |_, new| {
+                new.allocate(NewObject::List(vec![child, child]))
+            })
+            .unwrap()
+            .0;
+        if cycle {
+            bench
+                .arena_mut()
+                .list_set(root.handle().unwrap(), 1, root)
+                .unwrap();
+        }
+        assert!(check_values(registry, "json.stringify", bench, vec![root]).is_some());
+        checked += 1;
+    }
     for cycle in [false, true] {
         let mut bench = heap();
         let child = decode(&mut bench, Datum::List(vec![text("child")]));

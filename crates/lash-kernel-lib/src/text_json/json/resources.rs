@@ -1,11 +1,15 @@
 //! JSON semantic queries share token and layout rules, but never allocate a
 //! guest value. Entity events are authored from the parsed input tree.
+mod numbers;
+mod reader;
+mod writer;
 use super::*;
 use lash_kernel_doc::{
     LogicalHeldV1 as Cost, NativeResourceContract as Contract, NativeResourceEntity as Entity,
     NativeResourceEvent as Event, NativeResourceExit as Exit, NativeResourceHolding as Holding,
     NativeResourceOrigin as Origin, NativeResourceOwner as Owner, NativeResourceRelease as Release,
 };
+use numbers::convert_number;
 
 fn overflow() -> NativeError {
     NativeError::Malformed("native logical cost overflow")
@@ -49,7 +53,7 @@ impl Graph {
                     token.parse::<f64>().map_err(|_| mismatch())?;
                     immutable(Cost::REFERENCE)
                 } else {
-                    numeric(convert_number(token, numbers, policy, &mut NoRoom)?)
+                    numeric(convert_number(token, numbers, policy)?)
                 };
                 self.converted = self
                     .converted
@@ -128,7 +132,7 @@ fn parse_contract(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
         };
         let input = text_arg(&args, 0)?;
         input_bytes = input.len() as u64;
-        let json = read(&input, args.limits().document_depth(), &mut NoRoom)?;
+        let json = reader::read(&input, args.limits().document_depth())?;
         let (numbers, policy) = if op == "parse_binary64" {
             (Type::Float, NumberPolicy::Float)
         } else {
@@ -219,10 +223,9 @@ fn workspace(
     Ok(bytes)
 }
 fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
-    let mut out = Out {
-        text: Count::default(),
+    let mut out = writer::Counter {
+        bytes: 0,
         args: &args,
-        new: &mut NoRoom,
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
@@ -304,7 +307,7 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
                 excluded,
             });
         }
-        write(
+        writer::write(
             arg(args.values(), 0)?,
             &mut vec![],
             0,
@@ -315,12 +318,12 @@ fn writer(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
     let mut contract = match answer {
         Ok(()) => Contract::value(
             Exit::Returned,
-            Cost::REFERENCE + out.text.len() as u64,
+            Cost::REFERENCE + out.bytes as u64,
             Origin::Immutable,
         ),
         Err(error) => refused(error)?,
     };
-    let mut bytes = out.text.len() as u64;
+    let mut bytes = out.bytes as u64;
     for value in args.values() {
         bytes = bytes
             .checked_add(workspace(args, value, &mut vec![], 0)?)
