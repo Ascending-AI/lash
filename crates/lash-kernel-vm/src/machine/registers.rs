@@ -234,6 +234,10 @@ impl Registers {
                 .ok_or("continuation register is missing")
         }
     }
+
+    pub(super) fn each_source_value(&self, visit: &mut dyn FnMut(&Value)) {
+        self.source.each_value(visit);
+    }
 }
 
 impl<I: SliceIndex<[Value]>> Index<I> for Registers {

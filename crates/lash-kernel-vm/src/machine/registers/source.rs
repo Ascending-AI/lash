@@ -55,6 +55,9 @@ impl Operands {
         registers: &[Value],
     ) -> Result<(), &'static str> {
         let op = stream.ops[pc as usize];
+        if !self.active {
+            return Err("source operation has no active owner bank");
+        }
         if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
             return Ok(());
         }
@@ -116,6 +119,12 @@ impl Operands {
             .position(|operand| operand.reg == reg && operand.site.as_ref() == site)
             .ok_or("continuation has no source operand at its role")?;
         Ok(self.values.remove(at).value)
+    }
+
+    pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
+        for operand in &self.values {
+            visit(&operand.value);
+        }
     }
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {

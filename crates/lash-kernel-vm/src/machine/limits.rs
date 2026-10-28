@@ -173,6 +173,7 @@ impl KernelMachine {
                 tasks.each_value(visit);
                 session.each_value(visit);
                 registers.iter().for_each(&mut *visit);
+                self.regs.each_source_value(visit);
                 pins.values.iter().for_each(&mut *visit);
                 pins.borrowed.iter().for_each(&mut *visit);
             };

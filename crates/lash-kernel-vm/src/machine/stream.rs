@@ -352,6 +352,9 @@ impl KernelMachine {
     }
 
     fn source_done(&mut self, running: &Running<'_>, pc: u32, ran: Ran) -> Eval<Ran> {
+        if matches!(&ran, Ran::Step) && running.stream.ops[pc as usize].writes().is_some() {
+            return Ok(ran);
+        }
         self.regs
             .source_complete(running.stream, pc)
             .map_err(fault)?;
