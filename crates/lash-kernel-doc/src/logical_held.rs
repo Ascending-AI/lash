@@ -39,6 +39,58 @@ impl LogicalHeldV1 {
     pub fn task(frames: u64, outcome: Option<&PageValue>) -> u64 {
         frames.saturating_add(outcome.map_or(0, Self::local))
     }
+
+    /// The same occurrence algebra on native input views. Cold immutable
+    /// members may request a read; chunk geometry never changes the price.
+    pub fn native_local(
+        args: crate::Args<'_>,
+        value: &crate::Value,
+    ) -> Result<u64, crate::NativeError> {
+        use crate::{NativeError, Value};
+        let invalid = || NativeError::Malformed("native logical cost overflow");
+        let payload = match value {
+            Value::Int(_) | Value::BigInt(_) => {
+                args.integer(value)?.ok_or_else(invalid)?.bits().div_ceil(8)
+            }
+            Value::Timestamp(_) | Value::BigTimestamp(_) => args
+                .timestamp(value)?
+                .ok_or_else(invalid)?
+                .bits()
+                .div_ceil(8),
+            Value::Text(_) | Value::LongText(_) => args.text(value)?.ok_or_else(invalid)?.len(),
+            Value::Bytes(_) => args.bytes(value)?.ok_or_else(invalid)?.len(),
+            Value::Tuple(_) => {
+                let mut bytes = 0_u64;
+                for chunk in args.sequence(value)?.ok_or_else(invalid)?.chunks() {
+                    for member in chunk? {
+                        bytes = bytes
+                            .checked_add(Self::native_local(args, member)?)
+                            .ok_or_else(invalid)?;
+                    }
+                }
+                bytes
+            }
+            Value::Error(_) => {
+                let error = args.error(value)?.ok_or_else(invalid)?;
+                let data = Self::native_local(args, &error.data)?;
+                args.text(&error.kind)?
+                    .ok_or_else(invalid)?
+                    .len()
+                    .checked_add(args.text(&error.message)?.ok_or_else(invalid)?.len())
+                    .and_then(|bytes| bytes.checked_add(data))
+                    .ok_or_else(invalid)?
+            }
+            Value::Function(_) => 64,
+            Value::Handle(_) => {
+                let handle = args.host_handle(value)?.ok_or_else(invalid)?;
+                (handle.kind.len() as u64)
+                    .checked_add(handle.id.len() as u64)
+                    .ok_or_else(invalid)?
+            }
+            _ => 0,
+        };
+        Self::REFERENCE.checked_add(payload).ok_or_else(invalid)
+    }
 }
 
 pub fn local_cost(value: &PageValue) -> u64 {
