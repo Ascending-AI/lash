@@ -9,7 +9,7 @@ use num_traits::ToPrimitive;
 use crate::register_numbers;
 use crate::testsupport::{self, Bench};
 
-const NATIVE_SHARDS: &[&str] = &[
+pub(super) const NATIVE_SHARDS: &[&str] = &[
     include_str!("../corpus/native/numbers/K-BND-001.json"),
     include_str!("../corpus/native/numbers/K-FN-007.json"),
     include_str!("../corpus/native/numbers/K-LIB-006.json"),

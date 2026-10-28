@@ -27,6 +27,8 @@ pub use text_json::{
 #[cfg(test)]
 mod memory_laws;
 #[cfg(test)]
+mod native_contract_laws;
+#[cfg(test)]
 mod testsupport;
 
 pub(crate) fn raised(

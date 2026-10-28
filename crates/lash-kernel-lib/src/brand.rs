@@ -74,30 +74,41 @@ pub(super) fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
 
 struct BrandOf;
 impl NativeFunction for BrandOf {
+    fn resource_contract(
+        &self,
+        args: lash_kernel_doc::Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        lash_kernel_doc::NativeResourceContract::reading(args, brand(args)).map(Some)
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        let Some(value @ Value::Record(_)) = call.args.get(0) else {
-            return Ok(Value::Absent);
-        };
-        let Some(fields) = call.args.table(value)? else {
-            return Ok(Value::Absent);
-        };
-        let key = Value::Text(
-            lash_kernel_doc::arena::ShortText::new("__lash_brand")
-                .unwrap_or_else(|| unreachable!("the brand field is inline")),
-        );
-        let Some(brand @ Value::Tuple(_)) = call.args.lookup(fields, &key)? else {
-            return Ok(Value::Absent);
-        };
-        let Some(parts) = call.args.sequence(brand)? else {
-            return Ok(Value::Absent);
-        };
-        if parts.len() == 2
-            && matches!(parts.get(0)?, Some(Value::Text(_) | Value::LongText(_)))
-            && matches!(parts.get(1)?, Some(Value::Text(_) | Value::LongText(_)))
-        {
-            Ok(*brand)
-        } else {
-            Ok(Value::Absent)
-        }
+        brand(call.args)
+    }
+}
+
+fn brand(args: lash_kernel_doc::Args<'_>) -> Result<Value, NativeError> {
+    let Some(value @ Value::Record(_)) = args.get(0) else {
+        return Ok(Value::Absent);
+    };
+    let Some(fields) = args.table(value)? else {
+        return Ok(Value::Absent);
+    };
+    let key = Value::Text(
+        lash_kernel_doc::arena::ShortText::new("__lash_brand")
+            .unwrap_or_else(|| unreachable!("the brand field is inline")),
+    );
+    let Some(brand @ Value::Tuple(_)) = args.lookup(fields, &key)? else {
+        return Ok(Value::Absent);
+    };
+    let Some(parts) = args.sequence(brand)? else {
+        return Ok(Value::Absent);
+    };
+    if parts.len() == 2
+        && matches!(parts.get(0)?, Some(Value::Text(_) | Value::LongText(_)))
+        && matches!(parts.get(1)?, Some(Value::Text(_) | Value::LongText(_)))
+    {
+        Ok(*brand)
+    } else {
+        Ok(Value::Absent)
     }
 }

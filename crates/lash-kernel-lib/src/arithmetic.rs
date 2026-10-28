@@ -256,6 +256,8 @@ impl Room<'_, '_> {
         counter: &mut WorkCounter,
     ) -> Result<(), NativeError> {
         // Upper bound on output magnitude in 64-bit words.
+        #[cfg(test)]
+        crate::native_contract_laws::observe_power_scratch(result, base, a, b);
         let words = a.bits().saturating_add(b.bits()).div_ceil(64).max(1);
         counter.spend(words)?;
         let held = result.bits().saturating_add(base.bits()).div_ceil(8);

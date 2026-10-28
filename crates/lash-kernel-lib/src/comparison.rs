@@ -108,11 +108,24 @@ pub fn same(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError> 
 /// Each sequence advances one member at a time, and never snapshots a
 /// list.
 /// A paged integer compared whole holds its bytes in `new`.
+#[inline]
 pub fn compare(
     a: &Value,
     b: &Value,
     args: &Args<'_>,
     new: &mut Nursery<'_>,
+) -> Result<Option<Ordering>, NativeError> {
+    compare_reading(a, b, args, |a, b| number_cmp(a, b, args, new))
+}
+
+/// Ordering with an input-only numeric reader. The native caller retains its
+/// physical read reservations; a logical description supplies mathematical
+/// numbers without installing values or reserving nursery room.
+pub(crate) fn compare_reading(
+    a: &Value,
+    b: &Value,
+    args: &Args<'_>,
+    mut numbers: impl FnMut(&Value, &Value) -> Result<Option<Ordering>, NativeError>,
 ) -> Result<Option<Ordering>, NativeError> {
     if let Some(answer) = scalar_compare(a, b) {
         return answer;
@@ -175,7 +188,7 @@ pub fn compare(
             (
                 Value::Int(_) | Value::BigInt(_) | Value::Float(_),
                 Value::Int(_) | Value::BigInt(_) | Value::Float(_),
-            ) => number_cmp(&a, &b, args, new)?,
+            ) => numbers(&a, &b)?,
             (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
                 let (Some(left), Some(right)) = (args.text(&a)?, args.text(&b)?) else {
                     return Err(NativeError::Malformed("a text names no text"));

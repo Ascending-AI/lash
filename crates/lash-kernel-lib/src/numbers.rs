@@ -24,6 +24,8 @@ use crate::math::Math;
 use crate::numeric::{Numeric, float_to_integer, integer_to_float};
 
 mod prepared;
+mod resources;
+pub(super) const INTEGER_POWER_WORK_LIMIT: u64 = 1_048_576;
 use crate::KernelHelper;
 use crate::raised;
 
@@ -470,7 +472,7 @@ fn definition(
     .then(|| Guard {
         unit: "upper-bound 64-bit output magnitude words of each integer exponentiation product"
             .into(),
-        limit: Formula::Constant(1_048_576),
+        limit: Formula::Constant(INTEGER_POWER_WORK_LIMIT),
     });
     let mut errors = vec!["type_error".to_owned(), "arity".to_owned()];
     match operation {
@@ -526,6 +528,12 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 }
 
 impl NativeFunction for NumericFunction {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::contract(self, args)
+    }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::SymbolicNative;
         lash_kernel_doc::NativeSpecialization {

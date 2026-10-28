@@ -10,6 +10,8 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use super::{CollectionError, copy, raise};
 use crate::numbers::KIND_NAMES;
 
+mod resources;
+
 type NativeDefinition<T> = (T, Arc<dyn NativeFunction>);
 
 #[derive(Clone, Copy)]
@@ -482,6 +484,12 @@ struct Aux(
     Option<lash_kernel_doc::SymbolicNative>,
 );
 impl NativeFunction for Aux {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        lash_kernel_doc::NativeResourceContract::reading(args, (self.0)(args.values())).map(Some)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         (self.0)(call.args.values())
     }
@@ -506,6 +514,12 @@ fn bool_not(args: &[Value]) -> Result<Value, NativeError> {
 /// `error.new(kind, message, data?)`.
 struct ErrorNew;
 impl NativeFunction for ErrorNew {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::error(args).map(Some)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let values = call.args.values();
         let kind = *field(nth(values, 0)?)?;
@@ -734,6 +748,12 @@ fn result_items(
     Ok(items)
 }
 impl NativeFunction for Native {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::collection(self, args)
+    }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::{
             ResidentRead,

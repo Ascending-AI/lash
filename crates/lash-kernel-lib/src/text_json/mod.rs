@@ -6,6 +6,7 @@ mod format;
 mod json;
 #[cfg(test)]
 mod laws;
+mod resources;
 mod text;
 
 use std::borrow::Cow;
@@ -53,6 +54,12 @@ impl Function {
 struct ResidentJoin(Arc<dyn NativeFunction>);
 
 impl NativeFunction for ResidentJoin {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        self.0.resource_contract(args)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         self.0.call(call)
     }
@@ -73,9 +80,30 @@ struct Native {
     /// answers where it needs no arena.
     prepared: Option<PreparedNative>,
     text_append: bool,
+    resources: Option<resources::Evaluator>,
 }
 
 impl NativeFunction for Native {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        let Some(evaluate) = self.resources else {
+            return Ok(None);
+        };
+        let contract = if !self.arity.contains(&args.len()) {
+            Err(raise("arity", "wrong argument count"))
+        } else {
+            evaluate(args)
+        };
+        match contract {
+            Ok(contract) => Ok(Some(contract)),
+            Err(NativeError::Refused { kind, message }) => Ok(
+                lash_kernel_doc::NativeResourceContract::refused(kind, &message),
+            ),
+            Err(error) => Err(error),
+        }
+    }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepared,
@@ -194,6 +222,7 @@ fn prepared_definition(
     prepared: Option<PreparedNative>,
 ) -> Function {
     let text_append = name == "text.concat";
+    let resources = resources::evaluator(name);
     if let Selection::Native(selected) = selection {
         return Function {
             definition: None,
@@ -206,6 +235,7 @@ fn prepared_definition(
                         .count()..=params.len(),
                     prepared,
                     text_append,
+                    resources,
                 }) as Arc<dyn NativeFunction>
             }),
         };
@@ -251,6 +281,7 @@ fn prepared_definition(
             arity,
             prepared,
             text_append,
+            resources,
         })),
     }
 }
