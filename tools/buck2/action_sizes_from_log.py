@@ -62,13 +62,10 @@ sample.
 
 The rule, per `<package>/<crate>`:
 
-* `cpu_count` = 1 while p95(cpu time / wall time / worker slot share) is
-  at most 1; otherwise ceil(p95 cores - 0.2), capped at 8. The slot share is
-  that sampled worker's advertised CPU count / max_inflight (historically
-  1.25 on i9, 1.67 on 02). Compile samples require both metadata fields above;
-  legacy logs can supply them with `--worker-metadata`, a JSON object keyed
-  by log path whose values hold `worker_cpu_count` and `worker_max_inflight`.
-  Missing metadata refuses sizing (S1); no pool-wide share is assumed.
+* `cpu_count` = ceil(total successful CPU time / total successful wall time
+  - 0.2), at least 1 and capped at 8. CPU books sustained demand, not burst
+  p95 or worker slot share. The p95 remains diagnostic evidence. Only
+  successful samples lasting at least one second supply this mean.
 * `memory_kb` = p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
   256 MiB and at least the 1.5 GiB default and `MINIMUM_MEMORY_KB` floor.
   Anonymous peaks are sampled every 250 ms. The fixed allowance covers
@@ -85,9 +82,9 @@ The rule, per `<package>/<crate>`:
   of the sampled workers. CPU still needs successful samples; kills are not
   CPU samples. Existing kind/profile/metadata overrides inherit the crate's
   OOM minimum, since an unjoined kill cannot identify a cheaper phase.
-* At least 20 successful samples, or the row in force stays -- a crate in
-  `MINIMUM_MEMORY_KB` keeps its floor even on too few or too small samples.
-  Fewer samples are not enough for a p95.
+* Memory needs at least 20 successful samples, or its row in force stays.
+  A crate in `MINIMUM_MEMORY_KB` keeps its floor even on too few or too small
+  samples. CPU can refresh an existing row from fewer successful samples.
 * A request is a platform property and so part of the action key: resizing a
   row re-executes every action of its targets on a cold cache. A refresh
   therefore keeps the row in force unless the request moves by a whole CPU or
@@ -127,11 +124,11 @@ Optimized compiles
 dependencies) compile with `-Copt-level=3`, and LLVM then holds more than a
 dev compile of the same crate. The event logs name each action's
 configuration, so `tools/buck2/optimized-sizes.json` carries, keyed like the
-kind table, what an optimized compile asks for where that is more than the
+kind table, what an optimized compile asks for where it differs from the
 dev request; the generated rules select it on the profile constraint, so a
-dev build's requests do not depend on it. The rule is `optimized_table`'s: a row only raises, one optimized sample is
-evidence, and a dev request that a refresh lowers leaves the optimized
-request where it was until 20 optimized samples say otherwise.
+dev build's requests do not depend on it. Memory only raises on fewer than
+20 optimized samples. CPU uses sustained optimized demand when measured and
+otherwise inherits the refreshed crate CPU, without a burst reservation floor.
 
 Metadata checks
 ---------------
@@ -240,7 +237,7 @@ COMPILE_TOOLS = {"python3", "rustdoc"}
 MIN_WALL_MS = 1000
 MIN_SAMPLES = 20
 CPU_PERCENTILE = 95
-# How far above a whole core the compile p95 or sustained test demand may
+# How far above a whole core sustained compile or test demand may
 # sit and still round down.
 CPU_TOLERANCE = 0.2
 # The pool caps a single action's request at 8 cores.
@@ -301,7 +298,8 @@ class Samples:
         self.legacy_peaks: list[int] = []
         self.anon_peaks: list[int] = []
         self.oom_kills = 0
-        self.slot_ratios: list[float] = []
+        self.cpu_usec = 0
+        self.wall_ms = 0
         self.attempts: collections.Counter[int] = collections.Counter()
         self.killed_requests: collections.Counter[int] = collections.Counter()
         self.observed_peak_bytes = 0
@@ -314,13 +312,15 @@ class Samples:
         requested_cpu: int,
         requested_kb: int = 0,
         anon_peak_bytes: int | None = None,
-        slot_share: float | None = None,
+        *,
+        cpu_usec: int | None = None,
+        wall_ms: int = MIN_WALL_MS,
     ) -> None:
         basis = peak_bytes if anon_peak_bytes is None else anon_peak_bytes
         self.observed_peak_bytes = max(self.observed_peak_bytes, peak_bytes)
         self.records.append((cores, basis, requested_cpu))
-        if slot_share is not None:
-            self.slot_ratios.append(cores / slot_share)
+        self.cpu_usec += cpu_usec if cpu_usec is not None else round(cores * wall_ms * 1000)
+        self.wall_ms += wall_ms
         if anon_peak_bytes is None:
             self.legacy_peaks.append(peak_bytes)
             self.needs.append(memory_need(peak_bytes, requested_kb))
@@ -344,12 +344,23 @@ def percentile(values: list[float], pct: int) -> float:
     return ordered[max(0, math.ceil(pct / 100 * len(ordered)) - 1)]
 
 
-def cpu_count_for(p95_cores: float, *, slot_share: float | None = None) -> int:
-    """The request above a compile slot share, or for sustained test demand."""
-    if slot_share is not None and p95_cores <= slot_share:
-        return DEFAULT_CPU_COUNT
-    wanted = math.ceil(p95_cores - CPU_TOLERANCE)
+def cpu_count_for(cores: float) -> int:
+    """Reserve sustained demand with the shared tolerance and CPU bounds."""
+    wanted = math.ceil(cores - CPU_TOLERANCE)
     return min(MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, wanted))
+
+
+def with_compile_cpu(row: dict, samples: Samples) -> dict:
+    """Refresh soft CPU demand without moving a retained memory request."""
+    if not samples.wall_ms:
+        return row
+    mean = samples.cpu_usec / 1000 / samples.wall_ms
+    return row | {
+        "cpu_count": cpu_count_for(mean),
+        "mean_cores": round(mean, 2),
+        "p95_cores": round(percentile(samples.cpu_basis(), CPU_PERCENTILE), 2),
+        "cpu_samples": len(samples.records),
+    }
 
 
 def memory_need(peak_bytes: int, requested_kb: int) -> float:
@@ -499,20 +510,9 @@ def observe_compile(samples: Samples, record: dict[str, str]) -> None:
         as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT,
         as_int(record.get("requested_kb")) or 0,
         as_int(record.get("anon_peak_bytes")),
-        worker_slot_share(record),
+        cpu_usec=cpu_usec,
+        wall_ms=wall_ms,
     )
-
-
-def worker_slot_share(record: dict[str, str]) -> float:
-    """S1: no compile sizing without the sampled worker's advertised share."""
-    cpus = as_int(record.get("worker_cpu_count"))
-    slots = as_int(record.get("worker_max_inflight"))
-    if not cpus or not slots:
-        raise ValueError(
-            "compile sizing requires worker metadata: worker_cpu_count and "
-            "worker_max_inflight on each record, or --worker-metadata for each log"
-        )
-    return cpus / slots
 
 
 def oom_killed(record: dict[str, str]) -> bool:
@@ -580,16 +580,18 @@ def metadata_table(measured, current, inherited) -> dict:
 
     Metadata uses the anonymous compile formula and allowance, with the
     512 MiB admission floor used by Clippy. Its cgroup floor is unchanged.
-    Twenty samples and the compile hysteresis still apply to successful-only
-    evidence. OOMs use the compile step-up even without successful samples.
+    Memory keeps its twenty-sample minimum and hysteresis. CPU uses the
+    available successful samples. OOMs step up even without successes.
     """
     rows = {profile: {key: dict(kinds) for key, kinds in current.get(profile, {}).items()}
             for profile in ("dev", "optimized")}
     for (key, kind, optimized), samples in sorted(measured.items()):
-        if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
-            continue
         profile = "optimized" if optimized else "dev"
         previous = rows[profile].get(key, {}).get(kind)
+        if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
+            if previous:
+                rows[profile][key][kind] = with_compile_cpu(previous, samples)
+            continue
         request = request_of(previous) if previous else inherited(key, kind, optimized)
         row = compile_row(samples, request, floor_kb=CLIPPY_FLOOR_KB)
         row.update(compile_evidence({key: samples})[key])
@@ -848,25 +850,18 @@ def compile_row(
         if samples.records else floor_kb,
         minimum,
     )
-    if samples.records and len(samples.slot_ratios) != len(samples.records):
-        raise ValueError("compile sizing requires worker metadata for every sample")
-    cpu_count = (
-        DEFAULT_CPU_COUNT
-        if not samples.records or percentile(samples.slot_ratios, CPU_PERCENTILE) <= 1
-        else cpu_count_for(p95)
-    )
+    cpu_fields = with_compile_cpu({"cpu_count": max(DEFAULT_CPU_COUNT, current[0])}, samples)
+    cpu_count = cpu_fields["cpu_count"]
     oom = oom_evidence(samples)
     oom_floor = oom.get("oom_floor_kb", 0)
     if samples.oom_kills:
         memory_kb = max(memory_kb, current[1], oom_floor)
-        if len(samples.records) < MIN_SAMPLES:
-            cpu_count = max(DEFAULT_CPU_COUNT, current[0])
         if memory_kb > oom["worker_memory_kb"]:
             if current[1] > oom["worker_memory_kb"] or minimum > oom["worker_memory_kb"]:
                 raise ValueError("in-force memory request exceeds sampled worker budget")
             memory_kb = oom["worker_memory_kb"]
     cpu_count, memory_kb = settled(
-        current, cpu_count, memory_kb,
+        (cpu_count, current[1]), cpu_count, memory_kb,
         max(max(samples.legacy_peaks, default=0), minimum * 1024, oom_floor * 1024),
     )
     return {
@@ -878,6 +873,7 @@ def compile_row(
         ),
         "peak_bytes": peak_bytes,
         "samples": len(samples.records),
+        **cpu_fields,
         **oom,
     }
 
@@ -897,7 +893,7 @@ def table(
         minimum = MINIMUM_MEMORY_KB.get(key)
         if len(samples.records) < MIN_SAMPLES and minimum is None and not samples.oom_kills:
             if key in current:
-                sizes[key] = current[key]
+                sizes[key] = with_compile_cpu(current[key], samples)
             continue
         row = compile_row(samples, request_of(current.get(key)), minimum or 0)
         if not samples.oom_kills and request_of(row) == (DEFAULT_CPU_COUNT, UNMEASURED_MEMORY_KB):
@@ -921,7 +917,7 @@ def clippy_table(
         samples = measured.get(key, Samples())
         if len(samples.records) < MIN_SAMPLES and not samples.oom_kills:
             if key in current:
-                sizes[key] = current[key]
+                sizes[key] = with_compile_cpu(current[key], samples)
             continue
         in_force = request_of(current[key]) if key in current else (0, 0)
         sizes[key] = compile_row(samples, in_force, floor_kb=CLIPPY_FLOOR_KB)
@@ -957,6 +953,8 @@ def kind_table(
                     request_of(crate_rows.get(key))[1], (key, kind),
                 )
                 sizes[key].pop(kind)
+            elif previous:
+                sizes[key][kind] = with_compile_cpu(previous, samples)
             continue
         existing = current.get(key, {}).get(kind)
         in_force = request_of(existing or crate_rows.get(key))
@@ -980,20 +978,21 @@ def optimized_table(
     previous_request,
     current: dict[str, dict[str, dict]] | None = None,
 ) -> dict[str, dict[str, dict[str, float | int]]]:
-    """The optimized-profile rows: what such a compile asks for above dev.
+    """Optimized CPU follows demand; memory keeps its conservative hold.
 
     `dev_request(key, kind)` is the dev request this refresh resolves and
     `previous_request(key, kind)` the one in force before it. An optimized
-    compile takes the larger of its dev request and its row here, so a row
-    only ever raises:
+    compile keeps at least its dev memory request. CPU has no burst floor:
 
     * A measured kind's row is the compile rule over its optimized samples.
       Optimized builds are rare, so one sample is evidence, but fewer than
-      MIN_SAMPLES can only raise the row in force, never lower it.
-    * A dev request this refresh lowers was what the optimized compile ran
+      MIN_SAMPLES can only raise memory, never lower it. CPU uses every
+      successful sample; without any it inherits the refreshed dev CPU unless
+      the row already holds a measured sustained CPU request.
+    * A dev memory request this refresh lowers was what the optimized compile ran
       under until now. Without MIN_SAMPLES optimized samples there is no
       evidence it needs less, so its row keeps at least that request.
-    * A row no larger than the dev request says nothing and is dropped.
+    * A row identical to dev after the memory hold is dropped.
     """
     current = current or {}
     groups = set(measured) | {(key, kind) for key, rows in current.items() for kind in rows}
@@ -1004,14 +1003,17 @@ def optimized_table(
         dev = dev_request(key, kind)
         in_force = request_of(existing) if existing else previous_request(key, kind)
         row = compile_row(samples, in_force) if samples.records or samples.oom_kills else dict(existing or {})
+        if not samples.records and not (existing and "mean_cores" in existing):
+            row["cpu_count"] = dev[0]
         if len(samples.records) < MIN_SAMPLES:
-            row["cpu_count"] = max(row.get("cpu_count", 0), in_force[0])
             row["memory_kb"] = max(row.get("memory_kb", 0), in_force[1])
-        if row["cpu_count"] > dev[0] or row["memory_kb"] > dev[1]:
+        if row["cpu_count"] != dev[0] or row["memory_kb"] > dev[1]:
             sizes[key][kind] = {
-                "cpu_count": max(row["cpu_count"], dev[0]),
+                "cpu_count": row["cpu_count"],
                 "memory_kb": max(row["memory_kb"], dev[1]),
                 "p95_cores": row.get("p95_cores", 0.0),
+                **({"mean_cores": row["mean_cores"]} if "mean_cores" in row else {}),
+                **({"cpu_samples": row["cpu_samples"]} if "cpu_samples" in row else {}),
                 "p99_peak_bytes": row.get("p99_peak_bytes", 0),
                 "peak_bytes": row.get("peak_bytes", 0),
                 "samples": len(samples.records),
@@ -1190,8 +1192,8 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
     previous = (stored("action-sizes.json"), stored("target-kind-sizes.json"))
     if events:
         kind_rows = kind_table(collect_kinds(labelled, shared), crate_rows, kind_rows)
-    # Every dev request this refresh lowers keeps its optimized compile where
-    # it was; see `optimized_table`.
+    # Lowering dev memory preserves the optimized memory hold. CPU does not
+    # inherit a reservation from the superseded burst rule.
     optimized_current = {
         key: dict(rows) for key, rows in stored("optimized-sizes.json").items() if key in keys
     }
@@ -1201,7 +1203,7 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         for kind in ("target", "test"):
             before = resolved_request(key, kind, *previous)
             after = resolved_request(key, kind, crate_rows, kind_rows)
-            if after[0] < before[0] or after[1] < before[1]:
+            if after[1] < before[1]:
                 optimized_current.setdefault(key, {}).setdefault(
                     kind, {"cpu_count": before[0], "memory_kb": before[1]}
                 )

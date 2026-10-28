@@ -144,7 +144,7 @@ def labelled(events: list[str], lines: list[str]) -> list[tuple]:
 def samples(peak_bytes: int, count: int, requested_kb: int = 4194304) -> sizes.Samples:
     kept = sizes.Samples()
     for _ in range(count):
-        kept.observe(1.0, peak_bytes, 1, requested_kb, slot_share=1.25)
+        kept.observe(1.0, peak_bytes, 1, requested_kb)
     return kept
 
 
@@ -334,6 +334,25 @@ class InForceTest(unittest.TestCase):
         current = {label: {"cpu_count": 1, "memory_kb": 2097152}}
         self.assertEqual(sizes.test_run_table(measured, current)[label]["memory_kb"], 1048576)
         self.assertEqual(sizes.test_run_table({}, current)[label], current[label])
+
+
+class CompileCpuTest(unittest.TestCase):
+    def test_burst_p95_does_not_price_sustained_compile_work(self):
+        # 126 CPU-seconds in serial work plus 144 in bursts, over 150 seconds.
+        lines = [usage(cores=1.0, wall_ms=7_000)] * 18
+        lines += [usage(cores=6.0, wall_ms=12_000)] * 2
+        measured = sizes.collect(lines, {("lash-internal-core", "lash_core")})
+        row = sizes.table(measured)[KEY]
+        self.assertEqual(row["p95_cores"], 6.0)
+        self.assertEqual(row["cpu_count"], 2)
+        self.assertEqual(row["mean_cores"], 1.8)
+        # An old burst CPU request cannot survive through a memory-only hold.
+        optimized = sizes.optimized_table(
+            {}, lambda *_: (2, 2097152), lambda *_: (6, 4194304),
+            {KEY: {"target": {"cpu_count": 6, "memory_kb": 4194304}}},
+        )
+        self.assertEqual(optimized[KEY]["target"]["cpu_count"], 2)
+        self.assertEqual(optimized[KEY]["target"]["memory_kb"], 4194304)
 
 
 class TestRunCpuTest(unittest.TestCase):
@@ -585,9 +604,9 @@ class MetadataSizingTest(unittest.TestCase):
         group = (KEY, "target", False)
         sample = sizes.Samples()
         for _ in range(19):
-            sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4, slot_share=1.25)
+            sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
         self.assertEqual(sizes.metadata_table({group: sample}, {}, inherited), {"dev": {}, "optimized": {}})
-        sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4, slot_share=1.25)
+        sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
         rows = sizes.metadata_table({group: sample}, {}, inherited)
         row = rows["dev"][KEY]["target"]
         self.assertEqual(row["memory_kb"], 1024 * 1024)

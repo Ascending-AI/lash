@@ -51,9 +51,9 @@ TARGET_KINDS = ("target", "test")
 # `--config=optimized` and the host configuration compile with
 # `-Copt-level=3`, and LLVM then holds more than a dev compile of the same
 # crate does. This table carries, keyed like the kind table, what an optimized
-# compile asks for where that is more than the dev request; the Rust macros
-# select it on the profile constraint, so a dev build's requests -- and action
-# keys -- do not depend on it.
+# compile asks for. Memory stays above dev; CPU follows sustained demand.
+# The Rust macros select it on the profile constraint, so a dev build's
+# requests and action keys do not depend on it.
 OPTIMIZED_SIZES_PATH = ROOT / "tools/buck2/optimized-sizes.json"
 # Every generated Rust target has a Clippy twin, `<label>__clippy`: the same
 # rule and attributes on a platform of its own (Buck2 gives a target one), so
@@ -211,11 +211,13 @@ TEST_RUN_SIZES = json.loads(TEST_RUN_SIZES_PATH.read_text(encoding="utf-8"))
 
 
 def optimized_request(package_name: str, crate_name: str, kind: str) -> dict[str, int]:
-    """What an optimized compile of one kind of target asks for: never less
-    than its dev request."""
+    """Optimized sustained CPU, with memory never below the dev request."""
     dev = compile_request(package_name, crate_name, kind)
     row = OPTIMIZED_SIZES.get(f"{package_name}/{crate_name}", {}).get(kind) or {}
-    return {field: max(dev[field], row.get(field, 0)) for field in ("cpu_count", "memory_kb")}
+    return {
+        "cpu_count": row.get("cpu_count", dev["cpu_count"]),
+        "memory_kb": max(dev["memory_kb"], row.get("memory_kb", 0)),
+    }
 
 
 def compile_request(

@@ -264,9 +264,8 @@ def check_sizing() -> None:
         for kind in kinds:
             assert kinds[kind]["samples"] >= sizes.MIN_SAMPLES or kinds[kind].get("oom_kills"), (key, kind)
 
-    # An optimized configuration's request is its row where that is more than
-    # the dev request, and never less than the dev request: the select can
-    # only raise. A row that raises nothing is not rendered.
+    # Optimized CPU uses its measured row. Only memory inherits the dev floor.
+    # A row identical to dev is not rendered.
     optimized_requests = bzl_value(text, "OPTIMIZED_COMPILE_REQUESTS")
     measured_optimized = load_json("optimized-sizes.json")
     assert set(optimized_requests) <= set(measured_optimized)
@@ -276,7 +275,7 @@ def check_sizing() -> None:
             dev = compile_requests.get(key, default)
             if kind == "test":
                 dev = test_compile_requests.get(key, dev)
-            expected = {field: max(dev[field], row[field]) for field in dev}
+            expected = {"cpu_count": row["cpu_count"], "memory_kb": max(dev["memory_kb"], row["memory_kb"])}
             rendered = optimized_requests.get(key, {}).get(kind, dev)
             assert rendered == expected, (key, kind)
             assert (kind in optimized_requests.get(key, {})) == (expected != dev), (key, kind)
@@ -285,7 +284,8 @@ def check_sizing() -> None:
             dev = compile_requests.get(key, default)
             if kind == "test":
                 dev = test_compile_requests.get(key, dev)
-            assert all(rendered[field] >= dev[field] for field in dev), (key, kind)
+            assert rendered["memory_kb"] >= dev["memory_kb"], (key, kind)
+            assert 1 <= rendered["cpu_count"] <= sizes.MAX_CPU_COUNT, (key, kind)
     evidence = load_json("compile-memory-evidence.json")
     assert set(evidence) == {"crates", "clippy", "kinds", "optimized"}
     assert evidence["crates"], "compile memory evidence is empty"

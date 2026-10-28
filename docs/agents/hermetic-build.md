@@ -188,8 +188,11 @@ least that failed ceiling plus 512 MiB. Round up to 256 MiB and cap at the
 smallest advertised memory budget of the sampled workers. OOM rows retain
 at least one 256 MiB increase over every failed ceiling, even when successful
 runs outnumber kills and the sampled peak missed the fatal allocation. They retain
-their in-force memory request and bypass sample-count and hysteresis limits;
-CPU continues to use successful p95 measurements. The evidence retains kills
+their in-force memory request and bypass sample-count and hysteresis limits.
+Compile, metadata and Clippy CPU requests use sustained demand over successful
+samples: `ceil(total CPU / total wall - 0.2)`, bounded to one through eight
+cores. Short bursts and worker slot share do not raise that CPU reservation.
+The p95 remains diagnostic evidence. The evidence retains kills
 and their derived minimum, and the sizing check rejects requests below it.
 Existing target-kind, optimized and metadata overrides inherit the crate's
 OOM minimum so an unjoined kill cannot leave a cheaper execution path.
