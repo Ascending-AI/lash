@@ -3,7 +3,8 @@ use std::ops::Index;
 use std::slice::SliceIndex;
 mod source;
 
-use lash_kernel_doc::Value;
+use super::logical_held::Projection;
+use lash_kernel_doc::{Value, heap::HeapFault};
 
 /// A region's bounded operand stack. Nested calls open disjoint windows;
 /// returning (including a guard miss) releases their references. Capacity
@@ -208,42 +209,67 @@ impl Registers {
         stream: &crate::compile::Stream,
         stmt: &crate::compile::Stmt,
         pc: u32,
-    ) -> Result<(), &'static str> {
-        self.source.begin(stream, stmt, pc, &self.values)
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        self.source
+            .begin(stream, stmt, pc, &self.values, projection)
     }
 
     pub(super) fn source_atoms_begin(
         &mut self,
         site: &lash_kernel_value::sites::Site,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), HeapFault> {
         self.source.begin_atoms(site)
     }
 
-    pub(super) fn source_atom(&mut self, index: usize, value: Value) -> Result<(), &'static str> {
-        self.source.atom(index, value)
+    pub(super) fn source_atom(
+        &mut self,
+        index: usize,
+        value: Value,
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        self.source.atom(index, value, projection)
     }
 
     pub(super) fn source_complete(
         &mut self,
         stream: &crate::compile::Stream,
         pc: u32,
-    ) -> Result<(), &'static str> {
-        self.source.complete(stream, pc, &self.values)
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        self.source.complete(stream, pc, &self.values, projection)
     }
 
     pub(super) fn take_source_role(
         &mut self,
         reg: lash_kernel_exec::Reg,
         site: &lash_kernel_value::sites::Site,
-    ) -> Result<Value, &'static str> {
+    ) -> Result<Value, HeapFault> {
         if self.source.active {
             self.source.take(reg, site)
         } else {
             self.values
                 .get(reg.ix())
                 .copied()
-                .ok_or("continuation register is missing")
+                .ok_or_else(|| HeapFault::Malformed("continuation register is missing".into()))
         }
+    }
+
+    pub(super) fn source_bytes(
+        &self,
+        arena: &lash_kernel_state::arena::Arena,
+    ) -> Result<u64, HeapFault> {
+        if self.source.active {
+            return self.source.bytes();
+        }
+        self.values[..self.extent]
+            .iter()
+            .zip(&self.written)
+            .filter(|(_, written)| **written)
+            .try_fold(0_u64, |sum, (value, _)| {
+                sum.checked_add(arena.logical_local(value)?)
+                    .ok_or_else(|| HeapFault::Malformed("entry holding cost overflow".into()))
+            })
     }
 
     /// Active stream operands are source occurrences. Outside a stream, an

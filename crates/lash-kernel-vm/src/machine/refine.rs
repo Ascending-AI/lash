@@ -22,6 +22,7 @@ struct Holdings<'a> {
     session: &'a session::Session,
     joins: &'a Tree<ListJoin>,
     registers: Vec<Value>,
+    operand_bytes: u64,
     pins: &'a Pins,
     /// What the walk of the arena gave the census, in page form.
     roots: Vec<PageValue>,
@@ -85,11 +86,9 @@ impl ResidentRoots for Holdings<'_> {
             .logical_control_bytes(&arena)?
             .checked_add(self.session.logical_written_bytes(&arena)?)
             .ok_or_else(|| HeapFault::Malformed("root holding cost overflow".into()))?;
-        for value in &self.registers {
-            root_and_control_bytes = root_and_control_bytes
-                .checked_add(arena.logical_local(value)?)
-                .ok_or_else(|| HeapFault::Malformed("operand holding cost overflow".into()))?;
-        }
+        root_and_control_bytes = root_and_control_bytes
+            .checked_add(self.operand_bytes)
+            .ok_or_else(|| HeapFault::Malformed("operand holding cost overflow".into()))?;
         Ok(Walked {
             session,
             root_and_control_bytes,
@@ -172,6 +171,7 @@ impl KernelMachine {
         self.heap.set_saved_functions(&self.functions);
         let access = self.heap.pages().clone();
         let registers = self.operand_roots();
+        let operand_bytes = self.regs.source_bytes(&self.arena.borrow())?;
         let mut holdings = Holdings {
             arena: &self.arena,
             access: &access,
@@ -179,6 +179,7 @@ impl KernelMachine {
             session: &self.session,
             joins: &self.joins,
             registers,
+            operand_bytes,
             pins: &self.pins,
             roots: Vec::new(),
             reach: None,
@@ -203,6 +204,7 @@ mod laws {
     fn normalized_operands(machine: &mut KernelMachine) -> (u64, u64) {
         let access = machine.heap.pages().clone();
         let registers = machine.operand_roots();
+        let operand_bytes = machine.regs.source_bytes(&machine.arena.borrow()).unwrap();
         let mut roots = Holdings {
             arena: &machine.arena,
             access: &access,
@@ -210,14 +212,25 @@ mod laws {
             session: &machine.session,
             joins: &machine.joins,
             registers,
+            operand_bytes,
             pins: &machine.pins,
             roots: Vec::new(),
             reach: None,
         };
         let walked = roots.walk().unwrap();
+        let mut entities = std::collections::BTreeSet::new();
+        for value in &roots.roots {
+            if let PageValue::Ref(Identity::Object(id)) = value {
+                entities.insert(*id);
+            }
+        }
+        let entity_bytes = entities
+            .into_iter()
+            .map(|id| roots.entity_local_bytes(id).unwrap())
+            .sum::<u64>();
         let result = (
             walked.root_and_control_bytes,
-            roots.anonymous_entity_bytes(),
+            roots.anonymous_entity_bytes() + entity_bytes,
         );
         roots.finish();
         result
@@ -253,11 +266,11 @@ mod laws {
             source_roles: std::sync::Mutex::new(Default::default()),
         };
         machine.regs.statement(stmt.regs);
-        machine.regs.source_begin(&stream, &stmt, 0).unwrap();
+        machine.source_begin(&stream, &stmt, 0).unwrap();
         assert_eq!(normalized_operands(machine), baseline, "unwritten storage");
         let held = machine.arena.borrow_mut().create_list(&[Value::Null]);
         machine.regs.put(19, held);
-        machine.regs.source_complete(&stream, 0).unwrap();
+        machine.source_complete(&stream, 0).unwrap();
         // Source ownership survives a cleared physical mirror.
         machine.regs.clear_range(19..20);
         let (bytes, bodies) = normalized_operands(machine);
@@ -265,7 +278,7 @@ mod laws {
         assert_eq!(bodies, baseline.1 + 48, "one list header and one member");
         // A consumed occurrence must disappear even if its mirror is restored.
         machine.regs.put(19, held);
-        machine.regs.source_complete(&stream, 1).unwrap();
+        machine.source_complete(&stream, 1).unwrap();
         assert_eq!(normalized_operands(machine), baseline, "consumed storage");
 
         let action_site = Site::new(Unit::Main, vec![0, 0]);
@@ -292,7 +305,7 @@ mod laws {
             ..Default::default()
         };
         machine.regs.put(0, Value::Null);
-        machine.regs.source_complete(&action, 0).unwrap();
+        machine.source_complete(&action, 0).unwrap();
         assert_eq!(
             normalized_operands(machine),
             (baseline.0 + 16, baseline.1),

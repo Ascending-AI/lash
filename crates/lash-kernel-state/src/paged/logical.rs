@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 mod codec;
 mod graph;
+mod values;
 
 /// An index in the exact source unit, assigned before register placement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -72,6 +73,14 @@ pub struct Holding {
     bytes: u64,
     links: Tree<Edge>,
 }
+impl std::fmt::Debug for Holding {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("Holding")
+            .field("bytes", &self.bytes)
+            .field("identities", &self.links.len())
+            .finish()
+    }
+}
 impl Holding {
     pub fn scalar(bytes: u64) -> Self {
         Self {
@@ -92,17 +101,24 @@ impl Holding {
     ) -> Result<Self, HeapFault> {
         let mut holding = Self::scalar(bytes);
         for target in edges {
-            let key = identity_key(target);
-            let count = match holding.links.get(&key, access)? {
-                Some(old) => old
-                    .count
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("edge count overflow"))?,
-                None => 1,
-            };
-            holding.links.write(key, Edge { target, count }, access)?;
+            holding.add_edge(target, 1, access)?;
         }
         Ok(holding)
+    }
+    fn add_edge(
+        &mut self,
+        target: Identity,
+        amount: u64,
+        access: &Access<'_>,
+    ) -> Result<(), HeapFault> {
+        let key = identity_key(target);
+        let count = self
+            .links
+            .get(&key, access)?
+            .map_or(0, |edge| edge.count)
+            .checked_add(amount)
+            .ok_or_else(|| invalid("edge count overflow"))?;
+        self.links.write(key, Edge { target, count }, access)
     }
     fn each_edge(
         &self,
@@ -191,8 +207,24 @@ impl State {
 /// before old ones are released, including self-aliasing replacements.
 pub enum Change {
     Roots(Vec<(Owner, Option<Holding>)>),
-    Allocate { entity: EntityId, body: Holding },
-    Mutate { entity: EntityId, body: Holding },
+    /// Move the exact existing occurrence, replacing the destination atomically.
+    Move {
+        from: Owner,
+        to: Owner,
+    },
+    /// A source read creates another occurrence with the same identity reach.
+    Copy {
+        from: Owner,
+        to: Owner,
+    },
+    Allocate {
+        entity: EntityId,
+        body: Holding,
+    },
+    Mutate {
+        entity: EntityId,
+        body: Holding,
+    },
 }
 
 pub struct Ledger {
@@ -285,6 +317,8 @@ impl Ledger {
         for change in changes {
             match change {
                 Change::Roots(changes) => edit.roots(changes)?,
+                Change::Move { from, to } => edit.transfer(from, to, false)?,
+                Change::Copy { from, to } => edit.transfer(from, to, true)?,
                 Change::Allocate { entity, body } => {
                     if body.bytes < Cost::OBJECT {
                         return Err(invalid("entity has no logical header"));
@@ -448,10 +482,39 @@ impl Edit<'_, '_> {
         }
         Ok(())
     }
+    fn transfer(&mut self, from: Owner, to: Owner, copy: bool) -> Result<(), HeapFault> {
+        let value = self
+            .state
+            .roots(from)
+            .get(&owner_key(from), self.access)?
+            .ok_or_else(|| invalid("source transfer has no owner"))?
+            .value;
+        if from == to {
+            return if copy {
+                Err(invalid("source copy has no distinct destination"))
+            } else {
+                Ok(())
+            };
+        }
+        let mut changes = vec![(to, Some(value))];
+        if !copy {
+            changes.push((from, None));
+        }
+        self.roots(changes)
+    }
     fn roots(&mut self, changes: Vec<(Owner, Option<Holding>)>) -> Result<(), HeapFault> {
         let mut old = Vec::new();
         let mut unique = BTreeMap::new();
         for (owner, value) in changes {
+            if value.is_none()
+                && self
+                    .state
+                    .roots(owner)
+                    .get(&owner_key(owner), self.access)?
+                    .is_none()
+            {
+                return Err(invalid("released source owner is absent"));
+            }
             if unique.insert(owner, value).is_some() {
                 return Err(invalid("owner replaced twice in one transfer"));
             }

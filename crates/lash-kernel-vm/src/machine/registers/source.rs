@@ -1,6 +1,10 @@
 //! Values owned by source occurrences, independent of register mirrors.
 use crate::compile::{Stmt, Stream};
-use lash_kernel_doc::Value;
+use crate::machine::logical_held::{Held, Projection};
+use lash_kernel_doc::{Value, heap::HeapFault};
+fn invalid(problem: &str) -> HeapFault {
+    HeapFault::Malformed(problem.into())
+}
 use lash_kernel_exec::{Op, Reg};
 use lash_kernel_value::sites::Site;
 use std::sync::Arc;
@@ -9,14 +13,14 @@ use std::sync::Arc;
 pub(super) struct Operands {
     values: Vec<Operand>,
     positions: Vec<usize>,
-    atoms: Vec<Value>,
+    atoms: Vec<Held>,
     atom_site: Option<Site>,
     pub(super) active: bool,
 }
 struct Operand {
     reg: Reg,
     site: Arc<Site>,
-    value: Value,
+    held: Held,
 }
 impl Operands {
     pub(super) fn clear(&mut self) {
@@ -34,7 +38,8 @@ impl Operands {
         stmt: &Stmt,
         pc: u32,
         registers: &[Value],
-    ) -> Result<(), &'static str> {
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
         self.clear();
         self.active = true;
         if self.positions.len() < stmt.regs as usize {
@@ -47,30 +52,37 @@ impl Operands {
         }
         let roles = stmt
             .source_roles_at(stream, pc)
-            .ok_or("source resume has no operand projection")?;
+            .ok_or_else(|| invalid("source resume has no operand projection"))?;
         for (reg, site) in roles.iter() {
             self.put(Operand {
                 reg: *reg,
                 site: Arc::clone(site),
-                value: *registers
-                    .get(reg.ix())
-                    .ok_or("source resume operand is missing")?,
+                held: projection.hold(
+                    *registers
+                        .get(reg.ix())
+                        .ok_or_else(|| invalid("source resume operand is missing"))?,
+                )?,
             })?;
         }
         Ok(())
     }
-    pub(super) fn begin_atoms(&mut self, site: &Site) -> Result<(), &'static str> {
+    pub(super) fn begin_atoms(&mut self, site: &Site) -> Result<(), HeapFault> {
         if !self.active || self.atom_site.is_some() {
-            return Err("action atoms have no vacant source owner");
+            return Err(invalid("action atoms have no vacant source owner"));
         }
         self.atom_site = Some(site.clone());
         Ok(())
     }
-    pub(super) fn atom(&mut self, index: usize, value: Value) -> Result<(), &'static str> {
+    pub(super) fn atom(
+        &mut self,
+        index: usize,
+        value: Value,
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
         if self.atom_site.is_none() || self.atoms.len() != index {
-            return Err("action atom has no ordered source role");
+            return Err(invalid("action atom has no ordered source role"));
         }
-        self.atoms.push(value);
+        self.atoms.push(projection.hold(value)?);
         Ok(())
     }
 
@@ -79,10 +91,11 @@ impl Operands {
         stream: &Stream,
         pc: u32,
         registers: &[Value],
-    ) -> Result<(), &'static str> {
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
         let op = stream.ops[pc as usize];
         if !self.active {
-            return Err("source operation has no active owner bank");
+            return Err(invalid("source operation has no active owner bank"));
         }
         if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
             return Ok(());
@@ -109,12 +122,14 @@ impl Operands {
         match range {
             Some(range) => {
                 for reg in range.regs() {
-                    self.remove(reg).ok_or("source input has no owner")?;
+                    self.remove(reg)
+                        .ok_or_else(|| invalid("source input has no owner"))?;
                 }
             }
             None => {
                 for reg in op.reads() {
-                    self.remove(reg).ok_or("source input has no owner")?;
+                    self.remove(reg)
+                        .ok_or_else(|| invalid("source input has no owner"))?;
                 }
             }
         }
@@ -124,9 +139,9 @@ impl Operands {
                 site: Arc::clone(
                     stream.source_sites[pc as usize]
                         .as_ref()
-                        .ok_or("source output has no site")?,
+                        .ok_or_else(|| invalid("source output has no site"))?,
                 ),
-                value: registers[reg.ix()],
+                held: projection.hold(registers[reg.ix()])?,
             })?;
         }
         if let Some(joins) = stream.source_joins.get(&pc) {
@@ -134,26 +149,26 @@ impl Operands {
                 let at = *self
                     .positions
                     .get(join.value.ix())
-                    .ok_or("source join has no register")?;
+                    .ok_or_else(|| invalid("source join has no register"))?;
                 let operand = self
                     .values
                     .get_mut(at)
-                    .ok_or("source join has no operand")?;
+                    .ok_or_else(|| invalid("source join has no operand"))?;
                 if operand.site != join.from {
-                    return Err("source join names another operand");
+                    return Err(invalid("source join names another operand"));
                 }
                 operand.site = Arc::clone(&join.to);
             }
         }
         Ok(())
     }
-    fn put(&mut self, operand: Operand) -> Result<(), &'static str> {
+    fn put(&mut self, operand: Operand) -> Result<(), HeapFault> {
         let at = self
             .positions
             .get_mut(operand.reg.ix())
-            .ok_or("source output register is missing")?;
+            .ok_or_else(|| invalid("source output register is missing"))?;
         if *at != usize::MAX {
-            return Err("source output overwrites an unconsumed operand");
+            return Err(invalid("source output overwrites an unconsumed operand"));
         }
         *at = self.values.len();
         self.values.push(operand);
@@ -171,29 +186,40 @@ impl Operands {
         }
         Some(value)
     }
-    pub(super) fn take(&mut self, reg: Reg, site: &Site) -> Result<Value, &'static str> {
+    pub(super) fn take(&mut self, reg: Reg, site: &Site) -> Result<Value, HeapFault> {
         let at = *self
             .positions
             .get(reg.ix())
-            .ok_or("continuation register is missing")?;
+            .ok_or_else(|| invalid("continuation register is missing"))?;
         let operand = self
             .values
             .get(at)
-            .ok_or("continuation has no source operand at its role")?;
+            .ok_or_else(|| invalid("continuation has no source operand at its role"))?;
         if operand.site.as_ref() != site {
-            return Err("continuation names another source operand");
+            return Err(invalid("continuation names another source operand"));
         }
         Ok(self
             .remove(reg)
-            .ok_or("continuation source operand disappeared")?
+            .ok_or_else(|| invalid("continuation source operand disappeared"))?
+            .held
             .value)
     }
 
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
         for operand in &self.values {
-            visit(&operand.value);
+            visit(&operand.held.value);
         }
-        self.atoms.iter().for_each(visit);
+        self.atoms.iter().for_each(|atom| visit(&atom.value));
+    }
+    pub(super) fn bytes(&self) -> Result<u64, HeapFault> {
+        self.values
+            .iter()
+            .map(|value| &value.held)
+            .chain(&self.atoms)
+            .try_fold(0_u64, |sum, held| {
+                sum.checked_add(held.holding.bytes())
+                    .ok_or_else(|| invalid("source operand holding cost overflow"))
+            })
     }
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {

@@ -164,9 +164,7 @@ impl KernelMachine {
         mut pc: usize,
     ) -> Eval<Ran> {
         self.regs.statement(running.stmt.regs);
-        self.regs
-            .source_begin(running.stream, running.stmt, pc as u32)
-            .map_err(fault)?;
+        self.source_begin(running.stream, running.stmt, pc as u32)?;
         let ops = running.stream.ops.as_slice();
         let task = running.task;
         loop {
@@ -344,9 +342,7 @@ impl KernelMachine {
                 }
             }
             if !matches!(op, Op::Region { .. }) {
-                self.regs
-                    .source_complete(running.stream, source_pc)
-                    .map_err(fault)?;
+                self.source_complete(running.stream, source_pc)?;
             }
         }
     }
@@ -355,9 +351,7 @@ impl KernelMachine {
         if matches!(&ran, Ran::Step) && running.stream.ops[pc as usize].writes().is_some() {
             return Ok(ran);
         }
-        self.regs
-            .source_complete(running.stream, pc)
-            .map_err(fault)?;
+        self.source_complete(running.stream, pc)?;
         Ok(ran)
     }
 
@@ -452,9 +446,7 @@ impl KernelMachine {
                     self.leave_region(running.stream, op_at as u32);
                     return Err(exit);
                 }
-                self.regs
-                    .source_complete(running.stream, op_at as u32)
-                    .map_err(fault)?;
+                self.source_complete(running.stream, op_at as u32)?;
             }
             pc = stop;
             let mut limit = self.bounds.charge_limit;

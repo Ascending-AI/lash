@@ -56,21 +56,40 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     let (heap, pages) = fresh();
     let access = heap.pages().clone();
     let mut ledger = Ledger::fresh();
+    let mut arena = crate::arena::Arena::new();
+    let child = arena.create_list(&[lash_kernel_doc::Value::Int(7)]);
+    let child_handle = child.handle().unwrap();
+    assert_eq!(arena.identify(child_handle).unwrap(), id(0));
+    let parent = arena.create_list(&[child, child]);
+    let parent_handle = parent.handle().unwrap();
+    assert_eq!(arena.identify(parent_handle).unwrap(), id(1));
+    let seals = pages.borrow().seals;
     let changes = vec![
         Change::Allocate {
             entity: id(0),
-            body: Holding::scalar(49),
+            body: Holding::native_body(&mut arena, &heap, child_handle).unwrap(),
         },
         Change::Allocate {
             entity: id(1),
-            body: value(64, &[0, 0], &access),
+            body: Holding::native_body(&mut arena, &heap, parent_handle).unwrap(),
         },
         Change::Roots(vec![
             (frame(), Some(Holding::frame())),
-            (owner(0), Some(value(16, &[1], &access))),
-            (owner(1), Some(value(16, &[0], &access))),
+            (
+                owner(0),
+                Some(Holding::from_native(&mut arena, &heap, &parent).unwrap()),
+            ),
+            (
+                owner(1),
+                Some(Holding::from_native(&mut arena, &heap, &child).unwrap()),
+            ),
         ]),
     ];
+    assert_eq!(
+        pages.borrow().seals,
+        seals,
+        "holding acquisition does not project payloads"
+    );
     let prepared = ledger.prepare(changes, &access).unwrap();
     assert_eq!(prepared.peak(), 209); // 49 + 64 + frame 64 + two references 32.
     let prepared = match prepared.admit(208) {
@@ -93,12 +112,26 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     );
 
     // The tuple has two 16-byte aliases, plus its 16-byte outer occurrence.
+    let tuple = arena.tuple(vec![child, child], 256).unwrap();
+    let tuple_holding = Holding::from_native(&mut arena, &heap, &tuple).unwrap();
+    let stored = lash_kernel_doc::heap::PageValue::Tuple(
+        crate::paged::stored::pages::tuple(
+            &access,
+            vec![
+                lash_kernel_doc::heap::PageValue::List(id(0)),
+                lash_kernel_doc::heap::PageValue::List(id(0)),
+            ],
+        )
+        .unwrap(),
+    );
+    let cold_holding = Holding::from_page(&heap, &stored).unwrap();
+    assert_eq!(tuple_holding.bytes(), cold_holding.bytes());
     admit(
         &mut ledger,
         vec![Change::Roots(vec![
             (owner(0), None),
             (owner(1), None),
-            (owner(2), Some(value(48, &[0, 0], &access))),
+            (owner(2), Some(tuple_holding)),
         ])],
         209,
         &access,
@@ -111,6 +144,24 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             entities: 1
         }
     );
+    admit(
+        &mut ledger,
+        vec![
+            Change::Move {
+                from: owner(2),
+                to: owner(3),
+            },
+            Change::Copy {
+                from: owner(3),
+                to: owner(2),
+            },
+            Change::Roots(vec![(owner(3), None)]),
+            Change::Roots(vec![(owner(2), Some(cold_holding))]),
+        ],
+        209,
+        &access,
+    );
+    assert!(ledger.holding(owner(3), &access).unwrap().is_none());
     let root = ledger.seal(&access, budget()).unwrap().unwrap();
     access.clear();
     let reads = pages.borrow().reads;
@@ -214,10 +265,27 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
             let (heap, pages) = fresh();
             let mut access = heap.pages().clone();
             let mut ledger = Ledger::fresh();
+            let mut arena = crate::arena::Arena::new();
+            let mirror = arena.create_list(&[]);
+            let mirror_handle = mirror.handle().unwrap();
+            assert_eq!(arena.identify(mirror_handle).unwrap(), id(0));
+            let empty_body = Holding::native_body(&mut arena, &heap, mirror_handle).unwrap();
+            arena.list_set(mirror_handle, 0, mirror).unwrap();
+            let cycle_body = Holding::native_body(&mut arena, &heap, mirror_handle).unwrap();
+            let result = arena.create_list(&[lash_kernel_doc::Value::Int(7)]);
+            let result_handle = result.handle().unwrap();
+            assert_eq!(arena.identify(result_handle).unwrap(), id(1));
+            let result_body = Holding::native_body(&mut arena, &heap, result_handle).unwrap();
             let mut roots = vec![
                 (frame(), Some(Holding::frame())),
-                (owner(0), Some(value(16, &[0], &access))),
-                (Owner::Ended(TaskId(7)), Some(value(16, &[1], &access))),
+                (
+                    owner(0),
+                    Some(Holding::from_native(&mut arena, &heap, &mirror).unwrap()),
+                ),
+                (
+                    Owner::Ended(TaskId(7)),
+                    Some(Holding::from_native(&mut arena, &heap, &result).unwrap()),
+                ),
             ];
             if keep_result {
                 roots.push((
@@ -230,15 +298,15 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
                 vec![
                     Change::Allocate {
                         entity: id(0),
-                        body: Holding::scalar(32),
+                        body: empty_body,
                     },
                     Change::Mutate {
                         entity: id(0),
-                        body: value(48, &[0], &access),
+                        body: cycle_body,
                     },
                     Change::Allocate {
                         entity: id(1),
-                        body: Holding::scalar(49),
+                        body: result_body,
                     },
                     Change::Roots(roots),
                     Change::Roots(vec![(owner(0), None)]),
@@ -275,6 +343,15 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
                     }
                 }
             );
+            // Completion-formula mirrors are host retention. They remain
+            // readable after logical normalization retires their source cycle.
+            arena.clean(mirror_handle).unwrap();
+            arena.clean(result_handle).unwrap();
+            let mut physical_roots = |visit: &mut crate::arena::Visit<'_>| visit(&mirror);
+            arena.collect_cycles(&mut physical_roots);
+            arena.release(&mut physical_roots);
+            assert!(matches!(arena.item(mirror_handle, 0).unwrap(),
+                Some(lash_kernel_doc::Value::List(handle)) if handle == mirror_handle));
             admit(&mut ledger, request(), limit, &access);
             assert_eq!(ledger.balance().unwrap().total().unwrap(), limit);
             if keep_result {
@@ -305,6 +382,13 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     let (heap, _) = fresh();
     let access = heap.pages().clone();
     let mut ledger = Ledger::fresh();
+    assert!(
+        matches!(
+            ledger.prepare([Change::Roots(vec![(owner(3), None)])], &access),
+            Err(HeapFault::Malformed(_))
+        ),
+        "releasing an absent source owner must reject the journal"
+    );
     admit(
         &mut ledger,
         vec![

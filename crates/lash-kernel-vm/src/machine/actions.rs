@@ -286,10 +286,7 @@ impl KernelMachine {
         let pending =
             self.continuation(&entry.suffix, phase, entry.roles.len(), |machine, at| {
                 let role = &entry.roles[at];
-                let value = machine
-                    .regs
-                    .take_source_role(role.reg, &role.site)
-                    .map_err(super::fault)?;
+                let value = machine.regs.take_source_role(role.reg, &role.site)?;
                 machine.take(role.reg.0 as usize);
                 Ok(super::frames::Role {
                     site: Arc::clone(&role.suffix),
@@ -428,7 +425,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         for (index, atom) in atoms.iter().enumerate() {
             let value = self.atom(task, exe, atom)?;
-            self.regs.source_atom(index, value).map_err(fault)?;
+            self.source_atom(index, value)?;
             self.put(at + index, value);
         }
         Ok(())
@@ -455,7 +452,7 @@ impl KernelMachine {
                 Atom::Var(var) => self.read_var(task, exe, var)?,
                 Atom::Literal(value) => self.literal(value)?,
             };
-            self.regs.source_atom(index, value).map_err(fault)?;
+            self.source_atom(index, value)?;
             values.push(value);
         }
         Ok(values)

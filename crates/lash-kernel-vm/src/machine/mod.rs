@@ -20,6 +20,7 @@ mod frames;
 pub(crate) mod islands;
 mod issued;
 mod limits;
+mod logical_held;
 mod loops;
 mod observing;
 mod operation_entry;

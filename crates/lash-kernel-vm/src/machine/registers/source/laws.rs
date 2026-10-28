@@ -7,6 +7,11 @@ use lash_kernel_value::sites::Unit;
 /// clearing a register mirror neither changes a role nor creates Null owners.
 #[test]
 fn source_operands_follow_consumption_and_ignore_register_mirrors() {
+    let run = crate::laws::embedder::Embedder::new("main { return null }");
+    let projection = Projection {
+        arena: &run.machine.arena,
+        heap: &run.machine.heap,
+    };
     let root = Site::new(Unit::Main, vec![0]);
     let selected = Arc::new(root.child(0));
     let leaf = Arc::new(selected.child(1));
@@ -53,10 +58,14 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
     };
     let mut registers = vec![Value::Null; 64];
     let mut owners = Operands::default();
-    owners.begin(&stream, &stmt, 0, &registers).unwrap();
+    owners
+        .begin(&stream, &stmt, 0, &registers, &projection)
+        .unwrap();
     assert!(owners.is_empty(), "unwritten Null storage is not a holding");
     registers[19] = Value::Int(7);
-    owners.complete(&stream, 0, &registers).unwrap();
+    owners
+        .complete(&stream, 0, &registers, &projection)
+        .unwrap();
     registers[19] = Value::Null;
     assert!(
         owners.take(Reg(19), &leaf).is_err(),
@@ -66,7 +75,9 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
     assert!(owners.is_empty());
 
     registers[3] = Value::Int(11);
-    owners.complete(&stream, 1, &registers).unwrap();
+    owners
+        .complete(&stream, 1, &registers, &projection)
+        .unwrap();
     let consume = Stream {
         ops: vec![Op::Bind {
             local: lash_kernel_exec::LocalRef { slot: 0, at: 31 },
@@ -75,7 +86,9 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         source_sites: vec![Some(Arc::clone(&result))],
         ..Default::default()
     };
-    owners.complete(&consume, 0, &registers).unwrap();
+    owners
+        .complete(&consume, 0, &registers, &projection)
+        .unwrap();
     assert!(
         owners.is_empty(),
         "a consumed source operand cannot remain in a register owner"

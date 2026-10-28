@@ -98,6 +98,9 @@ pub struct Facts {
     /// first normalization. Shared immutable DAGs reuse the calculation, not
     /// the holding charge. Representation changes preserve this cost.
     logical_immutable_cost: std::cell::OnceCell<u64>,
+    /// Immutable source occurrence and direct identity edges. This cache owns
+    /// no runtime value and does not retain an arena body for collection.
+    pub(crate) logical_holding: std::cell::OnceCell<crate::paged::logical::Holding>,
     /// Exact unsaturated sum of flat member charge sizes, never persisted.
     flat: Option<sizes::FlatSize>,
     /// A resident map's, set's or record's key index.

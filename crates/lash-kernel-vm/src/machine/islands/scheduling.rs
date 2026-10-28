@@ -70,9 +70,7 @@ impl KernelMachine {
             for (reg, value) in values {
                 self.put(reg as usize, value);
             }
-            self.regs
-                .source_begin(running.stream, running.stmt, pc)
-                .map_err(fault)?;
+            self.source_begin(running.stream, running.stmt, pc)?;
             let outcome = (|| {
                 let flow = match running.stream.ops[pc as usize] {
                     Op::Act => {
@@ -87,9 +85,7 @@ impl KernelMachine {
                 let ran = if flow == Flow::Step {
                     Ran::Step
                 } else {
-                    self.regs
-                        .source_complete(running.stream, pc)
-                        .map_err(fault)?;
+                    self.source_complete(running.stream, pc)?;
                     match self.register_suffix(host, &running, pc as usize + 1, true)? {
                         Some(ran) => ran,
                         None => self.run(host, &running, pc as usize + 1)?,
@@ -183,7 +179,7 @@ impl KernelMachine {
         out: Reg,
     ) -> Status {
         let (task, exe, stmt) = (running.task, running.exe, running.id);
-        self.regs.source_atoms_begin(&action.site).map_err(fault)?;
+        self.regs.source_atoms_begin(&action.site)?;
         self.observe_action(exe, &action.site);
         if action.guest
             && matches!(
@@ -248,7 +244,7 @@ impl KernelMachine {
 
             ActionKind::Join(handle) => {
                 let handle = self.atom(task, exe, handle)?;
-                self.regs.source_atom(0, handle).map_err(fault)?;
+                self.source_atom(0, handle)?;
                 match self.join_one(task, handle)? {
                     Ok(value) => {
                         self.put(out, value);
@@ -262,7 +258,7 @@ impl KernelMachine {
             }
             ActionKind::JoinMany(mode, handles) => {
                 let handles = self.atom(task, exe, handles)?;
-                self.regs.source_atom(0, handles).map_err(fault)?;
+                self.source_atom(0, handles)?;
                 match self.join_list(task, *mode, &handles)? {
                     Ok(value) => {
                         self.put(out, value);
@@ -284,7 +280,7 @@ impl KernelMachine {
             }
             ActionKind::Cancel(handle) => {
                 let handle = self.atom(task, exe, handle)?;
-                self.regs.source_atom(0, handle).map_err(fault)?;
+                self.source_atom(0, handle)?;
                 let Value::Task(target) = handle else {
                     return raise("type_error", "`cancel` takes a task handle");
                 };
