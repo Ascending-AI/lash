@@ -192,11 +192,17 @@ impl Tables {
                         regs: stmt.regs,
                     };
                     assert!(
-                        self.stream
-                            .verify_holding_sites(&code.source_room, ranges.main)
-                            && ranges.test.is_none_or(|test| self
-                                .stream
-                                .verify_holding_sites(&code.source_room, test)),
+                        self.stream.verify_holding_sites(
+                            &code.source_room,
+                            ranges.main,
+                            ranges.regs
+                        ) && ranges
+                            .test
+                            .is_none_or(|test| self.stream.verify_holding_sites(
+                                &code.source_room,
+                                test,
+                                ranges.regs
+                            )),
                         "source holding coordinates at {}",
                         code.site
                     );
@@ -907,6 +913,9 @@ pub(crate) struct Stream {
     /// Exact source coordinates recorded during lowering, before placement.
     /// Charge-region heads have no source holding event of their own.
     pub(crate) source_sites: Vec<Option<Arc<Site>>>,
+    /// Ownership-only joins after an executed op, including the taken arm
+    /// of a conditional. They do not add executable or charge operations.
+    pub(crate) source_joins: BTreeMap<u32, Vec<SourceJoin>>,
     pub(crate) consts: Vec<Constant>,
     pub(crate) names: Vec<BindingName>,
     pub(crate) fields: Vec<Field>,
@@ -925,6 +934,13 @@ pub(crate) struct Stream {
     /// The layout the stream was lowered under, which says whether its
     /// read sites cache.
     pub(crate) layout: Layout,
+}
+
+#[derive(Clone)]
+pub(crate) struct SourceJoin {
+    pub(crate) from: Arc<Site>,
+    pub(crate) to: Arc<Site>,
+    pub(crate) value: Reg,
 }
 
 /// An action nested in a statement's expression, or a call inside an

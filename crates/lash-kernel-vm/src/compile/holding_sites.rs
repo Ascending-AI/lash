@@ -4,11 +4,19 @@
 use super::{OpRange, Stream, room};
 use lash_kernel_doc::{Expr, Node, Stmt};
 use lash_kernel_exec::Op;
+use lash_kernel_value::sites::Site;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 impl Stream {
     /// Cold verification against the independent source tree. Ordinary worker
     /// activation does not walk that tree or force its memory description.
-    pub(super) fn verify_holding_sites(&self, source: &room::Source, range: OpRange) -> bool {
+    pub(super) fn verify_holding_sites(
+        &self,
+        source: &room::Source,
+        range: OpRange,
+        regs: u32,
+    ) -> bool {
         if self.source_sites.len() != self.ops.len() {
             return false;
         }
@@ -36,6 +44,83 @@ impl Stream {
             }
             if !implements(op, node) {
                 return false;
+            }
+        }
+        self.verify_source_flow(source, range, regs)
+    }
+
+    fn verify_source_flow(&self, source: &room::Source, range: OpRange, regs: u32) -> bool {
+        let mut pending = vec![(range.start, vec![None::<Arc<Site>>; regs as usize])];
+        let mut seen = BTreeMap::new();
+        while let Some((pc, mut owners)) = pending.pop() {
+            if pc == range.end() {
+                continue;
+            }
+            if pc > range.end() {
+                return false;
+            }
+            if let Some(previous) = seen.insert(pc, owners.clone()) {
+                if previous != owners {
+                    return false;
+                }
+                continue;
+            }
+            let op = self.ops[pc as usize];
+            for reg in op.reads() {
+                let Some(owner) = owners.get_mut(reg.ix()) else {
+                    return false;
+                };
+                if owner.is_none() {
+                    return false;
+                }
+                if !matches!(op, Op::Pin { .. }) {
+                    *owner = None;
+                }
+            }
+            if let Some(reg) = op.writes() {
+                let Some(owner) = owners.get_mut(reg.ix()) else {
+                    return false;
+                };
+                *owner = self.source_sites[pc as usize].clone();
+            }
+            if let Some(joins) = self.source_joins.get(&pc) {
+                for join in joins {
+                    let Some(owner) = owners.get_mut(join.value.ix()) else {
+                        return false;
+                    };
+                    if owner.as_ref() != Some(&join.from)
+                        || join.from.unit != join.to.unit
+                        || join.from.path.len() != join.to.path.len() + 1
+                        || !join.from.path.starts_with(&join.to.path)
+                        || !join.to.path.starts_with(&source.site.path)
+                    {
+                        return false;
+                    }
+                    let mut node = Node::Block(&source.body);
+                    for index in &join.to.path[source.site.path.len()..] {
+                        let Some(child) = node.children().get(*index as usize).copied() else {
+                            return false;
+                        };
+                        node = child;
+                    }
+                    if !matches!(
+                        (node, join.from.path.last()),
+                        (Node::Expr(Expr::If { .. }), Some(1 | 2))
+                            | (Node::Expr(Expr::Let { .. }), Some(1))
+                    ) {
+                        return false;
+                    }
+                    *owner = Some(Arc::clone(&join.to));
+                }
+            }
+            let next = pc + 1;
+            match op {
+                Op::Jump { skip } => pending.push((next + skip, owners)),
+                Op::JumpIfFalse { skip, .. } => {
+                    pending.push((next + skip, owners.clone()));
+                    pending.push((next, owners));
+                }
+                _ => pending.push((next, owners)),
             }
         }
         true

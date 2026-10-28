@@ -338,7 +338,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
         LOOP,
         WALK,
         ISLAND,
-        "main { let x = pair.twice(3) let ys = let(y = x, if(true, [y, x], [x])) return text.join(ys, \"-\") }",
+        "main { let x = pair.twice(3) let ys = let(y = x, if(true, [y, if(false, x, y)], if(false, [x], [y]))) return text.join(ys, \"-\") }",
     ] {
         let (program, _) = Embedder::with(
             text,
@@ -383,6 +383,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 code.source_room.verify().unwrap();
                 let key = (code.source_room.owner, code.source_room.site.clone());
                 let mut sites = std::collections::BTreeMap::new();
+                let mut joins = std::collections::BTreeMap::new();
                 let mut blocks = vec![code.body];
                 while let Some(block) = blocks.pop() {
                     for stmt in &exe.block(block).stmts {
@@ -406,14 +407,25 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                                     _ => op.kind(),
                                 };
                                 *sites.entry((site.as_ref().clone(), kind)).or_insert(0) += 1;
+                                if let Some(transfers) = stream.source_joins.get(&pc) {
+                                    for transfer in transfers {
+                                        *joins
+                                            .entry((
+                                                transfer.from.as_ref().clone(),
+                                                transfer.to.as_ref().clone(),
+                                            ))
+                                            .or_insert(0) += 1;
+                                    }
+                                }
                             }
                         }
                         blocks.extend(stmt.form.blocks());
                     }
                 }
                 let holding_key = (key.clone(), code.capture_names.clone());
-                if let Some(previous) = holding_sites.insert(holding_key, sites.clone()) {
-                    assert_eq!(previous, sites, "source events survive physical layouts");
+                let events = (sites, joins);
+                if let Some(previous) = holding_sites.insert(holding_key, events.clone()) {
+                    assert_eq!(previous, events, "source events survive physical layouts");
                 }
                 if let Some(previous) = canonical.get(&key) {
                     assert_eq!(

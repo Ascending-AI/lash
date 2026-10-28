@@ -27,11 +27,12 @@ use lash_kernel_exec::{
 use lash_kernel_value::names::FunctionId;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
-    NestedKind, NestedRole, Runs, Shuffler, Stmt, Var, Via,
+    NestedKind, NestedRole, Runs, Shuffler, SourceJoin, Stmt, Var, Via,
 };
 use crate::functions::brand_built;
 
@@ -44,6 +45,10 @@ struct Ops {
     ops: Vec<Op>,
     source_sites: Vec<Option<Arc<Site>>>,
     source: Arc<Site>,
+    source_joins: BTreeMap<u32, Vec<SourceJoin>>,
+    /// Every instruction that can finish the last expression evaluated.
+    /// A conditional's arms can have different final instructions.
+    ends: Vec<u32>,
     regs: u32,
     regions: Regions,
     /// Whether the last region is open: the ops since its head stand in it.
@@ -160,6 +165,13 @@ impl Ops {
         self.regs = self.regs.max(other.regs);
         self.ops.append(&mut other.ops);
         self.source_sites.append(&mut other.source_sites);
+        self.source_joins.extend(
+            other
+                .source_joins
+                .into_iter()
+                .map(|(pc, joins)| (pc + offset, joins)),
+        );
+        self.ends = other.ends.into_iter().map(|pc| pc + offset).collect();
         other.regions.clear();
         (other.ops, other.regions)
     }
@@ -167,6 +179,17 @@ impl Ops {
     /// Notes that register `reg` is used.
     fn uses(&mut self, reg: Reg) {
         self.regs = self.regs.max(reg.0 + 1);
+    }
+
+    fn join(&mut self, ends: &[u32], child: u32, value: Reg) {
+        let join = SourceJoin {
+            from: Arc::new(self.source.child(child)),
+            to: Arc::clone(&self.source),
+            value,
+        };
+        for pc in ends {
+            self.source_joins.entry(*pc).or_default().push(join.clone());
+        }
     }
 }
 
@@ -421,6 +444,11 @@ impl Compiler<'_> {
         place_regions(&mut ops, &mut self.stream.regions, start);
         self.stream.ops.append(&mut ops.ops);
         self.stream.source_sites.append(&mut ops.source_sites);
+        self.stream.source_joins.extend(
+            ops.source_joins
+                .into_iter()
+                .map(|(pc, joins)| (pc + start, joins)),
+        );
         self.spare.push(ops.ops);
         ops.regions.clear();
         self.spare_regions.push(ops.regions);
@@ -504,6 +532,8 @@ impl Compiler<'_> {
             ops: self.spare.pop().unwrap_or_default(),
             source_sites: Vec::new(),
             source: Arc::new(self.site()),
+            source_joins: BTreeMap::new(),
+            ends: Vec::new(),
             regs: 0,
             regions: self.spare_regions.pop().unwrap_or_default(),
             open: false,
@@ -910,8 +940,13 @@ impl Compiler<'_> {
                 self.child(1, |c| c.expr(ops, then, dst));
                 let jump = ops.ops.len();
                 ops.push(Op::Jump { skip: 0 });
+                ops.join(&[jump as u32], 1, dst);
                 let otherwise = ops.ops.len();
                 self.child(2, |c| c.expr(ops, r#else, dst));
+                let otherwise_ends = ops.ends.clone();
+                ops.join(&otherwise_ends, 2, dst);
+                ops.ends = vec![jump as u32];
+                ops.ends.extend(otherwise_ends);
                 // Both arms reach what follows: a region of its own.
                 ops.close();
                 let end = ops.ops.len();
@@ -933,6 +968,7 @@ impl Compiler<'_> {
                 ops.push(Op::LetBind { local, src: dst });
                 self.child(1, |c| c.expr(ops, body, dst));
                 ops.push(Op::LetEnd { local });
+                ops.join(&[ops.ops.len() as u32 - 1], 1, dst);
                 if let Some(scopes) = self.scopes.last_mut() {
                     let declared = scopes.blocks.pop().unwrap_or_default();
                     if let Some(block) = scopes.blocks.last_mut() {
@@ -989,6 +1025,10 @@ impl Compiler<'_> {
             }
         }
         self.live.truncate(live);
+        if !matches!(expr, doc::Expr::If { .. }) {
+            ops.ends.clear();
+            ops.ends.push(ops.ops.len() as u32 - 1);
+        }
         ops.source = enclosing;
     }
 
