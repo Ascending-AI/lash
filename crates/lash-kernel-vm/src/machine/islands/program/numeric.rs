@@ -187,13 +187,13 @@ impl Build<'_> {
             let Op::Store { inputs, cache, .. } = &mut self.ops[at].op else {
                 unreachable!()
             };
-            *cache = match reads[index] {
+            *cache = matches!(
+                reads[index],
                 Read::Literal {
                     value: Value::Text(_),
                     ..
-                } => begin.as_ref().map(|begin| begin.id),
-                _ => None,
-            };
+                }
+            );
             *inputs = Some(Box::new(StoreInputs {
                 reads,
                 roles: [target, index, value],

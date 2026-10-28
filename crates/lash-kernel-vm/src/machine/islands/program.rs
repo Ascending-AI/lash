@@ -245,7 +245,7 @@ pub(in crate::machine::islands) enum Op {
         field: Option<usize>,
         pc: u32,
         inputs: Option<Box<StoreInputs>>,
-        cache: Option<StmtId>,
+        cache: bool,
         finish: Option<u32>,
     },
     Remove {
@@ -880,7 +880,7 @@ impl<'e> Build<'e> {
                     field: *field,
                     pc: *pc,
                     inputs: None,
-                    cache: None,
+                    cache: false,
                     finish: None,
                 });
                 self.emit(Op::Done {
