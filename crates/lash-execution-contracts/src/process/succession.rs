@@ -10,6 +10,7 @@ pub const SUCCESSOR_MAIL: &str = "process.successor";
 /// payload and the published environment it runs under.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessSuccessor {
+    pub request_id: Option<String>,
     pub payload: serde_json::Value,
     pub env: ProcessEnvRef,
 }
@@ -17,7 +18,11 @@ pub struct ProcessSuccessor {
 impl ProcessSuccessor {
     #[must_use]
     pub fn new(payload: serde_json::Value, env: ProcessEnvRef) -> Self {
-        Self { payload, env }
+        Self {
+            payload,
+            env,
+            request_id: None,
+        }
     }
 }
 
@@ -26,6 +31,11 @@ impl ProcessSuccessor {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessSuccessorRequest {
+    /// The fenced owner settled this id without changing the selected pair.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchanged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub payload: serde_json::Value,
     pub env: ProcessEnvRef,
     /// The definition the engine's admission names the new payload by.
@@ -36,10 +46,12 @@ pub struct ProcessSuccessorRequest {
 impl ProcessSuccessorRequest {
     /// The replay key of the event `prefix` records this request as.
     #[must_use]
-    pub(crate) fn replay_key(&self, process: &ProcessId, prefix: &str) -> String {
-        let digest = crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(
-            &serde_json::to_value(self).unwrap_or_default(),
-        ));
+    pub fn replay_key(&self, process: &ProcessId, prefix: &str) -> String {
+        let value = self.request_id.as_ref().map_or_else(
+            || serde_json::to_value(self).unwrap_or_default(),
+            |id| serde_json::json!({"request_id":id}),
+        );
+        let digest = crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(&value));
         format!("{prefix}:{process}:{digest}")
     }
 }
@@ -52,6 +64,8 @@ pub enum ProcessSuccession {
     Requested,
     /// The process already runs the named pair; nothing was recorded.
     AlreadyCurrent,
+    /// This request id already has a durable success or refusal event.
+    AlreadyResolved,
 }
 
 /// Why a successor request is refused. A refusal records nothing, and the

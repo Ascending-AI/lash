@@ -1829,6 +1829,90 @@ export_file(
 )
 
 export_file(
+    name = "host-schemas/kernel-helper-publication-upgrade-request/v1.d.ts",
+    src = "host-schemas/kernel-helper-publication-upgrade-request/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-publication-upgrade-request/v1.schema.json",
+    src = "host-schemas/kernel-helper-publication-upgrade-request/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-publication-upgrade/v1.d.ts",
+    src = "host-schemas/kernel-helper-publication-upgrade/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-publication-upgrade/v1.schema.json",
+    src = "host-schemas/kernel-helper-publication-upgrade/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-run-upgrade-request/v1.d.ts",
+    src = "host-schemas/kernel-helper-run-upgrade-request/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-run-upgrade-request/v1.schema.json",
+    src = "host-schemas/kernel-helper-run-upgrade-request/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-upgrade-refusal/v1.d.ts",
+    src = "host-schemas/kernel-helper-upgrade-refusal/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-upgrade-refusal/v1.schema.json",
+    src = "host-schemas/kernel-helper-upgrade-refusal/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-upgrade-safety/v1.d.ts",
+    src = "host-schemas/kernel-helper-upgrade-safety/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-upgrade-safety/v1.schema.json",
+    src = "host-schemas/kernel-helper-upgrade-safety/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-run-upgrade/v1.d.ts",
+    src = "host-schemas/kernel-helper-run-upgrade/v1.d.ts",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "host-schemas/kernel-helper-run-upgrade/v1.schema.json",
+    src = "host-schemas/kernel-helper-run-upgrade/v1.schema.json",
+    mode = "reference",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
     name = "host-schemas/kernel-migration-refusal/v1.d.ts",
     src = "host-schemas/kernel-migration-refusal/v1.d.ts",
     mode = "reference",

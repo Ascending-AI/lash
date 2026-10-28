@@ -212,3 +212,62 @@ pub mod helper_compatibility_work {
         }
     }
 }
+
+/// An upgrade uses the authenticated retained-state walk even when library identities match.
+#[derive(Debug, thiserror::Error)]
+pub enum HelperUpgradeCheckError {
+    #[error(transparent)]
+    Heap(#[from] HeapFault),
+    #[error(transparent)]
+    Refused(#[from] lash_kernel_doc::HelperUpgradeRefusal),
+}
+impl Checkpoint {
+    pub fn check_helper_upgrade(
+        &self,
+        source: Box<dyn super::PageSource>,
+        documents: &std::collections::BTreeMap<
+            lash_kernel_value::LinkId,
+            lash_kernel_doc::Document,
+        >,
+        imports: &std::collections::BTreeMap<
+            (lash_kernel_value::LinkId, lash_kernel_value::ImportSlot),
+            lash_kernel_value::CallableId,
+        >,
+        build: &lash_kernel_doc::BuildHelpers,
+        upgrade: &lash_kernel_doc::HelperUpgrade,
+    ) -> Result<lash_kernel_doc::HelperUpgradeSafety, HelperUpgradeCheckError> {
+        let live = super::code::scan_checkpoint(self, source, true)?;
+        if let Some(function) = live.constructors.intersection(&upgrade.changed).next() {
+            return Err(lash_kernel_doc::HelperUpgradeRefusal::BrandedData {
+                function: *function,
+            }
+            .into());
+        }
+        let fixed = super::code::restore_selection(
+            super::RetainedCode {
+                callables: live.fixed_callables.clone(),
+                ..Default::default()
+            },
+            documents,
+            imports,
+            build,
+        )?;
+        if let Some(function) = fixed.pins.intersection(&upgrade.changed).next() {
+            return Err(lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable {
+                function: *function,
+            }
+            .into());
+        }
+        let retained = super::code::restore_selection(live, documents, imports, build)?;
+        let functions: std::collections::BTreeSet<_> = retained
+            .pins
+            .intersection(&upgrade.changed)
+            .copied()
+            .collect();
+        Ok(if functions.is_empty() {
+            lash_kernel_doc::HelperUpgradeSafety::Safe
+        } else {
+            lash_kernel_doc::HelperUpgradeSafety::Deferred { functions }
+        })
+    }
+}

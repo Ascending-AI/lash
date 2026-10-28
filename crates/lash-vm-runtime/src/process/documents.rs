@@ -1577,3 +1577,22 @@ mod store_cause_laws {
         );
     }
 }
+
+impl KernelDocuments {
+    pub(super) async fn hold_helper_upgrade(
+        &self,
+        claim: &ReferrerClaim,
+        content: &LinkedContent,
+    ) -> Result<(), EnginePortError> {
+        let code = CellCode {
+            content: content.clone(),
+            documents: content
+                .documents
+                .iter()
+                .map(|(id, doc)| (*id, IdentifiedDocument::from_shared(Arc::clone(doc))))
+                .collect(),
+            prepared: content.links.keys().copied().collect(),
+        };
+        self.hold_cell_code(claim, &code, &code.prepared, &[]).await
+    }
+}

@@ -512,7 +512,7 @@ impl ProcessWorkflowOverlayAccumulator {
                 }
             }
             // Ordinals from here on refer to the successor's document.
-            ProcessLifecycleFact::Succeeded(_) => self.ran.clear(),
+            ProcessLifecycleFact::Succeeded(request) if !request.unchanged => self.ran.clear(),
             ProcessLifecycleFact::Terminal { .. } => self.finish(),
             _ => {}
         }
@@ -983,6 +983,8 @@ mod tests {
             6,
             ProcessLifecycleFact::Succeeded(
                 lash_execution_contracts::process::ProcessSuccessorRequest {
+                    unchanged: false,
+                    request_id: None,
                     payload: serde_json::Value::Null,
                     env: crate::ProcessEnvRef::new("successor"),
                     definition_id: None,
@@ -997,6 +999,23 @@ mod tests {
             ProcessWorkflowObservation::Counts
         );
 
+        overlay.committed(&committed(
+            8,
+            ProcessLifecycleFact::Succeeded(
+                lash_execution_contracts::process::ProcessSuccessorRequest {
+                    unchanged: true,
+                    request_id: Some("no-op-upgrade".into()),
+                    payload: serde_json::Value::Null,
+                    env: crate::ProcessEnvRef::new("successor"),
+                    definition_id: None,
+                },
+            ),
+        ));
+        assert_eq!(
+            counts(&overlay),
+            [(1, 1, 0)],
+            "an already-current request does not restart statement counts"
+        );
         let unobserved = ProcessWorkflowOverlayAccumulator::new(process).snapshot();
         assert_eq!(unobserved.observation, ProcessWorkflowObservation::Off);
         assert!(unobserved.ran.is_empty());

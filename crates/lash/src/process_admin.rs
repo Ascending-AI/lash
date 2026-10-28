@@ -1284,3 +1284,169 @@ mod host_start_refusal_tests {
         }
     }
 }
+
+#[cfg(feature = "codemode")]
+impl Processes {
+    /// Request an explicit helper upgrade. The owner rechecks every retained root at rest.
+    /// `Requested` includes a run whose active continuation must first drain.
+    pub async fn upgrade_run(
+        &self,
+        process: &ProcessId,
+        pin: &crate::process::HostArtifactPin,
+        request: &lash_kernel_doc::HelperRunUpgradeRequest,
+    ) -> Result<
+        std::result::Result<
+            lash_kernel_doc::HelperRunUpgrade,
+            lash_kernel_doc::HelperUpgradeRefusal,
+        >,
+    > {
+        use lash_execution_contracts::process::ProcessInput;
+        let record = self
+            .core
+            .backend
+            .process_registry()
+            .get_process(process)
+            .await?
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Session("process is not retained".into())
+            })?;
+        let lookup = lash_execution_contracts::process::ProcessSuccessorRequest {
+            unchanged: false,
+            request_id: Some(request.request_id.clone()),
+            payload: serde_json::Value::Null,
+            env: lash_core::ProcessEnvRef::new("upgrade-lookup"),
+            definition_id: None,
+        };
+        for prefix in ["process.succeeded", "process.successor_refused"] {
+            let settled = self
+                .core
+                .backend
+                .process_registry()
+                .event_by_replay_key(
+                    process,
+                    &lookup.replay_key(process, prefix),
+                    record.last_event_sequence,
+                )
+                .await?;
+            if !matches!(
+                settled,
+                lash_execution_contracts::process::ProcessEventReadOutcome::Retained(None)
+            ) {
+                return Ok(Ok(lash_kernel_doc::HelperRunUpgrade {
+                    request_id: request.request_id.clone(),
+                    publication: None,
+                    state: lash_kernel_doc::HelperRunUpgradeState::AlreadyResolved,
+                }));
+            }
+        }
+        let ProcessInput::Engine {
+            kind,
+            payload,
+            launch,
+        } = record.input.as_ref()
+        else {
+            return Err(lash_execution_contracts::PluginError::Session(
+                "process has no kernel engine".into(),
+            )
+            .into());
+        };
+        if kind != lash_vm_runtime::LASH_VM_ENGINE_KIND {
+            return Err(lash_execution_contracts::PluginError::Session(
+                "process has another engine".into(),
+            )
+            .into());
+        }
+        let mut input = lash_vm_runtime::KernelProcessInput::from_payload(payload)
+            .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
+        let artifacts = self.core.host_artifacts();
+        let (code, publication) = match artifacts
+            .documents()?
+            .upgrade_run_code(&crate::artifacts::upgrade_claim(pin)?, &input)
+            .await
+            .map_err(lash_execution_contracts::PluginError::from)?
+        {
+            Ok(upgraded) => upgraded,
+            Err(refusal) => return Ok(Err(refusal)),
+        };
+        let mut env = self.env(&launch.env).await?.ok_or_else(|| {
+            lash_execution_contracts::PluginError::Session("process environment is missing".into())
+        })?;
+        let mut execution = env.execution().clone();
+        for (use_, binding) in env.execution().uses.iter() {
+            if let Some(link) = publication.links.get(&use_.link) {
+                execution.uses.insert(
+                    lash_kernel_value::OperationUse {
+                        link: *link,
+                        slot: use_.slot,
+                    },
+                    binding.clone(),
+                );
+            }
+        }
+        let descriptor =
+            lash_vm_runtime::definition_draft(&lash_vm_runtime::KernelProcessDefinition {
+                code: code.clone(),
+            })
+            .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
+        let definition = artifacts.publish_definition(pin, &descriptor).await?;
+        let inspection = artifacts
+            .inspect_target(&crate::process::LinkTarget::Definition(definition.id))
+            .await?;
+        execution.requirements.machine.extend(&inspection.machine);
+        execution.roots.insert(publication.to.link());
+        execution.authored.insert(publication.to.link());
+        for link in &env.execution().authored {
+            if let Some(next) = publication.links.get(link) {
+                execution.authored.insert(*next);
+            }
+        }
+        env = env.with_execution(execution);
+        let env = artifacts.publish_process_env(pin, &env).await?;
+        input.code = code;
+        let payload = serde_json::to_value(input)
+            .map_err(|e| lash_execution_contracts::PluginError::Session(e.to_string()))?;
+        let mut successor = lash_execution_contracts::process::ProcessSuccessor::new(payload, env);
+        successor.request_id = Some(request.request_id.clone());
+        let result = match self.succeed(process, successor).await {
+            Ok(result) => result,
+            Err(crate::EmbedError::Plugin(
+                lash_execution_contracts::PluginError::ProcessSuccessorRefused { refusal, .. },
+            )) => {
+                if let lash_execution_contracts::process::ProcessSuccessorRefusal::Engine {
+                    refusal,
+                    ..
+                } = refusal.as_ref()
+                    && let Ok(refusal) = serde_json::from_value::<
+                        lash_kernel_doc::HelperUpgradeRefusal,
+                    >(refusal.clone())
+                {
+                    return Ok(Err(refusal));
+                }
+                return Err(
+                    lash_execution_contracts::PluginError::ProcessSuccessorRefused {
+                        process: process.clone(),
+                        refusal,
+                    }
+                    .into(),
+                );
+            }
+            Err(error) => return Err(error),
+        };
+        let state = match result {
+            lash_execution_contracts::process::ProcessSuccession::Requested => {
+                lash_kernel_doc::HelperRunUpgradeState::Requested
+            }
+            lash_execution_contracts::process::ProcessSuccession::AlreadyCurrent => {
+                lash_kernel_doc::HelperRunUpgradeState::AlreadyCurrent
+            }
+            lash_execution_contracts::process::ProcessSuccession::AlreadyResolved => {
+                lash_kernel_doc::HelperRunUpgradeState::AlreadyResolved
+            }
+        };
+        Ok(Ok(lash_kernel_doc::HelperRunUpgrade {
+            request_id: request.request_id.clone(),
+            publication: Some(publication),
+            state,
+        }))
+    }
+}

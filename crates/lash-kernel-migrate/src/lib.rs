@@ -47,3 +47,8 @@ pub use migration::{
 };
 pub use rewrite::{Redeclared, redeclare, replace_functions, unchanged};
 pub use saved::{function_value, saved_function};
+
+mod helper_upgrade;
+pub use helper_upgrade::{
+    check_upgrade_captures, check_upgrade_data, upgrade_callable, upgrade_helpers,
+};

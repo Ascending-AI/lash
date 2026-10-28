@@ -5,9 +5,7 @@ use lash_kernel_doc::{ActKind, Action, Callee, Expr, FunctionDefinition, Node, S
 use lash_kernel_value::{FunctionId, HelperLibraryId};
 use serde::{Deserialize, Serialize};
 
-/// Stable upgrade pairing key, scoped by its owning package. Never executable.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct HelperId(pub String);
+pub use lash_kernel_doc::HelperId;
 
 /// The Rust implementation a retained native declaration needs.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -608,5 +606,143 @@ impl Archive {
         next.releases.push(release);
         self.check_append(&next)?;
         Ok(next)
+    }
+}
+
+impl Archive {
+    /// Pair exact reached helpers through the entire authenticated contract history.
+    pub fn upgrade(
+        &self,
+        reached: &BTreeSet<FunctionId>,
+    ) -> Result<lash_kernel_doc::HelperUpgrade, lash_kernel_doc::HelperUpgradeRefusal> {
+        let release = self
+            .releases
+            .last()
+            .ok_or_else(|| lash_kernel_doc::HelperUpgradeRefusal::Archive {
+                message: "empty helper ledger".into(),
+            })?
+            .library
+            .identity;
+        self.upgrade_to(reached, release)
+    }
+
+    /// Validate an already recorded target against its original release, across later deploys.
+    pub fn upgrade_to(
+        &self,
+        reached: &BTreeSet<FunctionId>,
+        release: HelperLibraryId,
+    ) -> Result<lash_kernel_doc::HelperUpgrade, lash_kernel_doc::HelperUpgradeRefusal> {
+        use lash_kernel_doc::{HelperChange, HelperUpgrade, HelperUpgradeRefusal as Refusal};
+        let definitions = self.validate().map_err(|error| Refusal::Archive {
+            message: error.to_string(),
+        })?;
+        let reached = reach(reached, &definitions).ok_or_else(|| Refusal::Archive {
+            message: "reached helper is absent".into(),
+        })?;
+        let sequence = self
+            .releases
+            .iter()
+            .rposition(|entry| entry.library.identity == release)
+            .ok_or_else(|| Refusal::Archive {
+                message: format!("target helper release {release} is not archived"),
+            })?;
+        let current = &self.releases[sequence];
+        let mut pairs = BTreeMap::<FunctionId, BTreeMap<HelperId, Binding>>::new();
+        let mut ambiguous = BTreeSet::new();
+        for release in &self.releases[..=sequence] {
+            for (helper, binding) in &release.bindings {
+                if pairs
+                    .entry(binding.function)
+                    .or_default()
+                    .insert(helper.clone(), binding.clone())
+                    .is_some_and(|prior| prior.revision != binding.revision)
+                {
+                    ambiguous.insert(binding.function);
+                }
+            }
+        }
+        let mut result = HelperUpgrade::default();
+        result.changed.extend(
+            definitions
+                .keys()
+                .filter(|id| !current.library.members.contains(id))
+                .copied(),
+        );
+        let mut covered = BTreeSet::new();
+        for function in &reached {
+            let Some(bindings) = pairs.get(function) else {
+                continue;
+            };
+            if bindings.len() != 1 || ambiguous.contains(function) {
+                return Err(Refusal::HelperUnpaired {
+                    function: *function,
+                });
+            }
+            let (helper, binding) = bindings.first_key_value().ok_or(Refusal::HelperUnpaired {
+                function: *function,
+            })?;
+            let Some(target) = current.bindings.get(helper) else {
+                return Err(
+                    if self
+                        .ledger
+                        .get(helper)
+                        .is_some_and(|entry| !entry.tombstones.is_empty())
+                    {
+                        Refusal::HelperTombstoned {
+                            helper: helper.clone(),
+                        }
+                    } else {
+                        Refusal::HelperMissing {
+                            helper: helper.clone(),
+                        }
+                    },
+                );
+            };
+            if target.revision != binding.revision {
+                return Err(Refusal::HelperContractChanged {
+                    helper: helper.clone(),
+                    from: binding.revision,
+                    to: target.revision,
+                });
+            }
+            let old_reach =
+                reach(&[*function].into(), &definitions).ok_or(Refusal::HelperUnpaired {
+                    function: *function,
+                })?;
+            covered.extend(&old_reach);
+            if function == &target.function {
+                continue;
+            }
+            let new_reach =
+                reach(&[target.function].into(), &definitions).ok_or(Refusal::HelperUnpaired {
+                    function: target.function,
+                })?;
+            result
+                .changed
+                .extend(old_reach.difference(&new_reach).copied());
+            let before = &definitions[function];
+            let after = &definitions[&target.function];
+            result.functions.insert(*function, target.function);
+            result.changes.push(HelperChange {
+                helper: helper.clone(),
+                from: *function,
+                to: target.function,
+                body: before.body() != after.body(),
+                charge: before.metering() != after.metering(),
+                native_version: before.native_version != after.native_version,
+            });
+        }
+        if let Some(function) = reached.difference(&covered).next() {
+            return Err(Refusal::HelperUnpaired {
+                function: *function,
+            });
+        }
+        result
+            .changes
+            .sort_by(|a, b| (&a.helper, a.from).cmp(&(&b.helper, b.from)));
+        if result.changes.is_empty() {
+            result.changed.clear();
+        }
+        Ok(result)
     }
 }

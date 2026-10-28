@@ -291,6 +291,7 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
         .publish_process_env(&pin, &old.env)
         .await
         .unwrap();
+    let old_env = env.clone();
     let settings = core
         .processes()
         .engine_defaults(lash_vm_runtime::LASH_VM_ENGINE_KIND, &old.payload)
@@ -323,6 +324,13 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
             "setup must park before its timer fires"
         );
     }
+    let mut no_op = ProcessSuccessor::new(old.payload.clone(), old_env.clone());
+    no_op.request_id = Some("already-current-law".into());
+    assert_eq!(
+        core.processes().succeed(&process, no_op).await.unwrap(),
+        lash::process::ProcessSuccession::Requested
+    );
+    nodes.quiesce().await;
     let before = stored(&core, &process).await;
     assert_eq!(before.state["phase"], "parked");
     assert_eq!(before.state["waits"].as_object().unwrap().len(), 1);
@@ -354,12 +362,21 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
         .publish_process_env(&pin, &new.env)
         .await
         .unwrap();
+    let mut successor = ProcessSuccessor::new(new.payload.clone(), env);
+    successor.request_id = Some("successor-law".into());
+    assert_eq!(
+        core.processes().succeed(&process, successor).await.unwrap(),
+        lash::process::ProcessSuccession::Requested
+    );
+    let mut pending_retry = ProcessSuccessor::new(old.payload.clone(), old_env.clone());
+    pending_retry.request_id = Some("successor-law".into());
     assert_eq!(
         core.processes()
-            .succeed(&process, ProcessSuccessor::new(new.payload.clone(), env))
+            .succeed(&process, pending_retry)
             .await
             .unwrap(),
-        lash::process::ProcessSuccession::Requested
+        lash::process::ProcessSuccession::Requested,
+        "a queued retry keeps the first request's target"
     );
     nodes.quiesce().await;
     // There is only one node until this inspection. In particular, an
@@ -394,6 +411,36 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
             "recovery finishes before any admitted wait expires"
         );
     }
+    let env = core
+        .host_artifacts()
+        .publish_process_env(&pin, &old.env)
+        .await
+        .unwrap();
+    let mut duplicate = ProcessSuccessor::new(old.payload.clone(), env);
+    duplicate.request_id = Some("successor-law".into());
+    assert_eq!(
+        core.processes().succeed(&process, duplicate).await.unwrap(),
+        lash::process::ProcessSuccession::AlreadyResolved
+    );
+    assert!(
+        assert_pair(&stored(&core, &process).await, &before, &old, &new),
+        "a repeated request id must not switch back to an earlier selection"
+    );
+    let mut no_op_retry = ProcessSuccessor::new(old.payload.clone(), old_env);
+    no_op_retry.request_id = Some("already-current-law".into());
+    assert_eq!(
+        core.processes()
+            .succeed(&process, no_op_retry)
+            .await
+            .unwrap(),
+        lash::process::ProcessSuccession::AlreadyResolved
+    );
+    assert!(assert_pair(
+        &stored(&core, &process).await,
+        &before,
+        &old,
+        &new
+    ));
     let count = advances() - offset;
     nodes.kill("a");
     nodes.kill("b");

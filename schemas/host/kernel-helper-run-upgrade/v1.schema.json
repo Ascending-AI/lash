@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "CallableId": {
+      "additionalProperties": false,
+      "description": "A function and its operation context. Authored callbacks retain their defining\nLink; build helpers carry the caller's real Link and an exact library ID.",
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        }
+      },
+      "required": [
+        "link",
+        "function"
+      ],
+      "type": "object"
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "HelperChange": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "boolean"
+        },
+        "charge": {
+          "type": "boolean"
+        },
+        "from": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "helper": {
+          "$ref": "#/$defs/HelperId"
+        },
+        "native_version": {
+          "type": "boolean"
+        },
+        "to": {
+          "$ref": "#/$defs/FunctionId"
+        }
+      },
+      "required": [
+        "helper",
+        "from",
+        "to",
+        "body",
+        "charge",
+        "native_version"
+      ],
+      "type": "object"
+    },
+    "HelperId": {
+      "description": "Permanent package-qualified contract name, used only when pairing releases.",
+      "type": "string"
+    },
+    "HelperPublicationUpgrade": {
+      "additionalProperties": false,
+      "description": "A new immutable publication revision. The host chooses whether its alias moves.",
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "from": {
+          "$ref": "#/$defs/WorkflowReference"
+        },
+        "links": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "$ref": "#/$defs/LinkId"
+            }
+          },
+          "type": "object"
+        },
+        "to": {
+          "$ref": "#/$defs/WorkflowReference"
+        },
+        "upgrade": {
+          "$ref": "#/$defs/HelperUpgrade"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "document",
+        "links",
+        "upgrade"
+      ],
+      "type": "object"
+    },
+    "HelperRunUpgradeState": {
+      "enum": [
+        "requested",
+        "already_current",
+        "already_resolved"
+      ],
+      "type": "string"
+    },
+    "HelperUpgrade": {
+      "additionalProperties": false,
+      "description": "A validated ledger pairing, including anonymous bodies that cannot be paired by name.",
+      "properties": {
+        "changed": {
+          "items": {
+            "$ref": "#/$defs/FunctionId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/HelperChange"
+          },
+          "type": "array"
+        },
+        "functions": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[0-9a-f]{64}$": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "functions",
+        "changes",
+        "changed"
+      ],
+      "type": "object"
+    },
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "LinkedStart": {
+      "additionalProperties": false,
+      "description": "The immutable Link and selected start that determine process definition identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "selector": {
+          "$ref": "#/$defs/StartSelector"
+        }
+      },
+      "required": [
+        "link",
+        "selector"
+      ],
+      "type": "object"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "StartSelector": {
+      "description": "Main requires a main block; Export names a top-level function and never runs main.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "export",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowReference": {
+      "description": "A selected workflow and its immutable defining Link.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "linked": {
+              "$ref": "#/$defs/LinkedStart"
+            }
+          },
+          "required": [
+            "linked"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "callable": {
+              "$ref": "#/$defs/CallableId"
+            }
+          },
+          "required": [
+            "callable"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "publication": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HelperPublicationUpgrade"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A newly prepared revision. An already settled id returns no new publication."
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/HelperRunUpgradeState"
+    }
+  },
+  "required": [
+    "request_id",
+    "state"
+  ],
+  "title": "HelperRunUpgrade",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

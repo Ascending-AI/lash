@@ -300,6 +300,8 @@ fn process_lifecycle_write_size() {
         )
         .expect("guard creation metadata");
         let successor = lash_execution_contracts::process::ProcessSuccessorRequest {
+            unchanged: false,
+            request_id: None,
             payload: serde_json::json!({"successor": record.input}),
             env: lash_execution_contracts::testing::process_execution_env_fixture_ref(),
             definition_id: Some(

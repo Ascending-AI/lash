@@ -1,0 +1,17 @@
+{
+  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade-request/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id"
+  ],
+  "title": "HelperRunUpgradeRequest",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

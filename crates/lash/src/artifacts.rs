@@ -119,6 +119,9 @@ pub struct HostArtifacts {
 }
 
 #[cfg(feature = "codemode")]
+#[path = "artifacts/helper_upgrade.rs"]
+mod helper_upgrade;
+#[cfg(feature = "codemode")]
 #[path = "artifacts/printing.rs"]
 mod printing;
 
@@ -1080,7 +1083,7 @@ impl HostArtifacts {
 
     /// The store of kernel documents behind this core's module port.
     #[cfg(feature = "codemode")]
-    fn documents(&self) -> Result<lash_vm_runtime::KernelDocuments> {
+    pub(crate) fn documents(&self) -> Result<lash_vm_runtime::KernelDocuments> {
         let provider = self
             .engines
             .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
@@ -1528,4 +1531,9 @@ impl HostArtifacts {
         )?;
         Ok(opened)
     }
+}
+
+#[cfg(feature = "codemode")]
+pub(crate) fn upgrade_claim(pin: &HostArtifactPin) -> Result<ReferrerClaim> {
+    claim(pin)
 }

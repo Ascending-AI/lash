@@ -397,6 +397,14 @@ fn run_document(
     document: lash_kernel_doc::Document,
     release: &HelperRelease,
 ) -> lash_kernel_doc::Datum {
+    run_selected(document, release, None, vec![])
+}
+fn run_selected(
+    document: lash_kernel_doc::Document,
+    release: &HelperRelease,
+    callable: Option<lash_kernel_doc::FunctionValue>,
+    args: Vec<lash_kernel_doc::Datum>,
+) -> lash_kernel_doc::Datum {
     use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
     use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
     use lash_kernel_vm::{Machine as _, Step};
@@ -476,8 +484,10 @@ fn run_document(
         },
         lash_kernel_vm::CellStart {
             owner: PageId([9; 32]),
-            target: lash_kernel_vm::Target::Main,
-            args: vec![],
+            target: callable.map_or(lash_kernel_vm::Target::Main, |value| {
+                lash_kernel_vm::Target::Callable(Box::new(value))
+            }),
+            args,
             session: None,
             modes: Default::default(),
             host: vec![],
@@ -548,4 +558,241 @@ fn helper_claims_use_the_first_generation_and_join_at_the_maximum() {
     assert_eq!(combined.helpers.claim_generations()[&old_id].generation, 1);
     assert_eq!(combined.helpers.claim_generations()[&new_id].generation, 2);
     assert!(combined.helpers.claim_generations().contains_key(&extra_id));
+}
+
+/// FIG-7523 law 2: an explicit equal-contract revision runs 99; the original still runs 7.
+#[test]
+fn explicit_helper_upgrade_runs_new_body_and_refuses_a_changed_contract() {
+    let old = definition_fixture();
+    let old_id = old.identity();
+    let current = lash_kernel_doc::parse_definition(
+        "function helper(value: Int) -> Int\nkernel 1\ncharge 2\nbody { return 99 }",
+    )
+    .unwrap();
+    let current_id = current.identity();
+    let archive = Archive::default()
+        .append(archive_fixture(old.clone()))
+        .unwrap()
+        .append(archive_fixture(current.clone()))
+        .unwrap();
+    let relay = format!(
+        "function relay(value: Int) -> Int\nkernel 1\nmetering statements\nuse helper = @{old_id}\nbody {{ let answer = invoke helper(value) return answer }}"
+    );
+    let mut document = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\ndefinition {}\ndefinition {}\nmain {{ let answer = invoke relay(7) return answer }}",
+        serde_json::to_string("function helper(value: Int) -> Int\nkernel 1\ncharge 1\nbody { return value }").unwrap(), serde_json::to_string(&relay).unwrap()
+    )).unwrap();
+    document.functions.remove(&old_id);
+    document.library = lash_kernel_doc::LibraryDependencies([old_id].into());
+    let original = document.identity();
+    let pairing = archive.upgrade(&[old_id].into()).unwrap();
+    let already_current = archive.upgrade(&[current_id].into()).unwrap();
+    assert!(already_current.changes.is_empty());
+    assert!(
+        already_current.changed.is_empty(),
+        "a no-op changes no constructor or retained callable"
+    );
+    let rewritten = lash_kernel_migrate::upgrade_helpers(&document, &pairing).unwrap();
+    assert_ne!(rewritten.document.identity(), original);
+    assert_eq!(
+        pairing.changes,
+        vec![lash_kernel_doc::HelperChange {
+            helper: HelperId("fixture:helper".into()),
+            from: old_id,
+            to: current_id,
+            body: true,
+            charge: true,
+            native_version: false
+        }]
+    );
+    let mut registry = FunctionRegistry::declarations();
+    registry.register(old, None).unwrap();
+    registry.register(current.clone(), None).unwrap();
+    let release = HelperRelease {
+        helpers: Arc::new(BuildHelpers::new(registry.clone(), [old_id, current_id]).unwrap()),
+        functions: registry,
+        roots: [current_id].into(),
+        labels: Default::default(),
+    };
+    assert_eq!(
+        run_document(document.clone(), &release),
+        lash_kernel_doc::Datum::Int(7.into())
+    );
+    assert_eq!(
+        run_document(rewritten.document, &release),
+        lash_kernel_doc::Datum::Int(99.into())
+    );
+    assert_eq!(document.identity(), original);
+    let future = lash_kernel_doc::parse_definition(
+        "function helper(value: Int) -> Int\nkernel 1\ncharge 3\nbody { return 101 }",
+    )
+    .unwrap();
+    let future_id = future.identity();
+    let later = archive
+        .clone()
+        .append(archive_fixture(future.clone()))
+        .unwrap();
+    let pinned = later
+        .upgrade_to(&[old_id].into(), archive.releases[1].library.identity)
+        .unwrap();
+    let mut future_release = release.clone();
+    future_release.functions.register(future, None).unwrap();
+    future_release.helpers = Arc::new(
+        BuildHelpers::new(
+            future_release.functions.clone(),
+            [old_id, current_id, future_id],
+        )
+        .unwrap(),
+    );
+    let recorded = lash_kernel_migrate::upgrade_helpers(&document, &pinned).unwrap();
+    assert_eq!(
+        run_document(recorded.document, &future_release),
+        lash_kernel_doc::Datum::Int(99.into()),
+        "a recorded target must not be substituted by the later 101 body"
+    );
+    // A published closure owns frozen scalar data; creating a revision preserves that data.
+    let factory_text = format!(
+        "function factory(marker: Any) -> Any\nkernel 1\nmetering statements\nuse helper = @{old_id}\nbody {{ let held = [7, marker] return fn(x) presentation (x: Int) -> Tuple(Int, Int) bare direct {{ let seed = held[0] let answer = invoke helper(x) return (seed, answer) }} }}"
+    );
+    let (factory, locals) = lash_kernel_doc::parse_definition_with_locals(&factory_text).unwrap();
+    let factory_id = factory.identity();
+    let factory_signature = factory.signature.clone();
+    let selected = locals[0].identity();
+    let mut captured_document =
+        lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    captured_document.main = None;
+    captured_document.exports.insert(
+        lash_kernel_value::Name::new("factory"),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: factory_id,
+            signature: factory_signature,
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    captured_document.functions = locals
+        .into_iter()
+        .chain([factory])
+        .map(|definition| (definition.identity(), definition))
+        .collect();
+    captured_document.library.insert(old_id);
+    let old_link = lash_kernel_value::Link {
+        document: captured_document.identity(),
+        fills: Default::default(),
+        helper_fills: Default::default(),
+    }
+    .identity();
+    let frozen = lash_kernel_doc::FunctionValue {
+        written_signature: None,
+        signature_origin: None,
+        implicit_text_conversions: vec![],
+        callable: lash_kernel_value::CallableId {
+            link: old_link,
+            function: selected,
+        },
+        captures: [(
+            lash_kernel_value::Name::new("held"),
+            lash_kernel_doc::CaptureValue::List(vec![
+                lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Int(7.into())),
+                lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Null),
+            ]),
+        )]
+        .into(),
+        signature: lash_kernel_doc::parse_signature("(x: Int) -> Tuple(Int, Int)").unwrap(),
+        convention: lash_kernel_doc::StartConvention::Direct,
+        captions: lash_kernel_doc::Captions::empty(captured_document.identity()),
+        representation: lash_kernel_doc::FunctionRepresentation::Bare,
+        creation: Some(lash_kernel_value::sites::Site::new(
+            lash_kernel_value::sites::Unit::Library(factory_id),
+            [1, 0],
+        )),
+        token: None,
+    };
+    let upgraded_document =
+        lash_kernel_migrate::upgrade_helpers(&captured_document, &pairing).unwrap();
+    let new_link = lash_kernel_value::Link {
+        document: upgraded_document.document.identity(),
+        fills: Default::default(),
+        helper_fills: Default::default(),
+    }
+    .identity();
+    let upgraded_value = lash_kernel_migrate::upgrade_callable(
+        &frozen,
+        &captured_document,
+        &upgraded_document,
+        new_link,
+        &pairing,
+    )
+    .unwrap();
+    assert_eq!(
+        run_selected(
+            captured_document.clone(),
+            &release,
+            Some(frozen.clone()),
+            vec![lash_kernel_doc::Datum::Int(11.into())]
+        ),
+        lash_kernel_doc::Datum::Tuple(vec![
+            lash_kernel_doc::Datum::Int(7.into()),
+            lash_kernel_doc::Datum::Int(11.into())
+        ])
+    );
+    assert_eq!(
+        run_selected(
+            upgraded_document.document.clone(),
+            &release,
+            Some(upgraded_value),
+            vec![lash_kernel_doc::Datum::Int(11.into())]
+        ),
+        lash_kernel_doc::Datum::Tuple(vec![
+            lash_kernel_doc::Datum::Int(7.into()),
+            lash_kernel_doc::Datum::Int(99.into())
+        ])
+    );
+    let mut branded = frozen;
+    let lash_kernel_doc::CaptureValue::List(held) = branded
+        .captures
+        .get_mut(&lash_kernel_value::Name::new("held"))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    held[1] = lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Record(vec![
+        (
+            "__lash_brand".into(),
+            lash_kernel_doc::Datum::Tuple(vec![
+                lash_kernel_doc::Datum::Text("fixture".into()),
+                lash_kernel_doc::Datum::Text("value".into()),
+            ]),
+        ),
+        (
+            "__lash_built".into(),
+            lash_kernel_doc::Datum::Bytes(lash_kernel_doc::Bytes::new(old_id.as_bytes().to_vec())),
+        ),
+    ]));
+    if let lash_kernel_doc::CaptureValue::Data(argument) = &held[1] {
+        assert!(matches!(
+            lash_kernel_migrate::check_upgrade_data(argument, &pairing),
+            Err(lash_kernel_doc::HelperUpgradeRefusal::BrandedData { function }) if function == old_id
+        ));
+    } else {
+        panic!("fixture argument is data");
+    }
+    assert!(
+        matches!(lash_kernel_migrate::upgrade_callable(&branded, &captured_document, &upgraded_document, new_link, &pairing), Err(lash_kernel_doc::HelperUpgradeRefusal::BrandedData {function}) if function == old_id)
+    );
+    let mut changed = current;
+    changed.errors.insert("new_error".into());
+    let removed = archive.clone().append(Release::default()).unwrap();
+    assert!(
+        matches!(removed.upgrade(&[old_id].into()), Err(lash_kernel_doc::HelperUpgradeRefusal::HelperTombstoned { helper }) if helper == HelperId("fixture:helper".into()))
+    );
+    let old_revision = archive.releases[0].bindings[&HelperId("fixture:helper".into())].revision;
+    let changed_archive = archive.append(archive_fixture(changed)).unwrap();
+    let target_revision = changed_archive.releases.last().unwrap().bindings
+        [&HelperId("fixture:helper".into())]
+        .revision;
+    assert!(
+        matches!(changed_archive.upgrade(&[old_id].into()), Err(lash_kernel_doc::HelperUpgradeRefusal::HelperContractChanged { helper, from, to }) if helper == HelperId("fixture:helper".into()) && from == old_revision && to == target_revision)
+    );
 }

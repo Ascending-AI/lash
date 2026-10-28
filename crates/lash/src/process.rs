@@ -235,3 +235,13 @@ pub use lash_execution_contracts::process::lifetime;
 pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
 
 pub use lash_kernel_value::providers::{ProcessComponentId, ProcessComponentIdError};
+
+#[cfg(feature = "codemode")]
+pub use lash_kernel_doc::{
+    HelperChange, HelperId, HelperPublicationUpgrade, HelperPublicationUpgradeRequest,
+    HelperRunUpgrade, HelperRunUpgradeRequest, HelperRunUpgradeState, HelperUpgrade,
+    HelperUpgradeRefusal, HelperUpgradeSafety,
+};
+
+#[cfg(feature = "codemode")]
+pub use lash_vm_runtime::process::HelperUpgradeCheckError;

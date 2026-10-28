@@ -721,6 +721,8 @@ impl PagedHeap {
 pub(super) fn frozen_values(
     heap: &PagedHeap,
     frozen: &FrozenRef,
+    brands: bool,
+    field: &mut dyn FnMut(&PageValue, &PageValue) -> Result<(), HeapFault>,
     visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
 ) -> Result<(), HeapFault> {
     let header = read_header(heap.pages(), frozen)?;
@@ -741,12 +743,27 @@ pub(super) fn frozen_values(
                     visit(&value)?;
                 }
             }
-            Body::Table { rows, .. } => {
+            Body::Table { rows, kind, .. } => {
                 let rows = rows.in_family(RELATIVE);
+                let mut branded = false;
+                if brands && kind == ObjectKind::Record {
+                    for rank in 0..rows.len() {
+                        let (_, entry) = rows
+                            .rank_get(rank, heap.pages())?
+                            .ok_or_else(|| invalid("missing frozen brand field"))?;
+                        if heap.equal(&entry.key, &PageValue::text("__lash_brand"))? {
+                            branded = super::code::is_brand(heap, &entry.value)?;
+                            break;
+                        }
+                    }
+                }
                 for rank in 0..rows.len() {
                     let (_, entry) = rows
                         .rank_get(rank, heap.pages())?
                         .ok_or_else(|| invalid("missing frozen table row"))?;
+                    if branded {
+                        field(&entry.key, &entry.value)?;
+                    }
                     visit(&entry.key)?;
                     visit(&entry.value)?;
                 }

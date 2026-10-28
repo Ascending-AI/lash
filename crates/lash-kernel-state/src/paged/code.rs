@@ -13,6 +13,8 @@ use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RetainedCode {
     pub callables: BTreeSet<CallableId>,
+    pub fixed_callables: BTreeSet<CallableId>,
+    pub constructors: BTreeSet<lash_kernel_value::FunctionId>,
     pub frames: BTreeSet<(LinkId, Unit)>,
     /// Exact transient continuation coordinates, including every caller frame.
     pub sites: BTreeSet<(LinkId, lash_kernel_value::sites::Site)>,
@@ -25,6 +27,14 @@ pub fn checkpoint_code(
     checkpoint: &Checkpoint,
     source: Box<dyn PageSource>,
 ) -> Result<RetainedCode, HeapFault> {
+    scan_checkpoint(checkpoint, source, false)
+}
+
+pub(super) fn scan_checkpoint(
+    checkpoint: &Checkpoint,
+    source: Box<dyn PageSource>,
+    brands: bool,
+) -> Result<RetainedCode, HeapFault> {
     let root = &checkpoint.0;
     let mut heap = PagedHeap::open_header(root.heap, source, EditEpoch(0))?;
     heap.restore_execution_roots(root);
@@ -33,12 +43,14 @@ pub fn checkpoint_code(
         heap: &heap,
         code: RetainedCode::default(),
         seen: BTreeSet::new(),
+        fixed: true,
+        brands,
     };
     visit(
         &Tree::<FunctionRecord>::of_keyed(&root.functions),
         heap.pages(),
         |row| {
-            scan.code.callables.insert(row.callable);
+            scan.callable(row.callable);
             scan.value(PageValue::Closure(row.environment))?;
             for frozen in row.captures.values().chain(&row.before).chain(&row.after) {
                 scan.frozen(frozen)?;
@@ -51,6 +63,7 @@ pub fn checkpoint_code(
         heap.pages(),
         |row| super::census_graph::binding_values(row, &mut |value| scan.value(value.clone())),
     )?;
+    scan.fixed = false;
     visit(
         &Tree::<ListJoinRecord>::of_keyed(&root.joins),
         heap.pages(),
@@ -125,6 +138,8 @@ struct Scan<'a> {
     heap: &'a PagedHeap,
     code: RetainedCode,
     seen: BTreeSet<Identity>,
+    fixed: bool,
+    brands: bool,
 }
 enum Work {
     Value(PageValue),
@@ -134,27 +149,53 @@ enum Work {
     Tuple(Arc<TupleRef>, u64),
 }
 impl Scan<'_> {
+    fn callable(&mut self, callable: CallableId) {
+        self.code.callables.insert(callable);
+        if self.fixed && self.brands {
+            self.code.fixed_callables.insert(callable);
+        }
+    }
+
     fn frozen(&mut self, frozen: &FrozenRef) -> Result<(), HeapFault> {
-        super::family_impl::frozen_values(self.heap, frozen, &mut |value| {
-            let mut pending = vec![value.clone()];
-            while let Some(value) = pending.pop() {
-                match value {
-                    PageValue::Function(_) | PageValue::Closure(_) => self.value(value)?,
-                    PageValue::Tuple(tuple) => {
-                        for at in 0..tuple.summary.len {
-                            pending.push(
-                                self.heap
-                                    .tuple_get(&tuple, at)?
-                                    .ok_or_else(|| invalid("missing frozen tuple member"))?,
-                            );
-                        }
-                    }
-                    PageValue::Error(error) => pending.push(self.heap.error_data(&error)?),
-                    _ => {}
+        let mut built = BTreeSet::new();
+        let heap = self.heap;
+        let brands = self.brands;
+        super::family_impl::frozen_values(
+            heap,
+            frozen,
+            brands,
+            &mut |key, value| {
+                if brands
+                    && heap.equal(key, &PageValue::text("__lash_built"))?
+                    && let Some(id) = constructor(heap, value)?
+                {
+                    built.insert(id);
                 }
-            }
-            Ok(())
-        })
+                Ok(())
+            },
+            &mut |value| {
+                let mut pending = vec![value.clone()];
+                while let Some(value) = pending.pop() {
+                    match value {
+                        PageValue::Function(_) | PageValue::Closure(_) => self.value(value)?,
+                        PageValue::Tuple(tuple) => {
+                            for at in 0..tuple.summary.len {
+                                pending.push(
+                                    self.heap
+                                        .tuple_get(&tuple, at)?
+                                        .ok_or_else(|| invalid("missing frozen tuple member"))?,
+                                );
+                            }
+                        }
+                        PageValue::Error(error) => pending.push(self.heap.error_data(&error)?),
+                        _ => {}
+                    }
+                }
+                Ok(())
+            },
+        )?;
+        self.code.constructors.extend(built);
+        Ok(())
     }
 
     fn value(&mut self, value: PageValue) -> Result<(), HeapFault> {
@@ -192,7 +233,7 @@ impl Scan<'_> {
                     pending.push(Work::Value(value));
                 }
                 Work::Value(PageValue::Function(callable)) => {
-                    self.code.callables.insert(*callable);
+                    self.callable(*callable);
                 }
                 Work::Value(PageValue::Tuple(tuple)) => pending.push(Work::Tuple(tuple, 0)),
                 Work::Value(PageValue::Error(error)) => {
@@ -222,14 +263,38 @@ impl Scan<'_> {
                                 Body::List { rows, .. } => {
                                     pending.push(Work::Values(rows.clone(), 0))
                                 }
-                                Body::Table { rows, .. } => {
+                                Body::Table { rows, kind, .. } => {
+                                    if self.brands
+                                        && *kind == ObjectKind::Record
+                                        && self
+                                            .heap
+                                            .record_get(
+                                                entity,
+                                                lash_kernel_doc::heap::FieldName::Static(
+                                                    "__lash_brand",
+                                                ),
+                                            )?
+                                            .as_ref()
+                                            .map(|value| is_brand(self.heap, value))
+                                            .transpose()?
+                                            .unwrap_or(false)
+                                        && let Some(value) = self.heap.record_get(
+                                            entity,
+                                            lash_kernel_doc::heap::FieldName::Static(
+                                                "__lash_built",
+                                            ),
+                                        )?
+                                        && let Some(id) = constructor(self.heap, &value)?
+                                    {
+                                        self.code.constructors.insert(id);
+                                    }
                                     pending.push(Work::Entries(rows.clone(), 0))
                                 }
                                 Body::Variable(value) => pending.push(Work::Value(value.clone())),
                                 Body::Closure {
                                     callable, captures, ..
                                 } => {
-                                    self.code.callables.insert(*callable);
+                                    self.callable(*callable);
                                     pending.push(Work::Captures(captures.clone(), 0));
                                 }
                             }
@@ -259,7 +324,7 @@ impl Scan<'_> {
 /// code-import bindings; helper edges come from the build's validated index.
 /// Dead directory objects, unrelated exports and the rest of the library do
 /// not enter this work list.
-pub(super) fn restore_selection(
+pub fn restore_selection(
     live: RetainedCode,
     documents: &std::collections::BTreeMap<LinkId, lash_kernel_doc::Document>,
     code_imports: &std::collections::BTreeMap<(LinkId, lash_kernel_value::ImportSlot), CallableId>,
@@ -450,4 +515,36 @@ fn enqueue(
         }
     }
     Ok(())
+}
+
+fn constructor(
+    heap: &PagedHeap,
+    value: &PageValue,
+) -> Result<Option<lash_kernel_value::FunctionId>, HeapFault> {
+    let PageValue::Bytes(bytes) = value else {
+        return Ok(None);
+    };
+    if bytes.len != 32 {
+        return Ok(None);
+    }
+    let mut body = Vec::with_capacity(32);
+    heap.payload_visit(value, 0..32, &mut |chunk| {
+        if let lash_kernel_doc::heap::Chunk::Bytes(bytes) = chunk {
+            body.extend_from_slice(bytes);
+        }
+        std::ops::ControlFlow::Continue(())
+    })?;
+    let bytes: [u8; 32] = body
+        .try_into()
+        .map_err(|_| invalid("constructor identity has the wrong length"))?;
+    Ok(Some(lash_kernel_value::FunctionId::from_bytes(bytes)))
+}
+
+pub(super) fn is_brand(heap: &PagedHeap, value: &PageValue) -> Result<bool, HeapFault> {
+    let PageValue::Tuple(tuple) = value else {
+        return Ok(false);
+    };
+    Ok(tuple.summary.len == 2
+        && matches!(heap.tuple_get(tuple, 0)?, Some(PageValue::Text(_)))
+        && matches!(heap.tuple_get(tuple, 1)?, Some(PageValue::Text(_))))
 }

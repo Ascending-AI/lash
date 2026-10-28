@@ -781,6 +781,88 @@ pub struct PreparedCheckpointCarry {
     pub machine: lash_kernel_value::claims::NodeRequirements,
 }
 
+impl KernelProcessEngine {
+    pub(super) async fn check_helper_upgrade(
+        &self,
+        process: &lash_core::ProcessId,
+        state: &KernelEngineState,
+        retained: &std::collections::BTreeSet<lash_kernel_value::CallableId>,
+        upgrade: &lash_kernel_doc::HelperUpgrade,
+    ) -> Result<
+        lash_kernel_doc::HelperUpgradeSafety,
+        lash_execution_contracts::process::SuccessionError,
+    > {
+        use lash_execution_contracts::process::SuccessionError;
+        let unavailable = |error: String| SuccessionError::Unavailable(error);
+        let Some(parked) = state.parked else {
+            return Ok(lash_kernel_doc::HelperUpgradeSafety::Safe);
+        };
+        let input = super::KernelProcessInput::from_payload(&state.payload)
+            .map_err(|e| unavailable(e.to_string()))?;
+        let content = self
+            .documents
+            .load_execution_content(&input.code, retained)
+            .await
+            .map_err(|e| unavailable(e.to_string()))?
+            .content;
+        let stores = self
+            .carry_stores
+            .as_ref()
+            .ok_or_else(|| unavailable("helper upgrade requires carry stores".into()))?;
+        let pages = stores
+            .durable_store()
+            .pages()
+            .ok_or_else(|| unavailable("helper upgrade requires pages".into()))?;
+        let exec = ExecKey::Process(process.clone());
+        let row = pages
+            .exec_root(&exec)
+            .await
+            .map_err(|e| unavailable(e.to_string()))?
+            .ok_or_else(|| unavailable("helper upgrade execution root is missing".into()))?;
+        let source = leased_pages(
+            pages,
+            RootLeaseRequest {
+                owner: RootOwner::Exec(exec),
+                expected: row.root,
+                fence: LeaseFence::Reader,
+                ttl_millis: 600_000,
+            },
+        )
+        .await
+        .map_err(|e| unavailable(e.to_string()))?;
+        let helpers = Arc::clone(&self.helpers);
+        let upgrade = upgrade.clone();
+        let root = parked.page.root;
+        tokio::task::spawn_blocking(move || {
+            let mut source = source;
+            let page = source
+                .read(&[PageRef {
+                    id: PageId(root.0),
+                    grant: PageGrant::NONE,
+                }])
+                .map_err(|e| unavailable(e.to_string()))?
+                .remove(0)
+                .map_err(|e| unavailable(e.to_string()))?;
+            let checkpoint =
+                Checkpoint::of_answer(&page).map_err(|e| unavailable(e.to_string()))?;
+            let (documents, imports) =
+                super::pages::helper_code(&content).map_err(|e| unavailable(e.to_string()))?;
+            checkpoint
+                .check_helper_upgrade(Box::new(source), &documents, &imports, &helpers, &upgrade)
+                .map_err(|error| match error {
+                    lash_kernel_state::paged::HelperUpgradeCheckError::Heap(error) => {
+                        unavailable(error.to_string())
+                    }
+                    lash_kernel_state::paged::HelperUpgradeCheckError::Refused(refusal) => {
+                        super::succession::typed_refusal(refusal)
+                    }
+                })
+        })
+        .await
+        .map_err(|e| unavailable(e.to_string()))?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

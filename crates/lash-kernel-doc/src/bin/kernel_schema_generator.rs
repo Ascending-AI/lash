@@ -18,6 +18,14 @@ const VERSION_CONSTANT: &str = "KERNEL_VERSION";
 fn main() -> Result<(), String> {
     let documents = vec![
         document::<Document>("kernel-document")?,
+        document::<lash_kernel_doc::HelperRunUpgrade>("kernel-helper-run-upgrade")?,
+        document::<lash_kernel_doc::HelperPublicationUpgradeRequest>(
+            "kernel-helper-publication-upgrade-request",
+        )?,
+        document::<lash_kernel_doc::HelperPublicationUpgrade>("kernel-helper-publication-upgrade")?,
+        document::<lash_kernel_doc::HelperRunUpgradeRequest>("kernel-helper-run-upgrade-request")?,
+        document::<lash_kernel_doc::HelperUpgradeRefusal>("kernel-helper-upgrade-refusal")?,
+        document::<lash_kernel_doc::HelperUpgradeSafety>("kernel-helper-upgrade-safety")?,
         document::<SourceMap>("kernel-source-map")?,
         document::<Captions>("kernel-captions")?,
         document::<Correspondence>("kernel-correspondence")?,

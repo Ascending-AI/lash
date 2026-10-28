@@ -19,10 +19,10 @@ mod code;
 #[cfg(any(test, feature = "perf-witness"))]
 pub use checkpoint::helper_compatibility_work;
 pub use checkpoint::{
-    Checkpoint, CheckpointHeader, HelperCompatibilityError, HelperPins, check_helper_compatibility,
-    inspect_checkpoint,
+    Checkpoint, CheckpointHeader, HelperCompatibilityError, HelperPins, HelperUpgradeCheckError,
+    check_helper_compatibility, inspect_checkpoint,
 };
-pub use code::{RetainedCode, checkpoint_code};
+pub use code::{RetainedCode, checkpoint_code, restore_selection};
 pub mod census;
 pub(crate) mod census_impl;
 pub mod family;

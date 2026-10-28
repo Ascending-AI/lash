@@ -783,3 +783,175 @@ fn fresh_callable_admission_cannot_grant_removed_helper_authority() {
     let embedding = embed(&image);
     finish(resume(&fixture, &embedding, &selection), fixture.wait);
 }
+
+/// FIG-7523 law 4: a drained helper leaves an anonymous iterator next in saved state.
+#[test]
+fn an_iterator_next_closure_refuses_upgrade_and_completes_on_its_old_body() {
+    let old_text = "function law.iterator() -> Any\nkernel 1\ncharge 1\nbody { let next = fn() { return 7 } return {next: next} }";
+    let new_text = old_text.replace("return 7", "return 99");
+    let (owner, locals) = lash_kernel_doc::parse_definition_with_locals(old_text).unwrap();
+    let (next_owner, next_locals) =
+        lash_kernel_doc::parse_definition_with_locals(&new_text).unwrap();
+    let old_next = locals[0].identity();
+    assert_ne!(old_next, next_locals[0].identity());
+    let old_owner = owner.identity();
+    let current_owner = next_owner.identity();
+    let current_next = next_locals[0].identity();
+    let mut registry = FunctionRegistry::declarations();
+    for definition in locals
+        .into_iter()
+        .chain([owner])
+        .chain(next_locals)
+        .chain([next_owner])
+    {
+        registry.register(definition, None).unwrap();
+    }
+    let helpers = Arc::new(BuildHelpers::new(registry.clone(), [old_owner]).unwrap());
+    let release = |root: FunctionId, child: FunctionId| {
+        use lash_kernel_releases::archive::{Binding, HelperId, Library, Release};
+        let definitions: BTreeMap<_, _> = [root, child]
+            .into_iter()
+            .map(|id| (id, registry.get(&id).unwrap().definition().as_ref().clone()))
+            .collect();
+        let contract =
+            lash_kernel_releases::archive::contract(root, &definitions, &BTreeMap::new()).unwrap();
+        let library = Library {
+            identity: lash_kernel_value::HelperLibraryId::of_members([root, child]),
+            members: [root, child].into(),
+            roots: [root].into(),
+        };
+        Release {
+            library: library.clone(),
+            definitions,
+            libraries: [("fixture".into(), library)].into(),
+            bindings: [(
+                HelperId("fixture:law.iterator".into()),
+                Binding {
+                    revision: contract.revision(),
+                    function: root,
+                },
+            )]
+            .into(),
+            ..Default::default()
+        }
+    };
+    let archive = lash_kernel_releases::archive::Archive::default()
+        .append(release(old_owner, old_next))
+        .unwrap()
+        .append(release(current_owner, current_next))
+        .unwrap();
+    let upgrade = archive.upgrade(&[old_owner].into()).unwrap();
+
+    for branded in [false, true] {
+        let brand = if branded {
+            ", __lash_brand: (\"fixture\", \"iterator\")"
+        } else {
+            ""
+        };
+        let mut document = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers by_spelling\nimport 0 operation host.pause() -> Any\nlibrary @{old_owner}\nmain {{ let stamp = {{__lash_built: b\"{old_owner}\"{brand}}} let iterator = invoke @{old_owner}() let next = iterator.next let pause = perform 0() as Any let answer = apply next() return answer }}",
+        )).unwrap();
+        document.functions.retain(|id, _| !helpers.contains(id));
+        document.library = LibraryDependencies([old_owner].into());
+        let signature = match &document.imports[&lash_kernel_value::ImportSlot(0)].kind {
+            lash_kernel_value::ImportKind::Operation { signature } => signature.clone(),
+            _ => unreachable!(),
+        };
+        let link = Link {
+            document: document.identity(),
+            helper_fills: Default::default(),
+            fills: [(
+                lash_kernel_value::ImportSlot(0),
+                Fill::Operation(OperationRequirement::new(
+                    signature,
+                    lash_kernel_value::ContractId::new("1"),
+                )),
+            )]
+            .into(),
+        };
+        let document = Arc::new(document);
+        let program = || {
+            Program::prepare(
+                link.identity(),
+                [(document.identity(), Arc::clone(&document))].into(),
+                &[(link.identity(), link.clone())].into(),
+                PageId([8; 32]),
+                lash_kernel_vm::PreparedLibrary::with_helpers(
+                    Arc::new(registry.clone()),
+                    Arc::clone(&helpers),
+                ),
+                Selection::Fresh,
+            )
+            .unwrap()
+        };
+        let pages = Pages::default();
+        let mut machine = KernelMachine::start(
+            program(),
+            BOUNDS,
+            CellStart {
+                owner: PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::new(pages.clone()),
+        )
+        .unwrap();
+        let Step::Parked(park) = machine.run(&mut World, u64::MAX).unwrap() else {
+            panic!("iterator is retained at a genuine park")
+        };
+        let lash_kernel_vm::Request::Effect(effect) = &park.requests[0];
+        let checkpoint = machine.checkpoint().unwrap().checkpoint();
+        drop(machine);
+        let refused = checkpoint.check_helper_upgrade(
+            Box::new(pages.clone()),
+            &[(link.identity(), document.as_ref().clone())].into(),
+            &Default::default(),
+            &helpers,
+            &upgrade,
+        );
+        match refused {
+            Err(lash_kernel_state::paged::HelperUpgradeCheckError::Refused(
+                lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable { function },
+            )) if !branded => assert_eq!(function, old_next),
+            Err(lash_kernel_state::paged::HelperUpgradeCheckError::Refused(
+                lash_kernel_doc::HelperUpgradeRefusal::BrandedData { function },
+            )) if branded => assert_eq!(function, old_owner),
+            other => panic!(
+                "iterator upgrade must refuse its exact retained state, branded={branded}: {other:?}"
+            ),
+        }
+        let mut resumed =
+            KernelMachine::open(program(), BOUNDS, &checkpoint, Box::new(pages)).unwrap();
+        resumed
+            .deliver(effect.wait, lash_kernel_vm::Outcome::Completed(Datum::Null))
+            .unwrap();
+        let Step::Ended(lash_kernel_vm::End::Finished(result)) =
+            resumed.run(&mut World, u64::MAX).unwrap()
+        else {
+            panic!("old iterator completes")
+        };
+        assert_eq!(result.result, Datum::Int(7.into()));
+    }
+    let active = fixture();
+    let twice = active.ids["twice"];
+    let deferred = active
+        .checkpoint
+        .check_helper_upgrade(
+            Box::new(active.pages.clone()),
+            &[(active.link.identity(), active.document.as_ref().clone())].into(),
+            &Default::default(),
+            &active.helpers,
+            &lash_kernel_doc::HelperUpgrade {
+                changed: [twice].into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        matches!(deferred, lash_kernel_doc::HelperUpgradeSafety::Deferred { functions } if functions.contains(&twice)),
+        "a still-active helper must drain before upgrade"
+    );
+}

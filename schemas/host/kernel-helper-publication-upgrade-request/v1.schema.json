@@ -1,0 +1,79 @@
+{
+  "$defs": {
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "LinkedStart": {
+      "additionalProperties": false,
+      "description": "The immutable Link and selected start that determine process definition identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "selector": {
+          "$ref": "#/$defs/StartSelector"
+        }
+      },
+      "required": [
+        "link",
+        "selector"
+      ],
+      "type": "object"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "StartSelector": {
+      "description": "Main requires a main block; Export names a top-level function and never runs main.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "export",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-helper-publication-upgrade-request/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "publication": {
+      "$ref": "#/$defs/LinkedStart"
+    }
+  },
+  "required": [
+    "publication"
+  ],
+  "title": "HelperPublicationUpgradeRequest",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

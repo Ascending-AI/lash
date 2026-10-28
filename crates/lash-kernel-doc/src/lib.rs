@@ -179,3 +179,10 @@ pub use frame_array::FrameArray;
 pub use native::NativeCtor;
 
 pub mod linked_site;
+
+mod helper_upgrade;
+pub use helper_upgrade::{
+    HelperChange, HelperId, HelperPublicationUpgrade, HelperPublicationUpgradeRequest,
+    HelperRunUpgrade, HelperRunUpgradeRequest, HelperRunUpgradeState, HelperUpgrade,
+    HelperUpgradeRefusal, HelperUpgradeSafety,
+};

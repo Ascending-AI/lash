@@ -21,7 +21,7 @@ fn refuse(message: impl Into<String>) -> SuccessionError {
         message,
     }
 }
-fn typed_refusal(cause: impl serde::Serialize + std::fmt::Display) -> SuccessionError {
+pub(super) fn typed_refusal(cause: impl serde::Serialize + std::fmt::Display) -> SuccessionError {
     let message = cause.to_string();
     match serde_json::to_value(cause) {
         Ok(refusal) => SuccessionError::Refused { refusal, message },
@@ -115,26 +115,6 @@ impl EngineSuccession for KernelSuccession {
             if input != from {
                 return Err(refuse("state is not the predecessor payload"));
             }
-            match (&from.code, &to.code) {
-                (
-                    super::InlineRequest::Callable {
-                        function: before,
-                        origin: prior,
-                        ..
-                    },
-                    super::InlineRequest::Callable {
-                        function: after,
-                        origin: next,
-                        ..
-                    },
-                ) if before == after && prior == next => {}
-                (super::InlineRequest::Linked { .. }, super::InlineRequest::Linked { .. }) => {}
-                _ => {
-                    return Err(refuse(
-                        "succession must preserve a callable's exact defining Link and frozen captures",
-                    ));
-                }
-            }
             let before = content
                 .document(
                     content
@@ -151,7 +131,136 @@ impl EngineSuccession for KernelSuccession {
                         .document,
                 )
                 .map_err(|e| refuse(e.to_string()))?;
-            let rewritten = if before.kernel() == after.kernel() {
+            let helper_plan = if before.kernel() == after.kernel()
+                && content
+                    .documents
+                    .values()
+                    .any(|document| !document.library.0.is_empty())
+            {
+                let source = self
+                    .engine
+                    .documents
+                    .authoring_content(&from.code)
+                    .await
+                    .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
+                let target = self
+                    .engine
+                    .documents
+                    .authoring_content(&to.code)
+                    .await
+                    .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
+                let helpers = |content: &lash_kernel_package::LinkedContent| {
+                    content
+                        .documents
+                        .values()
+                        .flat_map(|doc| doc.library.iter().copied())
+                        .collect::<BTreeSet<_>>()
+                };
+                let archive = lash_kernel_releases::archive_candidate()
+                    .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
+                let mut selected = None;
+                let mut refusal = None;
+                for release in archive.releases.iter().rev() {
+                    match super::helper_upgrade::plan_at(
+                        &source,
+                        context.from.link,
+                        &archive,
+                        release.library.identity,
+                    ) {
+                        Ok(planned)
+                            if planned.links[&context.from.link] == context.to.link
+                                && !planned.upgrade.changes.is_empty() =>
+                        {
+                            selected = Some((planned, source.clone()));
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            refusal = Some(error);
+                        }
+                    }
+                }
+                if selected.is_none() && helpers(&source) != helpers(&target) {
+                    return Err(refusal.map_or_else(
+                        || refuse("helper replacements must be an explicit ledger upgrade"),
+                        typed_refusal,
+                    ));
+                }
+                selected
+            } else {
+                None
+            };
+            if let Some((plan, source)) = &helper_plan {
+                let expected = super::helper_upgrade::rewritten_code(&from.code, source, plan)
+                    .map_err(typed_refusal)?;
+                if expected != to.code {
+                    return Err(refuse(
+                        "helper upgrade changed frozen captures or their defining origin",
+                    ));
+                }
+                if let super::InlineRequest::Callable { function, .. } = &from.code {
+                    super::helper_upgrade::check_frozen(
+                        function,
+                        source,
+                        &self.engine.helpers,
+                        &plan.upgrade,
+                        true,
+                    )
+                    .map_err(typed_refusal)?;
+                }
+                super::helper_upgrade::check_arguments(
+                    &from,
+                    source,
+                    &self.engine.helpers,
+                    &plan.upgrade,
+                )
+                .map_err(typed_refusal)?;
+                if from.args != to.args {
+                    return Err(refuse("helper upgrades preserve run arguments"));
+                }
+                match self
+                    .engine
+                    .check_helper_upgrade(
+                        process,
+                        &state,
+                        &context.predecessor.retained_code,
+                        &plan.upgrade,
+                    )
+                    .await?
+                {
+                    lash_kernel_doc::HelperUpgradeSafety::Safe => {}
+                    lash_kernel_doc::HelperUpgradeSafety::Deferred { functions } => {
+                        tracing::info!(process_id = %process, changed_helpers = ?plan.upgrade.changed, retained_helpers = ?functions, "helper upgrade deferred until retained execution drains");
+                        return Ok(SuccessorCarry::InFlight);
+                    }
+                }
+            } else {
+                match (&from.code, &to.code) {
+                    (
+                        super::InlineRequest::Callable {
+                            function: before,
+                            origin: prior,
+                            ..
+                        },
+                        super::InlineRequest::Callable {
+                            function: after,
+                            origin: next,
+                            ..
+                        },
+                    ) if before == after && prior == next => {}
+                    (super::InlineRequest::Linked { .. }, super::InlineRequest::Linked { .. }) => {}
+                    _ => {
+                        return Err(refuse(
+                            "succession must preserve a callable's exact defining Link and frozen captures",
+                        ));
+                    }
+                }
+            }
+            let rewritten = if let Some((mut plan, _)) = helper_plan {
+                plan.rewritten
+                    .remove(&context.from.link)
+                    .ok_or_else(|| refuse("upgrade has no root rewrite"))?
+            } else if before.kernel() == after.kernel() {
                 lash_kernel_migrate::Rewritten {
                     document: after.clone(),
                     correspondence: lash_kernel_migrate::unchanged(before, after)

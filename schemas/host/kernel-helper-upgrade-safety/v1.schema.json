@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-helper-upgrade-safety/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "safe",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "functions": {
+          "items": {
+            "$ref": "#/$defs/FunctionId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "status": {
+          "const": "deferred",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "functions"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "HelperUpgradeSafety",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "HelperId": {
+      "description": "Permanent package-qualified contract name, used only when pairing releases.",
+      "type": "string"
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-helper-upgrade-refusal/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "helper": {
+          "$ref": "#/$defs/HelperId"
+        },
+        "refused": {
+          "const": "helper_contract_changed",
+          "type": "string"
+        },
+        "to": {
+          "$ref": "#/$defs/FunctionId"
+        }
+      },
+      "required": [
+        "refused",
+        "helper",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "helper": {
+          "$ref": "#/$defs/HelperId"
+        },
+        "refused": {
+          "const": "helper_tombstoned",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "helper"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "helper": {
+          "$ref": "#/$defs/HelperId"
+        },
+        "refused": {
+          "const": "helper_missing",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "helper"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "refused": {
+          "const": "helper_unpaired",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "function"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "refused": {
+          "const": "archive",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "message"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "refused": {
+          "const": "document",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "message"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "refused": {
+          "const": "retained_callable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "function"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "refused": {
+          "const": "branded_data",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "function"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "HelperUpgradeRefusal",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

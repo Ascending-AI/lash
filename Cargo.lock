@@ -3546,6 +3546,7 @@ dependencies = [
  "lash-kernel-doc",
  "lash-kernel-engine",
  "lash-kernel-lib",
+ "lash-kernel-migrate",
  "lash-kernel-state",
  "lash-kernel-value",
  "lash-kernel-vm",

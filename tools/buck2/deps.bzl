@@ -1732,6 +1732,7 @@ PACKAGE_DEPS = {
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_engine": "//crates/lash-kernel-engine:lash-kernel-engine",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },

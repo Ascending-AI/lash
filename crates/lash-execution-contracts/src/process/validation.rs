@@ -395,6 +395,14 @@ pub fn apply_successor_input(
             status: record.status(),
         });
     }
+    if request.unchanged {
+        if !super::succession::successor_is_current(request, record) {
+            return Err(PluginError::Session(
+                "an unchanged successor event changes the selected pair".into(),
+            ));
+        }
+        return Ok(());
+    }
     let crate::ProcessInput::Engine { kind, launch, .. } = record.input.as_ref() else {
         return Err(PluginError::Session(format!(
             "process `{}` runs no engine, and has no successor",

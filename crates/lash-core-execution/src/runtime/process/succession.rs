@@ -74,6 +74,28 @@ pub async fn request_process_successor(
         .get_process(process)
         .await?
         .ok_or_else(|| refused(ProcessSuccessorRefusal::UnknownProcess))?;
+    if let Some(id) = &successor.request_id {
+        let request = ProcessSuccessorRequest {
+            unchanged: false,
+            request_id: Some(id.clone()),
+            payload: successor.payload.clone(),
+            env: successor.env.clone(),
+            definition_id: None,
+        };
+        for prefix in ["process.succeeded", "process.successor_refused"] {
+            let prior = backend
+                .process_registry()
+                .event_by_replay_key(
+                    process,
+                    &request.replay_key(process, prefix),
+                    record.last_event_sequence,
+                )
+                .await?;
+            if !matches!(prior, ProcessEventReadOutcome::Retained(None)) {
+                return Ok(ProcessSuccession::AlreadyResolved);
+            }
+        }
+    }
     if record.is_terminal() {
         return Err(refused(ProcessSuccessorRefusal::Ended));
     }
@@ -89,11 +111,15 @@ pub async fn request_process_successor(
         .into_identity()
         .definition_id;
     let request = ProcessSuccessorRequest {
+        unchanged: false,
+        request_id: successor.request_id,
         payload: successor.payload,
         env: successor.env,
         definition_id,
     };
-    if lash_execution_contracts::process::succession::successor_is_current(&request, &record) {
+    if request.request_id.is_none()
+        && lash_execution_contracts::process::succession::successor_is_current(&request, &record)
+    {
         return Ok(ProcessSuccession::AlreadyCurrent);
     }
     if record.cancel_request.is_some() {

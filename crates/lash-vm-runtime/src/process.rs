@@ -14,7 +14,11 @@
 
 mod advance;
 mod documents;
+mod helper_upgrade;
 mod helpers;
+pub use helper_upgrade::{
+    HelperPublicationUpgrade, HelperPublicationUpgradeRequest, HelperRunUpgradeRequest,
+};
 mod inline;
 mod migrate;
 mod page_carry;
@@ -1068,3 +1072,5 @@ pub fn kernel_process_engine_registration(
         engine: Arc::clone(&engine),
     }))
 }
+
+pub use lash_kernel_state::paged::HelperUpgradeCheckError;

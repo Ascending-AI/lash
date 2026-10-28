@@ -68,8 +68,8 @@ fn unavailable(message: impl std::fmt::Display) -> DurableError {
 }
 
 impl ProcessActivation {
-    /// Record the newest `process.successor` mail of `tx` in the driver, or
-    /// apply it at once to a process whose engine has not started.
+    /// Record id-bearing successor mail in order, or the newest unkeyed request,
+    /// and apply it at once to a process whose engine has not started.
     pub(super) async fn record_successor(
         &self,
         owned: &Owned<'_>,
@@ -77,37 +77,100 @@ impl ProcessActivation {
         current: &Current<'_>,
         driver: &Driver,
     ) -> Result<Succession, DurableError> {
-        let Some(mail) = tx
+        let keyed = tx
             .mail()
             .iter()
             .filter(|mail| mail.kind.as_str() == SUCCESSOR_MAIL)
-            .max_by_key(|mail| mail.seq)
+            .find(|mail| {
+                serde_json::from_str::<ProcessSuccessorRequest>(&mail.body)
+                    .is_ok_and(|request| request.request_id.is_some())
+            });
+        let Some(mail) = keyed
+            .or_else(|| {
+                tx.mail()
+                    .iter()
+                    .filter(|mail| mail.kind.as_str() == SUCCESSOR_MAIL)
+                    .max_by_key(|mail| mail.seq)
+            })
             .cloned()
         else {
             return Ok(Succession::AsWritten(Box::new(tx)));
         };
-        tx.ack_through(mail.seq);
-        let request = match serde_json::from_str::<ProcessSuccessorRequest>(&mail.body) {
+        let mut request = match serde_json::from_str::<ProcessSuccessorRequest>(&mail.body) {
             Ok(request)
-                if !lash_execution_contracts::process::succession::successor_is_current(
-                    &request,
-                    current.record,
-                ) =>
+                if request.request_id.is_some()
+                    || !lash_execution_contracts::process::succession::successor_is_current(
+                        &request,
+                        current.record,
+                    ) =>
             {
                 request
             }
             // A resend of the pair the process already runs, or mail that
             // is no request: acknowledged, and nothing changes.
             Ok(_) => {
+                tx.ack_through(mail.seq);
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Succession::Ended(Pass::Again));
             }
             Err(error) => {
+                tx.ack_through(mail.seq);
                 tracing::warn!(process_id = %current.process, %error, "successor mail does not decode; dropped");
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Succession::Ended(Pass::Again));
             }
         };
+        if driver.successor.as_ref().is_some_and(|pending| {
+            pending.request_id.is_some() && pending.request_id != request.request_id
+        }) {
+            return Ok(Succession::AsWritten(Box::new(tx)));
+        }
+        tx.ack_through(mail.seq);
+        if request.request_id.is_some() {
+            if driver
+                .successor
+                .as_ref()
+                .is_some_and(|pending| pending.request_id == request.request_id)
+            {
+                owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                return Ok(Succession::Ended(Pass::Again));
+            }
+            for prefix in ["process.succeeded", "process.successor_refused"] {
+                let prior = self
+                    .backend
+                    .process_registry()
+                    .event_by_replay_key(
+                        current.process,
+                        &request.replay_key(current.process, prefix),
+                        current.record.last_event_sequence,
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                if !matches!(
+                    prior,
+                    lash_execution_contracts::process::ProcessEventReadOutcome::Retained(None)
+                ) {
+                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                    return Ok(Succession::Ended(Pass::Again));
+                }
+            }
+        }
+        request.unchanged = false;
+        if request.request_id.is_some()
+            && lash_execution_contracts::process::succession::successor_is_current(
+                &request,
+                current.record,
+            )
+        {
+            request.unchanged = true;
+            append_event(
+                &mut tx,
+                current.process,
+                ProcessEventAppendRequest::succeeded(current.process, &request),
+            );
+            owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+            return Ok(Succession::Ended(Pass::Again));
+        }
         if current.row.state_rev == 0 {
             return Box::pin(self.apply_successor(
                 owned,
