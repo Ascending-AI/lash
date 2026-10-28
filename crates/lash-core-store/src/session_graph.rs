@@ -393,7 +393,7 @@ pub struct SessionNodeRecord {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionNodeBody"
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 3;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the node body to 23. Its body
 /// keeps 22's shape, and [`upcast_synthetic_node_body`] is the permanent
@@ -401,7 +401,7 @@ pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 2;
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionNodeBody"
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 4;
 
 /// The synthetic N+1's history upcaster: a generation-22 node body is a
 /// generation-23 body under the older stamp.
