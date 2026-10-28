@@ -701,7 +701,18 @@ impl FeedState {
                 == lash_durable::Notifier::AfterCommit)
                 .then(|| stores.node_wakes())
                 .flatten();
-            self.changes = Some(stores.wake_sink().observe(actor, transport).await);
+            self.changes = match stores.wake_sink().observe(actor, transport).await {
+                Ok(watch) => Some(watch),
+                Err(error) => {
+                    tracing::error!(
+                        store = %stores.binding_identity(),
+                        session_id = %self.source.session_id,
+                        %error,
+                        "session observation notification source could not be opened",
+                    );
+                    return Some(Err(EmbedError::Durable(error)));
+                }
+            };
         }
         loop {
             if self.done {

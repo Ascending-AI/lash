@@ -617,6 +617,7 @@ pub(super) async fn follow(
 /// Watch `ctx`'s session and share concurrent reads when a listener hears
 /// every process. Otherwise each resolution starts a fresh read through
 /// the follower's replay-event and polling schedules.
+/// Failed observer acquisition also keeps that polling fallback.
 async fn watch_session(ctx: &SendContext) -> Option<KeyWatch> {
     let actor = lash_durable::ActorKey::session(ctx.parts.session_id.as_str()).ok()?;
     let backend = ctx.parts.effect_host.backend();
@@ -624,7 +625,7 @@ async fn watch_session(ctx: &SendContext) -> Option<KeyWatch> {
     let transport = (backend.config().settings().notifier == lash_durable::Notifier::AfterCommit)
         .then(|| stores.node_wakes())
         .flatten();
-    let watch = stores.wake_sink().observe(actor, transport).await;
+    let watch = stores.wake_sink().observe(actor, transport).await.ok()?;
     watch.hears_every_process().then_some(watch)
 }
 

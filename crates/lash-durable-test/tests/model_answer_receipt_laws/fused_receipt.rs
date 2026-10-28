@@ -259,7 +259,7 @@ async fn an_observer_receives_only_its_inputs_acknowledged_terminal() {
     })
     .await;
     let sink = deployment.backend.stores().wake_sink();
-    let watch = sink.observe(actor(), None).await;
+    let watch = sink.observe(actor(), None).await.expect("local watch");
     assert!(
         watch
             .committed_turn(&lash_core::store::FollowSubject::Input(

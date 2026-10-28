@@ -1255,6 +1255,13 @@ impl ObservableSession {
     /// head. Callers should replace their UI/projection from the included
     /// observation, which is the durable head, persist `gap.latest_cursor`,
     /// and keep polling the same stream; it continues from that cursor.
+    ///
+    /// When after-commit notifications need a backend observer that cannot
+    /// be opened, the stream yields [`EmbedError::Durable`] with the original
+    /// acquisition cause and then ends. Its cursor is unchanged. After
+    /// handling the cause, the host calls this method again with its last
+    /// applied cursor. The stream does not retry or fall back to polling.
+    /// Stores with no notification transport still follow local commits.
     pub fn subscribe_and_recover(&self, cursor: SessionCursor) -> SessionObservationStream {
         SessionObservationStream::new(self.feed_source(), cursor)
     }

@@ -137,23 +137,31 @@ impl WakeSink {
     /// no lease and no liveness lock, and returns once it listens. The
     /// watch says whether either listens
     /// ([`KeyWatch::hears_every_process`]).
+    /// With no transport, no observer is acquired and the watch does not
+    /// claim cross-process coverage.
+    ///
+    /// # Errors
+    /// The transport's observer acquisition error. No observer is installed
+    /// on failure; the caller chooses whether to fail or use polling.
     pub async fn observe(
         &self,
         actor: ActorKey,
         transport: Option<Arc<dyn NodeWakes>>,
-    ) -> KeyWatch {
+    ) -> Result<KeyWatch, crate::DurableError> {
         let mut watch = self.inner.watches.subscribe(actor);
         watch.every_process = match transport {
-            Some(transport) => self.listening(transport.as_ref()).await,
+            Some(transport) => {
+                self.listening(transport.as_ref()).await?;
+                true
+            }
             None => false,
         };
-        watch
+        Ok(watch)
     }
 
-    /// Whether a listener of this process hears what every node hears: an
-    /// attached node's, or the observer, opened through `transport` now if
-    /// neither listens.
-    async fn listening(&self, transport: &dyn NodeWakes) -> bool {
+    /// Ensure this process hears every node: through an attached node's
+    /// listener or an observer opened now. A failed open installs nothing.
+    async fn listening(&self, transport: &dyn NodeWakes) -> Result<(), crate::DurableError> {
         let _opening = self.inner.opening.lock().await;
         if !self.nodes().is_empty()
             || self
@@ -161,17 +169,13 @@ impl WakeSink {
                 .as_ref()
                 .is_some_and(|stop| !stop.is_closed())
         {
-            return true;
+            return Ok(());
         }
-        let Ok(feed) = transport.observe().await else {
-            // No listener: the subscriber's own fallback reads find the
-            // changes.
-            return false;
-        };
+        let feed = transport.observe().await?;
         let (stop, stopped) = oneshot::channel();
         tokio::spawn(relay(feed, Arc::downgrade(&self.inner.watches), stopped));
         *self.observer() = Some(stop);
-        true
+        Ok(())
     }
 
     fn observer(&self) -> std::sync::MutexGuard<'_, Option<oneshot::Sender<()>>> {

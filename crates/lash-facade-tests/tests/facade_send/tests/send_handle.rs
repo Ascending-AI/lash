@@ -257,9 +257,9 @@ async fn equivalent_followers_share_a_read_and_keep_a_racing_completion() -> Res
     let input = sent.input_id().clone();
     let subject = lash_core::store::FollowSubject::Input(input);
     let actor = lash_core::durable_port::ActorKey::session("shared-follow").expect("session actor");
-    let mut first_watch = wakes.observe(actor.clone(), None).await;
-    let mut second_watch = wakes.observe(actor.clone(), None).await;
-    let mut third_watch = wakes.observe(actor.clone(), None).await;
+    let mut first_watch = wakes.observe(actor.clone(), None).await?;
+    let mut second_watch = wakes.observe(actor.clone(), None).await?;
+    let mut third_watch = wakes.observe(actor.clone(), None).await?;
     let store =
         lash_core::store::SessionStore::new(read_store, SessionId::fixture("shared-follow"))?;
     let snapshot = reads.on(StoreOp::follow_facts).after().pause();
@@ -286,7 +286,7 @@ async fn equivalent_followers_share_a_read_and_keep_a_racing_completion() -> Res
         );
         // A subscriber arriving after the snapshot began must read afresh,
         // even while older readers share that snapshot under the same hint.
-        let mut late = wakes.observe(actor.clone(), None).await;
+        let mut late = wakes.observe(actor.clone(), None).await?;
         late.read_follow_facts(&store, &subject, |_| {}).await?;
         assert_eq!(
             reads.calls(StoreOp::follow_facts),
@@ -320,7 +320,7 @@ async fn equivalent_followers_share_a_read_and_keep_a_racing_completion() -> Res
         assert_eq!(completed, run);
     }
     let before_fresh = reads.calls(StoreOp::follow_facts);
-    let mut fresh = wakes.observe(actor, None).await;
+    let mut fresh = wakes.observe(actor, None).await?;
     assert!(
         fresh.committed_turn(&subject).is_none(),
         "a new subscriber cannot use an earlier handoff"

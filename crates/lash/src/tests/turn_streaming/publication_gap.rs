@@ -18,6 +18,8 @@ enum Fault {
     Hold,
     /// Retain the commit but lose its notification to the existing reader.
     MissNotification,
+    /// Retain publications while the reader's live tail hears nothing.
+    SilentLive,
 }
 
 /// A law's hold on a replay store: the commit publication it holds, and
@@ -138,6 +140,7 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
                 }
                 Fault::Hold => self.gate.hold().await,
                 Fault::MissNotification => self.missed.store(true, Ordering::SeqCst),
+                Fault::SilentLive => {}
             }
         }
         let committed = events.iter().any(|event| commits_rows(&event.payload));
@@ -164,7 +167,7 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
     ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
     {
         let _boundary = self.boundary.lock().await;
-        let prefix = if matches!(self.fault, Fault::MissNotification)
+        let prefix = if matches!(self.fault, Fault::MissNotification | Fault::SilentLive)
             && self.reader.lock_recover().as_ref() == Some(cursor)
         {
             Some(self.inner.replay_after_cursor(cursor).await?)
@@ -176,14 +179,16 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
             && let Ok(lash_core::LiveReplaySubscribeOutcome::Subscribed(subscription)) = outcome
         {
             let missed = Arc::clone(&self.missed);
+            let silent = matches!(self.fault, Fault::SilentLive);
             let replayed = prefix.len();
             outcome = Ok(lash_core::LiveReplaySubscribeOutcome::Subscribed(
                 lash_core::LiveReplaySubscription::new(
                     prefix,
                     subscription.skip(replayed).filter_map(move |item| {
-                        let drop_notification = item.as_ref().is_ok_and(|event| {
-                            commits_rows(&event.payload) && missed.swap(false, Ordering::SeqCst)
-                        });
+                        let drop_notification = silent
+                            || item.as_ref().is_ok_and(|event| {
+                                commits_rows(&event.payload) && missed.swap(false, Ordering::SeqCst)
+                            });
                         std::future::ready((!drop_notification).then_some(item))
                     }),
                 ),
@@ -225,6 +230,283 @@ impl lash_core::LiveReplayStore for CommitPublicationStore {
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
+}
+
+/// The observer fails before it can install a reconnecting listener.
+struct FailFirstObserver {
+    inner: Arc<dyn lash_durable::NodeWakes>,
+    opens: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl lash_durable::NodeWakes for FailFirstObserver {
+    async fn publish(
+        &self,
+        batch: &lash_durable::WakeBatch,
+    ) -> std::result::Result<(), lash_durable::DurableError> {
+        self.inner.publish(batch).await
+    }
+
+    async fn committed(
+        &self,
+        batch: &lash_durable::WakeBatch,
+    ) -> std::result::Result<(), lash_durable::DurableError> {
+        self.inner.committed(batch).await
+    }
+
+    async fn listen(
+        &self,
+        lease: &lash_durable::NodeLease,
+    ) -> std::result::Result<Box<dyn lash_durable::NodeWakeFeed>, lash_durable::DurableError> {
+        self.inner.listen(lease).await
+    }
+
+    async fn observe(
+        &self,
+    ) -> std::result::Result<Box<dyn lash_durable::NodeWakeFeed>, lash_durable::DurableError> {
+        if self.opens.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(lash_durable::DurableError::Store(
+                lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: "injected notification-source acquisition failure".into(),
+                },
+            ));
+        }
+        self.inner.observe().await
+    }
+
+    async fn liveness(
+        &self,
+    ) -> std::result::Result<Vec<lash_durable::BootLiveness>, lash_durable::DurableError> {
+        self.inner.liveness().await
+    }
+
+    async fn reap_released(
+        &self,
+        reaper: &lash_durable::NodeLease,
+        boot: &lash_durable::Owner,
+    ) -> std::result::Result<Vec<lash_durable::Reaped>, lash_durable::DurableError> {
+        self.inner.reap_released(reaper, boot).await
+    }
+}
+
+/// FIG-7538: a failed notification prerequisite yields its typed cause,
+/// without retrying or advancing the cursor; a new subscription continues it.
+/// An intentionally transport-free memory store still delivers local commits.
+#[tokio::test]
+async fn notification_acquisition_failure_errors_and_resubscribe_delivers_the_commit_once()
+-> Result<()> {
+    for has_transport in [true, false] {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            notification_acquisition_scenario(has_transport),
+        )
+        .await
+        .expect("notification acquisition law deadlock watchdog")?;
+    }
+    Ok(())
+}
+
+async fn notification_acquisition_scenario(has_transport: bool) -> Result<()> {
+    use crate::observe::{SessionObservationEventPayload, SessionObservationStreamItem};
+    use futures_util::FutureExt as _;
+    use lash_execution_contracts::backend::StoreSet;
+
+    let directory = tempfile::tempdir().expect("private feed database");
+    let open_file = || async {
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(
+                directory.path().join("feed.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("open SQLite file stores"),
+        ) as Arc<dyn StoreSet>
+    };
+    let writer_stores: Arc<dyn StoreSet> = if has_transport {
+        open_file().await
+    } else {
+        sqlite_memory_store_set().await
+    };
+    let opens = Arc::new(AtomicUsize::new(0));
+    let reader_stores = if has_transport {
+        let opens = Arc::clone(&opens);
+        lash_core::testing::runtime_helpers::LayeredStores::over(open_file().await)
+            .map_node_wakes(move |inner| Arc::new(FailFirstObserver { inner, opens }))
+            .into_store_set()
+    } else {
+        writer_stores.clone()
+    };
+    assert_eq!(reader_stores.node_wakes().is_some(), has_transport);
+    let replay = CommitPublicationStore::new(if has_transport {
+        Fault::SilentLive
+    } else {
+        Fault::Hold
+    });
+    let writer = explicit_ephemeral_facets(LashCore::standard_builder(
+        lash_conformance::backend_over(writer_stores),
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay.clone())
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let reader = explicit_ephemeral_facets(LashCore::standard_builder(
+        lash_conformance::backend_over(reader_stores),
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay.clone())
+    .serve_sessions(false)
+    .build(crate::tests::host::runtime_lease_owner())?;
+    let session_id = SessionId::from("failed-feed-prerequisite");
+    let session = created_session(&writer, session_id.clone())
+        .await
+        .open()
+        .await?;
+    let state = lash_core::store::load_session_window_state(
+        &session.binding.store(),
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("created durable head")
+    .state;
+    let observed = reader.session(session_id).observe_with_state(state).await?;
+    let cursor = observed.observe().snapshot().await?.cursor;
+    *replay.reader.lock_recover() = Some(cursor.clone());
+    let mut feed = observed.observe().subscribe_and_recover(cursor.clone());
+    tokio::time::pause();
+    let acquisition_time = tokio::time::Instant::now();
+    let mut first = None;
+    for _ in 0..256 {
+        if first.is_none() {
+            first = feed.next().now_or_never().flatten();
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(tokio::time::Instant::now(), acquisition_time);
+    let answered_without_time = first.is_some();
+    tokio::time::resume();
+    // The unfixed feed reaches live tailing after losing the error;
+    // the fixed feed returns it before any subscription read.
+    if first.is_none() {
+        first = tokio::select! {
+            biased;
+            item = feed.next() => Some(item.expect("one error item")),
+            () = replay.gate.read.notified() => None,
+        };
+    }
+    let handle = session
+        .send(TurnInput::text("retained across failed acquisition"))
+        .await?;
+    replay.published.notified().await;
+    tokio::time::pause();
+    let frozen = tokio::time::Instant::now();
+    let mut commits = Vec::new();
+    for _ in 0..256 {
+        if first.is_none() {
+            first = feed.next().now_or_never().flatten();
+        }
+        if !has_transport && let Some(item) = first.take() {
+            match item? {
+                SessionObservationStreamItem::Event(event)
+                    if matches!(
+                        &event.payload,
+                        SessionObservationEventPayload::Committed { .. }
+                    ) =>
+                {
+                    commits.push(event)
+                }
+                SessionObservationStreamItem::Event(_) => {}
+                SessionObservationStreamItem::Gap { gap, .. } => {
+                    panic!("local retained commit gapped: {gap:?}")
+                }
+            }
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(tokio::time::Instant::now(), frozen, "no fallback timer ran");
+    tokio::time::resume();
+    if has_transport {
+        assert!(
+            answered_without_time,
+            "acquisition must fail without a timer"
+        );
+        let error = first
+            .expect("failed acquisition must yield an error, not remain pending")
+            .expect_err("notification prerequisite failure must not become a live subscription");
+        assert!(
+            matches!(error, EmbedError::Durable(lash_durable::DurableError::Store(ref cause))
+            if cause.kind == lash_durable::StoreFailureKind::Unavailable
+            && cause.message == "injected notification-source acquisition failure"),
+            "typed acquisition cause: {error:?}"
+        );
+        assert_eq!(feed.cursor(), &cursor, "failure consumes no cursor");
+        assert!(
+            matches!(feed.next().now_or_never(), Some(None)),
+            "the failed stream ends without retry"
+        );
+        assert_eq!(
+            opens.load(Ordering::SeqCst),
+            1,
+            "no internal acquisition retry"
+        );
+        feed = observed.observe().subscribe_and_recover(cursor);
+        while commits.is_empty() {
+            match feed.next().await.expect("resubscribed feed stays open")? {
+                SessionObservationStreamItem::Event(event)
+                    if matches!(
+                        &event.payload,
+                        SessionObservationEventPayload::Committed { .. }
+                    ) =>
+                {
+                    commits.push(event)
+                }
+                SessionObservationStreamItem::Event(_) => {}
+                SessionObservationStreamItem::Gap { gap, .. } => {
+                    panic!("retained recovery gapped: {gap:?}")
+                }
+            }
+        }
+        assert_eq!(
+            opens.load(Ordering::SeqCst),
+            2,
+            "the host resubscription opens the observer"
+        );
+    }
+    let outcome = handle.outcome().await?;
+    let run = outcome.run().expect("committed run").as_str();
+    let [commit] = commits.as_slice() else {
+        panic!("one commit, transport={has_transport}: {commits:?}");
+    };
+    let SessionObservationEventPayload::Committed { entries, .. } = &commit.payload else {
+        unreachable!()
+    };
+    let replies = entries
+        .iter()
+        .filter(|entry| entry.provenance.is_turn_reply)
+        .map(|entry| {
+            entry
+                .provenance
+                .turn_id
+                .as_ref()
+                .expect("reply turn")
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(replies, vec![run]);
+    while let Some(item) = feed.next().now_or_never() {
+        match item.expect("feed stays open")? {
+            SessionObservationStreamItem::Event(event) => assert!(
+                !matches!(
+                    &event.payload,
+                    SessionObservationEventPayload::Committed { .. }
+                ),
+                "commit delivered twice"
+            ),
+            SessionObservationStreamItem::Gap { gap, .. } => panic!("continuation gapped: {gap:?}"),
+        }
+    }
+    reader.shutdown().await?;
+    writer.shutdown().await?;
+    Ok(())
 }
 
 /// FIG-7531: a reader opened from Current follows two adjacent turns without

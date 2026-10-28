@@ -43,6 +43,15 @@ Auxiliary events advance the live position but never the revision the
 consumer holds. The backend's existing listener carries the same hints across
 processes; replay retention still determines whether continuation is possible.
 
+If a configured after-commit notification observer cannot open, the feed
+returns the transport's typed durable error and ends without advancing its
+cursor (FIG-7538). It logs the failed acquisition with store and session;
+the host handles the cause and resubscribes from its last applied cursor.
+There is no internal acquisition retry or polling fallback. A store with no
+transport, such as SQLite memory, intentionally keeps its local watch. Send
+followers explicitly retain their separate polling fallback on acquisition
+failure.
+
 ## Consequences
 
 Turn streams and `TurnOutput.activities` are convenience APIs. Reconnect uses session observation. Hosts project local observations into their own DTOs ([ADR 0136](0136-hosts-own-their-wire-contracts.md)). Custom live replay stores implement per-session sequencing and ordered publication themselves; the `LiveReplayStore` trait states every obligation and `lash-conformance` certifies them.

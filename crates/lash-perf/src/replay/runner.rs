@@ -603,7 +603,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             None
         };
         let completion = match &idle {
-            Some((sink, actor)) => Some(sink.observe(actor.clone(), None).await),
+            Some((sink, actor)) => Some(sink.observe(actor.clone(), None).await?),
             None => None,
         };
         lanes.push(Lane {
