@@ -67,13 +67,13 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 1;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 2;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 2;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 3;
 
 /// A saved function: a function a session keeps between cells, held in an
 /// immutable FunctionBundle node with every saved function it uses. Its
