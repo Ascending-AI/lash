@@ -65,6 +65,11 @@ mod graph_codec;
 pub mod heap;
 pub mod logical_held;
 pub use logical_held::LogicalHeldV1;
+mod native_resources;
+pub use native_resources::{
+    NativeResourceContract, NativeResourceEntity, NativeResourceEvent, NativeResourceExit,
+    NativeResourceHolding, NativeResourceOrigin, NativeResourceOwner, NativeResourceRelease,
+};
 mod identified;
 pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
 pub use identified::{IdentifiedDocument, document_work};

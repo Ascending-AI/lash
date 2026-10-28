@@ -861,6 +861,17 @@ pub struct NativeCall<'call, 'n> {
 pub trait NativeFunction: Send + Sync {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError>;
 
+    /// Evaluate the canonical logical obligations from input facts, separately
+    /// from execution. `None` is uncertified, never a zero-cost declaration.
+    /// A predictor may request cold input chunks; it must not reserve nursery
+    /// room, execute the native, or infer a contract from its observed output.
+    fn resource_contract(
+        &self,
+        _args: Args<'_>,
+    ) -> Result<Option<crate::NativeResourceContract>, NativeError> {
+        Ok(None)
+    }
+
     /// A heap-independent entry over immediates, for an opcode's guarded
     /// fast path: `None` declines to the general call.
     fn prepare(&self) -> Option<PreparedNative> {
