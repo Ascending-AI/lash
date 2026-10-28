@@ -49,7 +49,6 @@ use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_value::data_limits::KernelDataLimits;
 
-use super::frames::Role;
 use super::session::Session;
 use super::sites::SiteCaches;
 use super::tasks::Occurrences;
@@ -141,7 +140,7 @@ pub(super) enum Stands {
     Called {
         stmt: StmtId,
         act: ActIx,
-        roles: Vec<Role>,
+        roles: Vec<(crate::compile::Suffix, Value)>,
     },
 }
 
@@ -1384,10 +1383,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 let Some((_, value)) = regs.iter().find(|(reg, _)| *reg == role.reg.0) else {
                     return self.halt(fault("an island call's role is held by no operand"));
                 };
-                roles.push(Role {
-                    site: std::sync::Arc::clone(&role.suffix),
-                    value: *value,
-                });
+                roles.push((std::sync::Arc::clone(&role.suffix), *value));
             }
             Stands::Called { stmt, act, roles }
         } else if let Some(pc) = exit.at {

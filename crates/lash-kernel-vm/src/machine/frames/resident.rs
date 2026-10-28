@@ -65,6 +65,13 @@ impl Frames {
                 Some((_, frame)) => {
                     let mut local = lash_kernel_doc::LogicalHeldV1::FRAME;
                     let code = self.exe.code(frame.code);
+                    if let Some(pending) = frame.pending.peek() {
+                        for role in &pending.roles {
+                            local = local.checked_add(role.holding.bytes()).ok_or_else(|| {
+                                HeapFault::Malformed("pending holding cost overflow".into())
+                            })?;
+                        }
+                    }
                     let mut add =
                         |value: &lash_kernel_doc::Value| -> Result<(), HeapFault> {
                             local = local.checked_add(arena.logical_local(value)?).ok_or_else(
@@ -84,11 +91,6 @@ impl Frames {
                                 add(&lash_kernel_doc::Value::ObjectRef(*cell))?;
                             }
                             super::SlotState::Cell(_) | super::SlotState::Empty => {}
-                        }
-                    }
-                    if let Some(pending) = frame.pending.peek() {
-                        for role in &pending.roles {
-                            add(&role.value)?;
                         }
                     }
                     let mut problem = None;

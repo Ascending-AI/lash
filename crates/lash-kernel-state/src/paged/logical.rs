@@ -13,7 +13,10 @@ use std::rc::Rc;
 
 mod codec;
 mod graph;
+mod ownership;
+pub use ownership::RootValue;
 mod values;
+pub(crate) use values::stream_value_edges;
 
 /// An index in the exact source unit, assigned before register placement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -293,6 +296,15 @@ impl Ledger {
     }
     pub fn balance(&self) -> Result<Balance, HeapFault> {
         self.state.balance()
+    }
+    /// A callback, cold load or safe-point handoff expires outstanding
+    /// capabilities even when no logical holding changes. Price stays constant.
+    pub fn handoff(&mut self) -> Result<(), HeapFault> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| invalid("logical revision overflow"))?;
+        Ok(())
     }
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
         Ok(self

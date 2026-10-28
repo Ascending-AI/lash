@@ -243,6 +243,21 @@ mod laws {
         let mut embedder = Embedder::new("main { return null }");
         let machine = &mut embedder.machine;
         let baseline = normalized_operands(machine);
+        machine
+            .source_entry(&[Value::Int(7), Value::Int(11)])
+            .unwrap();
+        machine.regs.clear_range(0..2);
+        assert_eq!(
+            normalized_operands(machine),
+            (baseline.0 + 34, baseline.1),
+            "exported arguments survive their cleared ABI mirrors"
+        );
+        machine.source_entry(&[]).unwrap();
+        assert_eq!(
+            normalized_operands(machine),
+            baseline,
+            "entry transfer releases its old bank"
+        );
         let site = Arc::new(Site::new(Unit::Main, vec![0, 0]));
         let stream = Stream {
             ops: vec![

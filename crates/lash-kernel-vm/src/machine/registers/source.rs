@@ -14,6 +14,8 @@ pub(super) struct Operands {
     values: Vec<Operand>,
     positions: Vec<usize>,
     atoms: Vec<Held>,
+    entry: Vec<Held>,
+    entry_active: bool,
     atom_site: Option<Site>,
     pub(super) active: bool,
 }
@@ -29,8 +31,30 @@ impl Operands {
         }
         self.values.clear();
         self.atoms.clear();
+        self.entry.clear();
+        self.entry_active = false;
         self.atom_site = None;
         self.active = false;
+    }
+    /// The exported entry's ABI arguments are source occurrences before any
+    /// statement or physical register window exists. Build all projections
+    /// before replacing the previous bank, so a failed projection keeps it.
+    pub(super) fn entry(
+        &mut self,
+        values: &[Value],
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        let held = values
+            .iter()
+            .map(|value| projection.hold(*value))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.clear();
+        self.entry = held;
+        self.entry_active = true;
+        Ok(())
+    }
+    pub(super) fn owns_values(&self) -> bool {
+        self.active || self.entry_active
     }
     pub(super) fn begin(
         &mut self,
@@ -186,7 +210,7 @@ impl Operands {
         }
         Some(value)
     }
-    pub(super) fn take(&mut self, reg: Reg, site: &Site) -> Result<Value, HeapFault> {
+    pub(super) fn take(&mut self, reg: Reg, site: &Site) -> Result<Held, HeapFault> {
         let at = *self
             .positions
             .get(reg.ix())
@@ -201,21 +225,24 @@ impl Operands {
         Ok(self
             .remove(reg)
             .ok_or_else(|| invalid("continuation source operand disappeared"))?
-            .held
-            .value)
+            .held)
     }
 
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {
         for operand in &self.values {
             visit(&operand.held.value);
         }
-        self.atoms.iter().for_each(|atom| visit(&atom.value));
+        self.atoms
+            .iter()
+            .chain(&self.entry)
+            .for_each(|atom| visit(&atom.value));
     }
     pub(super) fn bytes(&self) -> Result<u64, HeapFault> {
         self.values
             .iter()
             .map(|value| &value.held)
             .chain(&self.atoms)
+            .chain(&self.entry)
             .try_fold(0_u64, |sum, held| {
                 sum.checked_add(held.holding.bytes())
                     .ok_or_else(|| invalid("source operand holding cost overflow"))
@@ -223,7 +250,7 @@ impl Operands {
     }
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
-        self.values.is_empty() && self.atoms.is_empty()
+        self.values.is_empty() && self.atoms.is_empty() && self.entry.is_empty()
     }
 }
 

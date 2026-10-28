@@ -71,7 +71,10 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         owners.take(Reg(19), &leaf).is_err(),
         "the branch owner was transferred"
     );
-    assert!(matches!(owners.take(Reg(19), &selected), Ok(Value::Int(7))));
+    assert!(matches!(
+        owners.take(Reg(19), &selected).map(|held| held.value),
+        Ok(Value::Int(7))
+    ));
     assert!(owners.is_empty());
 
     registers[3] = Value::Int(11);

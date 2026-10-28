@@ -8,7 +8,6 @@ use super::tree::{Access, Cell, Tree};
 use super::*;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::*;
-use std::ops::ControlFlow;
 use std::rc::Rc;
 
 impl CensusGraph for PagedHeap {
@@ -282,31 +281,7 @@ impl PagedHeap {
         value: &PageValue,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        match value {
-            PageValue::List(id)
-            | PageValue::Map(id)
-            | PageValue::Set(id)
-            | PageValue::Record(id)
-            | PageValue::Closure(id) => out(Identity::Object(*id))?,
-            PageValue::Task(id) => out(Identity::Task(*id))?,
-            PageValue::Ref(id) => out(*id)?,
-            PageValue::Tuple(t) if t.summary.has_edges => {
-                let mut error = None;
-                self.tuple_visit(t, &mut |v| match self.stream_edges(v, out) {
-                    Ok(()) => ControlFlow::Continue(()),
-                    Err(e) => {
-                        error = Some(e);
-                        ControlFlow::Break(())
-                    }
-                })?;
-                if let Some(e) = error {
-                    return Err(e);
-                }
-            }
-            PageValue::Error(e) if e.has_edges => self.stream_edges(&self.error_data(e)?, out)?,
-            _ => (),
-        }
-        Ok(())
+        super::logical::stream_value_edges(&self.access, value, out)
     }
 }
 

@@ -1132,6 +1132,10 @@ impl Arena {
         Ok(())
     }
 
+    pub(crate) fn logical_handle(&self, entity: EntityId) -> Option<ArenaHandle> {
+        self.entities.get(&entity).copied()
+    }
+
     /// The durable id of the mutable object `handle`, given now if it has
     /// none: the next primary ordinal. It is dirty already, as every object
     /// the run creates is until it is projected.

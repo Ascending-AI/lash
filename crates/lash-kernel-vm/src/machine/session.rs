@@ -342,7 +342,7 @@ pub(crate) fn start(
             }
             let mut args = Vec::new();
             for (datum, param) in start.args.iter().zip(&signature.params) {
-                machine.regs = args.clone().into();
+                machine.source_entry(&args)?;
                 args.push(if param.optional && matches!(datum, Datum::Absent) {
                     Value::Absent
                 } else {
@@ -354,7 +354,7 @@ pub(crate) fn start(
             if let lash_kernel_doc::StartConvention::PyArgsList { positional } =
                 definition.convention
             {
-                machine.regs = args.clone().into();
+                machine.source_entry(&args)?;
                 let positional = positional as usize;
                 let named = args
                     .iter()
@@ -375,6 +375,9 @@ pub(crate) fn start(
                     .new_object(NewObject::Map(named))
                     .map_err(|error| start_interrupt("keywords", error.into()))?;
                 machine.put(args.len(), keywords);
+                let mut packed = args.clone();
+                packed.push(keywords);
+                machine.source_entry(&packed)?;
                 let list = machine
                     .new_object(NewObject::List(args.into_iter().take(positional).collect()))
                     .map_err(|error| start_interrupt("arguments", error.into()))?;
@@ -383,7 +386,7 @@ pub(crate) fn start(
                 definition.convention
             {
                 for datum in start.args.iter().skip(signature.params.len()) {
-                    machine.regs = args.clone().into();
+                    machine.source_entry(&args)?;
                     args.push(
                         machine
                             .decode(&exe, datum, &lash_kernel_value::types::Type::Any)
@@ -391,7 +394,7 @@ pub(crate) fn start(
                     );
                 }
                 // Start arguments remain roots while the packed list reserves.
-                machine.regs = args.clone().into();
+                machine.source_entry(&args)?;
                 let list = machine
                     .new_object(NewObject::List(args))
                     .map_err(|error| start_interrupt("arguments", error.into()))?;
@@ -414,7 +417,7 @@ pub(crate) fn start(
         }
     };
     let count = args.len();
-    machine.regs = args.into();
+    machine.source_entry(&args)?;
     if let Some(code) = code {
         let mut call = exec::Call::new(code, 0, count).exported(descriptor.as_ref());
         if let Some(descriptor) = &descriptor

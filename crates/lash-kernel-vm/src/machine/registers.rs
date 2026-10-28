@@ -3,7 +3,7 @@ use std::ops::Index;
 use std::slice::SliceIndex;
 mod source;
 
-use super::logical_held::Projection;
+use super::logical_held::{Held, Projection};
 use lash_kernel_doc::{Value, heap::HeapFault};
 
 /// A region's bounded operand stack. Nested calls open disjoint windows;
@@ -204,6 +204,21 @@ impl Registers {
         self.kill = 0;
     }
 
+    pub(super) fn source_entry(
+        &mut self,
+        values: &[Value],
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        self.source.entry(values, projection)?;
+        self.window(values.len());
+        for (index, value) in values.iter().enumerate() {
+            self.put(index, *value);
+        }
+        self.clear_range(values.len()..self.extent);
+        self.extent = values.len();
+        Ok(())
+    }
+
     pub(super) fn source_begin(
         &mut self,
         stream: &crate::compile::Stream,
@@ -244,14 +259,16 @@ impl Registers {
         &mut self,
         reg: lash_kernel_exec::Reg,
         site: &lash_kernel_value::sites::Site,
-    ) -> Result<Value, HeapFault> {
+        projection: &Projection<'_>,
+    ) -> Result<Held, HeapFault> {
         if self.source.active {
             self.source.take(reg, site)
         } else {
-            self.values
-                .get(reg.ix())
-                .copied()
-                .ok_or_else(|| HeapFault::Malformed("continuation register is missing".into()))
+            let value =
+                self.values.get(reg.ix()).copied().ok_or_else(|| {
+                    HeapFault::Malformed("continuation register is missing".into())
+                })?;
+            projection.hold(value)
         }
     }
 
@@ -259,7 +276,7 @@ impl Registers {
         &self,
         arena: &lash_kernel_state::arena::Arena,
     ) -> Result<u64, HeapFault> {
-        if self.source.active {
+        if self.source.owns_values() {
             return self.source.bytes();
         }
         self.values[..self.extent]
@@ -275,7 +292,7 @@ impl Registers {
     /// Active stream operands are source occurrences. Outside a stream, an
     /// action may still be assembling arguments in explicitly written slots.
     pub(super) fn source_projection(&self) -> Vec<Value> {
-        if self.source.active {
+        if self.source.owns_values() {
             let mut values = Vec::new();
             self.source.each_value(&mut |value| values.push(*value));
             values

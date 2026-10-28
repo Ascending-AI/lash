@@ -64,33 +64,23 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     let parent_handle = parent.handle().unwrap();
     assert_eq!(arena.identify(parent_handle).unwrap(), id(1));
     let seals = pages.borrow().seals;
-    let changes = vec![
-        Change::Allocate {
-            entity: id(0),
-            body: Holding::native_body(&mut arena, &heap, child_handle).unwrap(),
-        },
-        Change::Allocate {
-            entity: id(1),
-            body: Holding::native_body(&mut arena, &heap, parent_handle).unwrap(),
-        },
-        Change::Roots(vec![
-            (frame(), Some(Holding::frame())),
-            (
-                owner(0),
-                Some(Holding::from_native(&mut arena, &heap, &parent).unwrap()),
-            ),
-            (
-                owner(1),
-                Some(Holding::from_native(&mut arena, &heap, &child).unwrap()),
-            ),
-        ]),
-    ];
+    let prepared = ledger
+        .prepare_ownership(
+            &mut arena,
+            &access,
+            &[],
+            &[
+                (frame(), RootValue::Frame),
+                (owner(0), RootValue::Value(&parent)),
+                (owner(1), RootValue::Value(&child)),
+            ],
+        )
+        .unwrap();
     assert_eq!(
         pages.borrow().seals,
         seals,
         "holding acquisition does not project payloads"
     );
-    let prepared = ledger.prepare(changes, &access).unwrap();
     assert_eq!(prepared.peak(), 209); // 49 + 64 + frame 64 + two references 32.
     let prepared = match prepared.admit(208) {
         Err(p) => p,
@@ -111,9 +101,21 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         }
     );
 
+    assert!(
+        matches!(
+            ledger.prepare_ownership(
+                &mut arena,
+                &access,
+                &[],
+                &[(owner(0), RootValue::Value(&child)),]
+            ),
+            Err(HeapFault::Malformed(_))
+        ),
+        "an overwrite must consume its old owner"
+    );
     // The tuple has two 16-byte aliases, plus its 16-byte outer occurrence.
     let tuple = arena.tuple(vec![child, child], 256).unwrap();
-    let tuple_holding = Holding::from_native(&mut arena, &heap, &tuple).unwrap();
+    let tuple_holding = Holding::from_native(&mut arena, heap.pages(), &tuple).unwrap();
     let stored = lash_kernel_doc::heap::PageValue::Tuple(
         crate::paged::stored::pages::tuple(
             &access,
@@ -124,7 +126,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         )
         .unwrap(),
     );
-    let cold_holding = Holding::from_page(&heap, &stored).unwrap();
+    let cold_holding = Holding::from_page(heap.pages(), &stored).unwrap();
     assert_eq!(tuple_holding.bytes(), cold_holding.bytes());
     admit(
         &mut ledger,
@@ -200,26 +202,57 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         depth: 0,
         slot: Slot::Capture(0),
     };
-    admit(
-        &mut ledger,
-        vec![
-            Change::Allocate {
-                entity: id(2),
-                body: Holding::scalar(49),
-            },
-            Change::Roots(vec![(owner(0), Some(value(16, &[2], &access)))]),
-        ],
-        129,
-        &access,
-    );
-    admit(
-        &mut ledger,
-        vec![Change::Roots(vec![
-            (owner(0), None),
-            (capture, Some(value(0, &[2], &access))),
-        ])],
-        129,
-        &access,
+    let cell = arena.new_cell(lash_kernel_doc::Value::Int(7));
+    assert_eq!(arena.identify(cell).unwrap(), id(2));
+    let variable = lash_kernel_doc::Value::ObjectRef(cell);
+    let prepared = ledger
+        .prepare_ownership(
+            &mut arena,
+            &access,
+            &[],
+            &[(owner(0), RootValue::Value(&variable))],
+        )
+        .unwrap();
+    ledger
+        .commit(
+            prepared
+                .admit(129)
+                .unwrap_or_else(|_| panic!("variable did not fit")),
+        )
+        .unwrap();
+    let prepared = ledger
+        .prepare_ownership(
+            &mut arena,
+            &access,
+            &[owner(0)],
+            &[(capture, RootValue::Capture(cell))],
+        )
+        .unwrap();
+    ledger
+        .commit(
+            prepared
+                .admit(129)
+                .unwrap_or_else(|_| panic!("capture did not fit")),
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            ledger.prepare_ownership(
+                &mut arena,
+                &access,
+                &[],
+                &[(
+                    Owner::Value {
+                        task: TaskId::MAIN,
+                        depth: 0,
+                        slot: Slot::Capture(1)
+                    },
+                    RootValue::Capture(child_handle)
+                ),]
+            ),
+            Err(HeapFault::Malformed(_))
+        ),
+        "a list cannot claim a borrowed variable owner"
     );
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 113);
     for holding in [
@@ -269,22 +302,23 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
             let mirror = arena.create_list(&[]);
             let mirror_handle = mirror.handle().unwrap();
             assert_eq!(arena.identify(mirror_handle).unwrap(), id(0));
-            let empty_body = Holding::native_body(&mut arena, &heap, mirror_handle).unwrap();
+            let empty_body = Holding::native_body(&mut arena, heap.pages(), mirror_handle).unwrap();
             arena.list_set(mirror_handle, 0, mirror).unwrap();
-            let cycle_body = Holding::native_body(&mut arena, &heap, mirror_handle).unwrap();
+            let cycle_body = Holding::native_body(&mut arena, heap.pages(), mirror_handle).unwrap();
             let result = arena.create_list(&[lash_kernel_doc::Value::Int(7)]);
             let result_handle = result.handle().unwrap();
             assert_eq!(arena.identify(result_handle).unwrap(), id(1));
-            let result_body = Holding::native_body(&mut arena, &heap, result_handle).unwrap();
+            let result_body =
+                Holding::native_body(&mut arena, heap.pages(), result_handle).unwrap();
             let mut roots = vec![
                 (frame(), Some(Holding::frame())),
                 (
                     owner(0),
-                    Some(Holding::from_native(&mut arena, &heap, &mirror).unwrap()),
+                    Some(Holding::from_native(&mut arena, heap.pages(), &mirror).unwrap()),
                 ),
                 (
                     Owner::Ended(TaskId(7)),
-                    Some(Holding::from_native(&mut arena, &heap, &result).unwrap()),
+                    Some(Holding::from_native(&mut arena, heap.pages(), &result).unwrap()),
                 ),
             ];
             if keep_result {
@@ -440,6 +474,27 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     assert!(matches!(ledger.commit(stale), Err(HeapFault::Malformed(_))));
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 146);
     assert!(ledger.holding(owner(1), &access).unwrap().is_none());
+    let before = ledger.balance().unwrap();
+    let across_handoff = ledger
+        .prepare_ownership(
+            &mut crate::arena::Arena::new(),
+            &access,
+            &[],
+            &[(owner(1), RootValue::Existing(owner(0)))],
+        )
+        .unwrap()
+        .admit(163)
+        .unwrap_or_else(|_| panic!("copy did not fit"));
+    ledger.handoff().unwrap();
+    assert!(matches!(
+        ledger.commit(across_handoff),
+        Err(HeapFault::Malformed(_))
+    ));
+    assert_eq!(
+        ledger.balance().unwrap(),
+        before,
+        "handoff changes authority, not holdings"
+    );
     let scratch = Owner::Value {
         task: TaskId::MAIN,
         depth: 0,

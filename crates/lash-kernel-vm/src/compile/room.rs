@@ -239,6 +239,21 @@ pub(crate) struct Source {
     description: OnceLock<Box<Description>>,
     seed: Option<Seed>,
     verified: OnceLock<Result<(), Refused>>,
+    owners: OnceLock<Result<Arc<OwnerSlots>, Refused>>,
+}
+
+/// Source selectors receive stable indices within this exact immutable body.
+/// No layout, physical slot or execution history contributes to their identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OwnerSlots {
+    pub(crate) owner: doc::constant_pool::PoolOwner,
+    pub(crate) source: Site,
+    slots: BTreeMap<Owner, u32>,
+}
+impl OwnerSlots {
+    pub(crate) fn get(&self, owner: &Owner) -> Option<u32> {
+        self.slots.get(owner).copied()
+    }
 }
 
 /// One immutable compilation unit shared by its lexical code bodies. The
@@ -420,6 +435,7 @@ impl Source {
             site,
             description: OnceLock::new(),
             verified: OnceLock::new(),
+            owners: OnceLock::new(),
             seed: Some(Seed {
                 unit,
                 params: params.into(),
@@ -453,6 +469,7 @@ impl Source {
             description: OnceLock::from(Box::new(description)),
             seed: None,
             verified: OnceLock::new(),
+            owners: OnceLock::new(),
         }
     }
     fn form(
@@ -555,6 +572,50 @@ impl Source {
     pub(crate) fn verify(&self) -> Result<(), Refused> {
         self.verify_identity()?;
         *self.verified.get_or_init(|| verify::body(self, &self.room))
+    }
+    /// Active ownership consumers explicitly force the cached independent
+    /// verdict. Indexing reads only the verified room, with no further AST walk.
+    pub(crate) fn owner_slots(&self) -> Result<Arc<OwnerSlots>, Refused> {
+        self.verify()?;
+        self.owners
+            .get_or_init(|| {
+                let mut owners = std::collections::BTreeSet::new();
+                for event in self.room.peak_extra.values() {
+                    owners.extend(event.inputs.iter().cloned());
+                    owners.extend(event.output.iter().cloned());
+                    owners.extend(event.entities.iter().cloned());
+                    for amount in [&event.peak, &event.delta] {
+                        for measure in amount.terms.keys() {
+                            match measure {
+                                Measure::Local(owner) => {
+                                    owners.insert(owner.clone());
+                                }
+                                Measure::Release(group)
+                                | Measure::NativeRelease { owners: group, .. } => {
+                                    owners.extend(group.iter().cloned());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                for exit in &self.room.exits {
+                    owners.extend(exit.owners.iter().cloned());
+                }
+                let slots = owners
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, owner)| {
+                        Ok((owner, u32::try_from(index).map_err(|_| Refused::Facts)?))
+                    })
+                    .collect::<Result<BTreeMap<_, _>, Refused>>()?;
+                Ok(Arc::new(OwnerSlots {
+                    owner: self.owner,
+                    source: self.site.clone(),
+                    slots,
+                }))
+            })
+            .clone()
     }
     fn verify_identity(&self) -> Result<(), Refused> {
         let description = std::ops::Deref::deref(self);

@@ -16,12 +16,37 @@ pub(super) struct Projection<'a> {
 impl Projection<'_> {
     pub(super) fn hold(&self, value: Value) -> Result<Held, HeapFault> {
         Ok(Held {
-            holding: Holding::from_native(&mut self.arena.borrow_mut(), self.heap, &value)?,
+            holding: Holding::from_native(&mut self.arena.borrow_mut(), self.heap.pages(), &value)?,
             value,
         })
     }
 }
 impl KernelMachine {
+    pub(super) fn hold_value(&self, value: Value) -> Result<Held, HeapFault> {
+        Projection {
+            arena: &self.arena,
+            heap: &self.heap,
+        }
+        .hold(value)
+    }
+    pub(super) fn take_source_role(
+        &mut self,
+        reg: lash_kernel_exec::Reg,
+        site: &lash_kernel_value::sites::Site,
+    ) -> Result<Held, HeapFault> {
+        let projection = Projection {
+            arena: &self.arena,
+            heap: &self.heap,
+        };
+        self.regs.take_source_role(reg, site, &projection)
+    }
+    pub(super) fn source_entry(&mut self, values: &[Value]) -> Result<(), HeapFault> {
+        let projection = Projection {
+            arena: &self.arena,
+            heap: &self.heap,
+        };
+        self.regs.source_entry(values, &projection)
+    }
     pub(super) fn source_begin(
         &mut self,
         stream: &Stream,

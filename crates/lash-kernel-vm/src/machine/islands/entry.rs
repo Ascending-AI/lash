@@ -719,9 +719,19 @@ impl KernelMachine {
                 pending = Some((
                     stmt,
                     act,
-                    self.continuation(&entry.suffix, PhaseRecord::Called, roles.len(), |_, at| {
-                        Ok(roles[at].clone())
-                    })?,
+                    self.continuation(
+                        &entry.suffix,
+                        PhaseRecord::Called,
+                        roles.len(),
+                        |machine, at| {
+                            let held = machine.hold_value(roles[at].1)?;
+                            Ok(super::super::frames::Role {
+                                site: std::sync::Arc::clone(&roles[at].0),
+                                value: held.value,
+                                holding: held.holding,
+                            })
+                        },
+                    )?,
                 ));
                 None
             }

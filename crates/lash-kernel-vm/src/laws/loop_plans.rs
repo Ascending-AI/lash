@@ -452,7 +452,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                     }
                 }
                 let holding_key = (key.clone(), code.capture_names.clone());
-                let events = (sites, joins);
+                let events = (sites, joins, code.source_room.owner_slots().unwrap());
                 if let Some(previous) = holding_sites.insert(holding_key, events.clone()) {
                     assert_eq!(previous, events, "source events survive physical layouts");
                 }
@@ -751,6 +751,24 @@ fn source_room_scratch_ends_on_both_primitive_exits() {
 fn source_room_exits_preserve_charge_prefix_and_holdings() {
     use crate::compile::room::{Phase, Refused};
     source_rooms(|source| {
+        let slots = source.owner_slots().unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &slots,
+            &source.owner_slots().unwrap()
+        ));
+        for event in source.room.peak_extra.values() {
+            for owner in event
+                .inputs
+                .iter()
+                .chain(event.output.iter())
+                .chain(event.entities.iter())
+            {
+                assert!(
+                    slots.get(owner).is_some(),
+                    "every concrete source owner has an index"
+                );
+            }
+        }
         for index in 0..source.room.exits.len() {
             use crate::compile::room::Owner;
             assert!(source.room.exits[index].owners.iter().all(|o| matches!(

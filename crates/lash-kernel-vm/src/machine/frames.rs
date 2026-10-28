@@ -194,6 +194,7 @@ pub(super) struct Pending {
 pub(super) struct Role {
     pub(super) site: Suffix,
     pub(super) value: Value,
+    pub(super) holding: lash_kernel_state::kernel_internals::logical::Holding,
 }
 
 /// What a frame's row holds of its continuation.
@@ -1291,6 +1292,10 @@ fn admit_roles(
         .into_iter()
         .map(|role| {
             Ok(Role {
+                holding: lash_kernel_state::kernel_internals::logical::Holding::from_page(
+                    access,
+                    &role.value,
+                )?,
                 value: admit(arena, access, &role.value)?,
                 site: role.site.into(),
             })
