@@ -768,10 +768,17 @@ and the determinism assertions unchanged. The lane explicitly authorizes
 this attributed refresh for intended feature changes; it does not change the
 normal blessing command's refusal to raise ceilings.
 
-The final five-capture population at `926db355d4` matched every counted
-summary and every turn/compaction record. It refreshes 26 per-turn medians
-across four workloads with zero measured noise. The counted store uses a
-fixed queue allocated before the turns, and compaction settlement reads only
-after the owner has applied the command and returned idle. The evidence
-retains all earlier populations rejected for nondeterminism. The final
-ordinary replay law must still pass against the compiled baseline.
+The final five-capture population at `ef40d5165d` matched every counted
+summary and every turn/compaction record. It uses zero measured noise and
+preserves the tighter prior/observed depth slopes. Inline SQLite replies
+wait for disposal of the command and its captures, and compaction readback
+waits for the owner to return idle after applying the command.
+
+The counted node-start phase initializes all five JSON Schema meta-validator
+engines. Counted workers initialize them before installing the resource
+observer. A targeted stack showed randomized alias-cache rehashing in lazy
+Draft 2020-12 meta-validator initialization, accounting for an intermittent
+3,152-byte first-turn allocation. Startup still pays this engine setup cost.
+Actual workload schemas retain their full admission and validation paths.
+The final ordinary law runs against the compiled baseline; rejected earlier
+populations remain diagnostic evidence.
