@@ -520,7 +520,7 @@ fn room_shared_binding_growth() {
         document.main.as_ref().unwrap(),
         std::slice::from_ref(&parameter),
         std::collections::BTreeMap::from([
-            ((root.clone(), parameter), true),
+            ((root.clone(), parameter.clone()), true),
             ((declared.clone(), Name::new("x")), true),
         ]),
         &std::collections::BTreeMap::new(),
