@@ -1,0 +1,22 @@
+kiln: running the cacheable test suite; named service, feature and other Cargo gates remain separate
+Buck2 native tools are current: /workspace/kiln/lash/forks/r36-idlecost/.buck2/native
+verified Lash Rust action overlay
+Buck2 vendor tree is current: /workspace/kiln/lash/forks/r36-idlecost/vendor
+Buck2 graph receipt is current
+hermetic-build: remote jobs=32 (driver jobs=32)
+[2026-10-28T20:59:43.691+01:00] Build ID: 5e0c086e-07b0-4c16-900d-7fded1b807a6
+[2026-10-28T20:59:43.692+01:00] File changed: root//.kiln/red-environment.log
+[2026-10-28T20:59:43.692+01:00] File changed: root//crates/lash-core-execution/src/plugin/runtime_impl.rs
+[2026-10-28T20:59:43.692+01:00] File changed: root//crates/lash-core/src/runtime/durable/commit_publication.rs
+[2026-10-28T20:59:43.692+01:00] 10 additional file change events
+[2026-10-28T20:59:43.787+01:00] RE Session: GRPC-SESSION-ID
+[2026-10-28T20:59:50.887+01:00] Waiting on root//crates/lash-durable:lash-durable__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T20:59:57.987+01:00] Waiting on root//crates/lash-durable:lash-durable__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:00:05.088+01:00] Waiting on root//crates/lash-durable:lash-durable__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:00:08.599+01:00] Cache hits: 0%
+[2026-10-28T21:00:08.599+01:00] Commands: 1 (cached: 0, remote: 1, local: 0)
+[2026-10-28T21:00:08.599+01:00] Network: up 59KiB  down 8.1KiB  session GRPC-SESSION-ID
+Tests finished: [mPass 1[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+hermetic-build: .buck2/test-report.json -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-report.json
+hermetic-build: .buck2/test-results -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-results
+kiln: test passed executed=1 passed=1 failed=0 receipt=/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-report.json

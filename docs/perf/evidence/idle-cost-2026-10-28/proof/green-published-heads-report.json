@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "5c59f40a-036b-4be9-b5ee-d147569b7604",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-core:lash-core__unit_test": {
+      "label": "root//crates/lash-core:lash-core__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "PASS",
+      "exit_code": 0,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-results/root/crates/lash-core/lash-core__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-results/root/crates/lash-core/lash-core__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-results/root/crates/lash-core/lash-core__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest runtime::durable::commit_publication::tests::published_head_hints_are_bounded_and_forgotten_heads_are_reannounced ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.10s\n\n",
+      "stderr": "",
+      "duration_seconds": 1.988372053,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "9f3ac636d774b32faecf158d6b7a644a101c889bdab1b2e50efafd189f9eaab6:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 0,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.11820181692019105
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

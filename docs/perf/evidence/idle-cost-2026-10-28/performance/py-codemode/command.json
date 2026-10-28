@@ -1,0 +1,23 @@
+[
+  "/usr/bin/time",
+  "-v",
+  "-o",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/py-codemode/time.txt",
+  "perf",
+  "stat",
+  "-e",
+  "instructions:u",
+  "-o",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/py-codemode/perf.txt",
+  "--",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-binaries/lash-perf",
+  "replay",
+  "py-codemode",
+  "--instructions",
+  "--store-dir",
+  "/tmp/lash-instructions-2cbojmic",
+  "--out",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/py-codemode.json",
+  "--turns",
+  "24"
+]

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "5e0c086e-07b0-4c16-900d-7fded1b807a6",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-durable:lash-durable__unit_test": {
+      "label": "root//crates/lash-durable:lash-durable__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "PASS",
+      "exit_code": 0,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-results/root/crates/lash-durable/lash-durable__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-results/root/crates/lash-durable/lash-durable__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205943-rshz8e_q/test-results/root/crates/lash-durable/lash-durable__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s\n\n",
+      "stderr": "",
+      "duration_seconds": 0.714216377,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "7a01117eb59a515177546648e06e52ed78fac97c40df3364645ecca737b0ced8:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 0,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.003912957850843668
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

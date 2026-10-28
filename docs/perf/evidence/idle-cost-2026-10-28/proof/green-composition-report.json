@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "16c2db16-157b-4a33-87a1-774fe1111e0e",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-core-execution:lash-core-execution__unit_test": {
+      "label": "root//crates/lash-core-execution:lash-core-execution__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "PASS",
+      "exit_code": 0,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 0.00s\n\n",
+      "stderr": "",
+      "duration_seconds": 0.546595519,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "0bd11f174077100383e360990dceac4dda48cfc8a3c52fca4201f5e2175c1c31:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 0,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.003750352654606104
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

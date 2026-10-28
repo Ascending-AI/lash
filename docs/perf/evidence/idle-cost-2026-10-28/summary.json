@@ -1,0 +1,1702 @@
+[
+  {
+    "stage": "before-populations",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 632.874326171875,
+    "sqlite_kib_per_session": 102.585390625,
+    "total_rss_kib_per_session": 1289.12,
+    "host_rss_kib_per_session": 1147.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 630.581259765625,
+    "sqlite_kib_per_session": 102.84171875,
+    "total_rss_kib_per_session": 1385.44,
+    "host_rss_kib_per_session": 1243.6,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 67.0476171875,
+    "sqlite_kib_per_session": 11.361921875,
+    "total_rss_kib_per_session": 86.508,
+    "host_rss_kib_per_session": 72.824,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 66.5778154296875,
+    "sqlite_kib_per_session": 10.1358125,
+    "total_rss_kib_per_session": 95.804,
+    "host_rss_kib_per_session": 82.12,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-held-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 1174.173447265625,
+    "sqlite_kib_per_session": 103.666953125,
+    "total_rss_kib_per_session": 1789.6,
+    "host_rss_kib_per_session": 1648.36,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-held-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 1171.40107421875,
+    "sqlite_kib_per_session": 100.72359375,
+    "total_rss_kib_per_session": 1902.56,
+    "host_rss_kib_per_session": 1761.32,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 656.4560927734375,
+    "sqlite_kib_per_session": 11.5478984375,
+    "total_rss_kib_per_session": 713.188,
+    "host_rss_kib_per_session": 712.328,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 655.975212890625,
+    "sqlite_kib_per_session": 10.1163671875,
+    "total_rss_kib_per_session": 722.296,
+    "host_rss_kib_per_session": 721.436,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 651.8436328125,
+    "sqlite_kib_per_session": 101.254375,
+    "total_rss_kib_per_session": 1239.08,
+    "host_rss_kib_per_session": 1239.08,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 647.9825,
+    "sqlite_kib_per_session": 101.254375,
+    "total_rss_kib_per_session": 1156.56,
+    "host_rss_kib_per_session": 1156.56,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 67.7937529296875,
+    "sqlite_kib_per_session": 11.160671875,
+    "total_rss_kib_per_session": 132.864,
+    "host_rss_kib_per_session": 132.864,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 67.1809697265625,
+    "sqlite_kib_per_session": 10.1273203125,
+    "total_rss_kib_per_session": 122.444,
+    "host_rss_kib_per_session": 122.444,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-held-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 948.904521484375,
+    "sqlite_kib_per_session": 100.9259375,
+    "total_rss_kib_per_session": 1551.28,
+    "host_rss_kib_per_session": 1551.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-held-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 944.941259765625,
+    "sqlite_kib_per_session": 98.041953125,
+    "total_rss_kib_per_session": 1463.84,
+    "host_rss_kib_per_session": 1463.84,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 378.757900390625,
+    "sqlite_kib_per_session": 10.9305390625,
+    "total_rss_kib_per_session": 470.856,
+    "host_rss_kib_per_session": 470.856,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 378.1333564453125,
+    "sqlite_kib_per_session": 9.806078125,
+    "total_rss_kib_per_session": 461.84,
+    "host_rss_kib_per_session": 461.84,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 625.439296875,
+    "sqlite_kib_per_session": 103.9871875,
+    "total_rss_kib_per_session": 1267.96,
+    "host_rss_kib_per_session": 1129.16,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 623.115849609375,
+    "sqlite_kib_per_session": 101.01375,
+    "total_rss_kib_per_session": 1366.76,
+    "host_rss_kib_per_session": 1227.96,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 66.31179296875,
+    "sqlite_kib_per_session": 11.4845859375,
+    "total_rss_kib_per_session": 85.24,
+    "host_rss_kib_per_session": 75.072,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 65.85026171875,
+    "sqlite_kib_per_session": 10.1208359375,
+    "total_rss_kib_per_session": 94.296,
+    "host_rss_kib_per_session": 84.128,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 66.1098251953125,
+    "sqlite_kib_per_session": 11.5571015625,
+    "total_rss_kib_per_session": 80.56,
+    "host_rss_kib_per_session": 70.392,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 8.501814453125,
+    "sqlite_kib_per_session": 11.5869609375,
+    "total_rss_kib_per_session": 80.712,
+    "host_rss_kib_per_session": 70.544,
+    "expired_sessions": 51,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 8.254427734375,
+    "sqlite_kib_per_session": 10.1208359375,
+    "total_rss_kib_per_session": 74.468,
+    "host_rss_kib_per_session": 64.3,
+    "expired_sessions": 51,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 1166.3683984375,
+    "sqlite_kib_per_session": 103.54328125,
+    "total_rss_kib_per_session": 1778.52,
+    "host_rss_kib_per_session": 1638.68,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 1164.33078125,
+    "sqlite_kib_per_session": 100.570078125,
+    "total_rss_kib_per_session": 1887.0,
+    "host_rss_kib_per_session": 1747.16,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 655.7383916015625,
+    "sqlite_kib_per_session": 11.5741328125,
+    "total_rss_kib_per_session": 770.952,
+    "host_rss_kib_per_session": 757.148,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 655.266146484375,
+    "sqlite_kib_per_session": 10.1012578125,
+    "total_rss_kib_per_session": 781.084,
+    "host_rss_kib_per_session": 767.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 655.5226455078125,
+    "sqlite_kib_per_session": 11.5681015625,
+    "total_rss_kib_per_session": 768.06,
+    "host_rss_kib_per_session": 754.256,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 602.5692275390625,
+    "sqlite_kib_per_session": 10.3865234375,
+    "total_rss_kib_per_session": 768.228,
+    "host_rss_kib_per_session": 754.424,
+    "expired_sessions": 51,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "code-held-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 602.30708984375,
+    "sqlite_kib_per_session": 10.089203125,
+    "total_rss_kib_per_session": 775.212,
+    "host_rss_kib_per_session": 761.408,
+    "expired_sessions": 51,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 646.916328125,
+    "sqlite_kib_per_session": 101.251328125,
+    "total_rss_kib_per_session": 1217.28,
+    "host_rss_kib_per_session": 1217.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 643.02072265625,
+    "sqlite_kib_per_session": 99.404453125,
+    "total_rss_kib_per_session": 1146.6,
+    "host_rss_kib_per_session": 1146.6,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 67.270666015625,
+    "sqlite_kib_per_session": 10.545046875,
+    "total_rss_kib_per_session": 130.616,
+    "host_rss_kib_per_session": 130.616,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 66.6369248046875,
+    "sqlite_kib_per_session": 9.94859375,
+    "total_rss_kib_per_session": 121.368,
+    "host_rss_kib_per_session": 121.368,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 66.89680078125,
+    "sqlite_kib_per_session": 11.073984375,
+    "total_rss_kib_per_session": 124.7,
+    "host_rss_kib_per_session": 124.7,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 5.890294921875,
+    "sqlite_kib_per_session": 10.37015625,
+    "total_rss_kib_per_session": 124.028,
+    "host_rss_kib_per_session": 124.028,
+    "expired_sessions": 96,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 5.6299326171875,
+    "sqlite_kib_per_session": 9.8299609375,
+    "total_rss_kib_per_session": 89.272,
+    "host_rss_kib_per_session": 89.272,
+    "expired_sessions": 96,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 943.689638671875,
+    "sqlite_kib_per_session": 100.81046875,
+    "total_rss_kib_per_session": 1534.08,
+    "host_rss_kib_per_session": 1534.08,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 939.714970703125,
+    "sqlite_kib_per_session": 97.837109375,
+    "total_rss_kib_per_session": 1447.04,
+    "host_rss_kib_per_session": 1447.04,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 100,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 378.26105078125,
+    "sqlite_kib_per_session": 10.9684609375,
+    "total_rss_kib_per_session": 469.384,
+    "host_rss_kib_per_session": 469.384,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 377.641484375,
+    "sqlite_kib_per_session": 9.8009375,
+    "total_rss_kib_per_session": 460.416,
+    "host_rss_kib_per_session": 460.416,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 377.860578125,
+    "sqlite_kib_per_session": 11.0153828125,
+    "total_rss_kib_per_session": 463.88,
+    "host_rss_kib_per_session": 463.88,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 317.9280361328125,
+    "sqlite_kib_per_session": 11.0452421875,
+    "total_rss_kib_per_session": 464.164,
+    "host_rss_kib_per_session": 464.164,
+    "expired_sessions": 96,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "after-populations",
+    "population": "standard-held-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 317.6734052734375,
+    "sqlite_kib_per_session": 10.760703125,
+    "total_rss_kib_per_session": 450.644,
+    "host_rss_kib_per_session": 450.644,
+    "expired_sessions": 96,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 1000,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-100",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 925.66310546875,
+    "sqlite_kib_per_session": 103.483203125,
+    "total_rss_kib_per_session": 1861.08,
+    "host_rss_kib_per_session": 1721.6,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-100",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 916.017451171875,
+    "sqlite_kib_per_session": 100.50984375,
+    "total_rss_kib_per_session": 1862.68,
+    "host_rss_kib_per_session": 1723.2,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-100",
+    "n": 100,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 6084.578837890625,
+    "sqlite_kib_per_session": 103.64109375,
+    "total_rss_kib_per_session": 14349.64,
+    "host_rss_kib_per_session": 14210.16,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-100",
+    "n": 100,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 5892.5740625,
+    "sqlite_kib_per_session": 103.64109375,
+    "total_rss_kib_per_session": 14349.64,
+    "host_rss_kib_per_session": 14210.16,
+    "expired_sessions": 17,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-100",
+    "n": 100,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 5884.78177734375,
+    "sqlite_kib_per_session": 100.667734375,
+    "total_rss_kib_per_session": 13146.6,
+    "host_rss_kib_per_session": 13007.12,
+    "expired_sessions": 17,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 880.6717578125,
+    "sqlite_kib_per_session": 103.338359375,
+    "total_rss_kib_per_session": 1811.28,
+    "host_rss_kib_per_session": 1669.6,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 871.239677734375,
+    "sqlite_kib_per_session": 100.364921875,
+    "total_rss_kib_per_session": 1814.56,
+    "host_rss_kib_per_session": 1672.88,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 114.739859375,
+    "sqlite_kib_per_session": 10.35021875,
+    "total_rss_kib_per_session": 134.268,
+    "host_rss_kib_per_session": 133.9,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 113.5793271484375,
+    "sqlite_kib_per_session": 10.052875,
+    "total_rss_kib_per_session": 133.364,
+    "host_rss_kib_per_session": 132.996,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 605.324275390625,
+    "sqlite_kib_per_session": 11.4878671875,
+    "total_rss_kib_per_session": 1394.108,
+    "host_rss_kib_per_session": 1393.74,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 592.8985771484375,
+    "sqlite_kib_per_session": 11.5347890625,
+    "total_rss_kib_per_session": 1394.148,
+    "host_rss_kib_per_session": 1393.78,
+    "expired_sessions": 11,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "code-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 591.91918359375,
+    "sqlite_kib_per_session": 11.2502421875,
+    "total_rss_kib_per_session": 1253.904,
+    "host_rss_kib_per_session": 1253.536,
+    "expired_sessions": 11,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 1,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 1
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-100",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 774.568173828125,
+    "sqlite_kib_per_session": 101.060546875,
+    "total_rss_kib_per_session": 1497.84,
+    "host_rss_kib_per_session": 1497.84,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-100",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 767.787666015625,
+    "sqlite_kib_per_session": 98.35265625,
+    "total_rss_kib_per_session": 1425.32,
+    "host_rss_kib_per_session": 1425.32,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-100",
+    "n": 100,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 5573.894072265625,
+    "sqlite_kib_per_session": 101.2184375,
+    "total_rss_kib_per_session": 12679.28,
+    "host_rss_kib_per_session": 12679.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-100",
+    "n": 100,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 5408.754423828125,
+    "sqlite_kib_per_session": 101.2184375,
+    "total_rss_kib_per_session": 12679.28,
+    "host_rss_kib_per_session": 12679.28,
+    "expired_sessions": 26,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-100",
+    "n": 100,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 5405.1723828125,
+    "sqlite_kib_per_session": 98.510546875,
+    "total_rss_kib_per_session": 11772.84,
+    "host_rss_kib_per_session": 11772.84,
+    "expired_sessions": 26,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100",
+    "rust_kib_per_session": 748.877734375,
+    "sqlite_kib_per_session": 100.988046875,
+    "total_rss_kib_per_session": 1466.28,
+    "host_rss_kib_per_session": 1466.28,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 100,
+    "phase": "idle-100-trimmed",
+    "rust_kib_per_session": 741.909072265625,
+    "sqlite_kib_per_session": 98.077265625,
+    "total_rss_kib_per_session": 1401.56,
+    "host_rss_kib_per_session": 1401.56,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 100
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000",
+    "rust_kib_per_session": 90.2679697265625,
+    "sqlite_kib_per_session": 10.1133046875,
+    "total_rss_kib_per_session": 132.636,
+    "host_rss_kib_per_session": 132.636,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-1000-trimmed",
+    "rust_kib_per_session": 89.3178076171875,
+    "sqlite_kib_per_session": 9.8222265625,
+    "total_rss_kib_per_session": 121.7,
+    "host_rss_kib_per_session": 121.7,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-aged",
+    "rust_kib_per_session": 559.3267119140625,
+    "sqlite_kib_per_session": 11.0760625,
+    "total_rss_kib_per_session": 1256.476,
+    "host_rss_kib_per_session": 1256.476,
+    "expired_sessions": null,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired",
+    "rust_kib_per_session": 543.4477275390625,
+    "sqlite_kib_per_session": 10.12909375,
+    "total_rss_kib_per_session": 1256.488,
+    "host_rss_kib_per_session": 1256.488,
+    "expired_sessions": 25,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  },
+  {
+    "stage": "before-profiles",
+    "population": "standard-durable-only-1000",
+    "n": 1000,
+    "phase": "idle-expired-trimmed",
+    "rust_kib_per_session": 542.85955859375,
+    "sqlite_kib_per_session": 9.838015625,
+    "total_rss_kib_per_session": 1155.304,
+    "host_rss_kib_per_session": 1155.304,
+    "expired_sessions": 25,
+    "residency": {
+      "actor_owners": 0,
+      "actor_states": {
+        "idle": 1000
+      },
+      "endpoint": "actor owners released; workers idle",
+      "held_facade_handles": 0,
+      "idle_workers": 0,
+      "materialized_session_owners": 0,
+      "pending_owner_details": {},
+      "pending_tool_waits": 0,
+      "queued_worker_items": 0,
+      "workers": 0
+    }
+  }
+]

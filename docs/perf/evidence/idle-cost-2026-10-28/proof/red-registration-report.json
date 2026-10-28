@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "2e0a4939-9243-4440-a1f6-9096da466b4d",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-core-execution:lash-core-execution__unit_test": {
+      "label": "root//crates/lash-core-execution:lash-core-execution__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "FAIL",
+      "exit_code": 101,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T204253-f4t52ro7/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T204253-f4t52ro7/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T204253-f4t52ro7/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor ... FAILED\n\nfailures:\n\n---- plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor stdout ----\n\nthread 'plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor' (7) panicked at crates/lash-core-execution/src/plugin/registration_tests.rs:26:5:\na released session leaves a weak allocation and owner key behind\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 250 filtered out; finished in 0.00s\n\n",
+      "stderr": "",
+      "duration_seconds": 0.584036423,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "b151c6bd2fa5ba33b23f40c63e2395a2a0b755e65b39906b5445823a38be06b0:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 101,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.00793256564065814
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

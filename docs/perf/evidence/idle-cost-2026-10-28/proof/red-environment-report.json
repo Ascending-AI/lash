@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "f81213e1-d0bc-4a9a-95e3-f1ad4b6c0ad2",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-durable:lash-durable__unit_test": {
+      "label": "root//crates/lash-durable:lash-durable__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "FAIL",
+      "exit_code": 101,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-results/root/crates/lash-durable/lash-durable__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-results/root/crates/lash-durable/lash-durable__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-results/root/crates/lash-durable/lash-durable__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority ... FAILED\n\nfailures:\n\n---- environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority stdout ----\n\nthread 'environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority' (7) panicked at crates/lash-durable/src/environment.rs:475:13:\nassertion `left == right` failed: ENV-BODY-REUSE: canonical cache bytes duplicate the body's own encoding\n  left: 0x75c0300029d0\n right: 0x75c030004390\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s\n\n",
+      "stderr": "",
+      "duration_seconds": 1.192123793,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "7d41c1e72db86fb3c082456a2bedfedf370edcc4a10deaf6f949d3500c56e1f7:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 101,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.00926469499245286
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

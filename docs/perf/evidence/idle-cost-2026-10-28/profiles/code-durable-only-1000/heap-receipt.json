@@ -1,0 +1,20 @@
+{
+  "allocator": "dhat-heap+stats_alloc",
+  "certifying": false,
+  "completed": true,
+  "elapsed_statistic": "single_window_wall_duration",
+  "kind": "lash.heap-profile",
+  "process_id": 611667,
+  "profile": "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-profiles/code-durable-only-1000/host.dhat.json",
+  "profile_quantities": {
+    "eb": "site_live_bytes_at_window_end",
+    "gb": "site_live_bytes_at_process_heap_peak",
+    "mb": "site_max_live_bytes",
+    "tb": "cumulative_requested_bytes"
+  },
+  "role": "growturn-host",
+  "scope": "this_process_rust_allocator_in_profile_window",
+  "unit": "bytes",
+  "window": "process-setup-through-final-idle-population-before-usability-and-teardown",
+  "window_elapsed_ns": 10584685669514
+}

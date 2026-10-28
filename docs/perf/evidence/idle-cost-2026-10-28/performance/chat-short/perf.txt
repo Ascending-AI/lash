@@ -1,0 +1,11 @@
+# started on Wed Oct 28 22:14:59 2026
+
+
+ Performance counter stats for '/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-binaries/lash-perf replay chat-short --instructions --store-dir /tmp/lash-instructions-2cbojmic --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/chat-short.json':
+
+        2085317954      instructions:u
+
+       0.691906386 seconds time elapsed
+
+       0.533187000 seconds user
+       0.527989000 seconds sys

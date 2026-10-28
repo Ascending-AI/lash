@@ -1,0 +1,23 @@
+[
+  "/usr/bin/time",
+  "-v",
+  "-o",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/chat-long-compacting/time.txt",
+  "perf",
+  "stat",
+  "-e",
+  "instructions:u",
+  "-o",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/chat-long-compacting/perf.txt",
+  "--",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-binaries/lash-perf",
+  "replay",
+  "chat-long-compacting",
+  "--instructions",
+  "--store-dir",
+  "/tmp/lash-instructions-2cbojmic",
+  "--out",
+  "/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/chat-long-compacting.json",
+  "--turns",
+  "200"
+]

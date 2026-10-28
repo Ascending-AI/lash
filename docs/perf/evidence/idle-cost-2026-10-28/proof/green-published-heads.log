@@ -1,0 +1,37 @@
+kiln: running the cacheable test suite; named service, feature and other Cargo gates remain separate
+Buck2 native tools are current: /workspace/kiln/lash/forks/r36-idlecost/.buck2/native
+verified Lash Rust action overlay
+Buck2 vendor tree is current: /workspace/kiln/lash/forks/r36-idlecost/vendor
+Buck2 graph receipt is current
+hermetic-build: remote jobs=32 (driver jobs=32)
+[2026-10-28T21:10:45.522+01:00] Build ID: 5c59f40a-036b-4be9-b5ee-d147569b7604
+[2026-10-28T21:10:45.535+01:00] File changed: root//.kiln/green-registration.log
+[2026-10-28T21:10:45.535+01:00] File changed: root//.kiln/green-published-heads.log
+[2026-10-28T21:10:45.535+01:00] File changed: root//.kiln/green-published-heads.log
+[2026-10-28T21:10:45.618+01:00] RE Session: GRPC-SESSION-ID
+[2026-10-28T21:10:52.621+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_queued]
+[2026-10-28T21:10:59.621+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:06.721+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:13.721+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:20.722+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:27.821+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:34.922+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:42.021+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:49.022+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:11:56.121+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:03.221+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:10.321+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:17.421+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:24.421+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:31.521+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:38.521+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:45.522+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:52.621+01:00] Waiting on root//crates/lash-core:lash-core__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:12:59.721+01:00] Waiting on Test lash-core__unit_test --  [re_execute]
+[2026-10-28T21:13:00.700+01:00] Cache hits: 0%
+[2026-10-28T21:13:00.700+01:00] Commands: 1 (cached: 0, remote: 1, local: 0)
+[2026-10-28T21:13:00.700+01:00] Network: up 79KiB  down 11KiB  session GRPC-SESSION-ID
+Tests finished: [mPass 1[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+hermetic-build: .buck2/test-report.json -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-report.json
+hermetic-build: .buck2/test-results -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-results
+kiln: test passed executed=1 passed=1 failed=0 receipt=/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211045-cze8xwk4/test-report.json

@@ -1,0 +1,11 @@
+# started on Wed Oct 28 20:13:48 2026
+
+
+ Performance counter stats for '/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-binaries/lash-perf compare --instructions --runs 1 --warmups 1 --factor 20 --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-compare/compare.json':
+
+      205619642944      instructions:u
+
+      53.033249938 seconds time elapsed
+
+      37.709759000 seconds user
+      14.762491000 seconds sys

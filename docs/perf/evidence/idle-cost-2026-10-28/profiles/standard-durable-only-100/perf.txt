@@ -1,0 +1,11 @@
+# started on Wed Oct 28 20:39:19 2026
+
+
+ Performance counter stats for '/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/attribution-binaries/growturn-dhat --phase idle-population --idle-protocol standard --idle-mode durable-only --sessions 100 --wave-size 100 --history-turns 20 --payload-bytes 1024 --database /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-profiles/standard-durable-only-100/sessions.sqlite --vm-worker /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-binaries/lash-vm-worker --native-memory-dir /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-profiles/standard-durable-only-100/native --trim-at-idle --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-profiles/standard-durable-only-100/points.jsonl --idle-wait-seconds 121 --dhat-out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-profiles/standard-durable-only-100/host.dhat.json --dhat-frames 40':
+
+     3809128772157      instructions:u
+
+     680.184276842 seconds time elapsed
+
+     541.877426000 seconds user
+      23.196506000 seconds sys

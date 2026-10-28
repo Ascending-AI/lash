@@ -1,0 +1,88 @@
+kiln: the git index of lash/r36-idlecost changed at HEAD c80f6bcc35e7; stopped its Buck2 daemon (pid 2341282), which predates the change
+kiln: running the cacheable test suite; named service, feature and other Cargo gates remain separate
+Buck2 native tools are current: /workspace/kiln/lash/forks/r36-idlecost/.buck2/native
+verified Lash Rust action overlay
+Buck2 vendor tree is current: /workspace/kiln/lash/forks/r36-idlecost/vendor
+Buck2 graph receipt is current
+hermetic-build: remote jobs=32 (driver jobs=32)
+[2026-10-28T21:46:49.585+01:00] Could not connect to buck2 daemon (buck2 daemon is not running), killing daemon..
+[2026-10-28T21:46:53.237+01:00] Connected to new buck2 daemon.
+[2026-10-28T21:46:53.239+01:00] Build ID: 16c2db16-157b-4a33-87a1-774fe1111e0e
+[2026-10-28T21:46:54.908+01:00] RE Session: GRPC-SESSION-ID
+[2026-10-28T21:47:01.938+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:09.038+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:16.038+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:23.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:30.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:37.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:44.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:51.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:47:58.338+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:05.338+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:12.438+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:19.438+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:26.538+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:33.638+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:40.639+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:47.738+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:48:54.838+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:49:01.938+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:49:08.938+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:15.945+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:23.038+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:30.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:37.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:44.338+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc metadata [pic] [re_execute]
+[2026-10-28T21:49:51.338+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_queued], and 1 other actions
+[2026-10-28T21:49:58.438+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:05.538+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:12.538+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:19.638+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:26.638+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:33.638+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:40.739+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:47.838+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:50:54.841+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:01.940+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:09.038+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:16.138+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:23.238+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:30.338+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:37.438+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:44.538+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:51.538+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:51:58.638+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:52:05.738+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 2 other actions
+[2026-10-28T21:52:12.838+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 2 other actions
+[2026-10-28T21:52:19.838+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 2 other actions
+[2026-10-28T21:52:26.937+01:00] Waiting on root//crates/lash-core:lash-core (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute], and 1 other actions
+[2026-10-28T21:52:33.938+01:00] Waiting on root//crates/lash-conformance:lash-conformance (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute]
+[2026-10-28T21:52:40.938+01:00] Waiting on root//crates/lash-conformance:lash-conformance (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc rlib [pic] [re_execute]
+[2026-10-28T21:52:48.038+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:52:55.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:02.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:09.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:16.338+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:23.438+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:30.538+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:37.539+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:44.638+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:51.738+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:53:58.838+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:05.838+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:12.938+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:20.038+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:27.138+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:34.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:41.238+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:48.338+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:54:55.438+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:55:02.538+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:55:09.538+01:00] Waiting on root//crates/lash-core-execution:lash-core-execution__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T21:55:12.558+01:00] Cache hits: 67%
+[2026-10-28T21:55:12.558+01:00] Commands: 694 (cached: 464, remote: 8, local: 222)
+[2026-10-28T21:55:12.558+01:00] Network: up 1.5MiB  down 723KiB  session GRPC-SESSION-ID
+Tests finished: [mPass 1[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+hermetic-build: .buck2/test-report.json -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-report.json
+hermetic-build: .buck2/test-results -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-results
+kiln: test passed executed=1 passed=1 failed=0 receipt=/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T214649-zgn5o5fl/test-report.json

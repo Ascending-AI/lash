@@ -1,0 +1,3136 @@
+{
+  "recorded_at": "2026-10-28T21:14:15.016659332+00:00",
+  "commit": "c105e218f9766546ee09ed257a02b24d069e7871",
+  "run_id": "compare-733027",
+  "cpu": "pinned:0",
+  "load_before": "22.09 29.38 26.59 11/9494 733029",
+  "load_after": "16.47 26.91 25.89 10/9449 765848",
+  "geometry": {
+    "charge": "exact",
+    "charge_limit": 10000000000,
+    "diagnostic": "separate fresh machine; first checkpoint before run; preparation inclusive",
+    "factor": 20,
+    "instructions": "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded",
+    "lash": "fresh cell start+run; lower/link/drop/result validation excluded",
+    "median": "two-point fit of per-count medians",
+    "memory_bytes": 536870912,
+    "memory_meter": "on",
+    "minimum": "two-point fit of per-count minima",
+    "observation": "off",
+    "reference": "resident interpreter; function call; process startup/JSON transport excluded",
+    "reference_instructions": "paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates",
+    "runs": 1,
+    "state": "fresh in-memory cell; no persisted history or state input",
+    "version": 2,
+    "warmups": 1
+  },
+  "rows": [
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "empty_loop",
+      "source_hash": "5db9a4e816911a041294fc70bfe29a990b83571e7af5b6f851f5a455cfbbfa8e",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 262473.0,
+            "result": 0,
+            "instructions": 1167091,
+            "instruction_window": {
+              "instructions": 1167091,
+              "time_enabled": 276167,
+              "time_running": 276167
+            }
+          },
+          {
+            "ns": 670983.0,
+            "result": 0,
+            "instructions": 7777110,
+            "instruction_window": {
+              "instructions": 7777110,
+              "time_enabled": 683952,
+              "time_running": 683952
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        262473.0,
+        670983.0
+      ],
+      "median_ns": [
+        262473.0,
+        670983.0
+      ],
+      "minimum": {
+        "slope_ns": 21.500526315789475,
+        "intercept_ns": 240972.47368421053
+      },
+      "median": {
+        "slope_ns": 21.500526315789475,
+        "intercept_ns": 240972.47368421053
+      },
+      "instructions": {
+        "minimum_per_operation": 347.89573684210524,
+        "median_per_operation": 347.89573684210524
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1574301.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 61014.0,
+        "library_preparation_inclusive": 1002495.0,
+        "linking": 603735.0,
+        "machine_construction": 10132632.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 2039
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "empty_loop",
+      "source_hash": "efeb20152fc845f3cb4f80eefd00186813bba28a88f9cf174e088ecfd7b12b89",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 299474.0,
+            "result": 0,
+            "instructions": 690355,
+            "instruction_window": {
+              "instructions": 690355,
+              "time_enabled": 316563,
+              "time_running": 316563
+            }
+          },
+          {
+            "ns": 410802.0,
+            "result": 0,
+            "instructions": 2474266,
+            "instruction_window": {
+              "instructions": 2474266,
+              "time_enabled": 426751,
+              "time_running": 426751
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        299474.0,
+        410802.0
+      ],
+      "median_ns": [
+        299474.0,
+        410802.0
+      ],
+      "minimum": {
+        "slope_ns": 5.859368421052632,
+        "intercept_ns": 293614.63157894736
+      },
+      "median": {
+        "slope_ns": 5.859368421052632,
+        "intercept_ns": 293614.63157894736
+      },
+      "instructions": {
+        "minimum_per_operation": 93.89005263157895,
+        "median_per_operation": 93.89005263157895
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1369477.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 67617.0,
+        "library_preparation_inclusive": 1344680.0,
+        "linking": 530999.0,
+        "machine_construction": 10603217.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 2037
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "prop_read",
+      "source_hash": "eced51007902ff8150e551a60f778195dbcfaa7a860f56b316559f717ecd2c4e",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1820405.0,
+            "result": 10000,
+            "instructions": 6408905,
+            "instruction_window": {
+              "instructions": 6408905,
+              "time_enabled": 1847264,
+              "time_running": 1847264
+            }
+          },
+          {
+            "ns": 18707824.0,
+            "result": 200000,
+            "instructions": 109540047,
+            "instruction_window": {
+              "instructions": 109540047,
+              "time_enabled": 18756789,
+              "time_running": 18756789
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1820405.0,
+        18707824.0
+      ],
+      "median_ns": [
+        1820405.0,
+        18707824.0
+      ],
+      "minimum": {
+        "slope_ns": 222.20288157894737,
+        "intercept_ns": 931593.4736842106
+      },
+      "median": {
+        "slope_ns": 222.20288157894737,
+        "intercept_ns": 931593.4736842106
+      },
+      "instructions": {
+        "minimum_per_operation": 1356.9887105263158,
+        "median_per_operation": 1356.9887105263158
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1622232.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 61245.0,
+        "library_preparation_inclusive": 1771442.0,
+        "linking": 607964.0,
+        "machine_construction": 12143686.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 26044
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "prop_read",
+      "source_hash": "8d208e04816c73ef8785cde508434d4266ed489200aad36bce34886ee18c18d4",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 973651.0,
+            "result": 10000,
+            "instructions": 4931203,
+            "instruction_window": {
+              "instructions": 4931203,
+              "time_enabled": 997210,
+              "time_running": 997210
+            }
+          },
+          {
+            "ns": 11882976.0,
+            "result": 200000,
+            "instructions": 86933891,
+            "instruction_window": {
+              "instructions": 86933891,
+              "time_enabled": 11920991,
+              "time_running": 11920991
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        973651.0,
+        11882976.0
+      ],
+      "median_ns": [
+        973651.0,
+        11882976.0
+      ],
+      "minimum": {
+        "slope_ns": 143.54375,
+        "intercept_ns": 399476.0
+      },
+      "median": {
+        "slope_ns": 143.54375,
+        "intercept_ns": 399476.0
+      },
+      "instructions": {
+        "minimum_per_operation": 1078.9827368421052,
+        "median_per_operation": 1078.9827368421052
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 973462.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 73809.0,
+        "library_preparation_inclusive": 1220184.0,
+        "linking": 443865.0,
+        "machine_construction": 14419046.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 6039
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "prop_write",
+      "source_hash": "f37dc968fcd42a5245176938513aaa524f8a6f8a4daba175dd2b27ae545bd375",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 11395608.0,
+            "result": 999,
+            "instructions": 5864437,
+            "instruction_window": {
+              "instructions": 5864437,
+              "time_enabled": 12865362,
+              "time_running": 12865362
+            }
+          },
+          {
+            "ns": 19448589.0,
+            "result": 19999,
+            "instructions": 79276358,
+            "instruction_window": {
+              "instructions": 79276358,
+              "time_enabled": 21159454,
+              "time_running": 21159454
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        11395608.0,
+        19448589.0
+      ],
+      "median_ns": [
+        11395608.0,
+        19448589.0
+      ],
+      "minimum": {
+        "slope_ns": 105.96027631578947,
+        "intercept_ns": 10971766.894736841
+      },
+      "median": {
+        "slope_ns": 105.96027631578947,
+        "intercept_ns": 10971766.894736841
+      },
+      "instructions": {
+        "minimum_per_operation": 965.9463289473684,
+        "median_per_operation": 965.9463289473684
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1635747.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 39394.0,
+        "library_preparation_inclusive": 1582358.0,
+        "linking": 722199.0,
+        "machine_construction": 9519299.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 6046
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "prop_write",
+      "source_hash": "6fd5a7378e94da237608c105fe4a3a6f1b0f7c61021daeb434803d6941986921",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1203454.0,
+            "result": 999,
+            "instructions": 4347750,
+            "instruction_window": {
+              "instructions": 4347750,
+              "time_enabled": 1223604,
+              "time_running": 1223604
+            }
+          },
+          {
+            "ns": 11189030.0,
+            "result": 19999,
+            "instructions": 73506093,
+            "instruction_window": {
+              "instructions": 73506093,
+              "time_enabled": 11214858,
+              "time_running": 11214858
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1203454.0,
+        11189030.0
+      ],
+      "median_ns": [
+        1203454.0,
+        11189030.0
+      ],
+      "minimum": {
+        "slope_ns": 131.38915789473685,
+        "intercept_ns": 677897.3684210526
+      },
+      "median": {
+        "slope_ns": 131.38915789473685,
+        "intercept_ns": 677897.3684210526
+      },
+      "instructions": {
+        "minimum_per_operation": 909.9781973684211,
+        "median_per_operation": 909.9781973684211
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 822457.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 49824.0,
+        "library_preparation_inclusive": 789346.0,
+        "linking": 415922.0,
+        "machine_construction": 8145083.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 6038
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "array_read",
+      "source_hash": "c9dbaaf2aa2f45e4aafe73ac2de9477e23818f0c20ade6c26540c981be75b9c9",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1417998.0,
+            "result": 45000,
+            "instructions": 11394745,
+            "instruction_window": {
+              "instructions": 11394745,
+              "time_enabled": 1438688,
+              "time_running": 1438688
+            }
+          },
+          {
+            "ns": 33434528.999999996,
+            "result": 900000,
+            "instructions": 210132348,
+            "instruction_window": {
+              "instructions": 210132348,
+              "time_enabled": 33508529,
+              "time_running": 33508529
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1417998.0,
+        33434528.999999996
+      ],
+      "median_ns": [
+        1417998.0,
+        33434528.999999996
+      ],
+      "minimum": {
+        "slope_ns": 168.50805789473682,
+        "intercept_ns": -267082.5789473683
+      },
+      "median": {
+        "slope_ns": 168.50805789473682,
+        "intercept_ns": -267082.5789473683
+      },
+      "instructions": {
+        "minimum_per_operation": 1045.9873842105262,
+        "median_per_operation": 1045.9873842105262
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1949768.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 65053.0,
+        "library_preparation_inclusive": 1554065.0,
+        "linking": 781039.0,
+        "machine_construction": 14396444.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 72079
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "array_read",
+      "source_hash": "aefc32a93c8bbee248a88ce26810667d93e6bb2650c50926bed4c8ecc74429f6",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1857955.0,
+            "result": 45000,
+            "instructions": 9263010,
+            "instruction_window": {
+              "instructions": 9263010,
+              "time_enabled": 1882319,
+              "time_running": 1882319
+            }
+          },
+          {
+            "ns": 29964422.0,
+            "result": 900000,
+            "instructions": 172319129,
+            "instruction_window": {
+              "instructions": 172319129,
+              "time_enabled": 30003977,
+              "time_running": 30003977
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1857955.0,
+        29964422.0
+      ],
+      "median_ns": [
+        1857955.0,
+        29964422.0
+      ],
+      "minimum": {
+        "slope_ns": 147.92877368421054,
+        "intercept_ns": 378667.2631578946
+      },
+      "median": {
+        "slope_ns": 147.92877368421054,
+        "intercept_ns": 378667.2631578946
+      },
+      "instructions": {
+        "minimum_per_operation": 858.1901,
+        "median_per_operation": 858.1901
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1371220.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 65532.99999999999,
+        "library_preparation_inclusive": 1098929.0,
+        "linking": 557088.0,
+        "machine_construction": 10788636.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 12076
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "func_call",
+      "source_hash": "3fdcf149dca1fb86431b5101990fb2abfe2f5e503ef017f31c4274b0c186614f",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1452803.0,
+            "result": 4000,
+            "instructions": 5079948,
+            "instruction_window": {
+              "instructions": 5079948,
+              "time_enabled": 1475978,
+              "time_running": 1475978
+            }
+          },
+          {
+            "ns": 22136715.0,
+            "result": 80000,
+            "instructions": 84952655,
+            "instruction_window": {
+              "instructions": 84952655,
+              "time_enabled": 22175690,
+              "time_running": 22175690
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1452803.0,
+        22136715.0
+      ],
+      "median_ns": [
+        1452803.0,
+        22136715.0
+      ],
+      "minimum": {
+        "slope_ns": 272.15673684210526,
+        "intercept_ns": 364176.0526315789
+      },
+      "median": {
+        "slope_ns": 272.15673684210526,
+        "intercept_ns": 364176.0526315789
+      },
+      "instructions": {
+        "minimum_per_operation": 1050.9566710526317,
+        "median_per_operation": 1050.9566710526317
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1276692.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 47500.0,
+        "library_preparation_inclusive": 925151.0,
+        "linking": 514367.0,
+        "machine_construction": 8106290.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 10045
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 4006,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "func_call",
+      "source_hash": "08c224d8bf1cfef23bd6442cf3a1b597b14da8eff9df776bab133a5112ccf3d7",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 800937.0,
+            "result": 4000,
+            "instructions": 4994094,
+            "instruction_window": {
+              "instructions": 4994094,
+              "time_enabled": 815509,
+              "time_running": 815509
+            }
+          },
+          {
+            "ns": 10842548.0,
+            "result": 80000,
+            "instructions": 84562290,
+            "instruction_window": {
+              "instructions": 84562290,
+              "time_enabled": 10868178,
+              "time_running": 10868178
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        800937.0,
+        10842548.0
+      ],
+      "median_ns": [
+        800937.0,
+        10842548.0
+      ],
+      "minimum": {
+        "slope_ns": 132.12646052631578,
+        "intercept_ns": 272431.15789473685
+      },
+      "median": {
+        "slope_ns": 132.12646052631578,
+        "intercept_ns": 272431.15789473685
+      },
+      "instructions": {
+        "minimum_per_operation": 1046.9499473684211,
+        "median_per_operation": 1046.9499473684211
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 805887.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 83807.0,
+        "library_preparation_inclusive": 1560307.0,
+        "linking": 343987.0,
+        "machine_construction": 16075292.000000002
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 10041
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 4002,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "func_closure_call",
+      "source_hash": "c6f9c51e7d58924795d48fcc15eac445338c2091d0c8318652aea22491b1c345",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1579371.0,
+            "result": 4000,
+            "instructions": 10678883,
+            "instruction_window": {
+              "instructions": 10678883,
+              "time_enabled": 1598117,
+              "time_running": 1598117
+            }
+          },
+          {
+            "ns": 25369076.0,
+            "result": 80000,
+            "instructions": 196877682,
+            "instruction_window": {
+              "instructions": 196877682,
+              "time_enabled": 25384797,
+              "time_running": 25384797
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1579371.0,
+        25369076.0
+      ],
+      "median_ns": [
+        1579371.0,
+        25369076.0
+      ],
+      "minimum": {
+        "slope_ns": 313.02243421052634,
+        "intercept_ns": 327281.2631578946
+      },
+      "median": {
+        "slope_ns": 313.02243421052634,
+        "intercept_ns": 327281.2631578946
+      },
+      "instructions": {
+        "minimum_per_operation": 2449.984197368421,
+        "median_per_operation": 2449.984197368421
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1063451.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 54733.0,
+        "library_preparation_inclusive": 1098689.0,
+        "linking": 391557.0,
+        "machine_construction": 8172335.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 18045
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 4006,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "func_closure_call",
+      "source_hash": "37e6120f7e3f91f05d4cad4303562de365c1295741a2df39aa573a625558e6c7",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        4000,
+        80000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1304164.0,
+            "result": 4000,
+            "instructions": 10141276,
+            "instruction_window": {
+              "instructions": 10141276,
+              "time_enabled": 1318512,
+              "time_running": 1318512
+            }
+          },
+          {
+            "ns": 20421619.0,
+            "result": 80000,
+            "instructions": 190715785,
+            "instruction_window": {
+              "instructions": 190715785,
+              "time_enabled": 20450775,
+              "time_running": 20450775
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1304164.0,
+        20421619.0
+      ],
+      "median_ns": [
+        1304164.0,
+        20421619.0
+      ],
+      "minimum": {
+        "slope_ns": 251.5454605263158,
+        "intercept_ns": 297982.15789473685
+      },
+      "median": {
+        "slope_ns": 251.5454605263158,
+        "intercept_ns": 297982.15789473685
+      },
+      "instructions": {
+        "minimum_per_operation": 2375.9803815789473,
+        "median_per_operation": 2375.9803815789473
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1413058.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 135976.0,
+        "library_preparation_inclusive": 2336827.0,
+        "linking": 500061.0,
+        "machine_construction": 28008181.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 10041
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 4002,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "int_arith",
+      "source_hash": "9c2b9a8eebc3fc780e4127e511c64d5bbce36e099f449480768e1403e33cb3d1",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1137600.0,
+            "result": 332833500,
+            "instructions": 1314840,
+            "instruction_window": {
+              "instructions": 1314840,
+              "time_enabled": 1059403,
+              "time_running": 1059403
+            }
+          },
+          {
+            "ns": 1963353.0000000002,
+            "result": 6656670000,
+            "instructions": 10596291,
+            "instruction_window": {
+              "instructions": 10596291,
+              "time_enabled": 1878973,
+              "time_running": 1878973
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1137600.0,
+        1963353.0000000002
+      ],
+      "median_ns": [
+        1137600.0,
+        1963353.0000000002
+      ],
+      "minimum": {
+        "slope_ns": 43.46068421052633,
+        "intercept_ns": 1094139.3157894737
+      },
+      "median": {
+        "slope_ns": 43.46068421052633,
+        "intercept_ns": 1094139.3157894737
+      },
+      "instructions": {
+        "minimum_per_operation": 488.4974210526316,
+        "median_per_operation": 488.4974210526316
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1113595.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 69291.0,
+        "library_preparation_inclusive": 1140286.0,
+        "linking": 413939.0,
+        "machine_construction": 9686112.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 3048
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "int_arith",
+      "source_hash": "0ff439911aedb3817aea93dc6af64ce82e33efa9b9e137511b8171bd053eeb3f",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 214514.0,
+            "result": 332833500,
+            "instructions": 1067286,
+            "instruction_window": {
+              "instructions": 1067286,
+              "time_enabled": 226866,
+              "time_running": 226866
+            }
+          },
+          {
+            "ns": 671423.0,
+            "result": 6656670000,
+            "instructions": 10029840,
+            "instruction_window": {
+              "instructions": 10029840,
+              "time_enabled": 683271,
+              "time_running": 683271
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        214514.0,
+        671423.0
+      ],
+      "median_ns": [
+        214514.0,
+        671423.0
+      ],
+      "minimum": {
+        "slope_ns": 24.047842105263157,
+        "intercept_ns": 190466.15789473685
+      },
+      "median": {
+        "slope_ns": 24.047842105263157,
+        "intercept_ns": 190466.15789473685
+      },
+      "instructions": {
+        "minimum_per_operation": 471.7133684210526,
+        "median_per_operation": 471.7133684210526
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1147900.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 47530.0,
+        "library_preparation_inclusive": 777414.0,
+        "linking": 488750.0,
+        "machine_construction": 7709003.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 3050
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "float_arith",
+      "source_hash": "d6527989ed40078389dc23af4f7e3a8a589104000705e318e44337b4329f967d",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 295476.0,
+            "result": 402838435.00000924,
+            "instructions": 1400431,
+            "instruction_window": {
+              "instructions": 1400431,
+              "time_enabled": 310843,
+              "time_running": 310843
+            }
+          },
+          {
+            "ns": 937403.0,
+            "result": 8056768700.000187,
+            "instructions": 12054515,
+            "instruction_window": {
+              "instructions": 12054515,
+              "time_enabled": 951865,
+              "time_running": 951865
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        295476.0,
+        937403.0
+      ],
+      "median_ns": [
+        295476.0,
+        937403.0
+      ],
+      "minimum": {
+        "slope_ns": 33.78563157894737,
+        "intercept_ns": 261690.36842105264
+      },
+      "median": {
+        "slope_ns": 33.78563157894737,
+        "intercept_ns": 261690.36842105264
+      },
+      "instructions": {
+        "minimum_per_operation": 560.7412631578948,
+        "median_per_operation": 560.7412631578948
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1341914.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 46668.0,
+        "library_preparation_inclusive": 997927.0,
+        "linking": 487357.0,
+        "machine_construction": 7366118.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 4054
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "float_arith",
+      "source_hash": "096caf1f86bc46450ea51f55bd0c53074ac9c7ea82d0b05555fe8893684a45ac",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 372380.0,
+            "result": 402838435.00000924,
+            "instructions": 1293480,
+            "instruction_window": {
+              "instructions": 1293480,
+              "time_enabled": 389931,
+              "time_running": 389931
+            }
+          },
+          {
+            "ns": 845701.0,
+            "result": 8056768700.000187,
+            "instructions": 11459863,
+            "instruction_window": {
+              "instructions": 11459863,
+              "time_enabled": 860283,
+              "time_running": 860283
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        372380.0,
+        845701.0
+      ],
+      "median_ns": [
+        372380.0,
+        845701.0
+      ],
+      "minimum": {
+        "slope_ns": 24.911631578947368,
+        "intercept_ns": 347468.36842105264
+      },
+      "median": {
+        "slope_ns": 24.911631578947368,
+        "intercept_ns": 347468.36842105264
+      },
+      "instructions": {
+        "minimum_per_operation": 535.0727894736842,
+        "median_per_operation": 535.0727894736842
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1888453.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 58811.0,
+        "library_preparation_inclusive": 1401124.0,
+        "linking": 622391.0,
+        "machine_construction": 12193670.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 4082
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 9
+          },
+          "source_evaluator": {
+            "register_program": 9
+          }
+        },
+        "register_entries": 6,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 2,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "map_set_string",
+      "source_hash": "cc1167209575863657c87be02c813598f26a7e0b7eb37adb2947a1e458c8e515",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 4501128.0,
+            "result": 1000,
+            "instructions": 24276882,
+            "instruction_window": {
+              "instructions": 24276882,
+              "time_enabled": 4537007,
+              "time_running": 4537007
+            }
+          },
+          {
+            "ns": 65231890.0,
+            "result": 1000,
+            "instructions": 404231677,
+            "instruction_window": {
+              "instructions": 404231677,
+              "time_enabled": 64926827,
+              "time_running": 64926827
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        4501128.0,
+        65231890.0
+      ],
+      "median_ns": [
+        4501128.0,
+        65231890.0
+      ],
+      "minimum": {
+        "slope_ns": 3196.355894736842,
+        "intercept_ns": 1304772.1052631582
+      },
+      "median": {
+        "slope_ns": 3196.355894736842,
+        "intercept_ns": 1304772.1052631582
+      },
+      "instructions": {
+        "minimum_per_operation": 19997.620789473684,
+        "median_per_operation": 19997.620789473684
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 4496319.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 41778.0,
+        "library_preparation_inclusive": 2445359.0,
+        "linking": 5154548.0,
+        "machine_construction": 9171634.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 13073
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 9
+          },
+          "source_evaluator": {
+            "register_program": 9
+          }
+        },
+        "register_entries": 7,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 8
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "map_set_string",
+      "source_hash": "693596e060cdc7bc1836d7dcbbf23fb1e4ee2941d94718dba82db13adc7f49b7",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1129966.0,
+            "result": 1000,
+            "instructions": 6563107,
+            "instruction_window": {
+              "instructions": 6563107,
+              "time_enabled": 1144406,
+              "time_running": 1144406
+            }
+          },
+          {
+            "ns": 18905106.0,
+            "result": 1000,
+            "instructions": 119481017,
+            "instruction_window": {
+              "instructions": 119481017,
+              "time_enabled": 18936226,
+              "time_running": 18936226
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1129966.0,
+        18905106.0
+      ],
+      "median_ns": [
+        1129966.0,
+        18905106.0
+      ],
+      "minimum": {
+        "slope_ns": 935.5336842105263,
+        "intercept_ns": 194432.3157894737
+      },
+      "median": {
+        "slope_ns": 935.5336842105263,
+        "intercept_ns": 194432.3157894737
+      },
+      "instructions": {
+        "minimum_per_operation": 5943.047894736842,
+        "median_per_operation": 5943.047894736842
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1041449.0000000001,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 57418.0,
+        "library_preparation_inclusive": 927045.0,
+        "linking": 445708.0,
+        "machine_construction": 10988142.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 6054
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "string_build1",
+      "source_hash": "50bcc41da676e579ba17ff0457509dafd64e2cd75132c2ab8ac76f821c92e343",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 595982.0,
+            "result": 1000,
+            "instructions": 3368081,
+            "instruction_window": {
+              "instructions": 3368081,
+              "time_enabled": 616095,
+              "time_running": 616095
+            }
+          },
+          {
+            "ns": 5722977.0,
+            "result": 1000,
+            "instructions": 46740087,
+            "instruction_window": {
+              "instructions": 46740087,
+              "time_enabled": 5751063,
+              "time_running": 5751063
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        595982.0,
+        5722977.0
+      ],
+      "median_ns": [
+        595982.0,
+        5722977.0
+      ],
+      "minimum": {
+        "slope_ns": 269.84184210526314,
+        "intercept_ns": 326140.15789473685
+      },
+      "median": {
+        "slope_ns": 269.84184210526314,
+        "intercept_ns": 326140.15789473685
+      },
+      "instructions": {
+        "minimum_per_operation": 2282.737157894737,
+        "median_per_operation": 2282.737157894737
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1133082.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 43141.0,
+        "library_preparation_inclusive": 1016881.0,
+        "linking": 584169.0,
+        "machine_construction": 6558668.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 3065
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 13
+          },
+          "source_evaluator": {
+            "register_program": 13
+          }
+        },
+        "register_entries": 7,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "operator": 8
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 968
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "string_build1",
+      "source_hash": "f7f211a6d7b28ddca506ffeb9f1fd3a62b0a2db0b8dc48292d1a1be1f821d7b9",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1000,
+        20000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 432714.0,
+            "result": 1000,
+            "instructions": 2883489,
+            "instruction_window": {
+              "instructions": 2883489,
+              "time_enabled": 449944,
+              "time_running": 449944
+            }
+          },
+          {
+            "ns": 4482092.0,
+            "result": 1000,
+            "instructions": 44279950,
+            "instruction_window": {
+              "instructions": 44279950,
+              "time_enabled": 4504055,
+              "time_running": 4504055
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        432714.0,
+        4482092.0
+      ],
+      "median_ns": [
+        432714.0,
+        4482092.0
+      ],
+      "minimum": {
+        "slope_ns": 213.12515789473684,
+        "intercept_ns": 219588.84210526315
+      },
+      "median": {
+        "slope_ns": 213.12515789473684,
+        "intercept_ns": 219588.84210526315
+      },
+      "instructions": {
+        "minimum_per_operation": 2178.761105263158,
+        "median_per_operation": 2178.761105263158
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 704586.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 42991.0,
+        "library_preparation_inclusive": 861429.0,
+        "linking": 347975.0,
+        "machine_construction": 7635495.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 3048
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 11
+          },
+          "source_evaluator": {
+            "register_program": 11
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "operator": 8,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 968
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "int_to_string",
+      "source_hash": "d1255679cf8317f3cefaf927fc49245f7d2f803d874641404029edca5533a8a8",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        3000,
+        60000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1374466.0,
+            "result": 3,
+            "instructions": 6912869,
+            "instruction_window": {
+              "instructions": 6912869,
+              "time_enabled": 1390196,
+              "time_running": 1390196
+            }
+          },
+          {
+            "ns": 20809569.0,
+            "result": 5,
+            "instructions": 121536382,
+            "instruction_window": {
+              "instructions": 121536382,
+              "time_enabled": 20842760,
+              "time_running": 20842760
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1374466.0,
+        20809569.0
+      ],
+      "median_ns": [
+        1374466.0,
+        20809569.0
+      ],
+      "minimum": {
+        "slope_ns": 340.9667192982456,
+        "intercept_ns": 351565.84210526315
+      },
+      "median": {
+        "slope_ns": 340.9667192982456,
+        "intercept_ns": 351565.84210526315
+      },
+      "instructions": {
+        "minimum_per_operation": 2010.9388245614034,
+        "median_per_operation": 2010.9388245614034
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 932234.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 50515.0,
+        "library_preparation_inclusive": 1429931.0,
+        "linking": 418958.0,
+        "machine_construction": 8729022.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 5061
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 2
+          },
+          "source_evaluator": {
+            "register_program": 2
+          }
+        },
+        "register_entries": 9,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "int_to_string",
+      "source_hash": "3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1000,
+        20000
+      ],
+      "operations": [
+        3000,
+        60000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 859096.0,
+            "result": 3,
+            "instructions": 4122337,
+            "instruction_window": {
+              "instructions": 4122337,
+              "time_enabled": 874449,
+              "time_running": 874449
+            }
+          },
+          {
+            "ns": 10988122.0,
+            "result": 5,
+            "instructions": 69670519,
+            "instruction_window": {
+              "instructions": 69670519,
+              "time_enabled": 11014101,
+              "time_running": 11014101
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        859096.0,
+        10988122.0
+      ],
+      "median_ns": [
+        859096.0,
+        10988122.0
+      ],
+      "minimum": {
+        "slope_ns": 177.70221052631578,
+        "intercept_ns": 325989.3684210527
+      },
+      "median": {
+        "slope_ns": 177.70221052631578,
+        "intercept_ns": 325989.3684210527
+      },
+      "instructions": {
+        "minimum_per_operation": 1149.968105263158,
+        "median_per_operation": 1149.968105263158
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1042261.0000000001,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 57849.0,
+        "library_preparation_inclusive": 1244231.0,
+        "linking": 768395.0,
+        "machine_construction": 9751997.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 5038
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "sort_bench",
+      "source_hash": "5cdc375d6143cb6fcc630d0504da19de734105f44c4ea990bb8aa5568a7dc199",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 35898435.0,
+            "result": 14000,
+            "instructions": 278091113,
+            "instruction_window": {
+              "instructions": 278091113,
+              "time_enabled": 35960947,
+              "time_running": 35960947
+            }
+          },
+          {
+            "ns": 691735094.0,
+            "result": 280000,
+            "instructions": 5447039665,
+            "instruction_window": {
+              "instructions": 5447039665,
+              "time_enabled": 691491564,
+              "time_running": 691491564
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        35898435.0,
+        691735094.0
+      ],
+      "median_ns": [
+        35898435.0,
+        691735094.0
+      ],
+      "minimum": {
+        "slope_ns": 34517718.89473684,
+        "intercept_ns": 1380716.1052631587
+      },
+      "median": {
+        "slope_ns": 34517718.89473684,
+        "intercept_ns": 1380716.1052631587
+      },
+      "instructions": {
+        "minimum_per_operation": 272049923.7894737,
+        "median_per_operation": 272049923.7894737
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 5179735.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 43311.0,
+        "library_preparation_inclusive": 43177825.0,
+        "linking": 4895220.0,
+        "machine_construction": 16529056.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 597341
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 275
+          },
+          "source_evaluator": {
+            "register_program": 275
+          }
+        },
+        "register_entries": 3279,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 15,
+            "native": 28,
+            "operator": 86
+          }
+        },
+        "operation_exits": {
+          "native": {
+            "record.contains": 14,
+            "ts.get_computed": 14
+          },
+          "operator": {
+            "ts.method_callable": 29,
+            "ts.to_property_key": 14
+          }
+        },
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "sort_bench",
+      "source_hash": "dc9d0f1b7fd397c2bcba5db1bb4e43de61ecc421bf80dad0e657bc17bfec4cf2",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1229604.0,
+            "result": 1000,
+            "instructions": 8028207,
+            "instruction_window": {
+              "instructions": 8028207,
+              "time_enabled": 1243662,
+              "time_running": 1243662
+            }
+          },
+          {
+            "ns": 18172708.0,
+            "result": 20000,
+            "instructions": 147659695,
+            "instruction_window": {
+              "instructions": 147659695,
+              "time_enabled": 18205625,
+              "time_running": 18205625
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1229604.0,
+        18172708.0
+      ],
+      "median_ns": [
+        1229604.0,
+        18172708.0
+      ],
+      "minimum": {
+        "slope_ns": 891742.3157894737,
+        "intercept_ns": 337861.6842105263
+      },
+      "median": {
+        "slope_ns": 891742.3157894737,
+        "intercept_ns": 337861.6842105263
+      },
+      "instructions": {
+        "minimum_per_operation": 7349025.684210527,
+        "median_per_operation": 7349025.684210527
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1075644.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 52238.0,
+        "library_preparation_inclusive": 1413621.0,
+        "linking": 465586.0,
+        "machine_construction": 8381739.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 8071
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 3
+          },
+          "source_evaluator": {
+            "register_program": 3
+          }
+        },
+        "register_entries": 5,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "json_transform",
+      "source_hash": "eb67836ac3d63d22ae77797a30d8f6bd454175f00b6f1fb38622a6ebbb2a336d",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 2365631.0,
+            "result": 7701,
+            "instructions": 8696423,
+            "instruction_window": {
+              "instructions": 8696423,
+              "time_enabled": 2390222,
+              "time_running": 2390222
+            }
+          },
+          {
+            "ns": 12775645.0,
+            "result": 154020,
+            "instructions": 97339996,
+            "instruction_window": {
+              "instructions": 97339996,
+              "time_enabled": 12825247,
+              "time_running": 12825247
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        2365631.0,
+        12775645.0
+      ],
+      "median_ns": [
+        2365631.0,
+        12775645.0
+      ],
+      "minimum": {
+        "slope_ns": 547895.4736842106,
+        "intercept_ns": 1817735.5263157894
+      },
+      "median": {
+        "slope_ns": 547895.4736842106,
+        "intercept_ns": 1817735.5263157894
+      },
+      "instructions": {
+        "minimum_per_operation": 4665451.2105263155,
+        "median_per_operation": 4665451.2105263155
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1645555.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 39174.0,
+        "library_preparation_inclusive": 1260433.0,
+        "linking": 678747.0,
+        "machine_construction": 7960055.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 4340
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 134
+          },
+          "source_evaluator": {
+            "register_program": 134
+          }
+        },
+        "register_entries": 14,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "native": 1,
+            "operator": 128
+          }
+        },
+        "operation_exits": {
+          "native": {
+            "json.parse_binary64": 1
+          }
+        },
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "json_transform",
+      "source_hash": "7881cb629936ab28c552588d7a74ac29d63acfadc811691d4688b23bf9eba5ab",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 1369216.0,
+            "result": 7701,
+            "instructions": 8617526,
+            "instruction_window": {
+              "instructions": 8617526,
+              "time_enabled": 1388012,
+              "time_running": 1388012
+            }
+          },
+          {
+            "ns": 6010558.0,
+            "result": 154020,
+            "instructions": 56324449,
+            "instruction_window": {
+              "instructions": 56324449,
+              "time_enabled": 6035667,
+              "time_running": 6035667
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        1369216.0,
+        6010558.0
+      ],
+      "median_ns": [
+        1369216.0,
+        6010558.0
+      ],
+      "minimum": {
+        "slope_ns": 244281.15789473685,
+        "intercept_ns": 1124934.8421052631
+      },
+      "median": {
+        "slope_ns": 244281.15789473685,
+        "intercept_ns": 1124934.8421052631
+      },
+      "instructions": {
+        "minimum_per_operation": 2510890.6842105263,
+        "median_per_operation": 2510890.6842105263
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 2350482.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 40657.0,
+        "library_preparation_inclusive": 4031658.0,
+        "linking": 1628965.0,
+        "machine_construction": 7516109.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 2400
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 8
+          },
+          "source_evaluator": {
+            "register_program": 8
+          }
+        },
+        "register_entries": 415,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 2,
+            "native": 1,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {
+          "native": {
+            "json.decode": 1
+          }
+        },
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "records",
+      "source_hash": "9ccaf39805acb4a702481d27e6a29b1e25aef407962dbb0075f8252622a6c408",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 24229863.0,
+            "result": 49990000,
+            "instructions": 165418567,
+            "instruction_window": {
+              "instructions": 165418567,
+              "time_enabled": 24343374,
+              "time_running": 24343374
+            }
+          },
+          {
+            "ns": 310517203.0,
+            "result": 999800000,
+            "instructions": 2290267952,
+            "instruction_window": {
+              "instructions": 2290267952,
+              "time_enabled": 310561653,
+              "time_running": 310561653
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        24229863.0,
+        310517203.0
+      ],
+      "median_ns": [
+        24229863.0,
+        310517203.0
+      ],
+      "minimum": {
+        "slope_ns": 15067754.736842105,
+        "intercept_ns": 9162108.263157895
+      },
+      "median": {
+        "slope_ns": 15067754.736842105,
+        "intercept_ns": 9162108.263157895
+      },
+      "instructions": {
+        "minimum_per_operation": 111834178.15789473,
+        "median_per_operation": 111834178.15789473
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1255533.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 40155.0,
+        "library_preparation_inclusive": 2974397.0,
+        "linking": 519427.0,
+        "machine_construction": 6647175.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 230081
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 31
+          },
+          "source_evaluator": {
+            "register_program": 31
+          }
+        },
+        "register_entries": 20004,
+        "slow_exits": {
+          "register_program": {
+            "capacity": 1,
+            "source_continuation": 21,
+            "native": 1,
+            "operator": 1,
+            "binding": 2
+          }
+        },
+        "operation_exits": {
+          "native": {
+            "list.copy": 1
+          }
+        },
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "records",
+      "source_hash": "d774b6a74d3d70c7b27049f61eaac81013a355b53aa2a5286c0aa7d34bf44ca1",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 19451624.0,
+            "result": 49990000,
+            "instructions": 150974636,
+            "instruction_window": {
+              "instructions": 150974636,
+              "time_enabled": 19521393,
+              "time_running": 19521393
+            }
+          },
+          {
+            "ns": 96478675.0,
+            "result": 999800000,
+            "instructions": 777806842,
+            "instruction_window": {
+              "instructions": 777806842,
+              "time_enabled": 96573705,
+              "time_running": 96573705
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        19451624.0,
+        96478675.0
+      ],
+      "median_ns": [
+        19451624.0,
+        96478675.0
+      ],
+      "minimum": {
+        "slope_ns": 4054055.3157894737,
+        "intercept_ns": 15397568.684210526
+      },
+      "median": {
+        "slope_ns": 4054055.3157894737,
+        "intercept_ns": 15397568.684210526
+      },
+      "instructions": {
+        "minimum_per_operation": 32991168.736842107,
+        "median_per_operation": 32991168.736842107
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 971708.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 40286.0,
+        "library_preparation_inclusive": 1522353.0,
+        "linking": 431261.0,
+        "machine_construction": 6875064.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 145047
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 45
+          },
+          "source_evaluator": {
+            "register_program": 45
+          }
+        },
+        "register_entries": 29984,
+        "slow_exits": {
+          "register_program": {
+            "capacity": 19,
+            "source_continuation": 3,
+            "binding": 11,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {
+          "capacity": {
+            "py.type.name": 19
+          }
+        },
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "templating",
+      "source_hash": "8b4fb8138c22f6eb6e82a6933f279e83fe7fdfc2ff4dd0732ae30d36df23499a",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 360178.0,
+            "result": 3252,
+            "instructions": 1787541,
+            "instruction_window": {
+              "instructions": 1787541,
+              "time_enabled": 376906,
+              "time_running": 376906
+            }
+          },
+          {
+            "ns": 2866322.0,
+            "result": 65040,
+            "instructions": 21950689,
+            "instruction_window": {
+              "instructions": 21950689,
+              "time_enabled": 2883967,
+              "time_running": 2883967
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        360178.0,
+        2866322.0
+      ],
+      "median_ns": [
+        360178.0,
+        2866322.0
+      ],
+      "minimum": {
+        "slope_ns": 131902.31578947368,
+        "intercept_ns": 228275.68421052632
+      },
+      "median": {
+        "slope_ns": 131902.31578947368,
+        "intercept_ns": 228275.68421052632
+      },
+      "instructions": {
+        "minimum_per_operation": 1061218.3157894737,
+        "median_per_operation": 1061218.3157894737
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 871149.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 37361.0,
+        "library_preparation_inclusive": 1146817.0,
+        "linking": 381017.0,
+        "machine_construction": 6459302.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 356
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 7
+          },
+          "source_evaluator": {
+            "register_program": 7
+          }
+        },
+        "register_entries": 7,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "operator": 3
+          }
+        },
+        "operation_exits": {
+          "operator": {
+            "text.concat": 3
+          }
+        },
+        "accumulated": 93
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "templating",
+      "source_hash": "687676b1fb9cc0bd7899aff8aa7625a374fedb274d1f8ea97837a1178be63d66",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        1,
+        20
+      ],
+      "operations": [
+        1,
+        20
+      ],
+      "samples": [
+        [
+          {
+            "ns": 328188.0,
+            "result": 3252,
+            "instructions": 1702860,
+            "instruction_window": {
+              "instructions": 1702860,
+              "time_enabled": 344226,
+              "time_running": 344226
+            }
+          },
+          {
+            "ns": 2689650.0,
+            "result": 65040,
+            "instructions": 21999934,
+            "instruction_window": {
+              "instructions": 21999934,
+              "time_enabled": 2706465,
+              "time_running": 2706465
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        328188.0,
+        2689650.0
+      ],
+      "median_ns": [
+        328188.0,
+        2689650.0
+      ],
+      "minimum": {
+        "slope_ns": 124287.47368421052,
+        "intercept_ns": 203900.5263157895
+      },
+      "median": {
+        "slope_ns": 124287.47368421052,
+        "intercept_ns": 203900.5263157895
+      },
+      "instructions": {
+        "minimum_per_operation": 1068267.0526315789,
+        "median_per_operation": 1068267.0526315789
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 771932.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 54062.0,
+        "library_preparation_inclusive": 1186833.0,
+        "linking": 322697.0,
+        "machine_construction": 9782614.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 350
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 5
+          },
+          "source_evaluator": {
+            "register_program": 5
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 1,
+            "operator": 2,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {
+          "operator": {
+            "text.concat": 2
+          }
+        },
+        "accumulated": 94
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "object_build",
+      "source_hash": "dc86c054dc72a895e57ffc063d6f8cb8d553664bd1241a0783a0b2e8ed8f03e5",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        10000,
+        200000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 7697762.0,
+            "result": 12081,
+            "instructions": 56561762,
+            "instruction_window": {
+              "instructions": 56561762,
+              "time_enabled": 7815354,
+              "time_running": 7815354
+            }
+          },
+          {
+            "ns": 136915429.0,
+            "result": 392081,
+            "instructions": 1020380158,
+            "instruction_window": {
+              "instructions": 1020380158,
+              "time_enabled": 145135529,
+              "time_running": 145135529
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        7697762.0,
+        136915429.0
+      ],
+      "median_ns": [
+        7697762.0,
+        136915429.0
+      ],
+      "minimum": {
+        "slope_ns": 680.0929842105263,
+        "intercept_ns": 896832.1578947371
+      },
+      "median": {
+        "slope_ns": 680.0929842105263,
+        "intercept_ns": 896832.1578947371
+      },
+      "instructions": {
+        "minimum_per_operation": 5072.7284,
+        "median_per_operation": 5072.7284
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 1832187.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 55314.0,
+        "library_preparation_inclusive": 6988267.0,
+        "linking": 3428400.0,
+        "machine_construction": 8083708.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 30039
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 15
+          },
+          "source_evaluator": {
+            "register_program": 15
+          }
+        },
+        "register_entries": 3,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 12,
+            "binding": 9
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "object_build",
+      "source_hash": "6ee0f8a356d69d0072786e778063bc42f68a600d5ffef95182d67aa4b3ce9320",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        10000,
+        200000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 6856099.0,
+            "result": 12081,
+            "instructions": 51595764,
+            "instruction_window": {
+              "instructions": 51595764,
+              "time_enabled": 6939121,
+              "time_running": 6939121
+            }
+          },
+          {
+            "ns": 145736734.0,
+            "result": 392081,
+            "instructions": 1016490655,
+            "instruction_window": {
+              "instructions": 1016490655,
+              "time_enabled": 153748610,
+              "time_running": 153748610
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        6856099.0,
+        145736734.0
+      ],
+      "median_ns": [
+        6856099.0,
+        145736734.0
+      ],
+      "minimum": {
+        "slope_ns": 730.9507105263158,
+        "intercept_ns": -453408.10526315775
+      },
+      "median": {
+        "slope_ns": 730.9507105263158,
+        "intercept_ns": -453408.10526315775
+      },
+      "instructions": {
+        "minimum_per_operation": 5078.394163157895,
+        "median_per_operation": 5078.394163157895
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 754279.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 37631.0,
+        "library_preparation_inclusive": 885386.0,
+        "linking": 402337.0,
+        "machine_construction": 6546556.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 30038
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 22
+          },
+          "source_evaluator": {
+            "register_program": 22
+          }
+        },
+        "register_entries": 2,
+        "slow_exits": {
+          "register_program": {
+            "source_continuation": 19,
+            "binding": 2,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "typescript",
+      "workload": "object_sort",
+      "source_hash": "d92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        10000,
+        200000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 140529427.0,
+            "result": 17678,
+            "instructions": 829803639,
+            "instruction_window": {
+              "instructions": 829803639,
+              "time_enabled": 140111699,
+              "time_running": 140111699
+            }
+          },
+          {
+            "ns": 3616145553.0,
+            "result": 217678,
+            "instructions": 20628442533,
+            "instruction_window": {
+              "instructions": 20628442533,
+              "time_enabled": 3627320445,
+              "time_running": 3627320445
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        140529427.0,
+        3616145553.0
+      ],
+      "median_ns": [
+        140529427.0,
+        3616145553.0
+      ],
+      "minimum": {
+        "slope_ns": 18292.71645263158,
+        "intercept_ns": -42397737.52631578
+      },
+      "median": {
+        "slope_ns": 18292.71645263158,
+        "intercept_ns": -42397737.52631578
+      },
+      "instructions": {
+        "minimum_per_operation": 104203.3626,
+        "median_per_operation": 104203.3626
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 2038846.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 50785.0,
+        "library_preparation_inclusive": 9407419.0,
+        "linking": 3245776.0,
+        "machine_construction": 8398881.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 3149925
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 24
+          },
+          "source_evaluator": {
+            "register_program": 24
+          }
+        },
+        "register_entries": 124218,
+        "slow_exits": {
+          "register_program": {
+            "capacity": 2,
+            "source_continuation": 14,
+            "operator": 4,
+            "binding": 10
+          }
+        },
+        "operation_exits": {},
+        "accumulated": 0
+      }
+    },
+    {
+      "engine": "lash",
+      "dialect": "python",
+      "workload": "object_sort",
+      "source_hash": "11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664",
+      "engine_identity": "90787a293e994243a6ecffc09248d50a5837830b783a9eeb048001011ca3727e",
+      "trips": [
+        10000,
+        200000
+      ],
+      "operations": [
+        10000,
+        200000
+      ],
+      "samples": [
+        [
+          {
+            "ns": 19834655.0,
+            "result": 17678,
+            "instructions": 149562851,
+            "instruction_window": {
+              "instructions": 149562851,
+              "time_enabled": 19931933,
+              "time_running": 19931933
+            }
+          },
+          {
+            "ns": 405852090.0,
+            "result": 217678,
+            "instructions": 3002489097,
+            "instruction_window": {
+              "instructions": 3002489097,
+              "time_enabled": 413743990,
+              "time_running": 413743990
+            }
+          }
+        ]
+      ],
+      "minimum_ns": [
+        19834655.0,
+        405852090.0
+      ],
+      "median_ns": [
+        19834655.0,
+        405852090.0
+      ],
+      "minimum": {
+        "slope_ns": 2031.6707105263158,
+        "intercept_ns": -482052.1052631587
+      },
+      "median": {
+        "slope_ns": 2031.6707105263158,
+        "intercept_ns": -482052.1052631587
+      },
+      "instructions": {
+        "minimum_per_operation": 15015.401294736843,
+        "median_per_operation": 15015.401294736843
+      },
+      "fixed_scopes_ns": {
+        "admission_lowering": 880416.0,
+        "embedding_process_once": 150857274.0,
+        "first_checkpoint": 42520.0,
+        "library_preparation_inclusive": 1469707.0,
+        "linking": 411885.0,
+        "machine_construction": 7282831.0
+      },
+      "ratios": {},
+      "execution_census": {
+        "statements": {
+          "register_program": 100076
+        },
+        "transitions": {
+          "register_program": {
+            "source_evaluator": 32
+          },
+          "source_evaluator": {
+            "register_program": 32
+          }
+        },
+        "register_entries": 10005,
+        "slow_exits": {
+          "register_program": {
+            "capacity": 2,
+            "source_continuation": 22,
+            "native": 2,
+            "binding": 2,
+            "cold_branch": 1
+          }
+        },
+        "operation_exits": {
+          "native": {
+            "list.copy": 1,
+            "list.sort_by_keys": 1
+          }
+        },
+        "accumulated": 0
+      }
+    }
+  ],
+  "errors": [],
+  "unsupported": [],
+  "durable": []
+}

@@ -1,0 +1,285 @@
+{
+  "rows": [
+    {
+      "row": "kernel/typescript/empty_loop",
+      "before": 347.93636842105263,
+      "after": 347.89573684210524,
+      "ceiling": 351.41573210526315,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/empty_loop",
+      "before": 93.87731578947368,
+      "after": 93.89005263157895,
+      "ceiling": 94.81608894736843,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/prop_read",
+      "before": 1356.9908157894736,
+      "after": 1356.9887105263158,
+      "ceiling": 1370.5607239473684,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/prop_read",
+      "before": 1078.9801842105262,
+      "after": 1078.9827368421052,
+      "ceiling": 1089.7699860526316,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/prop_write",
+      "before": 966.0022631578947,
+      "after": 965.9463289473684,
+      "ceiling": 975.6622857894737,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/prop_write",
+      "before": 909.975197368421,
+      "after": 909.9781973684211,
+      "ceiling": 919.0749493421052,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/array_read",
+      "before": 1045.9944578947368,
+      "after": 1045.9873842105262,
+      "ceiling": 1056.4544024736842,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/array_read",
+      "before": 858.1932157894737,
+      "after": 858.1901,
+      "ceiling": 866.7751479473684,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/func_call",
+      "before": 1050.9850394736843,
+      "after": 1050.9566710526317,
+      "ceiling": 1061.494889868421,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/func_call",
+      "before": 1046.973157894737,
+      "after": 1046.9499473684211,
+      "ceiling": 1057.4428894736843,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/func_closure_call",
+      "before": 2449.9798421052633,
+      "after": 2449.984197368421,
+      "ceiling": 2474.479640526316,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/func_closure_call",
+      "before": 2375.9857368421053,
+      "after": 2375.9803815789473,
+      "ceiling": 2399.745594210526,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/int_arith",
+      "before": 488.4313157894737,
+      "after": 488.4974210526316,
+      "ceiling": 493.3156289473684,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/int_arith",
+      "before": 471.8118947368421,
+      "after": 471.7133684210526,
+      "ceiling": 476.53001368421053,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/float_arith",
+      "before": 560.7904210526316,
+      "after": 560.7412631578948,
+      "ceiling": 566.3983252631579,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/float_arith",
+      "before": 535.1017894736842,
+      "after": 535.0727894736842,
+      "ceiling": 540.4528073684211,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/map_set_string",
+      "before": 19997.960263157896,
+      "after": 19997.620789473684,
+      "ceiling": 20197.939865789474,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/map_set_string",
+      "before": 5943.758894736842,
+      "after": 5943.047894736842,
+      "ceiling": 6003.196483684211,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/string_build1",
+      "before": 2283.616736842105,
+      "after": 2282.737157894737,
+      "ceiling": 2306.4529042105264,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/string_build1",
+      "before": 2178.746157894737,
+      "after": 2178.761105263158,
+      "ceiling": 2200.533619473684,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/int_to_string",
+      "before": 2010.9428947368422,
+      "after": 2010.9388245614034,
+      "ceiling": 2031.0523236842107,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/int_to_string",
+      "before": 1149.978052631579,
+      "after": 1149.968105263158,
+      "ceiling": 1161.4778331578948,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/sort_bench",
+      "before": 272047115.7368421,
+      "after": 272049923.7894737,
+      "ceiling": 274767586.8942105,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/sort_bench",
+      "before": 7349070.368421053,
+      "after": 7349025.684210527,
+      "ceiling": 7422561.072105263,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/json_transform",
+      "before": 4666666.315789473,
+      "after": 4665451.2105263155,
+      "ceiling": 4713332.978947368,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/json_transform",
+      "before": 2509549.1052631577,
+      "after": 2510890.6842105263,
+      "ceiling": 2534644.5963157895,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/records",
+      "before": 111834385.31578948,
+      "after": 111834178.15789473,
+      "ceiling": 112952729.16894737,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/records",
+      "before": 32990562.47368421,
+      "after": 32991168.736842107,
+      "ceiling": 33320468.098421052,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/templating",
+      "before": 1056974.0,
+      "after": 1061218.3157894737,
+      "ceiling": 1067543.74,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/templating",
+      "before": 1078133.2631578948,
+      "after": 1068267.0526315789,
+      "ceiling": 1088914.5957894737,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/object_build",
+      "before": 5072.689147368421,
+      "after": 5072.7284,
+      "ceiling": 5123.416038842105,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/object_build",
+      "before": 5078.3461,
+      "after": 5078.394163157895,
+      "ceiling": 5129.129561,
+      "pass": true
+    },
+    {
+      "row": "kernel/typescript/object_sort",
+      "before": 104203.44957894737,
+      "after": 104203.3626,
+      "ceiling": 105245.48407473684,
+      "pass": true
+    },
+    {
+      "row": "kernel/python/object_sort",
+      "before": 15015.340605263158,
+      "after": 15015.401294736843,
+      "ceiling": 15165.49401131579,
+      "pass": true
+    },
+    {
+      "row": "replay/chat-short/host",
+      "before": 35804489.5,
+      "after": 35861925.5,
+      "ceiling": 36162534.395,
+      "pass": true
+    },
+    {
+      "row": "replay/chat-long-compacting/host",
+      "before": 39705409.5,
+      "after": 39748843.0,
+      "ceiling": 40102463.595,
+      "pass": true
+    },
+    {
+      "row": "replay/ts-codemode/host",
+      "before": 124341046.0,
+      "after": 107174684.0,
+      "ceiling": 125584456.46000001,
+      "pass": true
+    },
+    {
+      "row": "replay/ts-codemode/worker",
+      "before": 40330772.0,
+      "after": 38955552.0,
+      "ceiling": 40730000,
+      "pass": true
+    },
+    {
+      "row": "replay/py-codemode/host",
+      "before": 85812822.0,
+      "after": 72638217.0,
+      "ceiling": 86670950.22,
+      "pass": true
+    },
+    {
+      "row": "replay/py-codemode/worker",
+      "before": 12751071.0,
+      "after": 12584554.0,
+      "ceiling": 12878581.71,
+      "pass": true
+    }
+  ],
+  "all_pass": true
+}

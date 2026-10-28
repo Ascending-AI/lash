@@ -1,0 +1,23 @@
+	Command being timed: "perf stat -e instructions:u -o /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-populations/standard-held-1000/perf.txt -- /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-binaries/growturn --phase idle-population --idle-protocol standard --idle-mode held --sessions 1000 --wave-size 100 --history-turns 20 --payload-bytes 1024 --database /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-populations/standard-held-1000/sessions.sqlite --vm-worker /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-binaries/lash-vm-worker --native-memory-dir /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-populations/standard-held-1000/native --trim-at-idle --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/before-populations/standard-held-1000/points.jsonl"
+	User time (seconds): 384.17
+	System time (seconds): 108.57
+	Percent of CPU this job got: 106%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 7:43.88
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 508268
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2
+	Minor (reclaiming a frame) page faults: 146983
+	Voluntary context switches: 3238279
+	Involuntary context switches: 19517
+	Swaps: 0
+	File system inputs: 196064
+	File system outputs: 86051032
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

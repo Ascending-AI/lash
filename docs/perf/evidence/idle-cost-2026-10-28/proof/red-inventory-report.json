@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "0f292024-4172-4062-99b9-12bb3c67c52f",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-core-execution:lash-core-execution__unit_test": {
+      "label": "root//crates/lash-core-execution:lash-core-execution__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "FAIL",
+      "exit_code": 101,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211637-iwj28z2x/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211637-iwj28z2x/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T211637-iwj28z2x/test-results/root/crates/lash-core-execution/lash-core-execution__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor ... FAILED\n\nfailures:\n\n---- plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor stdout ----\n\nthread 'plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor' (7) panicked at crates/lash-core-execution/src/plugin/registration_tests.rs:40:5:\nassertion `left == right` failed: the last capabilities lease must release only its own inventory observation\n  left: (1, 2)\n right: (1, 1)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    plugin::runtime_impl::registration_tests::released_sessions_drop_their_registration_without_erasing_a_successor\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 250 filtered out; finished in 0.00s\n\n",
+      "stderr": "",
+      "duration_seconds": 0.563983665,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "9525e6aac5c4c8367862873317413240878bbbfcbac158bfe2d4aa0582fd5c20:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 101,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.0036120638251304626
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

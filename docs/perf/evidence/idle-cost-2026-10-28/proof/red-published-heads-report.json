@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "trace_id": "a3e2f0f7-600d-45d1-be9f-a226d808b0c6",
+  "session_complete": true,
+  "results": {
+    "root//crates/lash-core:lash-core__unit_test": {
+      "label": "root//crates/lash-core:lash-core__unit_test",
+      "configuration": "prelude//platforms:default#a8ac7ec86a6bee54",
+      "status": "FAIL",
+      "exit_code": 101,
+      "outputs": {
+        "junit_xml": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205248-5_tubl10/test-results/root/crates/lash-core/lash-core__unit_test/test.xml",
+        "undeclared": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205248-5_tubl10/test-results/root/crates/lash-core/lash-core__unit_test/undeclared",
+        "log": "/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205248-5_tubl10/test-results/root/crates/lash-core/lash-core__unit_test/test.log"
+      },
+      "stdout": "\nrunning 1 test\ntest runtime::durable::commit_publication::tests::published_head_hints_are_bounded_and_forgotten_heads_are_reannounced ... FAILED\n\nfailures:\n\n---- runtime::durable::commit_publication::tests::published_head_hints_are_bounded_and_forgotten_heads_are_reannounced stdout ----\n\nthread 'runtime::durable::commit_publication::tests::published_head_hints_are_bounded_and_forgotten_heads_are_reannounced' (7) panicked at crates/lash-core/src/runtime/durable/commit_publication.rs:228:9:\npublication hints retain every released session without a bound\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    runtime::durable::commit_publication::tests::published_head_hints_are_bounded_and_forgotten_heads_are_reannounced\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.04s\n\n",
+      "stderr": "",
+      "duration_seconds": 0.442296138,
+      "max_memory_used_bytes": 0,
+      "executor": "remote_command",
+      "cache": false,
+      "action_digest": "8ffca46fe46785add3e54a3b634944c002732f658424be70baf24311f8210547:147",
+      "output_error": null,
+      "execution": {
+        "schema": 1,
+        "timed_out": false,
+        "interrupted_signal": null,
+        "exit_code": 101,
+        "cleanup_complete": true,
+        "elapsed_seconds": 0.05065249418839812
+      },
+      "service_local_uncached": false
+    }
+  },
+  "infrastructure_errors": []
+}

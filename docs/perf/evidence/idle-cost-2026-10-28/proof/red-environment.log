@@ -1,0 +1,50 @@
+kiln: running the cacheable test suite; named service, feature and other Cargo gates remain separate
+Buck2 native tools are current: /workspace/kiln/lash/forks/r36-idlecost/.buck2/native
+verified Lash Rust action overlay
+Buck2 vendor tree is current: /workspace/kiln/lash/forks/r36-idlecost/vendor
+Buck2 graph receipt is current
+hermetic-build: remote jobs=32 (driver jobs=32)
+[2026-10-28T20:56:36.039+01:00] Build ID: f81213e1-d0bc-4a9a-95e3-f1ad4b6c0ad2
+[2026-10-28T20:56:36.048+01:00] File changed: root//.kiln/red-published-heads.log
+[2026-10-28T20:56:36.048+01:00] File changed: root//crates/lash-durable/src/environment.rs
+[2026-10-28T20:56:36.048+01:00] File changed: root//.kiln/red-environment-sync.log
+[2026-10-28T20:56:36.048+01:00] 6 additional file change events
+[2026-10-28T20:56:36.048+01:00] File changed: root//.kiln/red-environment.log
+[2026-10-28T20:56:36.126+01:00] RE Session: GRPC-SESSION-ID
+[2026-10-28T20:56:43.139+01:00] Waiting on root//crates/lash-durable:lash-durable__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T20:56:50.239+01:00] Waiting on root//crates/lash-durable:lash-durable__unit_test__rust_test (prelude//platforms:default#a8ac7ec86a6bee54) -- rustc link [pic] [re_execute]
+[2026-10-28T20:56:57.338+01:00] Waiting on Test lash-durable__unit_test --  [re_queued]
+[2026-10-28T20:57:00.168+01:00] ✗ Fail: root//crates/lash-durable:lash-durable__unit_test (1.2s)
+[2026-10-28T20:57:00.168+01:00] ---- STDOUT ----
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] running 1 test
+[2026-10-28T20:57:00.168+01:00] test environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority ... FAILED
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] failures:
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] ---- environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority stdout ----
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] thread 'environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority' (7) panicked at crates/lash-durable/src/environment.rs:475:13:
+[2026-10-28T20:57:00.168+01:00] assertion `left == right` failed: ENV-BODY-REUSE: canonical cache bytes duplicate the body's own encoding
+[2026-10-28T20:57:00.168+01:00]   left: 0x75c0300029d0
+[2026-10-28T20:57:00.168+01:00]  right: 0x75c030004390
+[2026-10-28T20:57:00.168+01:00] note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] failures:
+[2026-10-28T20:57:00.168+01:00]     environment::tests::repeated_body_reads_reuse_content_without_reusing_owner_authority
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.168+01:00] ---- STDERR ----
+[2026-10-28T20:57:00.168+01:00]
+[2026-10-28T20:57:00.198+01:00] Cache hits: 0%
+[2026-10-28T20:57:00.198+01:00] Commands: 1 (cached: 0, remote: 1, local: 0)
+[2026-10-28T20:57:00.198+01:00] Network: up 62KiB  down 8.8KiB  session GRPC-SESSION-ID
+Tests finished: Pass 0. [mFail 1[m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+1 TESTS FAILED
+  ✗ root//crates/lash-durable:lash-durable__unit_test (prelude//platforms:default#a8ac7ec86a6bee54)
+hermetic-build: .buck2/test-report.json -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-report.json
+hermetic-build: .buck2/test-results -> /workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-results
+kiln: test failed executed=1 passed=0 failed=1 receipt=/workspace/kiln/lash/forks/r36-idlecost/.buck2/test-invocations/20261028T205635-hynpuuas/test-report.json

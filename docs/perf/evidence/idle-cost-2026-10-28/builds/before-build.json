@@ -1,0 +1,106 @@
+{
+  "trace_id": "ee37c0f7-3ea8-4b23-81b0-07700b944ef2",
+  "success": true,
+  "results": {
+    "root//crates/lash-perf:growturn__bin": {
+      "success": "SUCCESS",
+      "outputs": {
+        "DEFAULT": [
+          "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__growturn__bin__/growturn"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "root//tools/buck2:optimized#bee7ae085849175c": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "DEFAULT": [
+              "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__growturn__bin__/growturn"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    },
+    "root//crates/lash-perf:growturn__bin__fv_a74417a2": {
+      "success": "SUCCESS",
+      "outputs": {
+        "DEFAULT": [
+          "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__growturn__bin__fv_a74417a2__/growturn"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "root//tools/buck2:optimized#bee7ae085849175c": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "DEFAULT": [
+              "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__growturn__bin__fv_a74417a2__/growturn"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    },
+    "root//crates/lash-perf:lash-perf__bin": {
+      "success": "SUCCESS",
+      "outputs": {
+        "DEFAULT": [
+          "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__lash-perf__bin__/lash_perf"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "root//tools/buck2:optimized#bee7ae085849175c": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "DEFAULT": [
+              "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-perf/__lash-perf__bin__/lash_perf"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    },
+    "root//crates/lash-vm-worker:lash-vm-worker__bin": {
+      "success": "SUCCESS",
+      "outputs": {
+        "DEFAULT": [
+          "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-vm-worker/__lash-vm-worker__bin__/lash_vm_worker"
+        ]
+      },
+      "other_outputs": {},
+      "configured_graph_size": null,
+      "configured": {
+        "root//tools/buck2:optimized#bee7ae085849175c": {
+          "errors": [],
+          "success": "SUCCESS",
+          "outputs": {
+            "DEFAULT": [
+              "buck-out/kiln/art/root/bee7ae085849175c/crates/lash-vm-worker/__lash-vm-worker__bin__/lash_vm_worker"
+            ]
+          },
+          "other_outputs": {},
+          "configured_graph_size": null
+        }
+      },
+      "errors": []
+    }
+  },
+  "failures": {},
+  "project_root": "/workspace/kiln/lash/forks/r36-idlecost",
+  "truncated": false,
+  "strings": {}
+}

@@ -1,0 +1,11 @@
+# started on Wed Oct 28 22:15:00 2026
+
+
+ Performance counter stats for '/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-binaries/lash-perf replay chat-long-compacting --instructions --store-dir /tmp/lash-instructions-2cbojmic --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/chat-long-compacting.json --turns 200':
+
+       11598793106      instructions:u
+
+       4.245476152 seconds time elapsed
+
+       3.755622000 seconds user
+       1.229905000 seconds sys

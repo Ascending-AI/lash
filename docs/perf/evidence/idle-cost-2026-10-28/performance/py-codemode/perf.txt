@@ -1,0 +1,11 @@
+# started on Wed Oct 28 22:15:06 2026
+
+
+ Performance counter stats for '/workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-binaries/lash-perf replay py-codemode --instructions --store-dir /tmp/lash-instructions-2cbojmic --out /workspace/notes/lash/tasks/lanes/r33/idlecost.evidence/after-performance/py-codemode.json --turns 24':
+
+        5979236876      instructions:u
+
+       2.938678106 seconds time elapsed
+
+       1.569953000 seconds user
+       0.630428000 seconds sys
