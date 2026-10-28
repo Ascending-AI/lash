@@ -720,7 +720,7 @@ impl KernelMachine {
                     stmt,
                     act,
                     self.continuation(&entry.suffix, PhaseRecord::Called, roles.len(), |_, at| {
-                        roles[at].clone()
+                        Ok(roles[at].clone())
                     })?,
                 ));
                 None

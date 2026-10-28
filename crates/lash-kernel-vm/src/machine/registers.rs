@@ -1,6 +1,7 @@
 //! Initialized scratch survives a statement; its logical values do not.
 use std::ops::Index;
 use std::slice::SliceIndex;
+mod source;
 
 use lash_kernel_doc::Value;
 
@@ -74,6 +75,7 @@ pub(super) struct Registers {
     /// operands. Computed by lowering, independent of writes at run time.
     kill: usize,
     owns_values: bool,
+    source: source::Operands,
     #[cfg(test)]
     pub(super) initializations: usize,
 }
@@ -96,6 +98,7 @@ impl Registers {
     /// Releases the prepared set at every exit of its statement's step.
     #[inline]
     pub(super) fn kill_statement(&mut self) {
+        self.source.clear();
         let end = std::mem::take(&mut self.kill).min(self.extent);
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| {
@@ -178,6 +181,7 @@ impl Registers {
     }
 
     pub(super) fn clear(&mut self) {
+        self.source.clear();
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.register_slots_cleared += self.extent as u64);
         // Reference-bearing entries die at the original statement boundary,
@@ -197,6 +201,38 @@ impl Registers {
         self.written[..self.extent].fill(false);
         self.extent = 0;
         self.kill = 0;
+    }
+
+    pub(super) fn source_begin(
+        &mut self,
+        stream: &crate::compile::Stream,
+        stmt: &crate::compile::Stmt,
+        pc: u32,
+    ) -> Result<(), &'static str> {
+        self.source.begin(stream, stmt, pc, &self.values)
+    }
+
+    pub(super) fn source_complete(
+        &mut self,
+        stream: &crate::compile::Stream,
+        pc: u32,
+    ) -> Result<(), &'static str> {
+        self.source.complete(stream, pc, &self.values)
+    }
+
+    pub(super) fn take_source_role(
+        &mut self,
+        reg: lash_kernel_exec::Reg,
+        site: &lash_kernel_value::sites::Site,
+    ) -> Result<Value, &'static str> {
+        if self.source.active {
+            self.source.take(reg, site)
+        } else {
+            self.values
+                .get(reg.ix())
+                .copied()
+                .ok_or("continuation register is missing")
+        }
     }
 }
 
@@ -220,6 +256,7 @@ impl From<Vec<Value>> for Registers {
             extent,
             kill: 0,
             owns_values,
+            source: source::Operands::default(),
             #[cfg(test)]
             initializations: 0,
         }
@@ -296,6 +333,10 @@ mod laws {
                 assert!(
                     machine.regs.projection().is_empty(),
                     "register holdings survived {body:?} under {layout:?}"
+                );
+                assert!(
+                    machine.regs.source.is_empty(),
+                    "source operands survived a statement exit"
                 );
                 assert!(
                     machine

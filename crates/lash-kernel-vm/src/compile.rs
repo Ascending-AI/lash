@@ -1015,6 +1015,7 @@ pub(crate) struct Stmt {
     pub(crate) ops: OpRange,
     pub(crate) regs: u32,
     pub(crate) form: Form,
+    pub(crate) source_roles: std::sync::OnceLock<Option<holding_sites::SourceRoles>>,
 }
 
 pub(crate) enum Form {

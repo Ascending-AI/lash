@@ -1,14 +1,100 @@
 //! The source node of each lowered operation. Placement changes only operands;
 //! it must not change the node whose holding event that operation implements.
 
-use super::{OpRange, Stream, room};
+use super::{Form, OpRange, Stmt, Stream, room};
 use lash_kernel_doc::{Expr, Node, Stmt};
 use lash_kernel_exec::Op;
 use lash_kernel_value::sites::Site;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub(crate) type SourceRoles = BTreeMap<u32, Box<[(lash_kernel_exec::Reg, Arc<Site>)]>>;
+
+impl Stmt {
+    /// A resume or a register miss recovers only named source operands.
+    /// Formation reads the already lowered stream, never the source AST.
+    pub(crate) fn source_roles_at(
+        &self,
+        stream: &Stream,
+        pc: u32,
+    ) -> Option<&[(lash_kernel_exec::Reg, Arc<Site>)]> {
+        let roles = self.source_roles.get_or_init(|| {
+            let mut roles = stream.form_source_roles(self.ops, self.regs)?;
+            if let Form::While { test, .. } = self.form {
+                roles.extend(stream.form_source_roles(test, self.regs)?);
+            }
+            Some(roles)
+        });
+        roles.as_ref()?.get(&pc).map(AsRef::as_ref)
+    }
+}
+
 impl Stream {
+    fn form_source_roles(&self, range: OpRange, regs: u32) -> Option<SourceRoles> {
+        let mut pending = vec![(range.start, vec![None::<Arc<Site>>; regs as usize])];
+        let mut seen = BTreeMap::new();
+        while let Some((pc, mut owners)) = pending.pop() {
+            if pc == range.end() {
+                continue;
+            }
+            if pc > range.end() {
+                return None;
+            }
+            if let Some(previous) = seen.insert(pc, owners.clone()) {
+                if previous != owners {
+                    return None;
+                }
+                continue;
+            }
+            let op = *self.ops.get(pc as usize)?;
+            for reg in op.reads() {
+                let owner = owners.get_mut(reg.ix())?;
+                owner.as_ref()?;
+                if !matches!(op, Op::Pin { .. }) {
+                    *owner = None;
+                }
+            }
+            if let Some(reg) = op.writes() {
+                *owners.get_mut(reg.ix())? =
+                    Some(Arc::clone(self.source_sites.get(pc as usize)?.as_ref()?));
+            }
+            if let Some(joins) = self.source_joins.get(&pc) {
+                for join in joins {
+                    let owner = owners.get_mut(join.value.ix())?;
+                    if owner.as_ref()? != &join.from {
+                        return None;
+                    }
+                    *owner = Some(Arc::clone(&join.to));
+                }
+            }
+            let next = pc.checked_add(1)?;
+            match op {
+                Op::Jump { skip } => pending.push((next.checked_add(skip)?, owners)),
+                Op::JumpIfFalse { skip, .. } => {
+                    pending.push((next.checked_add(skip)?, owners.clone()));
+                    pending.push((next, owners));
+                }
+                _ => pending.push((next, owners)),
+            }
+        }
+        Some(
+            seen.into_iter()
+                .map(|(pc, owners)| {
+                    (
+                        pc,
+                        owners
+                            .into_iter()
+                            .enumerate()
+                            .filter_map(|(reg, site)| {
+                                Some((lash_kernel_exec::Reg(reg as u32), site?))
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
     /// Cold verification against the independent source tree. Ordinary worker
     /// activation does not walk that tree or force its memory description.
     pub(crate) fn verify_holding_sites(

@@ -286,10 +286,15 @@ impl KernelMachine {
         let pending =
             self.continuation(&entry.suffix, phase, entry.roles.len(), |machine, at| {
                 let role = &entry.roles[at];
-                super::frames::Role {
+                let value = machine
+                    .regs
+                    .take_source_role(role.reg, &role.site)
+                    .map_err(super::fault)?;
+                machine.take(role.reg.0 as usize);
+                Ok(super::frames::Role {
                     site: Arc::clone(&role.suffix),
-                    value: machine.take(role.reg.0 as usize),
-                }
+                    value,
+                })
             })?;
         self.frame(task)?.stand_at(act, pending);
         Ok(())

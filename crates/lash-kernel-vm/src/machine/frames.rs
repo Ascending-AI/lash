@@ -266,14 +266,14 @@ impl KernelMachine {
         site: &Suffix,
         phase: PhaseRecord,
         count: usize,
-        mut role: impl FnMut(&mut Self, usize) -> Role,
+        mut role: impl FnMut(&mut Self, usize) -> Result<Role, Halt>,
     ) -> Result<Pending, Halt> {
         let mut roles = match count {
             0 => Vec::new(),
             _ => self.storage.roles.pop().unwrap_or_default(),
         };
         for at in 0..count {
-            let role = role(self, at);
+            let role = role(self, at)?;
             roles.push(role);
         }
         Ok(Pending {
