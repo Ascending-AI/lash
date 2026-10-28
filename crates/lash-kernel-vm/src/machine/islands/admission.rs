@@ -137,65 +137,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.admit_direct_source(resources, request.occurrence, before, units, close)
     }
 
-    /// A certified immediate answer has no heap publication or work owner.
-    /// Its scalar table still gives the library's exact source formula.
-    pub(super) fn source_scalar_answer(
-        &self,
-        lib: crate::compile::LibId,
-        values: &[Value],
-        checked: bool,
-    ) -> Option<(Value, u64)> {
-        let function = self.exe.lib(lib);
-        if values.len() != function.arity || !values.iter().all(scalar) {
-            return None;
-        }
-        let (entry, fast) = function.specialization.prepared.as_ref()?;
-        let table = fast.scalar()?;
-        if checked
-            && !function
-                .header
-                .signature
-                .params
-                .iter()
-                .zip(values)
-                .all(|(param, value)| {
-                    (param.optional && matches!(value, Value::Absent))
-                        || crate::compile::import_result_fits(&param.ty, *value)
-                })
-        {
-            return None;
-        }
-        let value = entry.call(values)?;
-        if !scalar(&value)
-            || (checked
-                && !crate::compile::import_result_fits(&function.header.signature.result, value))
-        {
-            return None;
-        }
-        Some((value, table.units(sizes(values, &value))?))
-    }
-
-    #[inline(never)]
-    pub(super) fn scalar_root_operator(&mut self, site: &OperatorSite, values: &[Value]) -> Answer {
-        let prepared = (|| {
-            let resources = self.direct_resources(DepthNeed::Compiled(site.depth), 0)?;
-            let (value, units) = self.source_scalar_answer(site.lib, values, site.checked)?;
-            let (before, root) = self.root_prefix(site.root).ok()?;
-            let occurrence = site.counted.or(root);
-            let admitted =
-                self.admit_direct_source(resources, occurrence, before, units, site.close)?;
-            Some((value, admitted, occurrence))
-        })();
-        if let Some((value, admitted, occurrence)) = prepared {
-            self.commit_admission(admitted, occurrence)?;
-            #[cfg(test)]
-            super::DIRECT_SCALAR_ROOTS.with(|calls| calls.set(calls.get() + 1));
-            return Ok(value);
-        }
-        self.covered = false;
-        self.operate(site, values)
-    }
-
     /// The occurrence is the same immutable source edge checked at admission.
     /// Keep it in the compiled site rather than copying it across arena work.
     #[inline(always)]
