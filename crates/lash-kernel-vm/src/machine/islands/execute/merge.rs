@@ -39,7 +39,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let length = i64::try_from(self.arena.len(list).ok()?).ok()?;
         self.resident_room(lash_kernel_state::arena::VALUE_BYTES)
             .then_some(())?;
-        self.store(None, target, Value::Int(length), value)?;
+        self.store(None, None, target, Value::Int(length), value)?;
         self.end_statement(frame);
         frame.control.push(Position::Block(append.body, 1));
         frame.statement = None;

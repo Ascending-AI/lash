@@ -72,3 +72,16 @@ for i in range(4):
             value = 0
         target['a'] = value
     print(target)
+
+# One source site changes both its key and its receiver's shape.
+target = {'a': 1, 'b': 2}
+for i in range(6):
+    key = 'a' if i % 2 else 'b'
+    target[key] = i
+    print(target[key])
+    if i == 2:
+        del target['a']
+        target['c'] = 8
+    if i == 4:
+        print(await host.echo(str(target)))
+print(target)

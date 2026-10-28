@@ -1183,8 +1183,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let ordered = inputs
                         .as_ref()
                         .map_or(values, |inputs| inputs.roles.map(|at| values[at]));
+                    let statement = frame.statement;
                     let stored = self.retaining(&mut frame.transient, |island| {
-                        island.store(*field, ordered[0], ordered[1], ordered[2])
+                        island.store(statement, *field, ordered[0], ordered[1], ordered[2])
                     });
                     if stored.is_none() {
                         let stop = self.at(*pc);

@@ -380,8 +380,7 @@ impl Arena {
 
     /// The value a shared variable holds.
     pub fn cell(&self, handle: ArenaHandle) -> Result<Value, NativeError> {
-        self.warm(handle)?;
-        match self.body(handle)? {
+        match self.resident_body(handle)? {
             Body::Cell(value) => Ok(*value),
             _ => Err(malformed("a cell handle names another body")),
         }

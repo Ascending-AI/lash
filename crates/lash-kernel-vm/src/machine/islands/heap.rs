@@ -608,6 +608,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     #[inline(never)]
     pub(super) fn store(
         &mut self,
+        statement: Option<StmtId>,
         field: Option<usize>,
         target: Value,
         index: Value,
@@ -619,6 +620,31 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     if matches!(index, Value::Text(_))
                         && self.resident_room(2 * lash_kernel_state::arena::VALUE_BYTES) =>
                 {
+                    if let (Some(statement), Value::Text(key)) = (statement, index) {
+                        let slot = self.sites.write(statement);
+                        if let Some(slot) = slot
+                            && crate::compile::write_property(self.arena, map, slot, &key, value)
+                                .ok()?
+                        {
+                            return Some(());
+                        }
+                        let (_, found) = find_property(
+                            self.arena,
+                            map,
+                            slot,
+                            &lash_kernel_state::arena::Key::of_text(key.as_str()),
+                        )
+                        .ok()?;
+                        if slot != found {
+                            self.sites.keep_write(statement, found);
+                        }
+                        if let Some(slot) = found
+                            && crate::compile::write_property(self.arena, map, slot, &key, value)
+                                .ok()?
+                        {
+                            return Some(());
+                        }
+                    }
                     return self.arena.table_write(map, index, value).ok();
                 }
                 (Value::List(list), None)
