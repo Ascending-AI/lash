@@ -42,6 +42,9 @@ use super::super::expr::{Expr, Kind};
 use super::super::{Executable, LibId};
 use super::{Body, Event, RegionSlot, Role, Step, Summary};
 
+mod code;
+use code::Instruction;
+
 /// The most variables a run holds in registers.
 const REGISTERS: usize = 16;
 
@@ -371,47 +374,6 @@ struct Unary {
     table: [u64; 16],
 }
 
-/// Private execution positions, rebuilt with the executable, never durable PCs.
-/// All branches go forward. A comparison's result is consumed by its branch.
-#[derive(Clone)]
-enum Instruction<T> {
-    Unary {
-        kernel: usize,
-        a: Arg<T>,
-        dst: usize,
-    },
-    Number {
-        kernel: usize,
-        a: Arg<T>,
-        b: Arg<T>,
-        dst: usize,
-    },
-    Compare {
-        kernel: usize,
-        a: Arg<T>,
-        b: Arg<T>,
-    },
-    Set {
-        value: Arg<T>,
-        dst: u8,
-    },
-    Commit {
-        at: u32,
-        units: u64,
-        formulas: usize,
-        program: Box<[Event]>,
-    },
-    Branch {
-        otherwise: usize,
-    },
-    Jump {
-        to: usize,
-    },
-    Exit {
-        ended: bool,
-    },
-}
-
 /// A run compiled for domain `T`.
 #[derive(Clone)]
 struct Program<T> {
@@ -598,7 +560,10 @@ impl Mixed {
             {
                 continue;
             }
-            return Some(Self { head, tail });
+            return Some(Self {
+                head: head.fused(),
+                tail: tail.fused(),
+            });
         }
         None
     }
@@ -749,6 +714,28 @@ impl<T: Domain> Program<T> {
         let mut pc = 0;
         loop {
             match &self.code[pc] {
+                Instruction::Assigned(assignment) => {
+                    let Kernel { op, table } = &self.kernels[assignment.kernel];
+                    let (a, b) = (assignment.a.get(state), assignment.b.get(state));
+                    let value = T::number(*op, a, b)?;
+                    state.charge(table, a, b, value.sized());
+                    state.regs[usize::from(assignment.dst)] = value;
+                    state.written |= 1 << assignment.dst;
+                    committed();
+                    let commit = &assignment.commit;
+                    state.commit(commit.units, commit.formulas, &commit.program);
+                }
+                Instruction::Test(test) => {
+                    let Kernel { op, table } = &self.kernels[test.kernel];
+                    let (a, b) = (test.a.get(state), test.b.get(state));
+                    state.holds = T::truth(*op, a, b)?;
+                    state.charge(table, a, b, 0);
+                    committed();
+                    let commit = &test.commit;
+                    state.commit(commit.units, commit.formulas, &commit.program);
+                    pc = if state.holds { pc + 1 } else { test.otherwise };
+                    continue;
+                }
                 Instruction::Unary { kernel, a, dst } => {
                     let Unary { entry, table, .. } = &self.unaries[*kernel];
                     let a = a.get(state);
@@ -762,50 +749,12 @@ impl<T: Domain> Program<T> {
                     let value = T::number(*op, a, b)?;
                     state.charge(table, a, b, value.sized());
                     state.temps[*dst] = value;
-                    if let [
-                        Instruction::Set {
-                            value: Arg::Temp(source),
-                            dst: slot,
-                        },
-                        Instruction::Commit {
-                            units,
-                            formulas,
-                            program,
-                            ..
-                        },
-                        ..,
-                    ] = &self.code[pc + 1..]
-                        && source == dst
-                    {
-                        state.regs[usize::from(*slot)] = value;
-                        state.written |= 1 << slot;
-                        committed();
-                        state.commit(*units, *formulas, program);
-                        pc += 3;
-                        continue;
-                    }
                 }
                 Instruction::Compare { kernel, a, b } => {
                     let Kernel { op, table } = &self.kernels[*kernel];
                     let (a, b) = (a.get(state), b.get(state));
                     state.holds = T::truth(*op, a, b)?;
                     state.charge(table, a, b, 0);
-                    if let [
-                        Instruction::Commit {
-                            units,
-                            formulas,
-                            program,
-                            ..
-                        },
-                        Instruction::Branch { otherwise },
-                        ..,
-                    ] = &self.code[pc + 1..]
-                    {
-                        committed();
-                        state.commit(*units, *formulas, program);
-                        pc = if state.holds { pc + 3 } else { *otherwise };
-                        continue;
-                    }
                 }
                 Instruction::Set { value, dst } => {
                     state.regs[usize::from(*dst)] = value.get(state);
@@ -864,10 +813,12 @@ pub(super) fn compile(
     // body. A shorter prefix must return to the ordinary register program.
     let homogeneous = mixed.is_none() || covers == body.steps.len() - from;
     Some(Typed {
-        floats: floats
-            .and_then(|(program, covered)| (homogeneous && covered == covers).then_some(program)),
-        ints: ints
-            .and_then(|(program, covered)| (homogeneous && covered == covers).then_some(program)),
+        floats: floats.and_then(|(program, covered)| {
+            (homogeneous && covered == covers).then(|| program.fused())
+        }),
+        ints: ints.and_then(|(program, covered)| {
+            (homogeneous && covered == covers).then(|| program.fused())
+        }),
         whole: mixed.is_some() || test.is_some() && covers == body.steps.len(),
         mixed,
     })
@@ -1601,6 +1552,9 @@ impl super::LoopPlan {
         for at in 0..program.code.len() {
             let mut bad = program.clone();
             match &mut bad.code[at] {
+                Instruction::Assigned(_) | Instruction::Test(_) => {
+                    unreachable!("verification precedes fusion")
+                }
                 Instruction::Unary { a, .. } | Instruction::Number { a, .. } => {
                     *a = Arg::Temp(program.temps)
                 }
