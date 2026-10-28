@@ -40,7 +40,7 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
 /// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
-pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 3;
+pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 4;
 
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION);
 

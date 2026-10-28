@@ -32,7 +32,7 @@ use crate::EngineStateFormat;
 /// )
 /// version_surface = "drain"
 /// format_manifest = "RunRecord"
-pub const RUN_RECORD_FORMAT_VERSION: u32 = 1;
+pub const RUN_RECORD_FORMAT_VERSION: u32 = 2;
 
 /// The turn checkpoint's format id.
 pub const TURN_CHECKPOINT_FORMAT_ID: &str = "turn-checkpoint";
