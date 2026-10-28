@@ -389,6 +389,7 @@ pub(super) async fn close_pass(
     {
         return Ok(Closing::Not(Box::new(tx)));
     }
+    let observed = tx.seen();
     drop(tx);
     let pass = match run_session_close(cx, session, tracing)
         .await
@@ -397,7 +398,7 @@ pub(super) async fn close_pass(
         Some(SessionCloseExit::Closed) => Pass::Released,
         Some(SessionCloseExit::Waiting) => {
             let mut tx = cx.begin().await?;
-            tx.give_up(Release::Waiting {
+            tx.ack_through(observed).give_up(Release::Waiting {
                 next_due: cx.next_due(),
             });
             cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;

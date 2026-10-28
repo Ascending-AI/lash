@@ -721,6 +721,9 @@ impl ActorTx {
     /// Give the actor up when this transaction commits. Mail that is still
     /// unacknowledged then makes it ready at once, unless it ends
     /// [`Release::Terminal`]; the last call wins.
+    /// A waiting or idle caller must acknowledge the frontier it observed
+    /// before reading the state it waits on. This does not acknowledge it:
+    /// a hand-back that ran no work must preserve every outstanding wake.
     pub fn give_up(&mut self, release: Release) -> &mut Self {
         self.release = Some(release);
         self

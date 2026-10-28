@@ -443,6 +443,8 @@ enum PublicationEvent {
 /// What every node's drive saw, kept across nodes.
 #[derive(Debug, Default)]
 struct Seen {
+    resume_gate: Option<Arc<ResumeGate>>,
+    releases: Vec<(Option<lash_durable::MailSeq>, ActorState)>,
     /// The text of each model call's request, in send order.
     requests: Vec<String>,
     /// Whether a model call started after the turn's cancel was requested.
@@ -459,6 +461,12 @@ struct Seen {
     restored_tool_counts: Vec<u64>,
     /// The completion key each approval handed the host, by call.
     approvals: Vec<(ToolCallId, String)>,
+}
+
+#[derive(Debug)]
+struct ResumeGate {
+    entered: tokio::sync::Semaphore,
+    proceed: tokio::sync::Semaphore,
 }
 
 #[derive(Clone)]
@@ -532,6 +540,11 @@ impl TurnServices for L4Services {
         _cx: &ActorContext,
         restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
+        let gate = self.seen.lock_recover().resume_gate.clone();
+        if let Some(gate) = gate {
+            gate.entered.add_permits(1);
+            gate.proceed.acquire().await.unwrap().forget();
+        }
         let row = restore.row().clone();
         self.seen
             .lock_recover()
@@ -1104,7 +1117,10 @@ impl Scenario for L4 {
         let seen = Arc::clone(&self.seen);
         nodes
             .script()
-            .observe_actor_receipts(move |label, _tx, _receipt| {
+            .observe_actor_receipts(move |label, tx, receipt| {
+                if label == CommitLabel::SESSION_RELEASE {
+                    seen.lock_recover().releases.push((tx.ack(), receipt.state));
+                }
                 if terminal(label) {
                     seen.lock_recover()
                         .publication
@@ -1923,6 +1939,159 @@ async fn a_turn_whose_only_member_is_a_parked_approval_releases_its_claim_and_re
 
 /// How far a law that steps the nodes by hand may run the virtual clock.
 const HORIZON_MS: u64 = 600_000;
+
+/// FIG-7544: suspension consumes the wake observed before the round read,
+/// preserves a later wake, and stays released until a real completion.
+#[tokio::test]
+async fn a_suspended_round_consumes_observed_wakes_without_losing_a_later_completion() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let scenario = L4::new(Mode::Approval);
+        let (clock, nodes, _) = until_waiting(&scenario).await;
+        let backend = scenario.backend.lock_recover().clone().unwrap();
+        let gate = Arc::new(ResumeGate {
+            entered: tokio::sync::Semaphore::new(0),
+            proceed: tokio::sync::Semaphore::new(0),
+        });
+        scenario.seen.lock_recover().resume_gate = Some(Arc::clone(&gate));
+        scenario.seen.lock_recover().releases.clear();
+        let wake = || async {
+            let mut tx = lash_durable::MailTx::new();
+            tx.wake(actor());
+            backend
+                .commit_mail(tx, CommitLabel::new("law.observed_wake"))
+                .await
+                .unwrap();
+        };
+        wake().await;
+        at_resume(&gate, &nodes).await;
+        let held = nodes.database().actor(&actor()).await.unwrap().unwrap();
+        let observed = nodes
+            .database()
+            .begin(&actor(), held.epoch)
+            .await
+            .unwrap()
+            .seen();
+        // The pass already read S. Commit S+1 while its round is held.
+        wake().await;
+        gate.proceed.add_permits(1);
+        at_resume(&gate, &nodes).await;
+        assert_eq!(
+            scenario.seen.lock_recover().releases.as_slice(),
+            &[(Some(observed), ActorState::Ready)],
+            "release must consume S and leave S+1 owed"
+        );
+        scenario.seen.lock_recover().resume_gate = None;
+        gate.proceed.add_permits(1);
+        let waiting = loop {
+            let row = nodes.database().actor(&actor()).await.unwrap().unwrap();
+            if row.state == ActorState::Waiting {
+                break row;
+            }
+            assert!(nodes.step().await.is_some());
+        };
+        assert!(!waiting.has_mail, "acked_seq must equal mail_seq");
+        assert_eq!(waiting.pending_mail, 0);
+        let lease = nodes
+            .database()
+            .register_node(&lash_durable::NodeSpec {
+                node: lash_durable::NodeId::new("claim-poll-oracle"),
+                decodes: backend.formats().decodes(),
+                serves: Vec::new(),
+                capabilities: Default::default(),
+                ttl_millis: 15_000,
+            })
+            .await
+            .unwrap();
+        let paused = clock.logical_ms();
+        for _ in 0..32 {
+            assert!(nodes.database().claim(&lease, 1).await.unwrap().is_empty());
+            let row = nodes.database().actor(&actor()).await.unwrap().unwrap();
+            assert_eq!(
+                row.epoch, waiting.epoch,
+                "a pending wait must not churn claims"
+            );
+            assert_eq!(row.state, ActorState::Waiting);
+        }
+        assert_eq!(clock.logical_ms(), paused);
+
+        let (call, key) = approval(&scenario);
+        assert_eq!(
+            waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+                .await
+                .unwrap(),
+            lash_durable::domain::ResolveAnswer::Resolved
+        );
+        assert_eq!(
+            nodes
+                .database()
+                .actor(&actor())
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ActorState::Ready,
+            "the real completion wakes the released session"
+        );
+        until_done(&scenario, &clock, &nodes).await;
+        assert_eq!(
+            nodes
+                .database()
+                .actor(&actor())
+                .await
+                .unwrap()
+                .unwrap()
+                .epoch,
+            lash_durable::Epoch(waiting.epoch.0 + 2),
+            "the completion causes exactly one claim and one release"
+        );
+        let member = only_member(&nodes).await;
+        let Some(SettledOutput::Completed(material)) = member.outcome() else {
+            panic!("the round did not complete: {:?}", member.outcome());
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(material.payload()).unwrap(),
+            host_answer(&call),
+            "the round records the real completion"
+        );
+        let seen = scenario.seen.lock_recover();
+        assert_eq!(seen.requests.len(), 2, "only the final model call resumes");
+        assert_eq!(scenario.tripwire.restores(&session(), &run()), 3);
+        let violations = publication_laws(&seen, None, 1);
+        assert!(violations.is_empty(), "{violations:#?}");
+        assert_eq!(
+            scenario.world.writes(&call),
+            [1],
+            "the parked body ran once"
+        );
+        assert_eq!(
+            nodes
+                .script()
+                .trace()
+                .iter()
+                .filter(|write| {
+                    write.point.label == CommitLabel::TURN_COMMIT && write.committed()
+                })
+                .count(),
+            1,
+            "the completion ends the turn once"
+        );
+    })
+    .await
+    .expect("wake suspension law deadlocked");
+}
+
+async fn at_resume(gate: &ResumeGate, nodes: &SimNodes) {
+    loop {
+        if let Ok(permit) = gate.entered.try_acquire() {
+            permit.forget();
+            return;
+        }
+        assert!(
+            nodes.step().await.is_some(),
+            "stalled before the resume barrier"
+        );
+    }
+}
 
 /// Start `scenario`'s turn on fresh nodes and step them until the session
 /// released its claim as `waiting`, with only its parked approval: the

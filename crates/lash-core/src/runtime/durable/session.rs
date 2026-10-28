@@ -427,6 +427,9 @@ impl SessionActivation {
                 Closing::Ran(pass) => return Ok(pass),
                 Closing::Not(tx) => *tx,
             };
+            // Capture the wake frontier before reading the state it signals.
+            // A later wake remains owed even if the round suspends this pass.
+            let observed = tx.seen();
             // Admission owns the answer to an unreadable head. Do not hydrate
             // that head before the queued sender has a run that can be refused.
             let mut open = match cx.session_projection().await? {
@@ -497,10 +500,11 @@ impl SessionActivation {
                         // before the turn's first owner commit (a failed pass,
                         // a panic) hands it on alone, so the input stays bound
                         // to its run: a cancel of it then ends that run (FIG-7351).
-                        let ran = futures_util::FutureExt::catch_unwind(
-                            std::panic::AssertUnwindSafe(self.run_turn(&cx, session, heads, row)),
-                        )
-                        .await;
+                        let ran =
+                            futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                                self.run_turn(&cx, session, heads, row, observed),
+                            ))
+                            .await;
                         if let Err(error) = cx.commit_pending_first(CommitLabel::TURN_ADMIT).await {
                             tracing::debug!(%error, "the turn's admission was not handed on");
                         }
@@ -524,7 +528,7 @@ impl SessionActivation {
                 };
             };
             drop(tx);
-            self.run_turn(cx, session, heads, row).await
+            self.run_turn(cx, session, heads, row, observed).await
         });
         match profile {
             Some(profile) => {

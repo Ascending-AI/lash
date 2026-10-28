@@ -9,6 +9,7 @@ impl SessionActivation {
         session: &SessionId,
         heads: &mut SessionOwner,
         row: TurnRow,
+        observed: lash_durable::MailSeq,
     ) -> Result<Pass, TurnError> {
         lash_core_ids::operational_metrics::turn::phase("owner orchestration", None, async {
             match heads.head(cx, session).await {
@@ -111,7 +112,8 @@ impl SessionActivation {
                 PhaseExit::Suspended { due } => {
                     let next_due = due.into_iter().chain(cx.next_due()).min();
                     let mut tx = cx.begin().await?;
-                    tx.give_up(Release::Waiting { next_due });
+                    tx.ack_through(observed)
+                        .give_up(Release::Waiting { next_due });
                     cx.commit(tx, CommitLabel::SESSION_RELEASE).await?;
                     Ok(Pass::Released)
                 }
