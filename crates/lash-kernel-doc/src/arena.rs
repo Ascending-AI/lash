@@ -129,6 +129,7 @@ impl ShortText {
         u128::from_le_bytes(word)
     }
 
+    #[inline]
     #[allow(unsafe_code)]
     pub fn as_str(&self) -> &str {
         let bytes = self.as_bytes();
@@ -689,6 +690,24 @@ impl Objects {
             .get_mut(handle.index as usize)
             .filter(|slot| slot.generation == handle.generation)
             .map(|slot| &mut slot.body)
+    }
+
+    /// Two distinct live bodies for machine edits; aliases and stale handles
+    /// return `None` before either body can change.
+    #[inline]
+    pub fn get_disjoint_mut(
+        &mut self,
+        first: ArenaHandle,
+        second: ArenaHandle,
+    ) -> Option<(&mut Body, &mut Body)> {
+        let [left, right] = self
+            .slots
+            .get_disjoint_mut([first.index as usize, second.index as usize])
+            .ok()?;
+        if left.generation != first.generation || right.generation != second.generation {
+            return None;
+        }
+        Some((&mut left.body, &mut right.body))
     }
 
     /// Allocates `body` outside a native call: reserves a slot and installs

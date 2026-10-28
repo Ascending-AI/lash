@@ -295,6 +295,39 @@
    "end": "error NotFound: at the end"
   },
   {
+   "name": "formatted_text",
+   "source": "# PY-FSTRING: typed conversion preserves Python spelling and captures each field before later effects.\nsmall = -7\nlarge = 2 ** 100\ntext = \"é😀\"\nprint(f\"{small}|{large}|{-large}|{text}|{True}|{False}|{None}\")\nprint(f\"{small!s}|{small!r}|{text!r}|{text!a}|{-0.0}|{small:}\")\nprint(f\"{-9223372036854775808}|{9223372036854775807}|{9223372036854775808}\")\njoined = f\"{text}:{large}:{text}\"\nprint(len(joined), joined)\n\ndef str(value):\n    return \"shadow\"\n\nprint(f\"{small}\", str(small))\n\ncurrent = \"first\"\ndef change():\n    global current\n    current = \"second\"\n    return 3\n\nprint(f\"{current}:{change()}:{current}\")\n\nasync def suspended():\n    global current\n    current = \"third\"\n    return await host.echo(11)\n\nprint(f\"{current}:{await suspended()}:{current}\")\nprint(len(joined))\n\ndef build():\n    for trip in range(1):\n        value = \"\"\n        for i in range(3):\n            value += f\"Tool {i}: value={i*3}; status=ready\\n\"\n            if i == 1:\n                value += value\n        print(value)\nbuild()\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "host.echo:11"
+     ],
+     "logged": [
+      "-7|1267650600228229401496703205376|-1267650600228229401496703205376|é😀|True|False|None",
+      "-7|-7|'é😀'|'\\xe9\\U0001f600'|-0.0|-7",
+      "-9223372036854775808|9223372036854775807|9223372036854775808",
+      "37 é😀:1267650600228229401496703205376:é😀",
+      "-7 shadow",
+      "first:3:second"
+     ]
+    },
+    {
+     "delivered": [
+      "host.echo:11"
+     ],
+     "asked": [],
+     "logged": [
+      "second:11:third",
+      "37",
+      "Tool 0: value=0; status=ready\nTool 1: value=3; status=ready\nTool 0: value=0; status=ready\nTool 1: value=3; status=ready\nTool 2: value=6; status=ready\n"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
    "name": "gather_cancel",
    "source": "import asyncio\nlog = []\nasync def child(n):\n    try:\n        await asyncio.sleep(1)\n        print(\"child continued\", n)\n    finally:\n        log.append(n)\nasync def both():\n    await asyncio.gather(child(1), child(2))\ngroup = asyncio.create_task(both())\nawait asyncio.sleep(0)\nawait asyncio.sleep(0)\ngroup.cancel()\ntry:\n    await group\nexcept asyncio.CancelledError:\n    print(\"cancelled\", log)\nawait asyncio.sleep(2)\nprint(\"end\", log)\n",
    "deliveries": [],

@@ -4,6 +4,133 @@ use super::super::compiled::WriteSite;
 use super::*;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+    #[inline(never)]
+    pub(super) fn deferred(
+        &mut self,
+        frame: &mut Frame<'e>,
+        operation: &Deferred,
+    ) -> Result<Next, Stop> {
+        let (dst, constant, miss) = match operation {
+            Deferred::Source(pc) => return Err(self.at(*pc)),
+            Deferred::Text {
+                dst,
+                constant,
+                miss,
+            } => (*dst, *constant, *miss),
+        };
+        let crate::compile::Constant::Deferred(lash_kernel_doc::Literal::Text(text)) =
+            &self.stream.consts[constant.ix()]
+        else {
+            unreachable!("a text instruction names a text literal");
+        };
+        if !self.resident_room(self.arena.text_install_bound(text.len() as u64)) {
+            return Err(self.at(miss));
+        }
+        frame.regs[dst as usize] = self.arena.text(text);
+        Ok(Next::Continue)
+    }
+
+    /// A certified concatenation of resident texts retains the native's
+    /// output work reservation and formula without constructing a call nursery.
+    #[inline(always)]
+    pub(in crate::machine::islands) fn text_concatenation(
+        &mut self,
+        site: &OperatorSite,
+        values: &[Value],
+    ) -> Option<Answer> {
+        let [left_value, right_value] = values else {
+            return None;
+        };
+        if !matches!(left_value, Value::Text(_) | Value::LongText(_))
+            || !matches!(right_value, Value::Text(_) | Value::LongText(_))
+        {
+            return None;
+        }
+        self.resident_concatenation(site, values, site.concat?)
+    }
+
+    #[inline(never)]
+    fn resident_concatenation(
+        &mut self,
+        site: &OperatorSite,
+        values: &[Value],
+        charge: crate::compile::TextCharge,
+    ) -> Option<Answer> {
+        let [left_value, right_value] = values else {
+            return None;
+        };
+        if OBSERVING
+            || !self.swift
+            || site.checked
+            || site.counted.is_some()
+            || site.act.is_some()
+            || site.root.is_some()
+            || self.deferred_end.is_some()
+            || !self.admits(site)
+        {
+            return None;
+        }
+        let (left, right) = (left_value, right_value);
+        if let (Value::Text(left), Value::Text(right)) = (left, right)
+            && let Some(value) = left.concat(right)
+        {
+            if !self.resident_room(0) {
+                return None;
+            }
+            self.covered = false;
+            if let Some(close) = &site.close
+                && !self.close(close)
+            {
+                return Some(Err(self.at_operands(close.head, site.reg, values)));
+            }
+            return Some(
+                if self
+                    .formula(charge.units(left.as_str().len() as u64, right.as_str().len() as u64))
+                {
+                    Ok(Value::Text(value))
+                } else {
+                    Err(self.at_operands(site.pc, site.reg, values))
+                },
+            );
+        }
+        if self.accumulator.as_ref().is_some_and(
+            |accumulator| matches!(left, Value::LongText(handle) if *handle == accumulator.left),
+        ) {
+            return self
+                .text_accumulation(site, Some(charge), values)
+                .map(|answer| answer.map(|made| Value::LongText(made.text)));
+        }
+        let (left, right) = (
+            resident_text(self.arena, left)?,
+            resident_text(self.arena, right)?,
+        );
+        let (left_bytes, right_bytes) = (left.len() as u64, right.len() as u64);
+        let bytes = left_bytes.checked_add(right_bytes)?;
+        if bytes <= lash_kernel_doc::arena::ShortText::MAX as u64 {
+            return None;
+        }
+        if !self.resident_room(self.arena.text_install_bound(bytes).checked_add(bytes)?) {
+            return None;
+        }
+        self.covered = false;
+        if let Some(close) = &site.close
+            && !self.close(close)
+        {
+            return Some(Err(self.at_operands(close.head, site.reg, values)));
+        }
+        let Some(value) = self.arena.concat_text(*left_value, *right_value) else {
+            return Some(Err(self.at_operands(site.pc, site.reg, values)));
+        };
+        if self.memory {
+            self.transient += bytes;
+        }
+        Some(if self.formula(charge.units(left_bytes, right_bytes)) {
+            Ok(value)
+        } else {
+            Err(self.at_operands(site.pc, site.reg, values))
+        })
+    }
+
     #[inline(always)]
     pub(super) fn accumulate(&mut self, frame: &mut Frame<'e>, at: usize) {
         let left = match frame.slots[at] {
@@ -32,17 +159,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Frame<'e>,
         site: &OperatorSite,
         append: Option<&super::super::compiled::Append>,
-        reads: &[Read],
+        reads: &[Read; 2],
         covered: bool,
         write: &WriteSite,
     ) -> Result<Next, Stop> {
         if write.accumulates {
             self.accumulate(frame, write.at);
         }
-        let values = self.inputs::<3>(&frame.slots, reads)?;
+        let values = self.inputs::<2>(&frame.slots, reads)?;
         if let Some(append) = append {
             let before = self.transient;
-            if let Some(answer) = self.text_accumulation(site, append.charge, &values[..2]) {
+            if let Some(answer) = self.text_accumulation(site, append.charge, &values) {
                 frame.transient += self.transient.saturating_sub(before);
                 let made = answer?;
                 frame.slots[write.at] = SlotState::Value(Value::LongText(made.text));
@@ -56,7 +183,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
         }
         frame.regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-            island.operator_value(site, &values[..2], covered)
+            island.operator_value(site, &values, covered)
         })?;
         #[cfg(test)]
         super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
@@ -85,7 +212,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if OBSERVING || !self.swift || self.tight || self.deferred_end.is_some() {
             return None;
         }
-        let [Value::LongText(left), Value::Text(part)] = values else {
+        let [Value::LongText(left), right] = values else {
             return None;
         };
         if !self.accumulator.as_ref().is_some_and(|accumulator| {
@@ -93,6 +220,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }) {
             return None;
         }
+        let right_bytes = match right {
+            Value::Text(text) => text.as_bytes().len() as u64,
+            Value::LongText(_) => resident_text(self.arena, right)?.len() as u64,
+            _ => return None,
+        };
         self.covered = false;
         if let Some(close) = &site.close
             && !self.close(close)
@@ -104,13 +236,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .saturating_sub(self.register_bytes)
             .saturating_sub(self.arena.held())
             .saturating_sub(self.transient);
-        let appended = match super::super::cx::append_text(
-            self.arena,
-            *left,
-            part.as_str(),
-            self.memory,
-            free,
-        ) {
+        let answer = match right {
+            Value::Text(part) => {
+                super::super::cx::append_text(self.arena, *left, part.as_str(), self.memory, free)
+            }
+            Value::LongText(other) => {
+                super::super::cx::append_long_text(self.arena, *left, *other, self.memory, free)
+            }
+            _ => return None,
+        };
+        let appended = match answer {
             Some(Some(appended)) => appended,
             Some(None) => return Some(Err(self.at_operands(site.pc, site.reg, values))),
             None => return Some(Err(self.at_operands(site.pc, site.reg, values))),
@@ -122,7 +257,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         accumulator.made = Some(appended.made);
         let units = match charge {
-            Some(charge) => Some(charge.units(appended.bytes, part.as_bytes().len() as u64)),
+            Some(charge) => Some(charge.units(appended.bytes, right_bytes)),
             None => measured_formula(
                 self.arena,
                 &self.exe.lib(site.lib).charge,
@@ -138,5 +273,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
             _ => Some(Err(self.at_operands(site.pc, site.reg, values))),
         }
+    }
+}
+
+fn resident_text<'a>(arena: &'a Arena, value: &'a Value) -> Option<&'a str> {
+    match value {
+        Value::Text(text) => Some(text.as_str()),
+        Value::LongText(handle) => match arena.body(*handle).ok()? {
+            lash_kernel_doc::arena::Body::LongText(text) => match &*text.chunks {
+                [lash_kernel_doc::arena::Chunk::Resident(text)] => Some(text.as_str()),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
     }
 }

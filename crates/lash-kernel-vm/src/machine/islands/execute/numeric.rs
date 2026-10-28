@@ -44,9 +44,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             scalar(&x)
                 .then(|| site.entry.call(&[x]))
                 .flatten()
-                .filter(scalar)
                 .and_then(|value| {
-                    self.numeric_charge(site, value, site.table.units(sizes(&[x], &value)), covered)
+                    let units = if scalar(&value) {
+                        site.table.units(sizes(&[x], &value))
+                    } else {
+                        self.unary_units(site, x, value)
+                    };
+                    self.numeric_charge(site, value, units, covered)
                 })
         } else {
             None
@@ -59,6 +63,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
         };
         self.destination(frame, site.reg, value, to)
+    }
+
+    #[inline(never)]
+    fn unary_units(&self, site: &OperatorSite, x: Value, value: Value) -> Option<u64> {
+        self.exe.lib(site.lib).prepared.as_ref()?.1.immediate(
+            &[x],
+            super::super::cx::Fresh::default(),
+            &value,
+        )
     }
 
     #[inline(always)]

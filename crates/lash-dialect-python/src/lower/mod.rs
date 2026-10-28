@@ -1112,6 +1112,10 @@ impl Lowerer<'_> {
                 None => (Buf::default(), Operand::none()),
             });
         }
+        Ok(self.ordered(parts))
+    }
+
+    fn ordered(&mut self, parts: Vec<(Buf, Operand)>) -> Vec<Operand> {
         let mut pins = vec![false; parts.len()];
         let mut later = false;
         for (index, (buf, operand)) in parts.iter().enumerate().rev() {
@@ -1123,7 +1127,7 @@ impl Lowerer<'_> {
             self.append(buf);
             out.push(if pinned { self.pin(operand) } else { operand });
         }
-        Ok(out)
+        out
     }
 
     /// A Python value as the bool its truth is.

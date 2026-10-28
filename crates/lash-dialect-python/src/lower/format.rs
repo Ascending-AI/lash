@@ -6,10 +6,22 @@ use crate::diagnostics::{self, Code};
 use ruff_python_ast::{self as ast};
 use ruff_text_size::Ranged;
 
-use super::{Lowerer, Lowering, Operand};
+use super::{Buf, Lowerer, Lowering, Operand};
 use crate::scope::Ty;
 
 impl Lowerer<'_> {
+    /// Source-proven strings and integers have the kernel's text spelling.
+    pub(super) fn string_value(&mut self, value: Operand) -> Lowering<Operand> {
+        match value.ty {
+            Ty::Str => Ok(value),
+            Ty::Int => Ok(Operand::inline(
+                self.native("num.to_text", vec![value.expr])?,
+                Ty::Str,
+            )),
+            _ => self.invoke("py.str", &[value], Ty::Str),
+        }
+    }
+
     pub(super) fn fstring(&mut self, fstring: &ast::ExprFString) -> Lowering<Operand> {
         let elements = || {
             fstring.value.iter().flat_map(|part| match part {
@@ -24,38 +36,44 @@ impl Lowerer<'_> {
                     .collect(),
             })
         };
-        // Python formats every field before it builds the text: with more
-        // than one field, each is bound where it is formatted, so no
-        // concatenation runs before a later field and no later field's
-        // statements change an earlier one.
-        let pinned = elements().filter(Result::is_ok).count() > 1;
-        let mut parts: Vec<Expr> = Vec::new();
+        // Effectful field conversion emits statements. Capture earlier
+        // fields before those statements, using ordinary operand ordering;
+        // pure typed conversions need no intermediate statement.
+        let mut parts: Vec<(Buf, Operand)> = Vec::new();
         for element in elements() {
             match (element, parts.last_mut()) {
-                (Err(literal), Some(Expr::Literal(Literal::Text(text)))) => {
+                (
+                    Err(literal),
+                    Some((
+                        _,
+                        Operand {
+                            expr: Expr::Literal(Literal::Text(text)),
+                            ..
+                        },
+                    )),
+                ) => {
                     text.push_str(literal);
                 }
-                (Err(literal), _) => parts.push(Expr::Literal(Literal::Text(literal.to_string()))),
+                (Err(literal), _) => parts.push((Buf::default(), Operand::text(literal))),
                 (Ok(field), _) => {
-                    let shown = self.field(field)?;
-                    let shown = if pinned { self.pin(shown) } else { shown };
-                    parts.push(shown.expr);
+                    parts.push(self.aside(|this| this.field(field))?);
                 }
             }
         }
-        // Every part is a text: they are concatenated in order, with no
-        // list to build and no general join (FIG-6846).
-        let mut parts = parts.into_iter();
-        let joined = match parts.next() {
-            None => return Ok(Operand::text("")),
-            Some(Expr::Literal(Literal::Text(text))) if parts.len() == 0 => {
+        let parts: Vec<_> = self
+            .ordered(parts)
+            .into_iter()
+            .map(|part| part.expr)
+            .collect();
+        let joined = match parts.as_slice() {
+            [] => return Ok(Operand::text("")),
+            [Expr::Literal(Literal::Text(text))] => {
                 return Ok(Operand::text(text));
             }
-            Some(first) => first,
+            [part] => part.clone(),
+            [left, right] => self.native("text.concat", vec![left.clone(), right.clone()])?,
+            _ => self.native("text.join", vec![Expr::List(parts), Operand::text("").expr])?,
         };
-        let joined = parts.try_fold(joined, |joined, part| {
-            self.native("text.concat", vec![joined, part])
-        })?;
         Ok(Operand::inline(joined, Ty::Str))
     }
 
@@ -114,15 +132,11 @@ impl Lowerer<'_> {
                 Ty::Str,
             )?
         } else {
-            self.invoke(
-                match conversion {
-                    "r" => "py.repr",
-                    "a" => "py.ascii",
-                    _ => "py.str",
-                },
-                &[value],
-                Ty::Str,
-            )?
+            match conversion {
+                "r" => self.invoke("py.repr", &[value], Ty::Str)?,
+                "a" => self.invoke("py.ascii", &[value], Ty::Str)?,
+                _ => self.string_value(value)?,
+            }
         };
         if let Some(debug) = &field.debug_text {
             let prefix = Operand::text(debug.as_str());

@@ -342,7 +342,7 @@ fn fixed(op: Op) -> Op {
             write,
         } if eligible(&site) && reads.len() == 2 && site.pair.is_some() && !write.accumulates => (
             site,
-            reads.into_vec().into_iter().map(Operand::from).collect(),
+            (*reads).into_iter().map(Operand::from).collect(),
             covered,
             Destination::Write(write),
         ),

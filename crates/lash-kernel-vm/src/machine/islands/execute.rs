@@ -1105,6 +1105,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 Op::Make {
                     ahead,
+                    replay_guard,
                     make,
                     items,
                     reg,
@@ -1114,7 +1115,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     // Construction destroys its source operands. Refuse before
                     // that overwrite when the unpaid source region cannot fit;
                     // otherwise a later close would replay it with its result.
-                    if !self.fits(*ahead) {
+                    if (*replay_guard && (!self.swift || self.tight)) || !self.fits(*ahead) {
                         return Err(self.at(*miss));
                     }
                     let before = self.transient;
@@ -1351,7 +1352,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     self.scratch.exit.scheduling = true;
                     return Err(self.at(*pc));
                 }
-                Op::Cold(pc) => return Err(self.at(*pc)),
+                Op::Cold(operation) => return self.deferred(frame, operation),
             }
             return Ok(Next::Continue);
         }

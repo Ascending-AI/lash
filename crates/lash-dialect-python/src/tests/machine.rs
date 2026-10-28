@@ -931,6 +931,16 @@ fn execution_observation_with_memory(
     rebuild: bool,
     layout: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> (ExecutionObservation, u64) {
+    execution_observation_with_meter(program, bounds, rebuild, layout, &mut |_| {})
+}
+
+fn execution_observation_with_meter(
+    program: Program,
+    bounds: Bounds,
+    rebuild: bool,
+    layout: lash_kernel_vm::testing::ExecutionStrategy,
+    on_park: &mut dyn FnMut(u64),
+) -> (ExecutionObservation, u64) {
     let session = Session::default();
     let mut machine = lash_kernel_vm::testing::start(
         program.clone(),
@@ -984,6 +994,7 @@ fn execution_observation_with_memory(
             .unwrap();
         }
         if let Step::Parked(park) = step {
+            on_park(machine.meters().memory);
             for request in park.requests {
                 requests.push(label(&request));
                 let (wait, outcome) = answer(&request);
@@ -1855,7 +1866,7 @@ async def build():
     d['a'] += 2
     print(d['a'], parts[0], floating, total)
     encoded = json.dumps({'z': [floating, -0.0], 'a': 'é'}, separators=(',', ':'))
-    print(await host.echo(encoded))
+    print(await host.echo(f"j{encoded}:{len(numbers)}"))
     parts[0] = text
     print(parts)
 await build()
@@ -1869,15 +1880,30 @@ await build()
     };
     let on = program(ExecutionStrategy::Optimized);
     let bodies = program(ExecutionStrategy::Interpreted);
-    let reference = execution_observation_with_layout(
+    let mut reference_held = Vec::new();
+    let reference = execution_observation_with_meter(
         bodies.clone(),
         BOUNDS,
         false,
         ExecutionStrategy::Interpreted,
+        &mut |bytes| reference_held.push(bytes),
+    )
+    .0;
+    let mut optimized_held = Vec::new();
+    assert_eq!(
+        execution_observation_with_meter(
+            on.clone(),
+            BOUNDS,
+            false,
+            ExecutionStrategy::Optimized,
+            &mut |bytes| optimized_held.push(bytes)
+        )
+        .0,
+        reference
     );
     assert_eq!(
-        execution_observation_with_layout(on.clone(), BOUNDS, false, ExecutionStrategy::Optimized),
-        reference
+        optimized_held, reference_held,
+        "retained bytes at each park"
     );
     assert_eq!(
         execution_observation_with_layout(on.clone(), BOUNDS, true, ExecutionStrategy::Optimized),

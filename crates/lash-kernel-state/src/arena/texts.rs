@@ -12,13 +12,81 @@
 //! refused as malformed. A projection reads only the new text's bytes,
 //! never its capacity, so it seals ordinary canonical text.
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LongText};
+use lash_kernel_doc::Value;
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, LongText, ShortText};
 use lash_kernel_doc::heap::TextSummary;
 use lash_kernel_doc::heap_values::text_summary;
 
 use super::{Arena, Facts};
 
 impl Arena {
+    /// Joins resident text members with an inline separator. Admission sees
+    /// the output work and installation bounds before allocation begins.
+    pub fn join_text(
+        &mut self,
+        list: ArenaHandle,
+        separator: ShortText,
+        admit: impl FnOnce(u64) -> bool,
+    ) -> Option<(Value, u64)> {
+        let values = self.sequence(list).ok()?;
+        let separator = separator.as_str();
+        let separators = values.len().saturating_sub(1) as u64;
+        let mut bytes = (separator.len() as u64).checked_mul(separators)?;
+        for value in values {
+            bytes = bytes.checked_add(resident(self, value)?.len() as u64)?;
+        }
+        if !admit(self.text_install_bound(bytes).checked_add(bytes)?) {
+            return None;
+        }
+        let mut joined = String::new();
+        joined
+            .try_reserve_exact(usize::try_from(bytes).ok()?)
+            .ok()?;
+        for (index, value) in values.iter().enumerate() {
+            if !separator.is_empty() && index != 0 {
+                joined.push_str(separator);
+            }
+            joined.push_str(resident(self, value)?);
+        }
+        let value = match ShortText::new(&joined) {
+            Some(short) => Value::Text(short),
+            None => Value::LongText(self.insert(
+                Body::LongText(LongText {
+                    summary: text_summary(&joined),
+                    chunks: Box::new([Chunk::Resident(joined)]),
+                }),
+                Facts::default(),
+            )),
+        };
+        Some((value, bytes))
+    }
+
+    /// Concatenates resident texts into their final buffer, retaining their
+    /// certified character counts. The caller admits the native's work and
+    /// installation bounds before calling; a decline changes no arena object.
+    pub fn concat_text(&mut self, left: Value, right: Value) -> Option<Value> {
+        let ((left, a), (right, b)) = (part(self, &left)?, part(self, &right)?);
+        let len = left.len().checked_add(right.len())?;
+        let mut joined = String::new();
+        joined.try_reserve_exact(len).ok()?;
+        joined.push_str(left);
+        joined.push_str(right);
+        if let Some(short) = ShortText::new(&joined) {
+            return Some(Value::Text(short));
+        }
+        Some(Value::LongText(self.insert(
+            Body::LongText(LongText {
+                summary: TextSummary {
+                    utf8_bytes: len as u64,
+                    chars: a.chars.checked_add(b.chars)?,
+                    utf16_units: a.utf16_units.checked_add(b.utf16_units)?,
+                },
+                chunks: Box::new([Chunk::Resident(joined)]),
+            }),
+            Facts::default(),
+        )))
+    }
+
     /// Whether long text `text` may give its storage to a concatenation of
     /// it: its bytes are one resident chunk, no member holds it, and no
     /// projection gave it a page form.
@@ -49,30 +117,32 @@ impl Arena {
         let Some(Body::LongText(text)) = self.objects.get_mut(from) else {
             return None;
         };
-        let [Chunk::Resident(held)] = &mut *text.chunks else {
+        let (made, len) = extended(text, part, || text_summary(part), admit)?;
+        Some((self.insert(Body::LongText(made), Facts::default()), len))
+    }
+
+    /// Extends with a resident text value, borrowing distinct long operands
+    /// together. An aliased operand keeps the ordinary copying path.
+    pub fn extend_text_from(
+        &mut self,
+        from: ArenaHandle,
+        other: ArenaHandle,
+        admit: impl FnOnce(u64) -> bool,
+    ) -> Option<(ArenaHandle, usize)> {
+        if from == other {
+            let owned = resident(self, &Value::LongText(other))?.to_owned();
+            return self.extend_text(from, &owned, admit);
+        }
+        let (Body::LongText(left), Body::LongText(right)) =
+            self.objects.get_disjoint_mut(from, other)?
+        else {
             return None;
         };
-        let len = held.len();
-        let wanted = len.checked_add(part.len())?;
-        if wanted > held.capacity() {
-            let grown = wanted.max(held.capacity().saturating_mul(2));
-            if !admit(u64::try_from(grown).ok()?) || held.try_reserve_exact(grown - len).is_err() {
-                return None;
-            }
-        }
-        held.push_str(part);
-        let added = text_summary(part);
-        let summary = TextSummary {
-            utf8_bytes: text.summary.utf8_bytes + added.utf8_bytes,
-            chars: text.summary.chars + added.chars,
-            utf16_units: text.summary.utf16_units + added.utf16_units,
+        let [Chunk::Resident(part)] = &*right.chunks else {
+            return None;
         };
-        let chunks = std::mem::take(&mut text.chunks);
-        let made = self.insert(
-            Body::LongText(LongText { summary, chunks }),
-            Facts::default(),
-        );
-        Some((made, len))
+        let (made, len) = extended(left, part, || right.summary, admit)?;
+        Some((self.insert(Body::LongText(made), Facts::default()), len))
     }
 
     /// Gives `from` back the storage [`Self::extend_text`] gave `to`, cut
@@ -90,4 +160,69 @@ impl Arena {
             text.chunks = chunks;
         }
     }
+}
+
+#[inline]
+fn part<'a>(arena: &'a Arena, value: &'a Value) -> Option<(&'a str, TextSummary)> {
+    match value {
+        Value::Text(text) => Some((text.as_str(), text_summary(text.as_str()))),
+        Value::LongText(handle) => match arena.body(*handle).ok()? {
+            Body::LongText(text) => match &*text.chunks {
+                [Chunk::Resident(bytes)] => Some((bytes.as_str(), text.summary)),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[inline]
+fn resident<'a>(arena: &'a Arena, value: &'a Value) -> Option<&'a str> {
+    match value {
+        Value::Text(text) => Some(text.as_str()),
+        Value::LongText(handle) => match arena.body(*handle).ok()? {
+            Body::LongText(text) => match &*text.chunks {
+                [Chunk::Resident(bytes)] => Some(bytes.as_str()),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[inline(always)]
+fn extended(
+    text: &mut LongText,
+    part: &str,
+    added: impl FnOnce() -> TextSummary,
+    admit: impl FnOnce(u64) -> bool,
+) -> Option<(LongText, usize)> {
+    let [Chunk::Resident(held)] = &mut *text.chunks else {
+        return None;
+    };
+    let len = held.len();
+    let wanted = len.checked_add(part.len())?;
+    if wanted > held.capacity() {
+        let grown = wanted.max(held.capacity().saturating_mul(2));
+        if !admit(u64::try_from(grown).ok()?) || held.try_reserve_exact(grown - len).is_err() {
+            return None;
+        }
+    }
+    held.push_str(part);
+    let added = added();
+    let summary = TextSummary {
+        utf8_bytes: text.summary.utf8_bytes + added.utf8_bytes,
+        chars: text.summary.chars + added.chars,
+        utf16_units: text.summary.utf16_units + added.utf16_units,
+    };
+
+    Some((
+        LongText {
+            summary,
+            chunks: std::mem::take(&mut text.chunks),
+        },
+        len,
+    ))
 }

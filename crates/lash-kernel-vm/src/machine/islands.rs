@@ -54,7 +54,7 @@ use super::sites::SiteCaches;
 use super::tasks::Occurrences;
 use super::{Control, Halt, SlotState, fault};
 pub(crate) use compiled::Compiled;
-use compiled::{Depth, Direct, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
+use compiled::{Deferred, Depth, Direct, HeapSite, NativeSite, OperatorSite, Read, UnitSite};
 
 use crate::compile::expr::Close;
 use crate::compile::islands::{HELD_BYTES, IslandPlan, MAX_ARGS};
@@ -730,6 +730,9 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     /// a stop at its op.
     #[inline(always)]
     pub(super) fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+        if let Some(answer) = self.text_concatenation(site, args) {
+            return answer;
+        }
         if let Some(close) = &site.close
             && !self.close(close)
         {

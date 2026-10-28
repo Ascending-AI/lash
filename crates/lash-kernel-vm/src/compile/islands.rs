@@ -984,37 +984,58 @@ impl Former<'_> {
             };
             let written: Vec<Reg> = span.iter().filter_map(Op::writes).collect();
             let mut fresh: Vec<Reg> = Vec::new();
-            let safe = span.iter().all(|op| {
+            let mut overwritten_input = None;
+            let safe = span.iter().enumerate().all(|(at, op)| {
                 let reads = op
                     .reads()
                     .into_iter()
                     .all(|reg| fresh.contains(&reg) || !written.contains(&reg));
+                if !reads {
+                    overwritten_input = Some((
+                        at,
+                        matches!(op, Op::MakeList { items } if !fresh.contains(&items.start)),
+                    ));
+                }
                 fresh.extend(op.writes());
                 reads
             });
-            safe || self
-                .tables
-                .stream
-                .ops
-                .get(commit as usize)
-                .and_then(|op| {
-                    let Op::Nested { act, .. } = op else {
-                        return None;
-                    };
-                    let lib = self
-                        .tables
-                        .stream
-                        .nested
-                        .get(act.ix())?
-                        .kind
-                        .operator_lib()?;
-                    self.library
-                        .get_lib(lib)?
-                        .collection_method()
-                        .then_some(())?;
-                    collection_restart(&self.tables.stream, head, commit)
-                })
-                .is_some()
+            // Make preflights the complete unpaid region before overwriting
+            // its inputs. Resident constants cannot fail before that close;
+            // non-plain execution declines at Make before the overwrite.
+            let construction = overwritten_input.is_some_and(|(at, first)| {
+                first
+                    && span[at + 1..].iter().all(|op| match op {
+                        Op::Const { c, .. } => matches!(
+                            self.tables.stream.consts.get(c.ix()),
+                            Some(super::Constant::Resident(_))
+                        ),
+                        _ => false,
+                    })
+            });
+            safe || construction
+                || self
+                    .tables
+                    .stream
+                    .ops
+                    .get(commit as usize)
+                    .and_then(|op| {
+                        let Op::Nested { act, .. } = op else {
+                            return None;
+                        };
+                        let lib = self
+                            .tables
+                            .stream
+                            .nested
+                            .get(act.ix())?
+                            .kind
+                            .operator_lib()?;
+                        self.library
+                            .get_lib(lib)?
+                            .collection_method()
+                            .then_some(())?;
+                        collection_restart(&self.tables.stream, head, commit)
+                    })
+                    .is_some()
         })
     }
 
@@ -1141,7 +1162,10 @@ impl Former<'_> {
                 self.tables.stream.names.get(name.ix())?;
                 Some(())
             }
-            ExprKind::Const(_) | ExprKind::Closure { .. } | ExprKind::Opaque => Some(()),
+            ExprKind::Const(_)
+            | ExprKind::Text { .. }
+            | ExprKind::Closure { .. }
+            | ExprKind::Opaque => Some(()),
             ExprKind::Operator {
                 lib,
                 invoke,

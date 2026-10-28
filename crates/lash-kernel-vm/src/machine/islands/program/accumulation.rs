@@ -73,7 +73,7 @@ impl Build<'_> {
         written.op = Op::Accumulation {
             site,
             append,
-            reads,
+            reads: Box::new([reads[0], reads[1]]),
             covered,
             write,
         };

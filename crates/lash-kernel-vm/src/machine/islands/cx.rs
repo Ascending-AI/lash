@@ -31,7 +31,7 @@ mod collections;
 mod copies;
 mod meter;
 mod texts;
-pub(super) use texts::append_text;
+pub(super) use texts::{append_long_text, append_text};
 mod operands;
 use crate::data::immediate_measure;
 use crate::machine::registers::Arguments;
@@ -451,22 +451,13 @@ impl Cx<'_> {
         ) else {
             return None;
         };
-        let short;
-        let long;
-        let part = match right {
-            Value::Text(text) => {
-                short = text;
-                short.as_str()
-            }
-            Value::LongText(_) => {
-                let semantics = self.arena.semantics().with_limits(self.limits);
-                let view = Args::new(&self.args[args.clone()], self.arena.objects(), &semantics);
-                long = view.text(&right).ok()??.as_str()?.to_owned();
-                &long
-            }
+        let free = self.free();
+        let answer = match right {
+            Value::Text(text) => append_text(self.arena, from, text.as_str(), self.memory, free),
+            Value::LongText(other) => append_long_text(self.arena, from, other, self.memory, free),
             _ => return None,
         };
-        let appended = match append_text(self.arena, from, part, self.memory, self.free())? {
+        let appended = match answer? {
             Some(appended) => appended,
             None => return Some(None),
         };

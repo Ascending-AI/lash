@@ -215,6 +215,7 @@ pub(in crate::machine::islands) enum Op {
     },
     Make {
         ahead: u64,
+        replay_guard: bool,
         make: Make,
         items: Box<[u32]>,
         reg: u32,
@@ -319,7 +320,8 @@ pub(in crate::machine::islands) enum Op {
     Join(u32),
     Wait(u32),
     Cancel(u32),
-    Cold(u32),
+    /// Heap text construction or an operation left to its source handler.
+    Cold(Deferred),
     /// A resident member read with its complete source guard and completion edge.
     Access(Box<AccessSite>),
     /// A source initialization immediately followed by its compact read.
@@ -332,7 +334,7 @@ pub(in crate::machine::islands) enum Op {
     Accumulation {
         site: Box<OperatorSite>,
         append: Option<Box<Append>>,
-        reads: Box<[Read]>,
+        reads: Box<[Read; 2]>,
         covered: bool,
         write: Box<WriteSite>,
     },
@@ -951,7 +953,9 @@ impl<'e> Build<'e> {
                 self.guard(head);
             }
             StatementKind::Cold => {
-                self.emit(Op::Cold(self.exe.stmt(statement.id).ops.start));
+                self.emit(Op::Cold(Deferred::Source(
+                    self.exe.stmt(statement.id).ops.start,
+                )));
             }
         }
         self.open = None;
@@ -1066,6 +1070,14 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &[]);
             }
+            Kind::Text { constant, miss } => {
+                self.emit(Op::Cold(Deferred::Text {
+                    dst: reg,
+                    constant: *constant,
+                    miss: *miss,
+                }));
+                self.result(reg, &[]);
+            }
             Kind::Operator {
                 lib, args, closes, ..
             } if unit_test(Some(self.exe.lib(*lib)), args) => {
@@ -1146,6 +1158,12 @@ impl<'e> Build<'e> {
                 site.body_when_observed |=
                     self.root.is_some() && matches!(self.exe.lib(site.lib).run, LibRun::Body(_));
                 self.site(site.depth, site.body_when_observed);
+                if site.concat.is_some() {
+                    let extra = site
+                        .entry
+                        .deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
+                    self.site(Depth::Template(extra), site.body_when_observed);
+                }
                 let direct = (closes.len() <= 1).then(|| self.reads(args)).flatten();
                 if let Some(reads) = direct {
                     let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
@@ -1201,6 +1219,16 @@ impl<'e> Build<'e> {
                         (lib.length_read().map(Direct::Length))
                             .or_else(|| lib.item_read().map(Direct::Item))
                             .or_else(|| lib.membership().map(Direct::Member))
+                            .or_else(|| match &lib.run {
+                                LibRun::Native { native, .. }
+                                    if lib.arity == 2
+                                        && lib.limit.is_none()
+                                        && native.prepare_text_join() =>
+                                {
+                                    Some(Direct::TextJoin)
+                                }
+                                _ => None,
+                            })
                     },
                 };
                 self.site(site.depth, false);
@@ -1395,6 +1423,9 @@ impl<'e> Build<'e> {
                 for item in items {
                     self.expr(item)?;
                 }
+                let replay_guard = *make == Make::List
+                    && *miss < pc
+                    && items.first().is_some_and(|item| item.pc < *miss);
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
                 let keeps: Vec<_> = self
                     .captures
@@ -1410,6 +1441,7 @@ impl<'e> Build<'e> {
                 }
                 self.emit(Op::Make {
                     ahead: *ahead,
+                    replay_guard,
                     make: *make,
                     items: items.clone(),
                     reg,
@@ -1460,7 +1492,7 @@ impl<'e> Build<'e> {
             }
             Kind::Pin(value) => self.expr(value)?,
             Kind::Opaque => {
-                self.emit(Op::Cold(pc));
+                self.emit(Op::Cold(Deferred::Source(pc)));
             }
             Kind::Act => {
                 // A statement-root call was emitted from its root expression.
@@ -1559,61 +1591,9 @@ impl<'e> Build<'e> {
             self.expr(value)?;
             self.close(arm.closes.first().copied(), reg);
         } else {
-            self.emit(Op::Cold(arm.start));
+            self.emit(Op::Cold(Deferred::Source(arm.start)));
         }
         Some(())
-    }
-
-    fn kind(&mut self, expr: &Expr, lib: LibId, args: &[Expr]) -> Option<bool> {
-        let Some((inner, literal)) = crate::compile::kind_test::test(self.exe, lib, args) else {
-            return Some(false);
-        };
-        let Kind::Operator {
-            args: inner_args, ..
-        } = &inner.kind
-        else {
-            return Some(false);
-        };
-        if [inner, expr]
-            .iter()
-            .any(|expr| matches!(&expr.kind, Kind::Operator { closes, .. } if closes.len() > 1))
-        {
-            return Some(false);
-        }
-        let kind = operator_site(inner, self.exe)?;
-        let same = operator_site(expr, self.exe)?;
-        if kind.counted.is_some() || same.counted.is_some() {
-            return Some(false);
-        }
-        self.site(kind.depth, kind.body_when_observed);
-        self.site(same.depth, same.body_when_observed);
-        if let Some(reads) = self.reads(std::slice::from_ref(&inner_args[0])) {
-            self.open = None;
-            self.emit(Op::DirectKind {
-                site: Box::new(KindTest {
-                    kind,
-                    same,
-                    literal,
-                    memo: Default::default(),
-                }),
-                reads,
-            });
-            self.result(expr.reg, &[inner_args[0].reg]);
-            return Some(true);
-        }
-        self.expr(&inner_args[0])?;
-        self.open = None;
-        self.emit(Op::Kind {
-            site: Box::new(KindTest {
-                kind,
-                same,
-                literal,
-                memo: Default::default(),
-            }),
-            src: inner_args[0].reg,
-        });
-        self.result(expr.reg, &[inner_args[0].reg]);
-        Some(true)
     }
 }
 

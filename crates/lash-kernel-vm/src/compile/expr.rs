@@ -24,7 +24,7 @@
 
 use lash_kernel_doc::Value;
 use lash_kernel_exec::{
-    ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
+    ActIx, ConstIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
 
 use super::{CodeId, Constant, LibId, Stream};
@@ -180,6 +180,8 @@ pub(crate) enum Kind {
     Session { name: NameIx, miss: u32 },
     /// A resident constant.
     Const(Value),
+    /// A text literal constructed in the run's arena at its source read.
+    Text { constant: ConstIx, miss: u32 },
     /// A library function its prepared entry answers: an operator
     /// (`Op::Operator`), or a nested invoke of an operator or a helper.
     Operator {
@@ -305,6 +307,7 @@ impl Expr {
             | Kind::Local { .. }
             | Kind::Session { .. }
             | Kind::Const(_)
+            | Kind::Text { .. }
             | Kind::Closure { .. }
             | Kind::Opaque => (None, None, &[]),
             Kind::Schedule { args, .. }
@@ -337,6 +340,7 @@ impl Expr {
             | Kind::Make { miss, .. }
             | Kind::Record { miss, .. }
             | Kind::Closure { miss, .. } => miss,
+            Kind::Text { miss, .. } => miss,
             _ => {
                 // A binding or pin can separate the first constant from
                 // its unpaid region head. Never cross an operation that
@@ -528,6 +532,13 @@ impl<'s> Reader<'s> {
                 ),
                 Op::Const { dst, c } => match stream.consts.get(c.ix())? {
                     Constant::Resident(value) => (dst, Kind::Const(*value)),
+                    Constant::Deferred(lash_kernel_doc::Literal::Text(_)) => (
+                        dst,
+                        Kind::Text {
+                            constant: c,
+                            miss: self.miss(pc),
+                        },
+                    ),
                     Constant::Deferred(_) => return None,
                 },
                 Op::Operator { lib, args } => (

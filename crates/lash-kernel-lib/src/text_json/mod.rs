@@ -33,6 +33,13 @@ pub(super) struct Function {
     native: Option<Arc<dyn NativeFunction>>,
 }
 impl Function {
+    fn resident_join(mut self) -> Self {
+        if let Some(native) = self.native.take() {
+            self.native = Some(Arc::new(ResidentJoin(native)));
+        }
+        self
+    }
+
     fn charge(&mut self, make: impl FnOnce(Formula) -> Formula) {
         if let Some(definition) = &mut self.definition
             && let Implementation::Native { charge } | Implementation::Both { charge, .. } =
@@ -40,6 +47,18 @@ impl Function {
         {
             *charge = make(std::mem::replace(charge, Formula::Constant(0)));
         }
+    }
+}
+
+struct ResidentJoin(Arc<dyn NativeFunction>);
+
+impl NativeFunction for ResidentJoin {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        self.0.call(call)
+    }
+
+    fn prepare_text_join(&self) -> bool {
+        true
     }
 }
 

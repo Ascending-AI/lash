@@ -29,6 +29,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         given: usize,
     ) -> Answer {
         let args = &padded[..given];
+        if matches!(site.direct, Some(Direct::TextJoin))
+            && let Some(answer) = self.joined_text(site, args)
+        {
+            return answer;
+        }
         let length = match (site.direct, padded[0]) {
             (Some(Direct::Length(units)), Value::List(list)) => {
                 self.arena.len(list).ok().map(|len| {
@@ -75,6 +80,60 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(value);
         }
         self.native_heap(site, padded, given)
+    }
+
+    #[inline(never)]
+    fn joined_text(&mut self, site: &NativeSite, args: &[Value]) -> Option<Answer> {
+        if self.swift
+            && self.resident_room(0)
+            && let [Value::List(list), Value::Text(separator)] = args
+        {
+            let count = self.arena.len(*list).ok()?;
+            let memory = self.memory;
+            let free = self
+                .ceiling
+                .saturating_sub(self.register_bytes)
+                .saturating_sub(self.arena.held())
+                .saturating_sub(self.transient);
+            if let Some((value, bytes)) = self
+                .arena
+                .join_text(*list, *separator, |needed| !memory || needed <= free)
+            {
+                if memory {
+                    self.transient += bytes;
+                }
+                let units = if self.charging {
+                    use crate::compile::Source;
+                    use lash_kernel_doc::Measure;
+                    let separator_bytes = separator.as_str().len() as u64;
+                    let input_bytes = bytes - separator_bytes * count.saturating_sub(1);
+                    self.exe.lib(site.lib).charge.evaluate(|source, measure| {
+                        match (source, measure) {
+                            (Source::Arg(0), Measure::Size) => count.saturating_add(1),
+                            (Source::Arg(0), Measure::DeepSize) => count
+                                .saturating_mul(2)
+                                .saturating_add(input_bytes)
+                                .saturating_add(1),
+                            (Source::Arg(1), Measure::Size | Measure::DeepSize) => {
+                                separator_bytes.saturating_add(1)
+                            }
+                            (Source::Result, Measure::Size | Measure::DeepSize) => {
+                                bytes.saturating_add(1)
+                            }
+                            _ => 0,
+                        }
+                    })
+                } else {
+                    0
+                };
+                if !self.admit_native(units) {
+                    return Some(Err(self.at_operands(site.pc, site.reg, args)));
+                }
+                self.formula(units);
+                return Some(Ok(value));
+            }
+        }
+        None
     }
 
     /// `list.get` / `tuple.get` on a valid resident position. This reads

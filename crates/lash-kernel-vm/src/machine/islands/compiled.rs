@@ -20,6 +20,17 @@ pub(super) use program::{
     Operand, Placement, Read, ReadSlot, Visit, WriteSite,
 };
 
+/// Heap text construction and operations the source handler must answer.
+#[derive(Clone, Copy)]
+pub(super) enum Deferred {
+    Source(u32),
+    Text {
+        dst: u32,
+        constant: lash_kernel_exec::ConstIx,
+        miss: u32,
+    },
+}
+
 /// A literal return's value and source-derived statement/close price.
 /// This is an ephemeral projection of its ReturnLiteral instruction.
 pub(super) struct LiteralReturn {
@@ -152,6 +163,7 @@ pub(super) struct OperatorSite {
     pub(super) table: ScalarTable,
     pub(super) pair: Option<lash_kernel_doc::scalar::Pair>,
     pub(super) texts: Option<lash_kernel_doc::scalar::ScalarOp>,
+    pub(super) concat: Option<crate::compile::TextCharge>,
     /// What its typed path's answer on two floats charges: its table's
     /// units for sizes of 1, as a float kernel answers a float or a
     /// boolean.
@@ -217,6 +229,8 @@ pub(super) enum Direct {
     /// The membership test of this table
     /// ([`crate::compile::Lib::membership`]).
     Member(lash_kernel_doc::plan::Table),
+    /// The native itself certifies resident text joining.
+    TextJoin,
 }
 
 /// A compiled test `same(x, ())` of a value against the empty tuple,
@@ -582,6 +596,9 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
             LibRun::Native { native, .. } => native.prepare_text_relation(),
             _ => None,
         },
+        concat: function
+            .text_append(exe)
+            .and_then(|_| function.charge.text_charge()),
         floats: table.units(0),
         table,
         close,

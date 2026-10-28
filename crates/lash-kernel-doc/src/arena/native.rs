@@ -874,6 +874,13 @@ pub trait NativeFunction: Send + Sync {
     fn prepare_text_relation(&self) -> Option<crate::scalar::ScalarOp> {
         None
     }
+
+    /// Certifies joining a list of texts with a text separator. Successful
+    /// resident joins must equal `call`; the machine retains the native's
+    /// formula and output work reservation. Other inputs use `call`.
+    fn prepare_text_join(&self) -> bool {
+        false
+    }
 }
 
 type ChargedEntry = fn(&[Value]) -> Option<PreparedAnswer>;

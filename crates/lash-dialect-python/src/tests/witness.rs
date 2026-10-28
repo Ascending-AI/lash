@@ -71,6 +71,7 @@ macro_rules! witness {
 
 witness!(
     number_text,
+    formatted_text,
     unicode_split,
     negative_round,
     numeric_text_grammar,

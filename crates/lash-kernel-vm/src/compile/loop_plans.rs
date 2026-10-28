@@ -1091,7 +1091,9 @@ impl Formation<'_> {
         match &expr.kind {
             // A statement-root invoke's value: its events precede the ops.
             Kind::Act => {}
-            Kind::Schedule { .. } | Kind::Closure { .. } | Kind::Opaque => return None,
+            Kind::Schedule { .. } | Kind::Closure { .. } | Kind::Text { .. } | Kind::Opaque => {
+                return None;
+            }
             Kind::Local { local, .. } => {
                 if !unshared(local.slot) {
                     return None;

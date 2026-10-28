@@ -182,94 +182,71 @@ equal and no higher charges. Full evidence is in
 
 ## Monty comparison
 
-The archived full optimized run on 2026-10-27 completed all **17/17 Python workloads**
-on Monty 1.4.0. All **170/170 measured Monty outputs exactly equal CPython's**,
-including the floating-point row. There were **85 engine/workload rows and
-850 measured samples**, with no unsupported features, missing rows or checksum
-errors. Lash used fewer instructions than Monty for integer arithmetic, and
-more for the other 16 rows. Keyed object sorting was 11.68×. The obsolete
-handwritten JSON row is omitted below; its before numbers are retained in
-`/workspace/notes/lash/tasks/lanes/r33/pyjson.evidence/monty-before-doc.md`.
-No interpreter changes were made in that baseline run.
+The full optimized FIG-7485 snapshot on 2026-10-28 uses source
+`5069896a062429db5e426b422aae1f5f2171b7d9`, based on main
+`c8680459bdbb50a249b8880100aab33eb8a0fea9`. It includes the core VM
+optimizations from FIG-7486. All 17 Python workloads ran on Monty 1.4.0,
+and all 170 measured Monty results equal CPython's. All 85 engine/workload
+rows and 850 measured samples passed source, result and geometry checks.
+This table replaces the previous mixed snapshots with this one run.
 
-This is one full optimized compare invocation at implementation commit
-`565d2761a7c8f5b0e9adc52beac2a58641070a93`, based on main `46b88ac7dbccd3278db4fed77b06112fd62caa97`.
-Main at run start was `7064395d3a437e377b0c5c541af97463d570e40b`; its intervening prompt/read-race
-changes did not change the benchmark or interpreter sources. Every engine
-received the checked-in workload, including the restricted JSON codec then on
-main. This baseline predates the supported JSON module workload and the numeric
-optimizations measured above.
+There were five low/high pairs, one warmup and factor 20, pinned to CPU 0,
+with observation off and exact charge and memory metering enabled. All 340
+scoped Lash windows and 510 reference process windows qualified at >=99%
+PMU running time. The process had an 8 GiB address-space cap. Shared-host
+wall time is unclaimed. Values are median incremental instructions/op;
+the Python and TS units retain their separate denominators.
 
-Five measured pairs, one fixed low-count warmup, factor 20, CPU 0, observation
-off, exact charge and memory metering on. The 340 scoped Lash windows and 510
-reference processes all qualified, with 100% PMU running time. Peak whole-run
-RSS was 482,508 KiB under the 8 GiB address-space cap. Shared-host wall time is
-not a latency claim. Values below are median incremental instructions/op;
-ratios above one mean Lash executed more instructions. Different Python/TS
-work units, especially sorting, keep their own denominators.
+The three owned string rows are at most 2x Monty. No Lash row regresses
+more than 1% against the fresh starting baseline `1c93dfa7cfd2`, and every
+TS/QuickJS row is at most 10x. Before this lane, templating, string_build1
+and int_to_string were 6.113x, 1.999x and 1.201x Monty respectively.
 
-The nine core rows below were updated for FIG-7486 on 2026-10-28 from the
-full optimized source `46a6d6efdc`, based on main `8ed4923df3`. The other rows
-retain the archived measurements above and do not describe current acceptance. The new run uses one warmup, three
-low/high pairs and factor 20, with exact charge and memory metering enabled
-under an 8 GiB address-space cap. All 85 engine/workload rows passed checksum
-and source/geometry checks. All 204 scoped Lash windows and 306 reference
-process windows qualified at >=99% PMU running time.
+| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
+|---|---:|---:|---:|---:|
+| object_sort | 89970.59 | 7769.01 | 11.581x | 8.875x |
+| map_set_string | 45762.21 | 5409.13 | 8.460x | 6.698x |
+| records | 171206042.11 | 20827330.32 | 8.220x | 8.542x |
+| sort_bench | 20383512.16 | 5577128.84 | 3.655x | 7.229x |
+| json_transform | 5595196.00 | 1599403.37 | 3.498x | 2.136x |
+| string_build1 | 2479.41 | 1242.45 | 1.996x | 8.385x |
+| templating | 1116073.00 | 565666.37 | 1.973x | 3.217x |
+| empty_loop | 320.03 | 193.51 | 1.654x | 3.424x |
+| prop_write | 1164.26 | 741.98 | 1.569x | 9.613x |
+| func_closure_call | 2487.26 | 1771.89 | 1.404x | 7.002x |
+| object_build | 5191.57 | 3767.55 | 1.378x | 1.896x |
+| array_read | 878.70 | 695.25 | 1.264x | 8.668x |
+| func_call | 1047.24 | 902.56 | 1.160x | 2.952x |
+| prop_read | 1103.25 | 1023.26 | 1.078x | 9.899x |
+| int_to_string | 1211.91 | 1470.98 | 0.824x | 3.466x |
+| int_arith | 527.01 | 720.53 | 0.731x | 2.431x |
+| float_arith | 608.30 | 1251.41 | 0.486x | 2.358x |
 
-Every owned core row meets 2x Monty. Across all 34 Lash rows, none regresses
-more than 1% against the fresh starting full baseline `1c93dfa7cfd2`; the
-largest increase is Python `int_to_string` at 0.825%. Every TS/QuickJS row
-meets 10x, with a maximum of 9.881560x. Shared-host wall time is unclaimed.
-Seven owned rows remain above parity, and complete intrinsic-cost attribution
-remains open. Raw results, the starting ratios and causal diagnostics are in
-`/workspace/notes/lash/tasks/lanes/r33/pymonty-core.evidence/`, particularly
-`compare-summary.md`, `accepted.json` and `semantic-costs.md`.
+Typed integer/string formatting now shares ordinary conversion paths,
+and f-strings use the same list-and-join lowering as TS templates.
+Resident text joins and concatenations retain their native charge formulas,
+work reservations and rollback rules; distinct long append operands borrow
+their resident bytes directly. The unchanged Python sources still run with
+exact metering, held-byte accounting and durable park/resume.
 
-| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Cause or remaining work |
-|---|---:|---:|---:|---:|---|
-| object_sort | 90770.03 | 7769.08 | 11.68× | 8.87× | Key extraction calls a Python lambda and reads each record before the native key sort; the secant is nonlinear. |
-| map_set_string | 45581.25 | 5408.45 | 8.43× | 8.01× | Each batch builds 1,000 text keys twice, stores dictionary entries and checks membership. |
-| records | 174035856.11 | 20827344.47 | 8.36× | 8.51× | Two materialized comprehensions, dictionary reads and helper-based summation traverse 10,000 records. |
-| templating | 3461959.00 | 565692.79 | 6.12× | 7.34× | Two f-string substitutions per line use Python formatting helpers before text concatenation. |
-| sort_bench | 21633352.16 | 5576494.58 | 3.88× | 22.98× | Text conversion, list population and order-checking surround the native sort. |
-| array_read | 857.31 | 695.25 | 1.23× | 8.65× | Source-certified integer reads fuse pure operands and preserve Python tuples; a 27 instr/op memory-admission diagnostic leaves a residual unassigned. |
-| prop_read | 1081.26 | 1023.25 | 1.06× | 9.88× | Source-certified map reads reuse the resident VM member path; a 27 instr/op memory-admission diagnostic leaves a residual unassigned. |
-| string_build1 | 2483.33 | 1242.50 | 2.00× | 8.41× | The inner loop repeatedly concatenates and replaces text with Python add semantics. |
-| float_arith | 608.28 | 1251.33 | 0.49× | 2.36× | The existing typed scalar path was already below Monty at the fresh starting baseline. |
-| prop_write | 1163.24 | 741.94 | 1.57× | 9.64× | Resident map writes avoid the generic heap context; the 26 instr/op memory-admission diagnostic explains only part of the remaining cost. |
-| empty_loop | 320.03 | 193.55 | 1.65× | 3.43× | Scalar-loop charge formulas cost about 33 instr/op in the diagnostic; the remaining excess is unassigned. |
-| object_build | 5202.81 | 3768.07 | 1.38× | 1.91× | Maps stream register operands and eligible append uses a source certificate; a 515 instr/op memory-admission diagnostic is only partial attribution. |
-| func_closure_call | 2477.26 | 1771.87 | 1.40× | 6.98× | The existing call and captured-cell paths remain; the 3 instr/op memory-admission diagnostic leaves closure overhead open. |
-| func_call | 1048.25 | 902.55 | 1.16× | 2.95× | Outlining heap construction/mutation removes dispatch code-generation regressions; the 3 instr/op memory-admission diagnostic leaves call overhead open. |
-| int_to_string | 1770.70 | 1470.97 | 1.20× | 3.43× | Three integer conversions per trip use the Python string helper and native number formatting. |
-| int_arith | 527.05 | 720.49 | 0.73× | 2.43× | The existing typed integer path remains below Monty. |
+Those guarantees do not yet explain the entire above-parity cost.
+The paired final-adapter memory-policy ablation and its exact deltas are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-str.evidence/semantic-costs.md`.
+Turning charge off changes execution paths, so its difference is not an
+intrinsic metering-cost estimate. Complete attribution for templating and
+string_build1 remains open. Core-row attribution remains documented in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-core.evidence/semantic-costs.md`;
+its earlier component ablations are not final optimized component costs.
 
-The memory and fee deltas in the updated core rows come from controlled
-first-candidate iteration ablations, not final optimized component costs.
-They explain only part of the above-parity cost; the remainder is open
-implementation work, not a measured intrinsic semantic cost. The archived
-rows' cause text remains a source-based hypothesis. Typed indexing is selected in
-[`lower/subscripts.rs`](../../crates/lash-dialect-python/src/lower/subscripts.rs).
-Its Python helper definitions, numeric/string operations and mutation rules
-are in [`core.kernel`](../../crates/lash-ext-py-helpers/src/helpers/core.kernel).
-Collection methods live in
-[`methods.kernel`](../../crates/lash-ext-py-helpers/src/helpers/methods.kernel);
-key extraction and summation in
-[`builtins.kernel`](../../crates/lash-ext-py-helpers/src/helpers/builtins.kernel);
-f-string formatting in
-[`format.kernel`](../../crates/lash-ext-py-helpers/src/helpers/format.kernel).
-VM fast paths can bypass helper execution, so these sources do not establish
-how much of a row's instructions each helper consumed.
-
-The reference identities are Monty executable
-`4479e7306fdf0c6a2a567aa139150ac47c75ab3c0138ec2c4efa010c382a87e0`,
-QuickJS source `04be246001599f5995fa2f2d8c91a0f198d3f34c`, executable
-`ec68673b92708e38971b58682bae94ca3775e106358c82f6fcd55526b8fd3ec4`,
-and CPython 3.12.3. The receipt retains each executable/source hash.
-Raw evidence is `/workspace/notes/lash/tasks/lanes/r33/monty.evidence/`,
-including `compare.json`, its Markdown output, 510 reference perf files,
-source wrappers/stdout/stderr, `verification.json`, result-population SHA-256s,
-release identities, the full optimized build report, and outer perf/time logs.
+Monty executable SHA-256 is
+`4479e7306fdf0c6a2a567aa139150ac47c75ab3c0138ec2c4efa010c382a87e0`.
+QuickJS source is `04be246001599f5995fa2f2d8c91a0f198d3f34c`, executable
+`ec68673b92708e38971b58682bae94ca3775e106358c82f6fcd55526b8fd3ec4`.
+CPython is 3.12.3; the receipt retains its executable hash.
+Raw results, sources, per-window counters, artifact identities, the charge
+census and correctness receipts are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-str.evidence/`, particularly
+`after.json`, `verification.json`, `charge-census.json` and `report.md`.
 
 `--profile <directory>` performs a separate `perf record` run per selected lash
 workload and dialect, writing perf data, perf-script stacks, and Inferno folded

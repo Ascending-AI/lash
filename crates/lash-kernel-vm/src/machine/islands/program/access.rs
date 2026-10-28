@@ -502,7 +502,7 @@ impl Build<'_> {
                 reads,
                 write,
                 ..
-            } => (&**operator, &**reads, &**write, at + 1),
+            } => (&**operator, reads.as_slice(), &**write, at + 1),
             Op::DirectOperator {
                 site: operator,
                 reads,

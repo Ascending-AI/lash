@@ -71,8 +71,10 @@ named `py.*`, written in kernel text under `../lash-ext-py-helpers/src/helpers/`
 as the `python` package. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the
 check that a dict or set did not change size under a `for` or a
-comprehension, `str`, `repr`
-and f-string formatting are helpers. Direct builtin `range` loops retain validated
+comprehension, `repr` and general f-string formatting are helpers.
+Builtin `str` and f-string fields without a format specification share direct
+kernel text conversion for proven integers and identity for proven strings.
+Other values retain Python conversion helpers. Direct builtin `range` loops retain validated
 integer bounds and step once before entering the counter loop. Closed float
 recurrences use the same numeric register operations as integer recurrences.
 A source-proven numeric accumulator with an unknown right operand uses a

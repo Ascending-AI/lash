@@ -232,7 +232,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     Op::Cond { .. } | Op::Branch { .. } | Op::LoopBranch { .. } => {
                         Reason::Condition
                     }
-                    Op::Cold(_) => Reason::ColdBranch,
+                    Op::Cold(Deferred::Source(_)) => Reason::ColdBranch,
+                    Op::Cold(Deferred::Text { .. }) => Reason::Native,
                     _ => Reason::SourceContinuation,
                 }
             };

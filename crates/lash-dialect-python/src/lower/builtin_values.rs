@@ -271,15 +271,7 @@ impl Lowerer<'_> {
             args.push(Operand::inline(Expr::Map(constructors), Ty::Dict));
         }
         if spec.name == "str" {
-            if args[0].ty == Ty::Str {
-                return Ok(args.remove(0));
-            }
-            if args[0].ty == Ty::Int {
-                return Ok(Operand::inline(
-                    self.native("num.to_text", vec![args[0].expr.clone()])?,
-                    Ty::Str,
-                ));
-            }
+            return self.string_value(args.remove(0));
         }
         let ty = match spec.name {
             "str" | "repr" | "format" | "hex" | "oct" | "bin" | "ascii" => Ty::Str,

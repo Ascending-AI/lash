@@ -133,17 +133,20 @@ pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
         &[],
         split,
     ));
-    functions.push(definition(
-        selection,
-        "text.join",
-        &[
-            ("items", sequence_type(Type::Text)),
-            ("separator", Type::Text),
-        ],
-        Type::Text,
-        &[],
-        join,
-    ));
+    functions.push(
+        definition(
+            selection,
+            "text.join",
+            &[
+                ("items", sequence_type(Type::Text)),
+                ("separator", Type::Text),
+            ],
+            Type::Text,
+            &[],
+            join,
+        )
+        .resident_join(),
+    );
     let mut admission = definition(
         selection,
         "text.join_or_index",
