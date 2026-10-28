@@ -187,13 +187,68 @@ equal and no higher charges. Full evidence is in
 
 ## Monty comparison
 
-The table is the ordinary optimized control captured at main
-`671e8c038fb4` on 2026-10-28 for FIG-7526. Each of the 85 engine/workload
-rows ran one low/high pair, one warmup and factor 20, with exact charge and
-memory metering, CPU pinning and an 8 GiB address-space cap. All 68 scoped
-Lash and 102 reference PMU windows ran at 100%; all 34 Monty outputs matched
-CPython. The largest control TS/QuickJS ratio was 9.8257x. This is a
-reference snapshot. Shared-host wall time is unclaimed.
+The FIG-7528 full optimized receipt on 2026-10-28 measures compact caller
+return metadata at source `c62bacfdd2cf009580e52611c0499e8b42f9d137`, against a matched
+control at `671e8c038fb4b2e04427f5ada4eef74eca4e0fcc`. Each of the 85
+engine/workload rows ran one low/high pair, one warmup and factor 20 on CPU 0,
+with exact charge and memory accounting and an 8 GiB address-space cap.
+All 68 scoped Lash and 102 reference PMU windows ran at 100%; all 34 Monty
+outputs matched CPython. Workload source bytes, results, work units and reference
+identities matched the control. All 34 Lash diagnostic execution censuses
+also matched.
+
+Every Lash row met the 1% regression guard. The maximum increase was 0.3433%
+for TS templating. Every TS/QuickJS ratio met 10x; the maximum was 9.8240x
+for prop_read. Values are incremental user instructions/op. Signed changes
+compare each dialect with its matched Lash control; negative means fewer
+instructions. Shared-host wall time is unclaimed.
+
+| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS | Python change | TS change |
+|---|---:|---:|---:|---:|---:|---:|
+| object_sort | 15034.03 | 7769.55 | 1.9350x | 8.7599x | -0.080% | -0.142% |
+| templating | 1062310.89 | 565617.95 | 1.8781x | 3.0834x | -0.165% | +0.343% |
+| string_build1 | 2218.69 | 1242.39 | 1.7858x | 7.5359x | -0.012% | +0.035% |
+| records | 33885364.21 | 20827465.05 | 1.6270x | 8.3704x | -0.002% | -0.160% |
+| json_transform | 2520722.11 | 1597361.21 | 1.5781x | 1.7513x | -0.025% | +0.096% |
+| func_closure_call | 2443.23 | 1771.86 | 1.3789x | 6.8829x | -0.367% | -0.366% |
+| object_build | 5138.58 | 3767.61 | 1.3639x | 1.8867x | -0.062% | -0.063% |
+| sort_bench | 7471956.16 | 5577374.11 | 1.3397x | 7.0571x | -0.014% | -0.006% |
+| array_read | 883.10 | 695.25 | 1.2702x | 8.6537x | +0.001% | +0.000% |
+| prop_write | 913.24 | 741.98 | 1.2308x | 9.4861x | -0.000% | -0.003% |
+| func_call | 1039.23 | 902.55 | 1.1514x | 2.9257x | +0.000% | -0.002% |
+| map_set_string | 6067.74 | 5407.98 | 1.1220x | 6.7027x | +0.001% | +0.005% |
+| prop_read | 1105.24 | 1023.28 | 1.0801x | 9.8240x | +0.001% | -0.000% |
+| int_to_string | 1197.56 | 1470.96 | 0.8141x | 3.4537x | +0.001% | +0.001% |
+| int_arith | 487.88 | 720.52 | 0.6771x | 2.3011x | -0.011% | -0.005% |
+| empty_loop | 116.94 | 193.39 | 0.6047x | 3.3600x | +0.000% | -0.003% |
+| float_arith | 558.26 | 1251.32 | 0.4461x | 2.1846x | +0.022% | -0.018% |
+
+A waiting caller now keeps a pending-call bit and uses its retained `pc - 1`
+for the call instruction's return destination, charge suffix and source
+projection. Source identity, logical frame costs and initialization are
+unchanged. Register and slot clearing remain in place. Boxed windows,
+entry-time clearing and conditional reuse of old parameter slots failed the
+regression guard and were rejected.
+
+Ordinary calls stopped moving: 1039.23 instructions/call, effectively equal
+to the control. Their callee already takes the existing literal-return path.
+Closure calls fell 0.367% and object_sort fell 0.080%. Weighting each of these
+three rows by its own fixed comparison interval saves 2.979 million
+instructions, below the study's 25.8 to 94.2 million forecast. No target row
+reached Monty parity. FIG-7528 remains open for window reuse and the three
+above-parity rows; no intrinsic floor above 1x is established. The study's
+measured admission checks and sampled argument/operand paths remain the
+next causes to investigate. Their contribution in this selected build is
+still unisolated.
+
+The receipt, every row's delta, rejected experiments and semantic proof are
+in `/workspace/notes/lash/tasks/lanes/r33/pymattr3.evidence/`, particularly
+`metadata.json`, `metadata-assessment.json`, `selected.json` and `report.md`.
+
+FIG-7526 separately measured the operand/result pipeline against its own
+ordinary optimized control at the same main `671e8c038fb4`. That control's
+maximum TS/QuickJS ratio was 9.8257x. Its experiments and open findings are
+retained here; the table above uses FIG-7528's qualified selected receipt.
 
 Three operand/result experiments were rejected by the unchanged 1% all-row
 guard. Fixed member operands, short heap/call windows and heap destinations
@@ -206,26 +261,6 @@ above-parity Python rows, the experiments increased instructions by
 18.294, 10.082 and 17.916 million respectively.
 Operation units are not averaged.
 
-| Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
-|---|---:|---:|---:|---:|
-| object_sort | 15046.15 | 7769.55 | 1.9366x | 8.7687x |
-| templating | 1075221.47 | 565511.21 | 1.9013x | 3.0837x |
-| string_build1 | 2219.00 | 1242.21 | 1.7863x | 7.5343x |
-| records | 33885515.11 | 20827938.00 | 1.6269x | 8.3870x |
-| json_transform | 2521087.84 | 1597183.84 | 1.5785x | 1.7484x |
-| func_closure_call | 2452.23 | 1771.85 | 1.3840x | 6.9086x |
-| object_build | 5141.67 | 3767.63 | 1.3647x | 1.8813x |
-| sort_bench | 7472487.79 | 5577326.42 | 1.3398x | 7.0578x |
-| array_read | 883.08 | 695.25 | 1.2702x | 8.6540x |
-| prop_write | 913.24 | 741.95 | 1.2309x | 9.4877x |
-| func_call | 1039.22 | 902.56 | 1.1514x | 2.9257x |
-| map_set_string | 6068.71 | 5408.18 | 1.1221x | 6.7022x |
-| prop_read | 1105.22 | 1023.23 | 1.0801x | 9.8257x |
-| int_to_string | 1197.58 | 1470.98 | 0.8141x | 3.4535x |
-| int_arith | 487.86 | 720.59 | 0.6770x | 2.3006x |
-| empty_loop | 116.93 | 193.36 | 0.6047x | 3.3587x |
-| float_arith | 558.24 | 1251.26 | 0.4461x | 2.1850x |
-
 No row newly reached parity in these experiments. The 13 above-parity Python
 rows remain open without a measured intrinsic floor, and FIG-7526 remains
 open. The next locations are the study's measured operand/destination,
@@ -235,13 +270,16 @@ Raw per-row deltas, fixed-interval totals, next profile sites, source/binary
 identities, counter receipts and restored patches are retained in
 `/workspace/notes/lash/tasks/lanes/r33/pymattr1.evidence/report.md`.
 
-The first rejected candidate's VM unit proof passed 218/218. Conformance
+FIG-7526's first rejected candidate's VM unit proof passed 218/218. Conformance
 executed 142 cases with 137 passes and five identity/link/caption failures;
 no conformance pass is claimed. Destination, integer-zero-size and native
 arity mutations were rejected by the existing register/reference differential.
 Their production restorations and probe limits are recorded in the lane
 report. No parent or main tests were run for comparison. Earlier optimization
 receipts and their qualified limits are retained below.
+
+The implementation notes and receipts below describe the earlier
+FIG-7484/7485/7486 changes.
 
 Scalar assignment/test pairs now fuse during compilation. Verified recurrences
 with one changing scalar and ordered copies execute checked kernels, exact fee

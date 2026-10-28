@@ -142,7 +142,9 @@ pub(super) struct Frame<'e> {
     /// loop's running activation, which nothing else holds (FIG-6795).
     texts: Vec<(usize, ArenaHandle)>,
     statement: Option<StmtId>,
-    waiting: Option<usize>,
+    /// A waiting caller stands at `pc - 1`; that instruction owns its
+    /// return destination, charge suffix and source continuation.
+    waiting: bool,
     may_clean: bool,
     admitted: bool,
     swift: bool,
@@ -199,7 +201,7 @@ impl<'e> Frame<'e> {
             control: window.control,
             texts: window.texts,
             statement: None,
-            waiting: None,
+            waiting: false,
             may_clean: false,
             admitted: false,
             swift: false,
@@ -384,11 +386,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     self.activate_mode(active);
                     (self.admitted, self.swift, self.covered) =
                         (active.admitted, active.swift, active.covered);
-                    let call = active
-                        .waiting
-                        .take()
-                        .ok_or_else(|| self.halt(fault("a caller has no call continuation")))?;
-                    let Op::Call { site, .. } = &active.callee.compiled.ops[call].op else {
+                    if !std::mem::take(&mut active.waiting) {
+                        return Err(self.halt(fault("a caller has no call continuation")));
+                    }
+                    let Op::Call { site, .. } = &active.callee.compiled.ops[active.pc - 1].op
+                    else {
                         unreachable!("a caller's continuation is a call")
                     };
                     active.regs[site.reg as usize] = value;

@@ -13,6 +13,17 @@ struct Observed {
 }
 
 fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool) -> Observed {
+    observe_reopening(source, layout, slice, bounds, taped, false)
+}
+
+fn observe_reopening(
+    source: &str,
+    layout: Layout,
+    slice: u64,
+    bounds: Bounds,
+    taped: bool,
+    cold_slices: bool,
+) -> Observed {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -59,7 +70,15 @@ fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool
                 break format!("finished {:?}", finished.result);
             }
             Step::Ended(other) => break format!("{other:?}"),
-            Step::Slice => {}
+            Step::Slice => {
+                if cold_slices {
+                    checkpoints.push(embedder.machine.semantic_checkpoint());
+                    embedder.reopen(layout, true);
+                    if taped {
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
+            }
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
                 embedder.reopen(layout, true);
@@ -135,6 +154,12 @@ fn direct_call_entry_agrees() {
         "let x = 3 return call pair(x, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3, 4)",
         "let f = fn(a, b) { return (a, b) } return apply f(3)",
+        // K-EVAL-008: the same physical window binds every missing argument
+        // afresh, even after another call supplied it or captured its cell.
+        "let f = fn(a, b) { return (a, b) } let first = apply f(3, 9) let second = apply f(4) return (first, second)",
+        "let make = fn(a, b) { return fn() { return (a, b) } } let first = apply make(3, 9) let second = apply make(4) return (apply first(), apply second())",
+        // An early return leaves a waiting caller and cleanup state to restore.
+        "let n = 0 let f = fn(x) { try { if flat.lt(x, 2) { return call pause(x) } return flat.add(x, 10) } finally { set n = flat.add(n, 1) } } let first = apply f(1) let second = apply f(3) return (first, second, n)",
         "let f = fn(a, b) { return (a, b) } return apply f(1, 2, 3)",
         "let bad = 3 return apply bad(4)",
         "let f = fn(x) { return call typed(x) } return apply f(false)",
@@ -199,6 +224,33 @@ fn direct_call_entry_agrees() {
             observe(&source, Layout(1), u64::MAX, bounds, true),
             "depth: {body}"
         );
+    }
+    // K-MACH-008 / K-CHG-001: stop after every charged boundary in a
+    // callback/capture/return sequence, then rebuild its source frames cold.
+    let source = format!(
+        "{definitions}main {{ let n = 0 let f = fn(x) {{ set n = flat.add(n, 1) let saved = call pause(x) return flat.add(saved, n) }} return invoke each.map(f, [1, 3]) }}"
+    );
+    for slice in [1, 2, 3, 5, 11, 31] {
+        assert_eq!(
+            observe_reopening(
+                &source,
+                Layout(0),
+                slice,
+                super::super::embedder::ROOMY,
+                true,
+                true
+            ),
+            observe_reopening(
+                &source,
+                Layout(1),
+                slice,
+                super::super::embedder::ROOMY,
+                true,
+                true
+            ),
+            "cold source frames at slice {slice}"
+        );
+        comparisons += 1;
     }
     println!("direct call entry: {comparisons} paired runs");
 }

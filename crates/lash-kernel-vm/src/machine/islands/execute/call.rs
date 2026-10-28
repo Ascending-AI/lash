@@ -215,7 +215,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     return Ok(Next::Continue);
                 }
-                frame.waiting = Some(frame.pc - 1);
+                frame.waiting = true;
                 (frame.admitted, frame.swift, frame.covered) =
                     (self.admitted, self.swift, self.covered);
                 self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));

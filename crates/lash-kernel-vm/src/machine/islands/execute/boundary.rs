@@ -281,10 +281,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         self.recycle(active);
         while let Some(mut caller) = callers.pop() {
-            let at = caller
-                .waiting
-                .ok_or_else(|| self.halt(fault("a caller has no call continuation")))?;
-            let instruction = &caller.callee.compiled.ops[at];
+            if !caller.waiting {
+                return Err(self.halt(fault("a caller has no call continuation")));
+            }
+            let instruction = &caller.callee.compiled.ops[caller.pc - 1];
             let Op::Call { site, .. } = &instruction.op else {
                 unreachable!("a caller's continuation is a call")
             };
@@ -313,7 +313,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     /// may have committed its first operation), then add the live outer
     /// operands. Neither scratch positions nor this physical cursor persist.
     pub(super) fn spill(&mut self, frame: &Frame<'_>, instruction: &Instruction) {
-        if frame.waiting.is_none() && frame.callee.compiled.has_restarts {
+        if !frame.waiting && frame.callee.compiled.has_restarts {
             for restart in
                 frame
                     .callee
@@ -352,7 +352,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     .push((*reg, frame.regs[*reg as usize]));
             }
         }
-        if frame.waiting.is_some()
+        if frame.waiting
             && let Op::Call { site, .. } = &instruction.op
             && let Some(inputs) = &site.inputs
         {
@@ -366,7 +366,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     pub(super) fn awaited_library(&self, frame: &Frame<'e>) -> Option<LibraryCall> {
-        let Op::Call { site, args, .. } = &frame.callee.compiled.ops[frame.waiting?].op else {
+        if !frame.waiting {
+            return None;
+        }
+        let Op::Call { site, args, .. } = &frame.callee.compiled.ops[frame.pc - 1].op else {
             return None;
         };
         Some(LibraryCall {
@@ -408,10 +411,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         else {
             return Ok(());
         };
-        let Some(at) = caller.waiting else {
+        if !caller.waiting {
             return Ok(());
-        };
-        let Op::Call { site, args, .. } = &caller.callee.compiled.ops[at].op else {
+        }
+        let Op::Call { site, args, .. } = &caller.callee.compiled.ops[caller.pc - 1].op else {
             return Ok(());
         };
         let Some(lib) = site.library else {
