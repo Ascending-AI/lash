@@ -125,7 +125,7 @@ impl Module {
         let missing: Vec<_> = facts
             .requires
             .iter()
-            .filter(|required| !serves.contains(required))
+            .filter(|required| !lash::plugins::ObligationToken::is_served(required, &serves))
             .cloned()
             .collect();
         assert!(

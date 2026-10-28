@@ -791,7 +791,7 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 | `model` | 47 |
 | `model_attempt` | 35 |
 | `tool` | 31 |
-| `cell` | 29 |
+| `cell` | 42 |
 | `process` | 26 |
 | `workflow` | 24 |
 | `workflow_node` | 22 |

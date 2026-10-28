@@ -1238,7 +1238,30 @@ fn protocol_records(history: &[lash_core::SessionHistoryRecord]) -> Vec<serde_js
     history
         .iter()
         .filter(|record| matches!(record, lash_core::SessionHistoryRecord::Protocol(_)))
-        .map(|record| serde_json::to_value(record).expect("a record encodes"))
+        .map(|record| {
+            let mut value = serde_json::to_value(record).expect("a record encodes");
+            // These histories are separate executions with independently measured CPU.
+            // Preserve reading presence and limits; other resources remain exact.
+            if let Some(readings) = value
+                .pointer_mut("/Protocol/payload/event/RlmTrajectoryEntry/consumption")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for reading in readings {
+                    if reading.get("resource").and_then(serde_json::Value::as_str)
+                        == Some("worker_cpu_nanos")
+                    {
+                        for field in ["consumed", "observed"] {
+                            if let Some(value) = reading.get_mut(field)
+                                && value.is_number()
+                            {
+                                *value = 0.into();
+                            }
+                        }
+                    }
+                }
+            }
+            value
+        })
         .collect()
 }
 

@@ -317,10 +317,11 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
             .filter(|(_, function)| function.states_native())
             .map(|(id, _)| *id),
     );
+    capabilities.machine.helpers = release.helpers.claim_capabilities();
     capabilities
         .machine
         .libraries
-        .insert(release.helpers.identity());
+        .extend(release.helpers.library_identities().iter().copied());
     let tools = lash_core::testing::test_tools_provider();
     capabilities
         .callbacks
@@ -371,7 +372,12 @@ async fn claim(
             .into_iter()
             .filter(|(owner, _)| owner == actor)
             .flat_map(|(_, required)| required)
-            .filter(|required| !lease.serves.as_ref().contains(required))
+            .filter(|required| {
+                !lash_vocabulary::claims::ObligationToken::is_served(
+                    required,
+                    lease.serves.as_ref(),
+                )
+            })
             .collect::<Vec<_>>();
         panic!("the law's session actor is not claimable; unserved: {missing:?}");
     };

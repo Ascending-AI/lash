@@ -685,7 +685,9 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
     let request: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/canvas-insert-request.json")).unwrap();
     let document: Document = serde_json::from_value(request["document"].clone()).unwrap();
-    let captions = serde_json::from_value(request["captions"].clone()).unwrap();
+    let captured: k::Captions = serde_json::from_value(request["captions"].clone()).unwrap();
+    // The JSON reconstructs this document under the current token grammar.
+    let captions = k::Captions::new(&document, captured.entries().to_vec()).unwrap();
     use tracing::instrument::WithSubscriber as _;
     use tracing_subscriber::layer::SubscriberExt as _;
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();

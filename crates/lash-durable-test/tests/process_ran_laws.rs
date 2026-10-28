@@ -776,7 +776,7 @@ impl Scenario for Counted {
         let missing: Vec<_> = facts
             .requires
             .iter()
-            .filter(|required| !serves.contains(required))
+            .filter(|required| !lash::plugins::ObligationToken::is_served(required, &serves))
             .collect();
         assert!(
             missing.is_empty(),

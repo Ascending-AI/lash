@@ -95,8 +95,11 @@ impl Namespace<'_> {
         attachment: Option<&Attachment>,
     ) -> Result<Link, LinkRefusal> {
         let helpers = lash_kernel_doc::helper_imports(content.document(document)?, catalog)
-            .map_err(|error| LinkRefusal::InvalidDocument {
-                message: error.to_string(),
+            .map_err(|error| match error {
+                lash_kernel_doc::LibraryRequirementRefusal::HelperUnavailable {
+                    reason,
+                    function,
+                } => LinkRefusal::HelperUnavailable { reason, function },
             })?;
         self.fulfil_declared(
             content,

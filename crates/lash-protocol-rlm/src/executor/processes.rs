@@ -274,7 +274,7 @@ mod work_laws {
                 .await,
             Err(EnginePortError::Refused(
                 AdmissionRefusal::DocumentValidation(ref invalid)
-            )) if matches!(*invalid.reason, lash_kernel_doc::InvalidReason::FunctionNotResolved { function } if function == shipped)
+            )) if matches!(*invalid.reason, lash_kernel_doc::InvalidReason::HelperUnavailable { function, reason: lash_kernel_value::HelperUnavailableReason::Unknown } if function == shipped)
         ));
         // Retain structurally valid bytes independently to test the cold
         // inspection boundary, which must use the same custom image too.
@@ -284,12 +284,16 @@ mod work_laws {
             .publish_module_artifact(&claim, &identified.id().to_string(), identified.body())
             .await
             .unwrap();
-        assert!(matches!(
-            documents.fulfil(&request(identified.id())).await,
-            Err(EnginePortError::Refused(
-                AdmissionRefusal::DocumentValidation(ref invalid)
-            )) if matches!(*invalid.reason, lash_kernel_doc::InvalidReason::FunctionNotResolved { function } if function == shipped)
-        ));
+        let refusal = documents.fulfil(&request(identified.id())).await.err();
+        assert!(
+            matches!(
+                refusal,
+                Some(EnginePortError::Refused(
+                    AdmissionRefusal::HelperUnavailable { function, reason: lash_kernel_value::HelperUnavailableReason::Unknown }
+                )) if function == shipped
+            ),
+            "cold custom helper refusal: {refusal:?}"
+        );
     }
 
     /// FIG-7135: linked loading's validated document facts reach execution
