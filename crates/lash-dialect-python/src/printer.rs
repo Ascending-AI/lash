@@ -92,6 +92,7 @@ pub(crate) fn print_regions(
             }
             ModulePart::Alias { .. } => {
                 return Err(PrintError::Unprintable {
+                    reason: lash_kernel_dialect::UnprintableReason::ModuleDeclarations,
                     site: lash_kernel_value::sites::Site::new(
                         lash_kernel_value::sites::Unit::Main,
                         Vec::new(),

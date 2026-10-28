@@ -398,10 +398,11 @@ pub(crate) fn lower_with_calls(
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
-        lowerer.emit(Stmt::Let {
-            name: Name::new(name.as_str()),
-            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-        });
+        lowerer.emit(
+            crate::constructs::conventions::CONVENTIONS
+                .bindings
+                .predeclaration(Name::new(name.as_str())),
+        );
     }
     let body = lowerer.block(|this| this.statements(&module.body))?;
     let body = lowerer.task_cleanup(body)?;

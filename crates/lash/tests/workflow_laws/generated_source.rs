@@ -140,7 +140,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             for maps in [false, true] {
                 let printed = local(&view, format, maps, embedding.library());
                 if authored != Some(format) {
-                    let Err(lash::dialect::PrintError::Unprintable { site }) = printed else {
+                    let Err(lash::dialect::PrintError::Unprintable { site, .. }) = printed else {
                         panic!(
                             "foreign helpers/policy or raw kernel must refuse: {format:?}: {printed:?}"
                         );
@@ -158,7 +158,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                         .await;
                     assert!(
                         matches!(remote,
-                        Err(lash::vm::SourceServiceError::Print(lash::dialect::PrintError::Unprintable { site: actual })) if actual == site),
+                        Err(lash::vm::SourceServiceError::Print(lash::dialect::PrintError::Unprintable { site: actual, .. })) if actual == site),
                         "worker retains the local refusal site"
                     );
                     continue;
@@ -657,4 +657,152 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
     core.shutdown().await.unwrap();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     println!("FIG-7378: {readbacks} exact canvas source readbacks");
+}
+
+/// FIG-7514: replay the host's exact admitted draft. An effect after the
+/// implicit async return has no authored inverse; the public print refusal
+/// must explain that construct rather than blame module main.
+#[tokio::test]
+async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
+    let request: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/canvas-insert-request.json")).unwrap();
+    let document: Document = serde_json::from_value(request["document"].clone()).unwrap();
+    let captions = serde_json::from_value(request["captions"].clone()).unwrap();
+    use tracing::instrument::WithSubscriber as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
+    let mut draft = lash::workflow::edit::Draft::open(document.clone()).unwrap();
+    let refusal = draft
+        .apply(
+            &lash::workflow::edit::Transaction {
+                base: document.identity(),
+                edits: vec![],
+            },
+            &lash_kernel_check::Environment::new(embedding.library()),
+            lash::workflow::edit::CONVENTIONS,
+        )
+        .expect_err("malformed source cannot be readmitted by a canvas edit");
+    assert!(refusal.to_string().contains("implicit return"), "{refusal}");
+    assert_eq!(draft.document(), &document, "refused admission is atomic");
+    let service = lash::vm::WorkerService::default();
+    let recorder = super::artifact_tracing::Recorder::default();
+    let subscriber = tracing_subscriber::Registry::default().with(recorder.clone());
+    let error = service
+        .print(
+            &document,
+            Some(&captions),
+            SourceFormat::TypeScriptV1,
+            PrintOptions {
+                source_map: true,
+                ..Default::default()
+            },
+        )
+        .with_subscriber(subscriber)
+        .await
+        .expect_err("the captured document has work after its implicit return");
+    assert!(error.to_string().contains("implicit return"), "{error}");
+    let lash::vm::SourceServiceError::Print(lash::dialect::PrintError::Unprintable {
+        site,
+        reason,
+    }) = &error
+    else {
+        panic!("{error}")
+    };
+    assert_eq!(
+        *reason,
+        lash::dialect::UnprintableReason::ImplicitReturn(
+            lash::dialect::conventions::ReturnRefusal::NotTerminating
+        )
+    );
+    assert!(
+        matches!(site.unit, k::Unit::Library(_)),
+        "the damaged callable owns the refusal"
+    );
+    let diagnostic: lash::dialect::Diagnostic = lash::dialect::PrintError::Unprintable {
+        site: site.clone(),
+        reason: reason.clone(),
+    }
+    .into();
+    assert_eq!(diagnostic.code(), "GENERATED_SOURCE_UNPRINTABLE");
+    assert!(diagnostic.to_string().contains("implicit return"));
+    let fields = recorder.print_refusal();
+    assert_eq!(fields["refusal.construct"], "implicit_return");
+    assert!(fields["refusal.reason"].contains("implicit return"));
+    assert_eq!(fields["refusal.site"], site.to_string());
+
+    // Replay the same insertion against the current helper release, using
+    // the captured host operation contracts rather than a simplified toolbox.
+    let namespaces = lash::dialect::regions::namespaces(&document).unwrap();
+    let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
+    let lowered = lash::typescript::lower(
+        "export async function liveRun(notify: boolean): Promise<void> { await inbox.sendItem({title: 'Live run v2', body: 'Starting.'}); await sleep(20000); await inbox.sendItem({title: 'Live run finished', body: 'The run is done.'}); }",
+        &environment,
+        lash::dialect::Mode::Module,
+    ).unwrap();
+    let mut draft = lash::workflow::edit::Draft::open(lowered.document.into_document()).unwrap();
+    let unit = super::function_unit(draft.document(), "liveRun");
+    let slot = draft
+        .document()
+        .imports
+        .iter()
+        .find(|(_, import)| import.name == lash::dialect::service_name("inbox", "send_item"))
+        .unwrap()
+        .0;
+    let slot = *slot;
+    let base = draft.identity();
+    draft
+        .apply(
+            &lash::workflow::edit::Transaction {
+                base,
+                edits: vec![lash::workflow::authoring::Operation::InsertStep {
+                    base,
+                    at: lash::workflow::edit::Position::end(Site::new(unit, [])),
+                    slot,
+                    args: vec![lash::workflow::authoring::DataValue::Record(vec![
+                        lash::workflow::authoring::DataRecordEntry {
+                            field: "title".into(),
+                            value: lash::workflow::authoring::DataValue::Literal(k::Literal::Text(
+                                "Live run v2 extra".into(),
+                            )),
+                        },
+                        lash::workflow::authoring::DataRecordEntry {
+                            field: "body".into(),
+                            value: lash::workflow::authoring::DataValue::Literal(k::Literal::Text(
+                                "A step added on the canvas.".into(),
+                            )),
+                        },
+                    ])],
+                    result: lash::schema::Type::Any,
+                    binding: None,
+                }],
+            },
+            &lash_kernel_check::Environment::new(embedding.library()),
+            lash::workflow::edit::CONVENTIONS,
+        )
+        .expect("the actual end insertion must be admitted");
+    let printed = service
+        .print(
+            draft.document(),
+            None,
+            SourceFormat::TypeScriptV1,
+            PrintOptions {
+                source_map: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(printed.source.contains("Live run v2 extra"));
+    assert!(printed.source.contains("A step added on the canvas."));
+    let (read, _) = service
+        .read_exported(
+            &printed.source,
+            draft.document(),
+            SourceFormat::TypeScriptV1,
+            Default::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.canonical_bytes(), draft.document().canonical_bytes());
 }

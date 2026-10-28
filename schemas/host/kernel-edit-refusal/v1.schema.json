@@ -209,6 +209,27 @@
         {
           "additionalProperties": false,
           "properties": {
+            "unprintable": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "$ref": "#/$defs/UnprintableReason"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "unprintable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "non_separable_step": {
               "additionalProperties": false,
               "properties": {
@@ -1003,6 +1024,31 @@
       ],
       "type": "string"
     },
+    "OperationRefusal": {
+      "additionalProperties": false,
+      "description": "A raw operation whose authored construct owns additional lowering work.",
+      "properties": {
+        "construct": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/QualifiedName"
+        }
+      },
+      "required": [
+        "operation",
+        "construct",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "PackagePath": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*(\\.[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*)*$",
+      "type": "string"
+    },
     "Param": {
       "additionalProperties": false,
       "properties": {
@@ -1020,6 +1066,33 @@
       "required": [
         "name",
         "ty"
+      ],
+      "type": "object"
+    },
+    "QualifiedName": {
+      "additionalProperties": false,
+      "description": "An Import name parsed by segment, optionally addressing a type member.",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/Segment"
+        },
+        "package": {
+          "$ref": "#/$defs/PackagePath"
+        },
+        "type_member": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Segment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "package",
+        "member"
       ],
       "type": "object"
     },
@@ -1235,6 +1308,18 @@
         }
       ]
     },
+    "ReturnRefusal": {
+      "description": "Why a lowering-owned return cannot be recovered as authored source.",
+      "enum": [
+        "not_terminating",
+        "wrong_form"
+      ],
+      "type": "string"
+    },
+    "Segment": {
+      "pattern": "^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*$",
+      "type": "string"
+    },
     "Signature": {
       "additionalProperties": false,
       "description": "What a function, an effect or an entry takes and returns.",
@@ -1274,6 +1359,14 @@
         "unit"
       ],
       "type": "object"
+    },
+    "SourceLanguage": {
+      "description": "The language of source, independent of a generated-source format version.",
+      "enum": [
+        "type_script",
+        "python"
+      ],
+      "type": "string"
     },
     "StatementForm": {
       "description": "An action form, as a refusal names one the body of a function with a\nnative implementation may not run (`K-LIB-004`).",
@@ -1487,6 +1580,108 @@
           },
           "required": [
             "library"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "UnprintableReason": {
+      "description": "The construct that has no faithful authored spelling and its constraint.",
+      "oneOf": [
+        {
+          "enum": [
+            "module_declarations",
+            "readback_refused",
+            "readback_mismatch",
+            "caption_mismatch",
+            "main_entry"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "inverse_unavailable": {
+              "additionalProperties": false,
+              "properties": {
+                "language": {
+                  "$ref": "#/$defs/SourceLanguage"
+                }
+              },
+              "required": [
+                "language"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "inverse_unavailable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "operation": {
+              "$ref": "#/$defs/OperationRefusal"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "callable": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "detail"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "callable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "main": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "detail"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "main"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "implicit_return": {
+              "$ref": "#/$defs/ReturnRefusal"
+            }
+          },
+          "required": [
+            "implicit_return"
           ],
           "type": "object"
         }

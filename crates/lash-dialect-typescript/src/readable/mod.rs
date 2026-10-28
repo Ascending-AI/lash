@@ -86,6 +86,7 @@ fn print_attempt(
     style: lift::Style,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
+    crate::constructs::conventions::CONVENTIONS.check_document(document, library)?;
     let namespaces = regions::namespaces(document).map_err(PrintError::Namespace)?;
     let lifted = lift::document(document, captions, library, style);
     let printing = Printing {
@@ -97,7 +98,8 @@ fn print_attempt(
             .into_iter()
             .map(|(name, (function, item))| {
                 item.map(|item| (name, item))
-                    .map_err(|_| PrintError::Unprintable {
+                    .map_err(|detail| PrintError::Unprintable {
+                        reason: lash_kernel_dialect::UnprintableReason::Callable { detail },
                         site: lash_kernel_value::sites::Site::new(
                             lash_kernel_value::sites::Unit::Library(function),
                             Vec::new(),
@@ -105,7 +107,8 @@ fn print_attempt(
                     })
             })
             .collect::<Result<_, _>>()?,
-        main: Some(lifted.main.map_err(|_| PrintError::Unprintable {
+        main: Some(lifted.main.map_err(|detail| PrintError::Unprintable {
+            reason: lash_kernel_dialect::UnprintableReason::Main { detail },
             site: lash_kernel_value::sites::Site::new(
                 lash_kernel_value::sites::Unit::Main,
                 Vec::new(),
@@ -134,6 +137,7 @@ impl regions::Regions for Printing<'_> {
         let mut writer = source::Writer::default();
         let mut written = BTreeMap::new();
         let unprintable = || PrintError::Unprintable {
+            reason: lash_kernel_dialect::UnprintableReason::ModuleDeclarations,
             site: lash_kernel_value::sites::Site::new(
                 lash_kernel_value::sites::Unit::Main,
                 Vec::new(),

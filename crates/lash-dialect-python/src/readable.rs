@@ -30,6 +30,7 @@ pub fn print(
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
+    crate::constructs::conventions::CONVENTIONS.check_document(document, library)?;
     let namespaces = regions::namespaces(document).map_err(PrintError::Namespace)?;
     let printing = Printing {
         document,
@@ -94,6 +95,7 @@ impl regions::Regions for Printing<'_> {
 
     fn whole(&self, functions: &BTreeSet<Name>) -> Result<regions::Whole, PrintError> {
         let unprintable = || PrintError::Unprintable {
+            reason: lash_kernel_dialect::UnprintableReason::ModuleDeclarations,
             site: lash_kernel_value::sites::Site::new(
                 lash_kernel_value::sites::Unit::Main,
                 Vec::new(),
@@ -118,7 +120,13 @@ impl regions::Regions for Printing<'_> {
             &BTreeSet::new(),
         );
         let (printed, written) = result.map_err(|error| match error {
-            PrintError::Invalid(_) => unprintable(),
+            PrintError::Invalid(detail) => PrintError::Unprintable {
+                site: lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
+                    vec![],
+                ),
+                reason: lash_kernel_dialect::UnprintableReason::Main { detail },
+            },
             error => error,
         })?;
         Ok(regions::Whole {

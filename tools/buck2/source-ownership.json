@@ -137,6 +137,9 @@
     "test_includes": {
       "otel_trace_evidence": [
         "docs/instrumentation-contract.md"
+      ],
+      "workflow_laws": [
+        "tests/workflow_laws/fixtures/canvas-insert-request.json"
       ]
     },
     "test_input_fallbacks": {
@@ -734,10 +737,136 @@
         "*/printed.*",
         "*/refusal.*.txt",
         "*/edits/*"
+      ],
+      "canvas_probe_nested": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_helper_0": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_helper_1": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_helper_2": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_helper_3": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_retry_0": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_retry_1": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_retry_2": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ],
+      "canvas_probe_retry_3": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
       ]
     },
     "derive_tests": true,
     "tests": {
+      "canvas_probe_helper_0": [
+        "tests/canvas_probe_helper_0.rs"
+      ],
+      "canvas_probe_helper_1": [
+        "tests/canvas_probe_helper_1.rs"
+      ],
+      "canvas_probe_helper_2": [
+        "tests/canvas_probe_helper_2.rs"
+      ],
+      "canvas_probe_helper_3": [
+        "tests/canvas_probe_helper_3.rs"
+      ],
+      "canvas_probe_nested": [
+        "tests/canvas_probe_nested.rs"
+      ],
+      "canvas_probe_retry_0": [
+        "tests/canvas_probe_retry_0.rs"
+      ],
+      "canvas_probe_retry_1": [
+        "tests/canvas_probe_retry_1.rs"
+      ],
+      "canvas_probe_retry_2": [
+        "tests/canvas_probe_retry_2.rs"
+      ],
+      "canvas_probe_retry_3": [
+        "tests/canvas_probe_retry_3.rs"
+      ],
       "corpus": [
         "tests/corpus.rs"
       ]
@@ -782,6 +911,7 @@
     },
     "test_input_fallbacks": {},
     "unit_test_sources": [
+      "src/canvas_prints.rs",
       "src/cell.rs",
       "src/lib.rs",
       "src/namespace.rs",

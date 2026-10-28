@@ -1385,7 +1385,8 @@ PACKAGE_DEPS = {
             "serde_bytes": "//third-party/rust:p0316",
             "serde_json": "//third-party/rust:p0320",
             "thiserror": "//third-party/rust:p0373",
-            "tokio": "//third-party/rust:p0379"
+            "tokio": "//third-party/rust:p0379",
+            "tracing": "//third-party/rust:p0395"
         }
     },
     "lash-internal-vm-protocol": {

@@ -194,7 +194,12 @@ impl Working {
     }
 
     /// The block a position names, and the index it puts a statement at.
-    pub(super) fn position(&mut self, position: &Position) -> Result<(Site, usize), Fault> {
+    pub(super) fn position(
+        &mut self,
+        position: &Position,
+        source: &lash_kernel_dialect::conventions::Conventions,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<(Site, usize), Fault> {
         let block = self.locate_as(&position.block, NodeClass::Block)?;
         let index = match &position.before {
             Some(before) => {
@@ -204,7 +209,17 @@ impl Working {
                 }
                 index
             }
-            None => self.block(&block).len(),
+            None => source
+                .canvas_end(&self.document, &block, catalog)
+                .map_err(|reason| {
+                    at(
+                        &position.block,
+                        EditDiagnosticKind::Unprintable {
+                            reason: lash_kernel_dialect::UnprintableReason::ImplicitReturn(reason),
+                        },
+                    )
+                })?
+                .unwrap_or_else(|| self.block(&block).len()),
         };
         Ok((block, index))
     }
@@ -285,10 +300,15 @@ impl Working {
         Ok(())
     }
 
-    pub(crate) fn edit(&mut self, edit: &Edit) -> Result<(), Fault> {
+    pub(crate) fn edit(
+        &mut self,
+        edit: &Edit,
+        source: &lash_kernel_dialect::conventions::Conventions,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<(), Fault> {
         match edit {
             Edit::InsertStatement { at, statement } => {
-                let (block, index) = self.position(at)?;
+                let (block, index) = self.position(at, source, catalog)?;
                 let shadow = Shadow::fresh(Node::Stmt(statement));
                 self.insert(&block, index, *statement.clone(), shadow);
             }
@@ -296,7 +316,9 @@ impl Working {
                 let (block, index) = self.statement(statement)?;
                 self.take(&block, index);
             }
-            Edit::MoveStatement { statement, to } => self.move_statement(statement, to)?,
+            Edit::MoveStatement { statement, to } => {
+                self.move_statement(statement, to, source, catalog)?
+            }
             Edit::ReplaceExpression { expression, with } => {
                 let site = self.locate_as(expression, NodeClass::Expression)?;
                 self.write(&site, |node| {
@@ -422,9 +444,15 @@ impl Working {
         Ok(())
     }
 
-    fn move_statement(&mut self, statement: &Site, to: &Position) -> Result<(), Fault> {
+    fn move_statement(
+        &mut self,
+        statement: &Site,
+        to: &Position,
+        source: &lash_kernel_dialect::conventions::Conventions,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+    ) -> Result<(), Fault> {
         let (from, at_index) = self.statement(statement)?;
-        let (mut block, mut index) = self.position(to)?;
+        let (mut block, mut index) = self.position(to, source, catalog)?;
         let moved = from.child(u32::try_from(at_index).unwrap_or(u32::MAX));
         if block.unit == moved.unit && block.path.starts_with(&moved.path) {
             return Err(at(statement, EditDiagnosticKind::IntoItself));

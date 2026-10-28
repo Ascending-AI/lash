@@ -2177,12 +2177,27 @@ mod artifact_tracing {
         events: Vec<(Option<SpanKey>, Fields)>,
     }
     #[derive(Clone)]
-    struct Recorder(Arc<Mutex<Records>>);
+    pub(super) struct Recorder(Arc<Mutex<Records>>);
 
     impl Default for Recorder {
         fn default() -> Self {
             lash_core::testing::trace_capture::pin_accounting_dispatch();
             Self(Arc::default())
+        }
+    }
+
+    impl Recorder {
+        pub(super) fn print_refusal(&self) -> BTreeMap<String, String> {
+            self.0
+                .lock()
+                .unwrap()
+                .spans
+                .iter()
+                .find(|span| span.name == "lash.source.print")
+                .expect("the public print span")
+                .fields
+                .0
+                .clone()
         }
     }
 
@@ -2212,6 +2227,28 @@ mod artifact_tracing {
                 fields,
                 closed: false,
             });
+        }
+        fn on_record(
+            &self,
+            id: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            context: Context<'_, Registry>,
+        ) {
+            let key = *context
+                .span(id)
+                .unwrap()
+                .extensions()
+                .get::<SpanKey>()
+                .unwrap();
+            let mut records = self.0.lock().unwrap();
+            values.record(
+                &mut records
+                    .spans
+                    .iter_mut()
+                    .find(|span| span.id == key)
+                    .unwrap()
+                    .fields,
+            );
         }
         fn on_close(&self, id: tracing::span::Id, context: Context<'_, Registry>) {
             let key = *context

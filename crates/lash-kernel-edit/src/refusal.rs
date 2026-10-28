@@ -103,6 +103,10 @@ pub enum EditDiagnosticKind {
     NoSuchFunction { name: Name },
     #[error("function `{name}` is not an entry")]
     NoSuchEntry { name: Name },
+    #[error("no authored source representation: {reason}")]
+    Unprintable {
+        reason: lash_kernel_dialect::UnprintableReason,
+    },
     #[error("this operation requires a source edit")]
     UnsupportedCanvasEdit,
     #[error("this site is not a canvas value target")]
@@ -150,6 +154,7 @@ impl EditDiagnosticKind {
         match self {
             Self::ReplacementMustBeSole => "replacement_must_be_sole",
             Self::NameCollision { .. } => "name_collision",
+            Self::Unprintable { .. } => "generated_source_unprintable",
             Self::UnsupportedCanvasEdit => "unsupported_canvas_edit",
             Self::NotValueTarget => "not_value_target",
             Self::ValueOutsideCanvasSet => "value_outside_canvas_set",

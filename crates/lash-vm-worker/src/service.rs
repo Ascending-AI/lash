@@ -122,8 +122,8 @@ pub(crate) fn perform(
                         Err(lash_kernel_dialect::PrintError::Namespace(error)) => {
                             Response::PrintNamespaceRefused(error)
                         }
-                        Err(lash_kernel_dialect::PrintError::Unprintable { site }) => {
-                            Response::Unprintable { site }
+                        Err(lash_kernel_dialect::PrintError::Unprintable { site, reason }) => {
+                            Response::Unprintable { site, reason }
                         }
                         Err(error) => Response::DialectRefused(error.into()),
                     }
@@ -382,7 +382,7 @@ mod tests {
         let response = perform(&embedding, &encoded).expect("print response");
         let response: Response = rmp_serde::from_slice(&response.0).expect("response");
         assert!(
-            matches!(response, Response::Unprintable { site } if site == expected),
+            matches!(response, Response::Unprintable { site, .. } if site == expected),
             "the callable site must survive IPC without parsing diagnostic prose"
         );
     }

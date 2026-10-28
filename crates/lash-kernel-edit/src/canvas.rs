@@ -225,6 +225,28 @@ fn expression_step(
 }
 
 impl Working {
+    fn binding_statement(
+        &mut self,
+        position: &crate::Position,
+        name: &lash_kernel_value::Name,
+        value: Rhs,
+        source: &Conventions,
+    ) -> Result<Stmt, Fault> {
+        let block = self.locate(&position.block)?;
+        let (statement, declaration) =
+            source
+                .bindings
+                .statement(name.clone(), value, !block.path.is_empty());
+        if let Some(declaration) = declaration {
+            let root = Site::new(block.unit, vec![]);
+            let index = self.block(&root).iter().take_while(|stmt| matches!(stmt,
+                Stmt::Let { name: prior, value: Rhs::Expr(Expr::Literal(Literal::Absent)) } if prior < name)).count();
+            let shadow = Shadow::fresh(Node::Stmt(&declaration));
+            self.insert(&root, index, declaration, shadow);
+        }
+        Ok(statement)
+    }
+
     fn retain_helpers(&mut self, node: Node<'_>, catalog: &dyn FunctionCatalog) {
         self.document
             .library
@@ -323,13 +345,15 @@ impl Working {
                 if !data(&value, catalog) {
                     return Err(at(&position.block, Cause::ValueOutsideCanvasSet));
                 }
-                self.edit(&Edit::InsertStatement {
-                    at: position.clone(),
-                    statement: Box::new(Stmt::Let {
-                        name: name.clone(),
-                        value: Rhs::Expr(value),
-                    }),
-                })?;
+                let statement = self.binding_statement(position, name, Rhs::Expr(value), source)?;
+                self.edit(
+                    &Edit::InsertStatement {
+                        at: position.clone(),
+                        statement: Box::new(statement),
+                    },
+                    source,
+                    catalog,
+                )?;
             }
             Operation::RemoveBinding { declaration, .. } => {
                 let site = self.locate(declaration)?;
@@ -341,9 +365,13 @@ impl Working {
                         && !contains_closure(Node::Expr(value)) => {}
                     _ => return Err(at(declaration, Cause::NotValueTarget)),
                 }
-                self.edit(&Edit::RemoveStatement {
-                    statement: declaration.clone(),
-                })?;
+                self.edit(
+                    &Edit::RemoveStatement {
+                        statement: declaration.clone(),
+                    },
+                    source,
+                    catalog,
+                )?;
             }
             Operation::RenameExport { from, to, .. } => {
                 if from == to && self.document.exports.contains_key(from) {
@@ -409,10 +437,14 @@ impl Working {
                             value
                         };
                         self.retain_helpers(Node::Expr(&value), catalog);
-                        self.edit(&Edit::ReplaceExpression {
-                            expression: expression.clone(),
-                            with: value,
-                        })?;
+                        self.edit(
+                            &Edit::ReplaceExpression {
+                                expression: expression.clone(),
+                                with: value,
+                            },
+                            source,
+                            catalog,
+                        )?;
                     }
                     ValueTarget::Initializer { statement } => {
                         let site = self.locate(statement)?;
@@ -426,10 +458,14 @@ impl Working {
                         if has_action(Node::Expr(old)) || contains_closure(Node::Expr(old)) {
                             return Err(at(statement, Cause::NotValueTarget));
                         }
-                        self.edit(&Edit::ReplaceExpression {
-                            expression: statement.child(0),
-                            with: value,
-                        })?;
+                        self.edit(
+                            &Edit::ReplaceExpression {
+                                expression: statement.child(0),
+                                with: value,
+                            },
+                            source,
+                            catalog,
+                        )?;
                     }
                     ValueTarget::ToolArgument {
                         action,
@@ -476,18 +512,26 @@ impl Working {
                         if path.is_empty() {
                             let value = argument(source, value, catalog, action)?;
                             self.retain_helpers(Node::Expr(&value), catalog);
-                            self.edit(&Edit::SetArgument {
-                                action: action.clone(),
-                                index: *index,
-                                argument: value,
-                            })?;
+                            self.edit(
+                                &Edit::SetArgument {
+                                    action: action.clone(),
+                                    index: *index,
+                                    argument: value,
+                                },
+                                source,
+                                catalog,
+                            )?;
                         } else {
                             let mut expression = action.child(*index);
                             expression.path.extend(path);
-                            self.edit(&Edit::ReplaceExpression {
-                                expression,
-                                with: value,
-                            })?;
+                            self.edit(
+                                &Edit::ReplaceExpression {
+                                    expression,
+                                    with: value,
+                                },
+                                source,
+                                catalog,
+                            )?;
                         }
                     }
                 }
@@ -500,6 +544,11 @@ impl Working {
                 binding,
                 ..
             } => {
+                if let Some(import) = self.document.imports.get(slot)
+                    && let Some(reason) = source.operation_refusal(&import.name)
+                {
+                    return Err(at(&position.block, Cause::Unprintable { reason }));
+                }
                 let args: Vec<_> = args.iter().map(|arg| arg.expression()).collect();
                 if !args.iter().all(|item| data(item, catalog)) {
                     return Err(at(&position.block, Cause::ValueOutsideCanvasSet));
@@ -535,26 +584,30 @@ impl Working {
                 };
                 let act = reply(source, act, catalog, &position.block)?;
                 let statement = match binding {
-                    Some(name) => Stmt::Let {
-                        name: name.clone(),
-                        value: match act.as_action() {
+                    Some(name) => {
+                        let value = match act.as_action() {
                             Some(action) => Rhs::Action(action),
                             None => Rhs::Expr(Expr::Act(Box::new(act))),
-                        },
-                    },
+                        };
+                        self.binding_statement(position, name, value, source)?
+                    }
                     None => Stmt::Do {
                         value: Expr::Act(Box::new(act)),
                     },
                 };
                 self.retain_helpers(Node::Stmt(&statement), catalog);
-                self.edit(&Edit::InsertStatement {
-                    at: position.clone(),
-                    statement: Box::new(statement),
-                })?;
+                self.edit(
+                    &Edit::InsertStatement {
+                        at: position.clone(),
+                        statement: Box::new(statement),
+                    },
+                    source,
+                    catalog,
+                )?;
             }
             Operation::RemoveStep { action, .. } => {
                 let statement = self.carrier(action, catalog, source)?;
-                self.edit(&Edit::RemoveStatement { statement })?;
+                self.edit(&Edit::RemoveStatement { statement }, source, catalog)?;
             }
             Operation::MoveStep { action, to, .. } => {
                 let site = self.locate(action)?;
@@ -565,10 +618,14 @@ impl Working {
                     return Err(at(action, Cause::IntoItself));
                 }
                 let statement = self.carrier(action, catalog, source)?;
-                self.edit(&Edit::MoveStatement {
-                    statement,
-                    to: to.clone(),
-                })?;
+                self.edit(
+                    &Edit::MoveStatement {
+                        statement,
+                        to: to.clone(),
+                    },
+                    source,
+                    catalog,
+                )?;
             }
             Operation::ChangeCondition {
                 statement,
@@ -583,10 +640,14 @@ impl Working {
                     )) => header(condition, statement)?,
                     _ => return Err(at(statement, Cause::NoCondition)),
                 }
-                self.edit(&Edit::SetCondition {
-                    statement: statement.clone(),
-                    condition: condition.clone(),
-                })?;
+                self.edit(
+                    &Edit::SetCondition {
+                        statement: statement.clone(),
+                        condition: condition.clone(),
+                    },
+                    source,
+                    catalog,
+                )?;
             }
             Operation::WrapSteps {
                 first,

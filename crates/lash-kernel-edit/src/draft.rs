@@ -178,7 +178,67 @@ impl Draft {
                     FaultKind::Unlinked(refusal) => refused(Some(index), refusal),
                 })?;
         }
-        let published = working.publish(self.identity, environment)?;
+        source
+            .check_document(&working.document, environment.functions)
+            .map_err(|error| {
+                let lash_kernel_dialect::PrintError::Unprintable { site, reason } = error else {
+                    unreachable!("convention validation only refuses missing inverses")
+                };
+                EditRefusal {
+                    diagnostics: vec![EditDiagnostic {
+                        edit: None,
+                        location: Some(crate::Location::Edited(site)),
+                        kind: EditDiagnosticKind::Unprintable { reason },
+                    }],
+                }
+            })?;
+        source.refresh_imports(&mut working.document);
+        let mut published = working.publish(self.identity, environment)?;
+        let (canonical, identities) = source
+            .verify_inverse(&published.document, environment.functions)
+            .map_err(|error| {
+                let (location, kind) = match error {
+                    lash_kernel_dialect::PrintError::Unprintable { site, reason } => (
+                        Some(crate::Location::Edited(site)),
+                        EditDiagnosticKind::Unprintable { reason },
+                    ),
+                    error => (
+                        None,
+                        EditDiagnosticKind::Invalid(lash_kernel_doc::InvalidReason::Document {
+                            message: error.to_string(),
+                        }),
+                    ),
+                };
+                EditRefusal {
+                    diagnostics: vec![EditDiagnostic {
+                        edit: None,
+                        location,
+                        kind,
+                    }],
+                }
+            })?;
+
+        if canonical.identity() != published.admitted.identity {
+            let survivors = published
+                .correspondence
+                .entries()
+                .iter()
+                .map(|entry| {
+                    let mut entry = entry.clone();
+                    if let lash_kernel_value::sites::Unit::Library(id) = &mut entry.to.unit {
+                        *id = identities.get(id).copied().unwrap_or(*id);
+                    }
+                    entry
+                })
+                .collect();
+            published.admitted = lash_kernel_check::admit(&canonical, environment)
+                .map_err(|error| refused(None, error))?;
+            published.correspondence =
+                Correspondence::of(self.identity, published.admitted.identity, survivors)
+                    .ok_or_else(invalid_correspondence)?;
+            published.document = canonical;
+        }
+
         // Check the resulting header facets, including changes reached through
         // edited literals or bindings rather than ChangeCondition itself.
         for node in published.admitted.graph.nodes() {

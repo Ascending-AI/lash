@@ -42,6 +42,7 @@ impl HostArtifacts {
             return Err(crate::EmbedError::WorkflowSource(
                 lash_vm_client::service::SourceServiceError::Print(
                     crate::dialect::PrintError::Unprintable {
+                        reason: crate::dialect::UnprintableReason::MainEntry,
                         site: lash_kernel_value::sites::Site::new(
                             lash_kernel_value::sites::Unit::Main,
                             [],

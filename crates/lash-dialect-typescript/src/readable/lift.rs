@@ -367,16 +367,15 @@ impl<'a> Lifter<'a> {
             .body()
             .ok_or_else(|| "native export has no authored body".to_owned())?
             .block;
-        // The implicit end of an async function returns undefined.
-        if function.projection == k::ProjectionRole::ImplicitReturn
-            && let [rest @ .., k::Stmt::ReturnVia { value, policy }] = statements
-            && matches!(value, k::Expr::Literal(k::Literal::Absent))
-            && self.is(policy, "ts.promise.adopt")
+        let end = crate::constructs::conventions::RETURNS
+            .body_end(function, |target, name| self.is(target, name))
+            .map_err(|reason| reason.to_string())?;
+        if let Some(end) = end
             && self
                 .captions
-                .is_none_or(|captions| captions.at(&site.child(rest.len() as u32)).is_none())
+                .is_none_or(|captions| captions.at(&site.child(end as u32)).is_none())
         {
-            statements = rest;
+            statements = &statements[..end];
         }
         // Entry lowering recreates reachable module helpers in its private
         // scope. Refer to their module declarations so re-lowering recreates

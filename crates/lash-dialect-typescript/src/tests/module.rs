@@ -309,10 +309,15 @@ fn an_unprintable_export_refuses_with_its_callable_site() {
     };
     export.convention = StartConvention::Direct;
     let site = Site::new(Unit::Library(export.function), Vec::new());
-    assert_eq!(
-        crate::print(&document, None, super::library(), Default::default()),
-        Err(lash_kernel_dialect::PrintError::Unprintable { site }),
-        "the failed lift must survive instead of printing an empty module",
+    assert!(
+        matches!(
+            crate::print(&document, None, super::library(), Default::default()),
+            Err(lash_kernel_dialect::PrintError::Unprintable {
+                site: actual,
+                reason: lash_kernel_dialect::UnprintableReason::Callable { .. },
+            }) if actual == site
+        ),
+        "the failed lift must survive instead of printing an empty module"
     );
 }
 

@@ -20,10 +20,11 @@ mod cell;
 mod namespace;
 use namespace::FixtureNamespace;
 use {lash_kernel_value::names::LinkedStart, lash_kernel_value::names::StartSelector};
+mod canvas_prints;
 mod printed;
 mod readable;
 
-pub use printed::{Lifted, SCAFFOLDING, readable_prints};
+pub use printed::{Lifted, SCAFFOLDING, canvas_prints, readable_prints};
 
 /// A corpus case: dialect-specific source, with a shared entry/refusal contract.
 #[derive(Debug, Deserialize)]
@@ -286,7 +287,7 @@ pub fn corpus_namespaces(
 /// reading, SM-ORDER/SM-COVER, closed edit replay and cell crossing structure.
 /// Only entry names and refusal codes are compared between dialects.
 pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
-    render_with(root).map(|(outputs, _)| outputs)
+    render_with(root, |_| false, (0, 1)).map(|(outputs, _)| outputs)
 }
 
 /// [`render`], and how each document and its canvas edit printed.
@@ -294,8 +295,13 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     clippy::disallowed_methods,
     reason = "corpus tooling reads explicitly supplied fixture paths"
 )]
-pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
+pub(crate) fn render_with(
+    root: &Path,
+    check_canvas: impl Fn(&Case) -> bool,
+    partition: (usize, usize),
+) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
     let mut report = Vec::new();
+    let mut canvas_failures = Vec::new();
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
     let mut effects = BTreeMap::new();
@@ -483,6 +489,23 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 environment: &env,
                 mode,
             };
+            if check_canvas(&case) && case.mode == CaseMode::Module {
+                eprintln!("canvas fixture {} {extension}", case.name);
+                if let Err(error) = canvas_prints::check(
+                    document,
+                    &lowered.captions,
+                    lang,
+                    &checker,
+                    &printing,
+                    partition,
+                ) {
+                    eprintln!(
+                        "canvas inverse failure {} {extension}: {error:#}",
+                        case.name
+                    );
+                    canvas_failures.push(format!("{} {extension}: {error:#}", case.name));
+                }
+            }
             let source = roundtrip(document, &lowered.captions, lang, &printing)
                 .with_context(|| format!("{} {extension}: authored print/read", case.name))?;
             report.push(Lifted::of(&case.name, lang, false, &source));
@@ -521,6 +544,11 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             }
         }
     }
+    ensure!(
+        canvas_failures.is_empty(),
+        "canvas edit law:\n{}",
+        canvas_failures.join("\n")
+    );
     Ok((outputs, report))
 }
 

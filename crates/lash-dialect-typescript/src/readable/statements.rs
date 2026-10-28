@@ -93,7 +93,10 @@ impl Lifter<'_> {
             },
             k::Stmt::Break => StmtKind::Break,
             k::Stmt::Continue => StmtKind::Continue,
-            k::Stmt::ReturnVia { value, policy } if self.is(policy, "ts.promise.adopt") => {
+            k::Stmt::ReturnVia { value, .. }
+                if crate::constructs::conventions::RETURNS
+                    .is_statement(statement, |target, name| self.is(target, name)) =>
+            {
                 match value {
                     k::Expr::Literal(k::Literal::Absent) => StmtKind::Return(None),
                     value => StmtKind::Return(Some(self.expr(value)?)),

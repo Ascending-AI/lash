@@ -226,7 +226,7 @@ fn module_main_roundtrip(
         }
     };
     assert!(
-        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site }) if site.unit == lash_kernel_value::sites::Unit::Main)
+        matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site, .. }) if site.unit == lash_kernel_value::sites::Unit::Main)
     );
     Ok(())
 }

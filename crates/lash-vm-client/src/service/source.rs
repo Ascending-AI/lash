@@ -34,6 +34,9 @@ impl Service {
     /// `captions`, of `document`, are spelled where the dialect can; the rest
     /// are listed in [`PrintedSource::dropped`]. Captions of another
     /// document, or naming a site that is not captionable, are refused here.
+    #[tracing::instrument(level = "debug", name = "lash.source.print", skip_all,
+        fields(dialect = format.dialect(), refusal.construct = tracing::field::Empty,
+            refusal.reason = tracing::field::Empty, refusal.site = tracing::field::Empty))]
     pub async fn print(
         &self,
         document: &Document,
@@ -54,10 +57,21 @@ impl Service {
                 options,
             })
             .await?;
-        match response {
+        let result = match response {
             Response::Printed(printed) => Ok(printed),
             other => Err(refused(other)),
+        };
+        if let Err(SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable {
+            site,
+            reason,
+        })) = &result
+        {
+            let span = tracing::Span::current();
+            span.record("refusal.construct", reason.construct());
+            span.record("refusal.reason", tracing::field::display(reason));
+            span.record("refusal.site", tracing::field::display(site));
         }
+        result
     }
 
     /// Lower a whole authored workflow module in the dialect of `language`,
@@ -162,8 +176,8 @@ fn refused(response: Response) -> SourceServiceError {
             SourceServiceError::Print(lash_kernel_dialect::PrintError::Namespace(error))
         }
 
-        Response::Unprintable { site } => {
-            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site })
+        Response::Unprintable { site, reason } => {
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site, reason })
         }
         Response::DialectRefused(refusal) => SourceServiceError::Dialect(Box::new(refusal)),
         Response::UndeclaredMembers { members } => {
@@ -183,12 +197,16 @@ mod tests {
     fn unprintable_worker_sites_reach_the_source_service_error() {
         let site =
             lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, vec![2]);
-        let wire = rmp_serde::to_vec_named(&Response::Unprintable { site: site.clone() }).unwrap();
+        let wire = rmp_serde::to_vec_named(&Response::Unprintable {
+            site: site.clone(),
+            reason: lash_kernel_dialect::UnprintableReason::ReadbackMismatch,
+        })
+        .unwrap();
         let response = rmp_serde::from_slice(&wire).unwrap();
         let error = refused(response);
         assert!(
             matches!(error,
-            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site: actual })
+            SourceServiceError::Print(lash_kernel_dialect::PrintError::Unprintable { site: actual, reason: lash_kernel_dialect::UnprintableReason::ReadbackMismatch })
                 if actual == site),
             "host must retain the typed site"
         );

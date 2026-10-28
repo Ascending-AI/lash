@@ -202,8 +202,11 @@ impl Lifter<'_> {
         body: &[k::Stmt],
         site: &Site,
     ) -> Lift<Body> {
-        let adopts =
-            |lifter: &Self, policy: &k::FunctionTarget| lifter.is(policy, "ts.promise.adopt");
+        let adopts = |lifter: &Self, policy: &k::FunctionTarget| {
+            crate::constructs::conventions::RETURNS
+                .asynchronous_policy
+                .is_some_and(|name| lifter.is(policy, name))
+        };
         // An arrow's expression: its arguments bound around it.
         let returned = match body {
             [k::Stmt::Return { value }] if !is_async => Some(value),

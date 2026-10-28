@@ -134,8 +134,20 @@ pub mod graph {
 /// correspondence an applied transaction answers.
 #[cfg(feature = "workflow-authoring")]
 pub mod edit {
-    pub use lash_dialect_conventions::ALL as CONVENTIONS;
-    pub use lash_kernel_dialect::conventions::{Boundary, BoundaryOperand, Conventions, Iteration};
+    pub const CONVENTIONS: &[Conventions] = &[
+        #[cfg(feature = "typescript")]
+        lash_dialect_typescript::CONVENTIONS,
+        #[cfg(not(feature = "typescript"))]
+        lash_dialect_conventions::typescript::CONVENTIONS,
+        #[cfg(feature = "python")]
+        lash_dialect_python::CONVENTIONS,
+        #[cfg(not(feature = "python"))]
+        lash_dialect_conventions::python::CONVENTIONS,
+    ];
+    pub use lash_kernel_dialect::conventions::{
+        BindingScope, Boundary, BoundaryOperand, Conventions, Inverse, Iteration, ReturnRefusal,
+        Returns, SourceOnlyOperation,
+    };
     pub use lash_kernel_edit::{
         Applied, Draft, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction, Location,
         NodeClass, Position, Transaction, extract_entry,

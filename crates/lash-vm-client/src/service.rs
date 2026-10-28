@@ -275,6 +275,7 @@ pub enum Response {
     /// The exact callable or main region has no authored source spelling.
     Unprintable {
         site: Site,
+        reason: lash_kernel_dialect::UnprintableReason,
     },
     Read {
         /// The document's token body.

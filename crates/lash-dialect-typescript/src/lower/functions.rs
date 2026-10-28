@@ -356,14 +356,11 @@ impl Lowerer<'_> {
             ),
             None => (value.expr(), None),
         };
-        let stmt = if self.frame().async_body {
-            Stmt::ReturnVia {
-                value,
-                policy: self.function_target("ts.promise.adopt")?,
-            }
-        } else {
-            Stmt::Return { value }
-        };
+        let stmt = crate::constructs::conventions::RETURNS.statement(
+            value,
+            self.frame().async_body,
+            |name| self.function_target(name),
+        )?;
         self.push(
             stmt,
             note.as_ref()
@@ -393,7 +390,11 @@ impl Lowerer<'_> {
             self.buf.last_stmt(),
             Some(Stmt::Return { .. } | Stmt::ReturnVia { .. })
         ) {
-            self.source_return(Operand::undefined())?;
+            let value = crate::constructs::conventions::RETURNS
+                .implicit_value()
+                .unwrap_or_else(|| unreachable!("TypeScript declares an implicit return"));
+            let value = self.inline(value, Ty::Undefined);
+            self.source_return(value)?;
             self.buf.implicit_return = true;
         }
         Ok(())

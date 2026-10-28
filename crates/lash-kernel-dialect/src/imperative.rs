@@ -64,6 +64,76 @@ pub struct PrintedSource {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped: Vec<CaptionTarget>,
 }
+/// A raw operation whose authored construct owns additional lowering work.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[error("{construct} ({operation}): {detail}")]
+#[serde(deny_unknown_fields)]
+pub struct OperationRefusal {
+    pub operation: lash_kernel_value::QualifiedName,
+    pub construct: String,
+    pub detail: String,
+}
+
+/// The construct that has no faithful authored spelling and its constraint.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum UnprintableReason {
+    #[error("{language:?} source edits require the dialect's inverse verifier")]
+    InverseUnavailable { language: SourceLanguage },
+    #[error(transparent)]
+    Operation(Box<OperationRefusal>),
+    #[error("callable: {detail}")]
+    Callable { detail: String },
+    #[error("module main: {detail}")]
+    Main { detail: String },
+    #[error("module declarations do not match their exported bindings")]
+    ModuleDeclarations,
+    #[error(transparent)]
+    ImplicitReturn(crate::conventions::ReturnRefusal),
+    #[error("generated module is refused by ordinary source lowering")]
+    ReadbackRefused,
+    #[error("generated module lowers to a different kernel document")]
+    ReadbackMismatch,
+    #[error("generated captions do not reproduce the document's captions")]
+    CaptionMismatch,
+    #[error("a saved main entry has no standalone callable source form")]
+    MainEntry,
+}
+
+impl UnprintableReason {
+    /// Stable construct category for print-span attributes.
+    pub fn construct(&self) -> &str {
+        match self {
+            Self::InverseUnavailable { .. } => "inverse_verifier",
+            Self::Operation(refusal) => &refusal.construct,
+            Self::Callable { .. } => "callable",
+            Self::Main { .. } | Self::MainEntry => "main",
+            Self::ModuleDeclarations => "module_declarations",
+            Self::ImplicitReturn(_) => "implicit_return",
+            Self::ReadbackRefused | Self::ReadbackMismatch => "module_readback",
+            Self::CaptionMismatch => "captions",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PrintError {
     #[error(transparent)]
@@ -75,8 +145,11 @@ pub enum PrintError {
     #[error("cannot encode generated source: {0}")]
     Encode(#[from] lash_kernel_doc::EncodeError),
     /// Authored syntax cannot represent this callable or main region.
-    #[error("no authored source representation at {site}")]
-    Unprintable { site: Site },
+    #[error("no authored source representation at {site}: {reason}")]
+    Unprintable {
+        site: Site,
+        reason: UnprintableReason,
+    },
     #[error("invalid generated source: {0}")]
     Invalid(String),
 }

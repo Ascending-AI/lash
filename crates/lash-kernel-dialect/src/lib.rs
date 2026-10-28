@@ -81,8 +81,8 @@ pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
 
 pub use imperative::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
-    check_captions, check_document_depth,
+    GeneratedSourceLimits, OperationRefusal, PrintError, PrintOptions, PrintedSource, SourceFormat,
+    SourceWriter, UnprintableReason, check_captions, check_document_depth,
 };
 
 /// Operand facts for authored source reconstruction.

@@ -1,3 +1,4 @@
+const SOURCE_ONLY: &[lash_kernel_dialect::conventions::SourceOnlyOperation] = &[];
 pub const REPLY: &str = "py.reply";
 use lash_kernel_dialect::conventions::{Boundary, Conventions, Iteration};
 pub const ITERATIONS: &[(Option<&str>, Iteration)] = &[
@@ -39,6 +40,9 @@ pub const ITERATIONS: &[(Option<&str>, Iteration)] = &[
     ),
 ];
 pub const CONVENTIONS: Conventions = Conventions {
+    inverse: lash_kernel_dialect::conventions::Inverse::Unavailable,
+    source_only: SOURCE_ONLY,
+    bindings: lash_kernel_dialect::conventions::BindingScope::Callable,
     language: Some(lash_kernel_doc::SourceLanguage::Python),
     matches_start: |start| {
         matches!(
@@ -57,6 +61,7 @@ pub const CONVENTIONS: Conventions = Conventions {
         literals_passthrough: false,
     },
     then_yield: false,
+    returns: lash_kernel_dialect::conventions::Returns::DIRECT,
 };
 pub fn iteration(view: Option<&str>) -> Option<&'static Iteration> {
     ITERATIONS

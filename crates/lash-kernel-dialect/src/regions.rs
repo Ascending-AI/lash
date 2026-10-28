@@ -220,10 +220,13 @@ pub fn print_verified(
             limit: options.limits.max_bytes,
         });
     }
-    let unprintable = || PrintError::Unprintable {
+    let unprintable = |reason| PrintError::Unprintable {
+        reason,
         site: lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, Vec::new()),
     };
-    let read = regions.read(&whole.source).map_err(|_| unprintable())?;
+    let read = regions
+        .read(&whole.source)
+        .map_err(|_| unprintable(crate::UnprintableReason::ReadbackRefused))?;
     let identities = if read.document.canonical_bytes() == document.canonical_bytes() {
         read.document
             .functions
@@ -231,7 +234,8 @@ pub fn print_verified(
             .map(|id| (*id, *id))
             .collect()
     } else {
-        crate::normalization::module(document, &read.document, library).ok_or_else(unprintable)?
+        crate::normalization::module(document, &read.document, library)
+            .ok_or_else(|| unprintable(crate::UnprintableReason::ReadbackMismatch))?
     };
     let remap = |site: &mut lash_kernel_value::sites::Site| {
         if let lash_kernel_value::sites::Unit::Library(id) = &mut site.unit {
@@ -250,13 +254,14 @@ pub fn print_verified(
             entry
         })
         .collect();
-    let read_captions = k::Captions::new(document, mapped_entries).map_err(|_| unprintable())?;
+    let read_captions = k::Captions::new(document, mapped_entries)
+        .map_err(|_| unprintable(crate::UnprintableReason::CaptionMismatch))?;
     if read_captions
         .entries()
         .iter()
         .any(|entry| captions.get(&entry.target) != Some(&entry.caption))
     {
-        return Err(unprintable());
+        return Err(unprintable(crate::UnprintableReason::CaptionMismatch));
     }
     let map = read.map.map(|mut map| {
         for row in &mut map.sites {

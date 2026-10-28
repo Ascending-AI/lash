@@ -1406,10 +1406,12 @@ impl Lowerer<'_> {
             // captured read) owns its range, never this absent initialization.
             let authored_span = this.span.take();
             for local in &declared {
-                this.emit(Stmt::Let {
-                    name: this.written(local, TextRange::default())?,
-                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-                });
+                let name = this.written(local, TextRange::default())?;
+                this.emit(
+                    crate::constructs::conventions::CONVENTIONS
+                        .bindings
+                        .predeclaration(name),
+                );
             }
             this.span = authored_span;
             for (param, default) in params.iter().zip(defaults) {

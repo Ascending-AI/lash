@@ -78,5 +78,31 @@ impl Lifted {
 /// Every corpus document and canvas edit, printed and checked against the
 /// laws.
 pub fn readable_prints(root: &std::path::Path) -> Result<Vec<Lifted>> {
-    super::render_with(root).map(|(_, report)| report)
+    super::render_with(
+        root,
+        |case| !SEPARATE_CANVAS_CASES.contains(&case.name.as_str()),
+        (0, 1),
+    )
+    .map(|(_, report)| report)
+}
+
+/// Large fixture matrices run in their own test targets, with the same limit.
+pub const SEPARATE_CANVAS_CASES: [&str; 3] = ["probe-nested", "probe-retry", "probe-helper"];
+
+/// Print and independently re-lower every admitted canvas edit of one fixture.
+///
+/// # Errors
+/// An unknown fixture, or any admitted edit without an exact source inverse.
+pub fn canvas_prints(root: &std::path::Path, name: &str, partition: (usize, usize)) -> Result<()> {
+    ensure!(
+        partition.1 > 0 && partition.0 < partition.1,
+        "invalid canvas partition"
+    );
+    ensure!(
+        super::catalog(root)?.iter().any(|case| case.name == name
+            && case.mode == super::CaseMode::Module
+            && case.refusal.is_none()),
+        "no admitted module fixture named {name}"
+    );
+    super::render_with(root, |case| case.name == name, partition).map(|_| ())
 }
