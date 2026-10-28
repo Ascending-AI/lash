@@ -9,6 +9,12 @@ pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) 
     let calls = &authority.calls;
     let mut room = SourceRoom {
         source: source.clone(),
+        bulk: authority.bulk.and_then(|path| match authority.owner {
+            doc::constant_pool::PoolOwner::Function(function) => {
+                Some(bulk::Bulk::project(function, path))
+            }
+            _ => None,
+        }),
         peak_extra: BTreeMap::new(),
         retained_delta: BTreeMap::new(),
         scratch: Box::new([]),
@@ -127,7 +133,7 @@ pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) 
                     events.push(event(
                         &site,
                         Phase::Catch,
-                        Box::new([]),
+                        vec![Owner::ActiveDeparture(source.clone())].into(),
                         Some(Owner::Binding {
                             declared: child(&site, 1),
                             name: catch.binding.clone(),
@@ -249,6 +255,36 @@ pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) 
                 }
                 _ => {}
             }
+            if let doc::Node::Stmt(doc::Stmt::Try(t)) = node
+                && t.finally.is_some()
+            {
+                let active = Owner::ActiveDeparture(source.clone());
+                let pending = Owner::PendingDeparture(site.clone());
+                events.push(event(
+                    &site,
+                    Phase::Suspend,
+                    vec![active.clone()].into(),
+                    Some(pending.clone()),
+                    Amount::default(),
+                    Amount::default(),
+                ));
+                events.push(event(
+                    &site,
+                    Phase::Restore,
+                    vec![pending.clone()].into(),
+                    Some(active),
+                    Amount::default(),
+                    Amount::default(),
+                ));
+                events.push(event(
+                    &site,
+                    Phase::Supersede,
+                    vec![pending.clone()].into(),
+                    None,
+                    Amount::default(),
+                    Amount::default().term(release([pending]), -1),
+                ));
+            }
             let (peak, delta) = formula(authority, &site, node, &ins, pool);
             events.push(event(
                 &site,
@@ -266,15 +302,10 @@ pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) 
                 Owner::Frame(source.clone()),
                 Owner::Scope(source.clone()),
                 Owner::Operands(source.clone()),
+                Owner::Departures(source.clone()),
             ]
             .into_iter()
             .chain((source.unit == Unit::Main).then(|| Owner::Sessions(source.clone())))
-            .chain(
-                e.output
-                    .iter()
-                    .filter(|o| matches!(o, Owner::Departure(_)))
-                    .cloned(),
-            )
             .collect();
             exits.push(Exit {
                 point: e.point.clone(),
@@ -293,12 +324,7 @@ pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) 
                     point: e.point.clone(),
                     charge_prefix: e.point.clone(),
                     kind: ExitKind::Raise,
-                    owners: owners
-                        .iter()
-                        .filter(|o| !matches!(o, Owner::Departure(_)))
-                        .cloned()
-                        .chain(e.output.as_ref().map(|_| Owner::Departure(site.clone())))
-                        .collect(),
+                    owners: owners.clone(),
                 });
             }
             for measure in e.peak.terms.keys() {

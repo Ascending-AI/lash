@@ -1320,8 +1320,18 @@ impl LoopPlan {
         let Head::While(test) = &self.head else {
             return None;
         };
-        let run=typed::compile(exe, registers, exe.charging(), Some(test), &self.body, 0,
-            super::room::Prefix {source:&self.source_room,at:&self.source_site})?;
+        let run = typed::compile(
+            exe,
+            registers,
+            exe.charging(),
+            Some(test),
+            &self.body,
+            0,
+            super::room::Prefix {
+                source: &self.source_room,
+                at: &self.source_site,
+            },
+        )?;
         run.whole.then_some(run)
     }
 

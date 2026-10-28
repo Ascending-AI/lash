@@ -249,7 +249,24 @@ impl<E: Execution> Run<'_, E> {
                     return Ok(exit);
                 }
                 if t.finally.is_some() {
+                    let suspended = exit != ExitKind::Normal;
+                    if suspended {
+                        self.step(site, Phase::Suspend)?;
+                    }
                     let cleanup = self.child(node, site, if t.catch.is_some() { 2 } else { 1 })?;
+                    if cleanup == ExitKind::Action {
+                        return Ok(cleanup);
+                    }
+                    if suspended {
+                        self.step(
+                            site,
+                            if cleanup == ExitKind::Normal {
+                                Phase::Restore
+                            } else {
+                                Phase::Supersede
+                            },
+                        )?;
+                    }
                     if cleanup != ExitKind::Normal {
                         exit = cleanup;
                     }

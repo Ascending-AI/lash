@@ -11,6 +11,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
     {
         return Err(Refused::Source);
     }
+    bulk::verify(source, room)?;
     let mut exit_at = BTreeMap::new();
     for e in &room.exits {
         if exit_at.insert((e.point.clone(), e.kind), e).is_some() {
@@ -34,7 +35,14 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 }
             }
             doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_)) => phases.push(Phase::Enter),
-            doc::Node::Stmt(doc::Stmt::Try(t)) if t.catch.is_some() => phases.push(Phase::Catch),
+            doc::Node::Stmt(doc::Stmt::Try(t)) => {
+                if t.catch.is_some() {
+                    phases.push(Phase::Catch);
+                }
+                if t.finally.is_some() {
+                    phases.extend([Phase::Suspend, Phase::Restore, Phase::Supersede]);
+                }
+            }
             doc::Node::Expr(doc::Expr::If { .. } | doc::Expr::Let { .. })
             | doc::Node::Stmt(
                 doc::Stmt::If { .. } | doc::Stmt::While { .. } | doc::Stmt::For { .. },
@@ -111,11 +119,23 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     let Some(catch) = &t.catch else {
                         return Err(Refused::Source);
                     };
-                    expected_inputs = Box::new([]);
+                    expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();
                     output = Some(Owner::Binding {
                         declared: child(&site, 1),
                         name: catch.binding.clone(),
                     });
+                }
+                (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend) => {
+                    expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();
+                    output = Some(Owner::PendingDeparture(site.clone()));
+                }
+                (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Restore) => {
+                    expected_inputs = vec![Owner::PendingDeparture(site.clone())].into();
+                    output = Some(Owner::ActiveDeparture(source.site.clone()));
+                }
+                (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
+                    expected_inputs = vec![Owner::PendingDeparture(site.clone())].into();
+                    output = None;
                 }
                 (doc::Node::Expr(doc::Expr::Let { name, .. }), Phase::Test) => {
                     expected_inputs = vec![operand(&child(&site, 0))].into();
@@ -196,16 +216,12 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     Owner::Frame(source.site.clone()),
                     Owner::Scope(source.site.clone()),
                     Owner::Operands(source.site.clone()),
+                    Owner::Departures(source.site.clone()),
                 ]
                 .into_iter()
                 .chain(
                     (source.site.unit == Unit::Main).then(|| Owner::Sessions(source.site.clone())),
                 )
-                .chain(if kind == ExitKind::Raise {
-                    output.as_ref().map(|_| Owner::Departure(site.clone()))
-                } else {
-                    output.clone().filter(|o| matches!(o, Owner::Departure(_)))
-                })
                 .collect();
                 if e.owners != owners {
                     return Err(Refused::Exit);
@@ -393,6 +409,10 @@ fn obligations(
                 -1,
             ));
         }
+        (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Supersede) => {
+            delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
+        }
+        (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend | Phase::Restore) => {}
         (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
             if let Some(c) = &t.catch
                 && source.shared.get(&(child(site, 1), c.binding.clone())) == Some(&true)

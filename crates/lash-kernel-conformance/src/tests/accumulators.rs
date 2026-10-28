@@ -201,6 +201,12 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
     else {
         panic!("the bulk-copy library lowers")
     };
+    let (described, dense, concat) =
+        lash_kernel_vm::kernel_internals::verify_bulk_source_rooms(&base.library).unwrap();
+    assert!(
+        described >= 2 && dense && concat,
+        "both source-derived copy policies have checked SourceRoom descriptions"
+    );
     let large = (0..513)
         .map(|i| i.to_string())
         .collect::<Vec<_>>()

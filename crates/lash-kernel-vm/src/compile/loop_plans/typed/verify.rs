@@ -387,7 +387,19 @@ impl crate::compile::LoopPlan {
             .expect("numeric register site");
         site.pair = None;
         assert!(
-            compile(exe, &registers, true, Some(test), &self.body, 0).is_none(),
+            compile(
+                exe,
+                &registers,
+                true,
+                Some(test),
+                &self.body,
+                0,
+                crate::compile::room::Prefix {
+                    source: &self.source_room,
+                    at: &self.source_site
+                }
+            )
+            .is_none(),
             "changed register facts withdraw typed repeats"
         );
         assert!(!program.verify(exe, Some(test), &self.body, 0, covers - 1));

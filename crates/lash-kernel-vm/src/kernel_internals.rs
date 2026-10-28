@@ -84,6 +84,17 @@ pub fn verify_library_stream(
     library.verify_stream()
 }
 
+/// Inspect active bulk descriptions and their understatement witnesses for
+/// kernel-owned laws. The tuple counts entries and the two membership policies.
+///
+/// # Errors
+///
+/// An absent or misstated source description, including its negative witness.
+#[doc(hidden)]
+pub fn verify_bulk_source_rooms(library: &PreparedLibrary) -> Result<(usize, bool, bool), String> {
+    library.verify_bulk_rooms()
+}
+
 /// The projected records inspected by kernel-owned format laws.
 pub fn sealed_root(sealed: &crate::SealedRoot) -> &CheckpointRoot {
     &sealed.root

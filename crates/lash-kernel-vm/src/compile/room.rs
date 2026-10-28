@@ -11,6 +11,7 @@ use lash_kernel_value::{FunctionId, Name};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+mod bulk;
 mod derive;
 mod evaluate;
 mod verify;
@@ -24,6 +25,9 @@ pub(crate) enum Phase {
     Item,
     Test,
     Catch,
+    Suspend,
+    Restore,
+    Supersede,
     Commit,
     Fallthrough,
     Leave,
@@ -42,8 +46,11 @@ pub(crate) struct Prefix<'a> {
 /// Source owner selectors, instantiated per invocation and loop occurrence.
 /// Scope selects active bindings in its source subtree; Operands selects its
 /// pending source occurrences. Sessions selects durable session roots. These
-/// groups are disjoint, and Frame names only the header. A departure transfers
-/// outside them before cleanup. No selector refers to physical registers.
+/// groups are disjoint, and Frame names only the header. Departures selects
+/// active and suspended departures outside scopes and operands. Suspend and
+/// Restore transfer the active departure to/from the exact try's pending owner;
+/// Supersede releases only that pending owner. An action preserves both.
+/// No selector refers to physical registers.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Owner {
     Operand(Site),
@@ -52,6 +59,9 @@ pub(crate) enum Owner {
     SessionCell { at: Site, name: Name },
     Atom { at: Site, index: u32 },
     Departure(Site),
+    PendingDeparture(Site),
+    ActiveDeparture(Site),
+    Departures(Site),
     HookArgument { at: Site, phase: Phase, index: u32 },
     HookResult { at: Site, phase: Phase },
     Cell { declared: Site, name: Name },
@@ -214,6 +224,7 @@ pub(crate) struct Scratch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceRoom {
     pub(crate) source: Site,
+    pub(crate) bulk: Option<bulk::Bulk>,
     pub(crate) peak_extra: BTreeMap<Point, Event>,
     pub(crate) retained_delta: BTreeMap<Point, Event>,
     pub(crate) scratch: Box<[Scratch]>,
@@ -229,6 +240,7 @@ pub(crate) struct Source {
     pub(crate) params: Box<[Name]>,
     pub(crate) shared: BTreeMap<(Site, Name), bool>,
     pub(crate) persistent: BTreeMap<Site, Name>,
+    pub(super) bulk: Option<&'static doc::plan::CopyLoop>,
     pub(crate) calls: BTreeMap<FunctionId, CallSource>,
     pub(crate) room: SourceRoom,
 }
@@ -368,6 +380,14 @@ impl Source {
             }
             node.children_into(&mut pending);
         }
+        let bulk = match owner {
+            doc::constant_pool::PoolOwner::Function(function) if site.path.is_empty() => catalog
+                .registered(&function)
+                .and_then(|r| r.plan())
+                .filter(|p| p.function == function)
+                .and_then(|p| p.template.as_ref()?.heap.as_ref()?.copy),
+            _ => None,
+        };
         let pool = doc::constant_pool::ConstantPool::extract(owner, body);
         let mut source = Self {
             owner,
@@ -376,9 +396,11 @@ impl Source {
             params: params.into(),
             shared,
             persistent,
+            bulk,
             calls,
             room: SourceRoom {
                 source: site,
+                bulk: None,
                 peak_extra: BTreeMap::new(),
                 retained_delta: BTreeMap::new(),
                 scratch: Box::new([]),

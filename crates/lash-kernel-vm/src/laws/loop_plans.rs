@@ -329,7 +329,12 @@ fn test_close(plan: &mut islands::IslandPlan) -> &mut expr::Close {
 /// owners used by prepared, typed, island, native/body and scalar entries.
 fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
     use crate::compile::{CodeId, LibId};
+    let typed_count = std::cell::Cell::new(0);
+    let typed_text = LOOP
+        .replace("num.add", "law.typed_add")
+        .replace("num.lt", "law.typed_less");
     for text in [
+        typed_text.as_str(),
         LOOP,
         WALK,
         ISLAND,
@@ -407,7 +412,8 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 plan.verify(plan.stream(&exe)).unwrap();
                 assert_eq!(plan.source_room.site, exe.code(plan.code).site);
                 if let Some(compiled) = plan.compiled(&exe) {
-                    compiled.verify_room_projections(&exe).unwrap();
+                    typed_count
+                        .set(typed_count.get() + compiled.verify_room_projections(&exe).unwrap());
                     assert!(std::sync::Arc::ptr_eq(
                         &compiled.source_room,
                         &plan.source_room
@@ -416,6 +422,10 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
             }
         }
     }
+    assert!(
+        typed_count.get() > 0,
+        "typed repeats retain their checked source prefix"
+    );
 }
 fn room_join(
     registry: &mut lash_kernel_doc::FunctionRegistry,
@@ -423,10 +433,26 @@ fn room_join(
 ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
     let definition=lash_kernel_doc::parse_definition("function text.join(xs: Any, separator: Any) -> Text\nkernel 1\ncharge sum(1, size(result))\nnative\n").unwrap();
     let native = lash_kernel_lib::native("text.join").expect("real joined-text specialization");
-    vec![(
+    let mut out = vec![(
         "text.join",
         registry.register(definition, Some(native)).unwrap(),
-    )]
+    )];
+    for (name, implementation, result) in [
+        ("law.typed_add", "num.add", "Any"),
+        ("law.typed_less", "num.lt", "Bool"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}(a: Any, b: Any) -> {result}\nkernel 1\ncharge 1\nnative\n"
+        ))
+        .unwrap();
+        out.push((
+            name,
+            registry
+                .register(definition, lash_kernel_lib::native(implementation))
+                .unwrap(),
+        ));
+    }
+    out
 }
 
 #[test]
@@ -471,6 +497,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
 
 #[test]
 fn source_room_retained_delta_has_source_owners() {
+    room_finally_departure();
     use crate::compile::room::Refused;
     source_rooms(|source| {
         for point in source.room.retained_delta.keys() {
@@ -533,7 +560,7 @@ fn source_room_exits_preserve_charge_prefix_and_holdings() {
                     | Owner::Scope(_)
                     | Owner::Operands(_)
                     | Owner::Sessions(_)
-                    | Owner::Departure(_)
+                    | Owner::Departures(_)
             )));
             let mut understated = source.room.clone();
             understated.exits[index].owners = Box::new([]);
@@ -857,4 +884,71 @@ fn room_member_growth_peak() {
         "member growth cannot be hidden by operand release: {balance:?}"
     );
     assert_eq!(balance.retained_delta, 516);
+}
+
+fn room_finally_departure() {
+    use crate::compile::room::{
+        CallSource, CheckedRoom, Execution, Facts, Measure, Owner, Point, Source,
+    };
+    use lash_kernel_value::{
+        FunctionId,
+        sites::{Site, Unit},
+    };
+    struct Trace;
+    struct Values;
+    impl Execution for Trace {
+        fn event(&mut self, _: &Point) -> Option<Box<dyn Facts + '_>> {
+            Some(Box::new(Values))
+        }
+        fn choose(&mut self, _: &Site) -> Option<bool> {
+            None
+        }
+    }
+    impl Facts for Values {
+        fn measure(&self, m: &Measure) -> Option<i128> {
+            match m {
+                Measure::Release(owners) => Some(
+                    owners
+                        .iter()
+                        .map(|o| match o {
+                            Owner::Operand(_) | Owner::PendingDeparture(_) => 16,
+                            _ => 0,
+                        })
+                        .sum(),
+                ),
+                _ => None,
+            }
+        }
+        fn call(&self, _: &Site, _: CallSource) -> Option<&CheckedRoom> {
+            None
+        }
+        fn raised(&self) -> bool {
+            false
+        }
+        fn resolved(&self, _: &Site) -> Option<FunctionId> {
+            None
+        }
+    }
+    let document = lash_kernel_doc::parse_document(
+        "numbers by_spelling\nkernel 1\nmain { try { return \"old\" } finally { return null } }",
+    )
+    .unwrap();
+    let source = Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(document.identity()),
+        Site::new(Unit::Main, vec![]),
+        document.main.as_ref().unwrap(),
+        &[],
+        Default::default(),
+        &std::collections::BTreeMap::new(),
+        &Default::default(),
+    );
+    assert_eq!(
+        source
+            .evaluate(&mut Trace, 100)
+            .unwrap()
+            .balance()
+            .retained_delta,
+        16,
+        "a replacing finally releases the suspended return occurrence"
+    );
 }

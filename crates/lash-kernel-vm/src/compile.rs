@@ -321,6 +321,49 @@ impl PreparedLibrary {
         self.0.tables.verify_stream(&self.0)
     }
 
+    /// Cold kernel-law inspection of the active source-derived copy entries.
+    pub(crate) fn verify_bulk_rooms(&self) -> Result<(usize, bool, bool), String> {
+        let mut checked = 0;
+        let mut dense = false;
+        let mut concat = false;
+        for index in 0..self.0.libs.len() {
+            let lib = self.0.lib(LibId(index as u32));
+            let Some((Entry::Template { template, .. }, _)) = &lib.specialization.prepared else {
+                continue;
+            };
+            if template.heap.as_ref().and_then(|h| h.copy).is_none() {
+                continue;
+            }
+            let code = match lib.run {
+                LibRun::Body(c) | LibRun::Native { body: Some(c), .. } => c,
+                _ => return Err("copy entry has no exact source body".into()),
+            };
+            let source = &self
+                .0
+                .tables
+                .code(&self.0, code)
+                .ok_or("copy source is absent")?
+                .source_room;
+            source.verify().map_err(|e| format!("copy source: {e:?}"))?;
+            let mut understated = source.room.clone();
+            let bulk = understated
+                .bulk
+                .as_mut()
+                .ok_or("copy induction is absent")?;
+            dense |= bulk.dense;
+            concat |= !bulk.dense;
+            bulk.temporary_values = bulk
+                .temporary_values
+                .checked_sub(1)
+                .ok_or("copy induction has no temporary holdings")?;
+            if source.verify_room(&understated) != Err(room::Refused::Peak) {
+                return Err("understated copy holdings were accepted".into());
+            }
+            checked += 1;
+        }
+        Ok((checked, dense, concat))
+    }
+
     /// How many library functions are prepared.
     #[cfg(test)]
     pub(crate) fn prepared(&self) -> usize {
