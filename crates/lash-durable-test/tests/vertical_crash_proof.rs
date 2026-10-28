@@ -1242,23 +1242,30 @@ fn protocol_records(history: &[lash_core::SessionHistoryRecord]) -> Vec<serde_js
             let mut value = serde_json::to_value(record).expect("a record encodes");
             // These histories are separate executions with independently measured CPU.
             // Preserve reading presence and limits; other resources remain exact.
-            if let Some(readings) = value
-                .pointer_mut("/Protocol/payload/event/RlmTrajectoryEntry/consumption")
-                .and_then(serde_json::Value::as_array_mut)
+            if let lash_core::SessionHistoryRecord::Protocol(protocol) = record
+                && let Some(event) = lash_protocol_rlm::decode_rlm_protocol_event(protocol)
+                    .expect("a stored RLM event decodes")
+                && let lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(cell) = event.as_ref()
             {
-                for reading in readings {
-                    if reading.get("resource").and_then(serde_json::Value::as_str)
-                        == Some("worker_cpu_nanos")
-                    {
-                        for field in ["consumed", "observed"] {
-                            if let Some(value) = reading.get_mut(field)
-                                && value.is_number()
-                            {
-                                *value = 0.into();
-                            }
-                        }
+                let mut cell = cell.as_ref().clone();
+                for reading in &mut cell.consumption {
+                    if reading.resource == lash_core::CellResource::WorkerCpuNanos {
+                        reading.consumed = reading.consumed.map(|_| 0);
+                        reading.observed = reading.observed.map(|_| 0);
                     }
                 }
+                let format = protocol
+                    .payload
+                    .get("format")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|version| u32::try_from(version).ok())
+                    .expect("the decoded event has its format stamp");
+                let normalized = lash::rlm::rlm_protocol_event(
+                    lash::rlm::RlmProtocolEvent::RlmTrajectoryEntry(Arc::new(cell)),
+                    format,
+                );
+                value["Protocol"]["payload"] = serde_json::to_value(normalized.payload)
+                    .expect("the normalized protocol payload encodes");
             }
             value
         })

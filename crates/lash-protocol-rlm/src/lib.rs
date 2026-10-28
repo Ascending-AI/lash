@@ -8,6 +8,7 @@
 mod call_feedback;
 mod catalogue_preview;
 mod cell_value;
+mod consumption_record;
 mod control_tools;
 mod deferred;
 mod dialect;

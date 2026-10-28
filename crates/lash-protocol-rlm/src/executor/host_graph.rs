@@ -723,19 +723,7 @@ impl TokenCodec for HostRootBody {
         encode_tree_ref(self.processes, out);
         out.unsigned(self.reads);
         out.unsigned(self.held_ms);
-        out.seq(self.consumption.len() as u64);
-        for value in &self.consumption {
-            out.seq(4);
-            // Resource tags are the same closed vocabulary as the host JSON.
-            #[expect(
-                clippy::expect_used,
-                reason = "CellResource serializes only a fixed unit-variant name"
-            )]
-            out.text(&serde_json::to_string(&value.resource).expect("a resource tag"));
-            value.consumed.encode(out);
-            out.unsigned(value.limit);
-            value.observed.encode(out);
-        }
+        crate::consumption_record::encode(&self.consumption, out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -771,21 +759,7 @@ impl TokenCodec for HostRootBody {
             processes: decode_tree_ref(input)?,
             reads: input.unsigned()?,
             held_ms: input.unsigned()?,
-            consumption: {
-                let count = input.seq()?;
-                let mut values = Vec::new();
-                for _ in 0..count {
-                    input.expect_struct(4)?;
-                    values.push(lash_core::CellConsumption {
-                        resource: serde_json::from_str(input.text()?)
-                            .map_err(|error| invalid(error.to_string()))?,
-                        consumed: Option::decode(input)?,
-                        limit: input.unsigned()?,
-                        observed: Option::decode(input)?,
-                    });
-                }
-                values
-            },
+            consumption: crate::consumption_record::decode(input)?,
         })
     }
 }

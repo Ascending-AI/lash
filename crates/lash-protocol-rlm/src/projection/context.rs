@@ -10,6 +10,7 @@ pub const RLM_PROTOCOL_EVENT_VERSION: u32 = 2;
 #[serde(deny_unknown_fields)]
 struct RlmEventEnvelope {
     format: u32,
+    #[serde(with = "super::recorded_event")]
     event: RlmProtocolEvent,
 }
 

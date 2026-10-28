@@ -59,6 +59,7 @@ lash-kernel-vm = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash-llm-transport = { workspace = true }
 lash-provider-anthropic = { workspace = true }
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing", "perf-witness"] }

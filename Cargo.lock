@@ -2542,6 +2542,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
  "lash-internal-protocol-types",
  "lash-internal-provider-anthropic",
  "lash-internal-sansio",

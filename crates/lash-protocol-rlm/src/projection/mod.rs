@@ -1,4 +1,5 @@
 pub(crate) mod context;
+mod recorded_event;
 pub(crate) mod transcript;
 mod transport;
 
