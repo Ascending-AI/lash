@@ -917,6 +917,7 @@ mod tests {
                     ),
                     SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
                         TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                             language: "typescript".to_owned(),
                             prints: Some(vec!["retained output".repeat(1024).into()]),
                             prints_retained: None,

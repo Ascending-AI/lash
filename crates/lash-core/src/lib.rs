@@ -528,7 +528,6 @@ pub use lash_protocol_types::CellFailureKind;
 pub use lash_protocol_types::CellFailureRepair;
 pub use lash_protocol_types::CellOutcome;
 pub use lash_protocol_types::CellPrint;
-pub use lash_protocol_types::CellRecord;
 pub use lash_protocol_types::CheckpointKind;
 pub use lash_protocol_types::CompletionCandidate;
 pub use lash_protocol_types::CompletionDisposition;
@@ -592,6 +591,7 @@ pub use lash_protocol_types::ValueShape;
 pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
 pub(crate) use lash_protocol_types::{BaseRenderCache, visible_response_parts};
+pub use lash_protocol_types::{CellConsumption, CellRecord, CellResource};
 
 pub use lash_kernel_value::json_schema::JsonSchema;
 pub use lash_kernel_value::json_schema::SchemaAdmissionError;

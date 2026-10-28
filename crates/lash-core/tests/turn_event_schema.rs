@@ -174,6 +174,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "code_block_completed (failed + graph_key present)",
             TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                 language: "python".to_string(),
                 prints: Some(vec!["1".to_string().into()]),
                 prints_retained: None,
@@ -187,6 +188,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "code_block_completed",
+                "consumption": [],
                 "language": "python",
                 "prints": [{
                     "text": "1",
@@ -210,6 +212,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "code_block_completed (finished + graph_key absent)",
             TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                 language: "python".to_string(),
                 prints: Some(Vec::new()),
                 prints_retained: None,
@@ -224,6 +227,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "code_block_completed",
+                "consumption": [],
                 "language": "python",
                 "prints": [],
                 "result": { "kind": "controlled", "value": {
@@ -387,6 +391,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "unavailable_cell_evidence",
             TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                 language: "python".into(),
                 prints: None,
                 prints_retained: None,
@@ -398,7 +403,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 tool_call_ids: None,
                 graph_key: None,
             },
-            json!({"type":"code_block_completed","language":"python","result":{"kind":"failed","value":{"kind":"host","message":"invocation failed"}}}),
+            json!({"type":"code_block_completed","consumption":[],"language":"python","result":{"kind":"failed","value":{"kind":"host","message":"invocation failed"}}}),
         ),
         (
             "finished",

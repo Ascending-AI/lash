@@ -665,6 +665,7 @@ pub struct HostState {
     /// state, over every activation before it: the next activation's
     /// execution resumes its held wall time from it (FIG-6786).
     pub held_ms: u64,
+    pub consumption: Vec<lash_core::CellConsumption>,
 }
 
 /// The host root's body: counts, roots and facts.
@@ -677,6 +678,7 @@ struct HostRootBody {
     processes: (u64, Option<NodeId>),
     reads: u64,
     held_ms: u64,
+    consumption: Vec<lash_core::CellConsumption>,
 }
 
 fn encode_tree_ref(tree: (u64, Option<NodeId>), out: &mut TokenWriter) {
@@ -696,7 +698,7 @@ fn usize_token(value: usize) -> u64 {
 
 impl TokenCodec for HostRootBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(9);
         encode_tree_ref(self.calls, out);
         match &self.tool_call_limit {
             None => out.none(),
@@ -721,10 +723,23 @@ impl TokenCodec for HostRootBody {
         encode_tree_ref(self.processes, out);
         out.unsigned(self.reads);
         out.unsigned(self.held_ms);
+        out.seq(self.consumption.len() as u64);
+        for value in &self.consumption {
+            out.seq(4);
+            // Resource tags are the same closed vocabulary as the host JSON.
+            #[expect(
+                clippy::expect_used,
+                reason = "CellResource serializes only a fixed unit-variant name"
+            )]
+            out.text(&serde_json::to_string(&value.resource).expect("a resource tag"));
+            value.consumed.encode(out);
+            out.unsigned(value.limit);
+            value.observed.encode(out);
+        }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         let calls = decode_tree_ref(input)?;
         let tool_call_limit = if input.option()? {
             input.expect_struct(4)?;
@@ -756,6 +771,21 @@ impl TokenCodec for HostRootBody {
             processes: decode_tree_ref(input)?,
             reads: input.unsigned()?,
             held_ms: input.unsigned()?,
+            consumption: {
+                let count = input.seq()?;
+                let mut values = Vec::new();
+                for _ in 0..count {
+                    input.expect_struct(4)?;
+                    values.push(lash_core::CellConsumption {
+                        resource: serde_json::from_str(input.text()?)
+                            .map_err(|error| invalid(error.to_string()))?,
+                        consumed: Option::decode(input)?,
+                        limit: input.unsigned()?,
+                        observed: Option::decode(input)?,
+                    });
+                }
+                values
+            },
         })
     }
 }
@@ -789,6 +819,7 @@ impl HostState {
             processes: (self.processes.len(), self.processes.stage(staging, reads)?),
             reads: self.reads,
             held_ms: self.held_ms,
+            consumption: self.consumption.clone(),
         };
         Ok(staging.encode_value(NodeKind::HOST_ROOT, &body)?)
     }
@@ -839,6 +870,7 @@ impl HostState {
             processes: Paged::load(decoder, id, body.processes.1, body.processes.0)?,
             reads: body.reads,
             held_ms: body.held_ms,
+            consumption: body.consumption,
         })
     }
 

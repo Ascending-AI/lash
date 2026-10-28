@@ -565,9 +565,11 @@ pub enum WorkerMessage {
     Progress {
         phase: WorkerPhase,
         cpu_nanos: u64,
+        /// Existing machine meters at this safe point, before CPU admission.
+        meters: Option<RunMeters>,
         /// Opt-in diagnostic delta, with no execution or admission authority.
         #[serde(skip_serializing_if = "Option::is_none")]
-        work: Option<WorkerWork>,
+        work: Option<Box<WorkerWork>>,
     },
     LimitExceeded {
         limit: lash_protocol_types::worker_limit::WorkerLimit,

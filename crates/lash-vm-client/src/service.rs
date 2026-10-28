@@ -333,6 +333,8 @@ type RunMeterObserver = Arc<dyn Fn(&VmOwner, crate::RunMeters, bool) + Send + Sy
 #[derive(Clone)]
 pub struct Service {
     #[cfg(feature = "testing")]
+    injected_cpu: Option<u64>,
+    #[cfg(feature = "testing")]
     run_meter_observer: Option<RunMeterObserver>,
     #[cfg(feature = "testing")]
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
@@ -363,6 +365,14 @@ pub struct Service {
 const LOST_EXECUTIONS: usize = 1024;
 
 impl Service {
+    /// Inject a CPU receipt at the first charged machine safe point. This
+    /// exercises CPU policy without depending on host speed or sleeping.
+    #[doc(hidden)]
+    #[cfg(feature = "testing")]
+    pub fn with_cpu_at_safe_point(mut self, cpu: std::time::Duration) -> Self {
+        self.injected_cpu = Some(u64::try_from(cpu.as_nanos()).unwrap_or(u64::MAX));
+        self
+    }
     /// Select the helper executable explicitly, using the code mode/process bounds.
     pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
         Self::new(PoolConfig::codemode(WorkerEntry::helper(executable)))
@@ -372,6 +382,8 @@ impl Service {
         Self {
             #[cfg(feature = "testing")]
             run_meter_observer: None,
+            #[cfg(feature = "testing")]
+            injected_cpu: None,
             #[cfg(feature = "testing")]
             receipts: None,
             #[cfg(feature = "testing")]
@@ -694,7 +706,10 @@ pub mod runtime_ops {
             clock: Arc<dyn lash_core_execution::Clock>,
         ) -> Service {
             let mut service = self.clone();
-            service.budget = Some(ExecutionBudget::resumed(held, clock));
+            let budget = ExecutionBudget::resumed(held, clock);
+            #[cfg(feature = "testing")]
+            budget.inject_cpu_at_safe_point(service.injected_cpu);
+            service.budget = Some(budget);
             service.retained = Some(Arc::new(Mutex::new(None)));
             service
         }

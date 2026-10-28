@@ -39,6 +39,38 @@ Update the compiled source and its quotations together; ignored Rust fences
 are rejected. The example's [`runtime.rs`](../examples/workflow-graph-roundtrip/src/runtime.rs)
 shows the complete application, component registration and observation feed.
 
+## Read a cell's bound consumption
+
+`ExecResponse.consumption` and the committed `CellRecord.consumption` carry the
+same typed `CellConsumption` entries on successful and failed cells. The
+existing `execute_tool <language>` span exports them as the JSON attribute
+`lash.cell.consumption`, including on `CELL_BOUND_EXCEEDED`. Each entry names
+its resource, consumed budget, configured limit and raw observed meter.
+Time entries use nanoseconds; memory and encoded sizes use bytes. Charges,
+worker CPU, held wall time and logical memory also export numeric
+`lash.cell.<resource>.consumed`, `.limit` and `.observed` attributes. The JSON
+attribute preserves the full unsigned values; numeric attributes saturate at
+`i64::MAX` because OpenTelemetry integers are signed.
+
+Instruction charges and logical memory bounds are deterministic for a fixed
+execution and accounting policy. Worker CPU and wall time depend on the host,
+scheduling and host reads. A host that needs a deterministic first bound should
+set its instruction or memory limit clearly below the CPU and wall limits.
+Logical memory accounting is separate from a worker's resident memory ceiling;
+checkpoint and collection behavior can also affect when logical memory is
+recounted. A cgroup memory kill is not a deterministic logical-memory bound.
+
+Charges consume at most their configured budget. `observed` preserves the raw
+kernel charge, including the refused crossing unit, so it may exceed `limit`.
+CPU counts across this activation's checkouts, including lowering and reaped
+workers. Held wall time includes earlier activations, as its policy does.
+Kernel meters are the latest safe-point receipt, not a peak. If a worker dies
+mid-slice, its last receipt can precede its death. `consumed: null` and
+`observed: null` mean Lash has no existing meter for that bound or has received
+no reading; they do not mean zero. Disabled charge and logical-memory meters
+have no entry. The cell end retains the snapshot, so replay of that recorded
+end reports the original consumption.
+
 ## Share an operation package across registered providers
 
 A root has one package publisher even when its operations have different

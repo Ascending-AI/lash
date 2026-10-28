@@ -592,6 +592,7 @@ impl TraceEvent {
                 code_chars: _,
             } => {}
             Self::ExecCodeCompleted {
+                consumption: _,
                 trailing_discarded: _,
                 code,
                 output,

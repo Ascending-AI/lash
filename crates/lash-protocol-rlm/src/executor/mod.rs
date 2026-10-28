@@ -17,6 +17,7 @@ pub(crate) mod cell_carry;
 mod cell_outputs;
 use cell_outputs::prepare_cell_outputs;
 mod cell_run;
+mod consumption;
 pub(crate) mod envelope;
 mod host;
 mod link;
@@ -396,13 +397,22 @@ async fn run_cell(
         workers,
         ..services.clone()
     };
-    let response = Box::pin(run_linked_cell(
+    let mut response = Box::pin(run_linked_cell(
         state, ctx, code, &services, identities, prints, snapshots, resumed,
     ))
     .await;
     // The worker that lowered a cell whose run never started on it goes
     // back to the pool.
     services.workers.release_retained().await;
+    if response.consumption.is_empty() && !response.suspended {
+        response.consumption = consumption::snapshot(
+            None,
+            &services,
+            cell_bounds(&services),
+            None,
+            response.error(),
+        );
+    }
     response
 }
 
@@ -928,6 +938,13 @@ async fn run_linked_cell(
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
     let printed = host.ledgers().printed_images(&prints.lock_recover());
+    let library_bound = match &run {
+        Ok(KernelEnd::Ended {
+            end: End::Error(lash_kernel_vm::RunError::Bound(exceeded)),
+            ..
+        }) if matches!(exceeded.bound, lash_kernel_vm::Bound::Guard { .. }) => Some(exceeded.limit),
+        _ => None,
+    };
     let answer = || -> ExecResponse {
         let collected = host.ledgers();
         let respond = |result| exec_response_from(&collected, &printed, result);
@@ -1048,6 +1065,27 @@ async fn run_linked_cell(
         }
     };
     let mut response = answer();
+    response.consumption = if recorded {
+        host.graph.lock_recover().state.consumption.clone()
+    } else {
+        consumption::snapshot(
+            Some(&host),
+            services,
+            bounds,
+            owed.as_ref().map(|(ledger, _, _)| ledger.growth()),
+            response.error(),
+        )
+    };
+    if !recorded && let Some(limit) = library_bound {
+        response.consumption.push(lash_core::CellConsumption {
+            resource: lash_core::CellResource::LibraryWork,
+            consumed: None,
+            observed: None,
+            limit,
+        });
+    }
+    host.graph.lock_recover().state.consumption = response.consumption.clone();
+    let consumption = response.consumption.clone();
     let ended = match owed {
         Some((ledger, end, pages)) => {
             end_cell(state, snapshots, &host, document_id, ledger, end, &pages)
@@ -1082,6 +1120,7 @@ async fn run_linked_cell(
             );
         }
     }
+    response.consumption = consumption;
     if !response.suspended && !ctx.has_nested_effect_error() {
         let graph = host.graph.lock_recover();
         let mut records = Vec::new();
@@ -1435,6 +1474,7 @@ fn broker_failure(
 
 fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
+        consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),
         calls: Vec::new(),
@@ -1513,6 +1553,7 @@ fn exec_response_from(
     result: lash_core::CellOutcome,
 ) -> ExecResponse {
     ExecResponse {
+        consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),
         calls: collected.executed_calls(),

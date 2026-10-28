@@ -28,6 +28,9 @@ pub struct ExecutionBudget {
 struct BudgetTotals {
     attempts: u32,
     cpu_nanos: u64,
+    meters: Option<crate::RunMeters>,
+    #[cfg(feature = "testing")]
+    injected_cpu: Option<u64>,
     replacement: bool,
     /// The wall time of the holds that ended, and what the execution held
     /// before this budget began.
@@ -55,6 +58,25 @@ impl Default for ExecutionBudget {
     }
 }
 impl ExecutionBudget {
+    /// Latest worker safe-point receipt. A killed worker can leave only an
+    /// earlier receipt; an absent meter is never reported as zero.
+    pub fn meters(&self) -> Option<crate::RunMeters> {
+        lock(&self.totals).meters
+    }
+    pub(crate) fn observe(&self, meters: crate::RunMeters) {
+        let mut totals = lock(&self.totals);
+        totals.meters = Some(meters);
+        #[cfg(feature = "testing")]
+        if meters.charged.is_some_and(|charged| charged > 0)
+            && let Some(cpu) = totals.injected_cpu.take()
+        {
+            totals.cpu_nanos = totals.cpu_nanos.max(cpu);
+        }
+    }
+    #[cfg(feature = "testing")]
+    pub(crate) fn inject_cpu_at_safe_point(&self, cpu: Option<u64>) {
+        lock(&self.totals).injected_cpu = cpu;
+    }
     pub fn totals(&self) -> (u32, Duration) {
         let totals = lock(&self.totals);
         (totals.attempts, Duration::from_nanos(totals.cpu_nanos))

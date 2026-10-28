@@ -379,6 +379,7 @@ mod tests {
                     graph_key: None,
                 }),
                 activity(TurnEvent::CodeBlockCompleted {
+                    consumption: Vec::new(),
                     language: "typescript".into(),
                     prints: Some(vec!["é".repeat(2_001).into()]),
                     prints_retained: None,

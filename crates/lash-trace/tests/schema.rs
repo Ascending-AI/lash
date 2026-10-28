@@ -720,6 +720,7 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
 fn exec_code_completed_event() -> TraceEvent {
     TraceEvent::ExecCodeCompleted {
+        consumption: Vec::new(),
         trailing_discarded: 0,
         code: String::new(),
         language: "python".to_string(),
@@ -1387,6 +1388,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             span_attributes: Default::default(),
         },
         TraceEvent::ExecCodeCompleted {
+                consumption: Vec::new(),
             trailing_discarded: 0,
             code: String::new(),
             language: "python".to_string(),

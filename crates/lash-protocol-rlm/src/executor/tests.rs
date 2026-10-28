@@ -1171,3 +1171,123 @@ async fn a_held_response_registers_its_cell_in_the_first_park() {
         "one admitted call, without redriving the cell"
     );
 }
+
+/// FIG-7519: the committed decision retains every existing meter, whichever
+/// bound fires. The configured budgets are the independent oracle.
+#[tokio::test(flavor = "multi_thread")]
+async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
+    let instruction_limit = 10_000;
+    let cpu_limit = std::time::Duration::from_secs(3600);
+    let mut config = lash_vm_client::service::Service::default().config().clone();
+    config.deadlines.cumulative_cpu = cpu_limit;
+    let mut services = cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::new(config),
+    );
+    services.execution_bounds = crate::plugin::ExecutionBounds::new(
+        crate::plugin::InstructionBound::instructions(instruction_limit),
+        crate::plugin::MemoryBound::mebibytes(64),
+    );
+    let tools = Arc::new(CellTools::default());
+    let (first, again) = run_and_replay(
+        &services,
+        &tools,
+        "await echo.say({ text: \"start\" }); while (true) {}",
+    )
+    .await;
+    assert_eq!(
+        first.error().and_then(|f| f.worker_limit),
+        Some(lash_vm_client::WorkerLimit::Fuel)
+    );
+    let encoded = serde_json::to_value(&first).expect("encode result");
+    let reading = |resource: &str| {
+        encoded["consumption"]
+            .as_array()
+            .and_then(|entries| entries.iter().find(|entry| entry["resource"] == resource))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
+    let charge = reading("charges");
+    assert_eq!(charge["consumed"], instruction_limit);
+    assert_eq!(charge["limit"], instruction_limit);
+    let cpu = reading("worker_cpu_nanos");
+    let cpu_bound = u64::try_from(cpu_limit.as_nanos()).unwrap();
+    assert_eq!(cpu["limit"], cpu_bound);
+    assert!(
+        cpu["consumed"]
+            .as_u64()
+            .is_some_and(|used| used < cpu_bound)
+    );
+    assert_eq!(
+        encoded["consumption"],
+        serde_json::to_value(&again).unwrap()["consumption"],
+        "a recorded end retains its decision meters"
+    );
+    // Force a CPU verdict only after the machine has run a charged slice.
+    // This does not depend on how quickly this host runs the guest.
+    let instruction_limit = 40_000_000;
+    let mut config = lash_vm_client::service::Service::default().config().clone();
+    config.deadlines.cumulative_cpu = cpu_limit;
+    let mut services = cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::new(config).with_cpu_at_safe_point(cpu_limit),
+    );
+    services.execution_bounds = crate::plugin::ExecutionBounds::new(
+        crate::plugin::InstructionBound::instructions(instruction_limit),
+        crate::plugin::MemoryBound::mebibytes(64),
+    );
+    let host = open_host().await;
+    let response = run_cell(
+        &mut typescript_state(),
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "while (true) {}",
+    )
+    .await;
+    assert_eq!(
+        response.error().and_then(|f| f.worker_limit),
+        Some(lash_vm_client::WorkerLimit::Cpu {
+            bound_ms: 3_600_000
+        }),
+        "{:?}",
+        response.error()
+    );
+    let reading = |resource| {
+        response
+            .consumption
+            .iter()
+            .find(|entry| entry.resource == resource)
+            .unwrap()
+    };
+    let charge = reading(lash_core::CellResource::Charges);
+    assert_eq!(charge.limit, instruction_limit);
+    assert!(
+        charge
+            .consumed
+            .is_some_and(|used| used > 0 && used < instruction_limit)
+    );
+    let cpu = reading(lash_core::CellResource::WorkerCpuNanos);
+    assert_eq!(cpu.limit, cpu_bound);
+    assert!(cpu.consumed.is_some_and(|used| used >= cpu_bound));
+
+    // Successful cells carry the same meters without an extra worker call.
+    let host = open_host().await;
+    let response = run_cell(
+        &mut typescript_state(),
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools),
+        &typescript_services(),
+        "await control.finish(7);",
+    )
+    .await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    let charge = response
+        .consumption
+        .iter()
+        .find(|entry| entry.resource == lash_core::CellResource::Charges)
+        .unwrap();
+    assert!(
+        charge
+            .consumed
+            .is_some_and(|used| used > 0 && used < charge.limit)
+    );
+}

@@ -774,6 +774,12 @@ impl Checkout {
             } => (RunStep::Ended { end, meters, seal }, sites),
             message => return Err(self.unexpected(Exchange::Run, &message)),
         };
+        match &step {
+            RunStep::Parked { meters, .. }
+            | RunStep::Slice { meters }
+            | RunStep::Ended { meters, .. } => self.budget.observe(*meters),
+            _ => {}
+        }
         self.sites.extend(sites);
         Ok(step)
     }
@@ -1131,6 +1137,7 @@ impl Checkout {
                 WorkerMessage::Progress {
                     phase: next,
                     cpu_nanos,
+                    meters,
                     work,
                 } => {
                     let allowed = matches!(
@@ -1149,7 +1156,10 @@ impl Checkout {
                         lock(&self.pool.measurements)
                             .counters
                             .worker_work
-                            .accumulate(work);
+                            .accumulate(*work);
+                    }
+                    if let Some(meters) = meters {
+                        self.budget.observe(meters);
                     }
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;

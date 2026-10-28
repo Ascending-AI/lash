@@ -213,6 +213,7 @@ pub enum TurnEvent {
     },
     /// Provisional cell activity; a later commit settles it (ADR 0122).
     CodeBlockCompleted {
+        consumption: Vec<lash_protocol_types::CellConsumption>,
         /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         language: String,
         /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122); absent when unavailable.

@@ -498,6 +498,49 @@ impl BindingChanges {
     }
 }
 
+/// A cell bound in its native units. Time values use nanoseconds.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum CellResource {
+    Charges,
+    MemoryBytes,
+    LiveTasks,
+    CallDepth,
+    RequestsPerPark,
+    JoinMembers,
+    WorkerCpuNanos,
+    HeldWallNanos,
+    ComputeNanos,
+    SerializationNanos,
+    LibraryWork,
+    HostReadNanos,
+    WorkerMemoryBytes,
+    Effects,
+    CheckpointBytes,
+    ToolCalls,
+    EffectValueBytes,
+    VmStateBytes,
+    FrameBytes,
+}
+
+/// Consumption at a cell decision, from existing kernel and supervisor meters.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct CellConsumption {
+    pub resource: CellResource,
+    /// Budget consumed. Charges saturate at the budget; `observed` retains
+    /// the raw kernel charge, including the refused crossing unit.
+    /// None means Lash has no meter for this bound, or no receipt arrived.
+    pub consumed: Option<u64>,
+    pub limit: u64,
+    /// The raw meter reading, which can pass the bound.
+    pub observed: Option<u64>,
+}
+
 /// One executed code cell, as committed history records it and a transcript
 /// returns it: the protocol that ran the cell appends this record, and a
 /// reader decodes the same record back. Its prints and result are the
@@ -507,6 +550,8 @@ impl BindingChanges {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellRecord {
+    /// The consumption used for the cell's decision, retained on success and failure.
+    pub consumption: Vec<CellConsumption>,
     /// The cell's identity within its session. A committed message that
     /// carries the cell's assistant context names it in its origin.
     pub id: String,
@@ -537,6 +582,8 @@ fn is_zero(value: &usize) -> bool {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecResponse {
+    /// The consumption used for the cell's decision, retained on success and failure.
+    pub consumption: Vec<CellConsumption>,
     /// Inline prints, in order; empty when `prints_retained` holds them.
     pub prints: Vec<CellPrint>,
     /// The complete ordered prints when their aggregate exceeds the history

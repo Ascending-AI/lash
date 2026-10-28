@@ -205,6 +205,7 @@ pub enum TraceEvent {
     /// its span. `started_at_ms` is the cell's first start, which a
     /// suspension or a re-run keeps; `duration_ms` runs from it.
     ExecCodeCompleted {
+        consumption: Vec<lash_protocol_types::CellConsumption>,
         /// Observed bytes discarded after the model reply's first cell.
         #[serde(default, skip_serializing_if = "is_zero")]
         trailing_discarded: usize,

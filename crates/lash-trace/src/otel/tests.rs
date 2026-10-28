@@ -811,6 +811,12 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         (
             TraceSpanKind::Cell,
             TraceEvent::ExecCodeCompleted {
+                consumption: vec![lash_protocol_types::CellConsumption {
+                    resource: lash_protocol_types::CellResource::Charges,
+                    consumed: Some(17),
+                    limit: 17,
+                    observed: Some(18),
+                }],
                 trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
@@ -858,6 +864,26 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
         assert_semconv(span);
+        if kind == TraceSpanKind::Cell {
+            // FIG-7519: numeric budget evidence survives content omission.
+            assert!(
+                span.attributes
+                    .contains(&A::CellChargesConsumed.value(17_i64))
+            );
+            assert!(span.attributes.contains(&A::CellChargesLimit.value(17_i64)));
+            assert!(
+                span.attributes
+                    .contains(&A::CellChargesObserved.value(18_i64))
+            );
+            let encoded = span
+                .attributes
+                .iter()
+                .find(|a| a.key.as_str() == "lash.cell.consumption")
+                .unwrap();
+            let decoded: serde_json::Value = serde_json::from_str(&encoded.value.as_str()).unwrap();
+            assert_eq!(decoded[0]["consumed"], 17);
+            assert_eq!(decoded[0]["observed"], 18);
+        }
         assert_eq!(span.name, name);
         assert_eq!(span.start_time, epoch_ms(start));
         assert_eq!(span.end_time, epoch_ms(9000));
@@ -915,6 +941,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                consumption: Vec::new(),
                 trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
@@ -934,6 +961,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                consumption: Vec::new(),
                 trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),

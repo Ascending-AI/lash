@@ -24,6 +24,7 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
+            consumption: Vec::new(),
             language: "typescript".to_string(),
             prints_retained: None,
             id: format!("lash_vm_step_{protocol_iteration}"),
@@ -54,6 +55,7 @@ fn terminal_step_event(
 ) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
+            consumption: Vec::new(),
             language: "typescript".to_string(),
             prints_retained: None,
             id: format!("lash_vm_step_{protocol_iteration}"),
@@ -548,6 +550,7 @@ fn printed_images_render_as_llm_image_blocks() {
     let projector = projector(1000);
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
+            consumption: Vec::new(),
             language: "typescript".to_string(),
             prints_retained: None,
             id: "lash_vm_step_1".to_string(),

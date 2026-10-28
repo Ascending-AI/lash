@@ -43,6 +43,7 @@ fn cpu_receipts_preserve_values_without_changing_frame_size() {
                 WorkerMessage::Progress {
                     phase: crate::WorkerPhase::Computing,
                     cpu_nanos,
+                    meters: None,
                     work: None,
                 }
             } else {

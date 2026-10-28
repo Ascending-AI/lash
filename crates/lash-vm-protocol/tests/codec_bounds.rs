@@ -164,6 +164,7 @@ fn a_control_frame_decodes_without_allocating() {
         message: WorkerMessage::Progress {
             phase: WorkerPhase::Computing,
             cpu_nanos: 1_000_000,
+            meters: None,
             work: None,
         },
     };

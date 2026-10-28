@@ -169,6 +169,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Serializing,
                 cpu_nanos: cpu_nanos()?,
+                meters: None,
                 work: None,
             },
         )?;
@@ -177,6 +178,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Responding,
                 cpu_nanos: cpu_nanos()?,
+                meters: None,
                 work: None,
             },
         )?;
@@ -220,6 +222,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Computing,
                 cpu_nanos: cpu_nanos()?,
+                meters: None,
                 work: None,
             },
         )?;

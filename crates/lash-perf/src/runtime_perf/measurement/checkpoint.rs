@@ -954,6 +954,7 @@ fn checkpoint_pending_exec(
     restored.handle_response(Response::ExecResult {
         id,
         result: Ok(ExecResponse {
+            consumption: Vec::new(),
             prints_retained: None,
             prints: vec![lash_core::CellPrint {
                 text: "checkpoint observation: resumed after ExecCode effect boundary".to_string(),

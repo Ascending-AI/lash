@@ -1219,7 +1219,10 @@ impl<'a> Projection<'a> {
                 out.push(A::ErrorType.value(crate::wire_tag(reason)));
             }
             TraceEvent::ExecCodeCompleted {
-                result, tool_calls, ..
+                result,
+                tool_calls,
+                consumption,
+                ..
             } => {
                 let outcome = if result.is_failed() {
                     "failed"
@@ -1227,6 +1230,50 @@ impl<'a> Projection<'a> {
                     "completed"
                 };
                 cell_attributes(record, outcome, Some(tool_calls.len()), out);
+                if !consumption.is_empty() {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "cell consumption contains only unit tags and integer fields"
+                    )]
+                    let encoded = serde_json::to_string(consumption).expect("cell consumption");
+                    out.push(A::CellConsumption.value(encoded));
+                    for reading in consumption {
+                        use lash_protocol_types::CellResource as R;
+                        let keys = match reading.resource {
+                            R::Charges => Some((
+                                A::CellChargesConsumed,
+                                A::CellChargesLimit,
+                                A::CellChargesObserved,
+                            )),
+                            R::WorkerCpuNanos => Some((
+                                A::CellWorkerCpuNanosConsumed,
+                                A::CellWorkerCpuNanosLimit,
+                                A::CellWorkerCpuNanosObserved,
+                            )),
+                            R::HeldWallNanos => Some((
+                                A::CellHeldWallNanosConsumed,
+                                A::CellHeldWallNanosLimit,
+                                A::CellHeldWallNanosObserved,
+                            )),
+                            R::MemoryBytes => Some((
+                                A::CellMemoryBytesConsumed,
+                                A::CellMemoryBytesLimit,
+                                A::CellMemoryBytesObserved,
+                            )),
+                            _ => None,
+                        };
+                        if let Some((consumed, limit, observed)) = keys {
+                            let integer = |value| i64::try_from(value).unwrap_or(i64::MAX);
+                            out.push(limit.value(integer(reading.limit)));
+                            if let Some(value) = reading.consumed {
+                                out.push(consumed.value(integer(value)));
+                            }
+                            if let Some(value) = reading.observed {
+                                out.push(observed.value(integer(value)));
+                            }
+                        }
+                    }
+                }
                 if let Some(error) = result.failure() {
                     let reason = error
                         .exec_failure

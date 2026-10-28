@@ -187,6 +187,16 @@ impl<'embedding> Server<'embedding> {
             None => Ok(()),
         }
     }
+    fn run_meters(&self) -> Option<RunMeters> {
+        self.hosted.as_ref().map(|hosted| {
+            let meters = hosted.machine.meters();
+            RunMeters {
+                charged: meters.charged,
+                memory: meters.memory,
+                live_tasks: meters.live_tasks,
+            }
+        })
+    }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
         if phase == WorkerPhase::Computing && self.cpu_ceiling.is_none() {
             let nanos = u128::from(cpu_nanos()?) + u128::from(self.bootstrap.cpu_nanos);
@@ -211,6 +221,7 @@ impl<'embedding> Server<'embedding> {
         self.send(WorkerMessage::Progress {
             phase,
             cpu_nanos: cpu_nanos()?,
+            meters: self.run_meters(),
             work: None,
         })
     }
@@ -1114,7 +1125,8 @@ impl<'embedding> Server<'embedding> {
                 WorkerMessage::Progress {
                     phase: WorkerPhase::Responding,
                     cpu_nanos: cpu_nanos()?,
-                    work: crate::perf_witness::take(),
+                    meters: self.run_meters(),
+                    work: crate::perf_witness::take().map(Box::new),
                 },
             )?;
             fences.outgoing.next_header();

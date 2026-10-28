@@ -332,6 +332,43 @@
         }
       ]
     },
+    "CellConsumption": {
+      "additionalProperties": false,
+      "description": "Consumption at a cell decision, from existing kernel and supervisor meters.",
+      "properties": {
+        "consumed": {
+          "description": "Budget consumed. Charges saturate at the budget; `observed` retains\nthe raw kernel charge, including the refused crossing unit.\nNone means Lash has no meter for this bound, or no receipt arrived.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "description": "The raw meter reading, which can pass the bound.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/CellResource"
+        }
+      },
+      "required": [
+        "resource",
+        "limit"
+      ],
+      "type": "object"
+    },
     "CellControl": {
       "description": "The control that ended a cell, as history records it.",
       "oneOf": [
@@ -693,6 +730,31 @@
           "type": "object"
         }
       ]
+    },
+    "CellResource": {
+      "description": "A cell bound in its native units. Time values use nanoseconds.",
+      "enum": [
+        "charges",
+        "memory_bytes",
+        "live_tasks",
+        "call_depth",
+        "requests_per_park",
+        "join_members",
+        "worker_cpu_nanos",
+        "held_wall_nanos",
+        "compute_nanos",
+        "serialization_nanos",
+        "library_work",
+        "host_read_nanos",
+        "worker_memory_bytes",
+        "effects",
+        "checkpoint_bytes",
+        "tool_calls",
+        "effect_value_bytes",
+        "vm_state_bytes",
+        "frame_bytes"
+      ],
+      "type": "string"
     },
     "ChargeSafetyDenialReason": {
       "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",
@@ -7630,6 +7692,12 @@
         "code": {
           "type": "string"
         },
+        "consumption": {
+          "items": {
+            "$ref": "#/$defs/CellConsumption"
+          },
+          "type": "array"
+        },
         "duration_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -7684,6 +7752,7 @@
       },
       "required": [
         "type",
+        "consumption",
         "code",
         "language",
         "started_at_ms",

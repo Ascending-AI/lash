@@ -71,6 +71,19 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `gen_ai.tool.name` | String | Provenance | tool, cell, process, tool_intent |
 | `gen_ai.tool.call.id` | String | Provenance | tool, process, tool_intent |
 | `lash.cell.id` | String | Provenance | cell |
+| `lash.cell.charges.consumed` | Integer | Provenance | cell |
+| `lash.cell.charges.limit` | Integer | Provenance | cell |
+| `lash.cell.charges.observed` | Integer | Provenance | cell |
+| `lash.cell.worker_cpu_nanos.consumed` | Integer | Provenance | cell |
+| `lash.cell.worker_cpu_nanos.limit` | Integer | Provenance | cell |
+| `lash.cell.worker_cpu_nanos.observed` | Integer | Provenance | cell |
+| `lash.cell.held_wall_nanos.consumed` | Integer | Provenance | cell |
+| `lash.cell.held_wall_nanos.limit` | Integer | Provenance | cell |
+| `lash.cell.held_wall_nanos.observed` | Integer | Provenance | cell |
+| `lash.cell.memory_bytes.consumed` | Integer | Provenance | cell |
+| `lash.cell.memory_bytes.limit` | Integer | Provenance | cell |
+| `lash.cell.memory_bytes.observed` | Integer | Provenance | cell |
+| `lash.cell.consumption` | String | Provenance | cell |
 | `lash.cell.language` | String | Provenance | cell |
 | `lash.cell.trailing_discarded` | Integer | Provenance | cell |
 | `lash.cell.tool_calls` | Integer | Provenance | cell |
@@ -176,7 +189,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `model` | 47 |
 | `model_attempt` | 35 |
 | `tool` | 31 |
-| `cell` | 29 |
+| `cell` | 42 |
 | `process` | 26 |
 | `workflow` | 24 |
 | `workflow_node` | 22 |

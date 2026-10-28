@@ -630,6 +630,7 @@ impl RuntimeTurnDriver<'_> {
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                             language: language.clone(),
                             prints: Some(Vec::new()),
                             prints_retained: None,
@@ -737,6 +738,7 @@ impl RuntimeTurnDriver<'_> {
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                             language: language.clone(),
                             prints: None,
                             prints_retained: None,
@@ -814,6 +816,7 @@ impl RuntimeTurnDriver<'_> {
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
+                            consumption: output.consumption.clone(),
                             language: language.clone(),
                             prints: Some(output.prints.clone()),
                             prints_retained: output.prints_retained.clone(),
@@ -837,6 +840,7 @@ impl RuntimeTurnDriver<'_> {
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
+                            consumption: Vec::new(),
                             language: language.clone(),
                             prints: None,
                             prints_retained: None,
@@ -897,6 +901,7 @@ impl RuntimeTurnDriver<'_> {
                             );
                         }
                         lash_trace::TraceEvent::ExecCodeCompleted {
+                            consumption: output.consumption.clone(),
                             trailing_discarded: discarded_bytes,
                             code: content
                                 .capture(lash_trace::ContentCategory::Code, || code.clone()),

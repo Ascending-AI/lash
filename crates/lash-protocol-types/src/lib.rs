@@ -78,9 +78,10 @@ pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue};
 pub use run_aggregate::RunAggregateWakePolicy;
 pub use session::{
-    BindingChanges, CallResultSummary, CellControl, CellDefect, CellFailure, CellFailureKind,
-    CellFailureRepair, CellOutcome, CellPrint, CellRecord, DegradedBinding, ExecCodeFailure,
-    ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
+    BindingChanges, CallResultSummary, CellConsumption, CellControl, CellDefect, CellFailure,
+    CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord, CellResource,
+    DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall,
+    ExecutedCallOutcome, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

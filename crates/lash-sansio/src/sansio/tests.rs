@@ -261,6 +261,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
 
 fn empty_exec_response() -> lash_protocol_types::ExecResponse {
     lash_protocol_types::ExecResponse {
+        consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),
         calls: Vec::new(),

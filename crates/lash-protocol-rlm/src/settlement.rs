@@ -95,6 +95,7 @@ pub(crate) fn settle_execution(
             record.prints = response.prints;
             record.prints_retained = response.prints_retained;
             record.result = response.result;
+            record.consumption = response.consumption;
             if let Some(outcome) = terminal_outcome {
                 // A tool stopped the turn: the cell's own control never
                 // took effect, so it is not the cell's result.
