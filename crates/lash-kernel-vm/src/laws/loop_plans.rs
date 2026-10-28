@@ -464,6 +464,7 @@ fn room_join(
 #[test]
 fn source_room_peak_bounds_follow_source_lifetimes() {
     use crate::compile::room::{Balance, Phase, Refused};
+    room_shared_binding_growth();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
     assert_eq!(
@@ -499,6 +500,44 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             assert_eq!(source.verify_room(&understated), Err(Refused::Peak));
         }
     });
+}
+
+fn room_shared_binding_growth() {
+    use crate::compile::room::{Phase, Point, Source};
+    use lash_kernel_value::Name;
+    use lash_kernel_value::sites::{Site, Unit};
+
+    let document = lash_kernel_doc::parse_document(
+        "numbers by_spelling\nkernel 1\nmain { let x = null return null }",
+    )
+    .unwrap();
+    let root = Site::new(Unit::Main, vec![]);
+    let declared = root.child(0);
+    let parameter = Name::new("parameter");
+    let source = Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(document.identity()),
+        root.clone(),
+        document.main.as_ref().unwrap(),
+        std::slice::from_ref(&parameter),
+        std::collections::BTreeMap::from([
+            ((root.clone(), parameter), true),
+            ((declared.clone(), Name::new("x")), true),
+        ]),
+        &Default::default(),
+        &std::collections::BTreeSet::from([Name::new("x")]),
+    );
+    source.verify().unwrap();
+    // The input occurrence moves into the cell. Its body is 32 bytes;
+    // the new binding's separate reference is 16 bytes.
+    for (site, phase, expected) in [
+        (root, Phase::Enter, 64 + 32 + 16),
+        (declared, Phase::Commit, 32 + 16),
+    ] {
+        let point = Point { site, phase };
+        let event = &source.room.peak_extra[&point];
+        assert_eq!(event.peak.fixed, expected, "{point:?}");
+        assert_eq!(event.delta.fixed, expected, "{point:?}");
+    }
 }
 
 #[test]
