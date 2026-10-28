@@ -998,7 +998,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     reads,
                     covered,
                 } => {
-                    let values = self.inputs::<3>(&frame.slots, reads)?;
+                    let mut values = [Value::Absent; 3];
+                    self.inputs(&frame.slots, reads, &mut values)?;
                     regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
                         island.operator_value(site, &values[..reads.len()], *covered)
                     })?;
@@ -1032,7 +1033,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     regs[site.reg as usize] = answer?;
                 }
                 Op::DirectNative { site, reads } => {
-                    let values = self.inputs::<MAX_ARGS>(&frame.slots, reads)?;
+                    let mut values = [Value::Absent; MAX_ARGS];
+                    self.inputs(&frame.slots, reads, &mut values)?;
                     regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
                         island.native(site, &values, reads.len())
                     })?;
@@ -1044,10 +1046,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     property,
                     finish,
                 } => {
-                    let values = match reads {
-                        Some(reads) => self.inputs::<3>(&frame.slots, reads.as_slice())?,
-                        None => std::array::from_fn(|at| frame.regs[args[at] as usize]),
-                    };
+                    let mut values = [Value::Absent; 3];
+                    match reads {
+                        Some(reads) => self.inputs(&frame.slots, reads.as_slice(), &mut values)?,
+                        None => values = std::array::from_fn(|at| frame.regs[args[at] as usize]),
+                    }
                     let answer = self
                         .member_write(frame.statement, property, site.close, &values)
                         .map(|answer| answer.map(|()| values[2]))
@@ -1074,10 +1077,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     reads,
                     to,
                 } => {
-                    let values = match reads {
-                        Some(reads) => self.inputs::<2>(&frame.slots, reads.as_slice())?,
-                        None => [regs[args[0] as usize], regs[args[1] as usize]],
-                    };
+                    let mut values = [Value::Absent; 2];
+                    match reads {
+                        Some(reads) => self.inputs(&frame.slots, reads.as_slice(), &mut values)?,
+                        None => values = [regs[args[0] as usize], regs[args[1] as usize]],
+                    }
                     let answer = self.member_value(site, &values, *units).unwrap_or_else(|| {
                         self.retaining(&mut frame.transient, |island| {
                             island.heap_call(site, &values)
@@ -1176,7 +1180,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     finish,
                 } => {
                     let values = match inputs {
-                        Some(inputs) => self.inputs::<3>(&frame.slots, &inputs.reads)?,
+                        Some(inputs) => {
+                            let mut values = [Value::Absent; 3];
+                            self.inputs(&frame.slots, &inputs.reads, &mut values)?;
+                            values
+                        }
                         None => [
                             regs[*target as usize],
                             index.map_or(Value::Absent, |reg| regs[reg as usize]),
@@ -1235,7 +1243,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     return self.access_init(frame, *head, original, held.as_deref());
                 }
                 Op::DirectKind { site, reads } => {
-                    let [value] = self.inputs::<1>(&frame.slots, reads)?;
+                    let mut values = [Value::Absent; 1];
+                    self.inputs(&frame.slots, reads, &mut values)?;
+                    let [value] = values;
                     regs[site.same.reg as usize] = self
                         .retaining(&mut frame.transient, |island| island.kind_test(site, value))?;
                 }
@@ -1287,7 +1297,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         self.begin(frame, begin.id, begin.index, begin.ahead)?;
                     }
                     let value = if let Some(reads) = &site.reads {
-                        self.inputs::<1>(&frame.slots, reads)?[0]
+                        {
+                            let mut values = [Value::Absent; 1];
+                            self.inputs(&frame.slots, reads, &mut values)?;
+                            values[0]
+                        }
                     } else {
                         frame.regs[site.reg as usize]
                     };

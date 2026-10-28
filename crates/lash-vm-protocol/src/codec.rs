@@ -205,22 +205,38 @@ impl FrameCodec {
             limit: self.limits.max_frame_bytes as usize,
             refused: None,
         };
-        let (result, complete) = {
-            let mut outgoing = cpu::Writer::new(&mut writer, frame.cpu_counter());
-            let result =
-                frame.serialize(&mut rmp_serde::Serializer::new(&mut outgoing).with_struct_map());
-            (result, outgoing.complete())
-        };
+        let result =
+            frame.serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
         if let Some(declared) = writer.refused {
             return Err(CodecRefusal::FrameTooLarge { limit, declared });
         }
         result.map_err(|error| CodecRefusal::Malformed {
             reason: Detail::new(format_args!("frame does not encode: {error}")),
         })?;
-        if !complete {
-            return Err(CodecRefusal::Malformed {
+        if let Some(counter) = frame.cpu_counter() {
+            let integer = cpu::integer(&writer.bytes).ok_or_else(|| CodecRefusal::Malformed {
                 reason: Detail::new("CPU receipt did not encode its named integer field"),
-            });
+            })?;
+            let end = writer.bytes.len();
+            let growth = 9 - integer.len();
+            if end + growth > writer.limit {
+                return Err(CodecRefusal::FrameTooLarge {
+                    limit,
+                    declared: (end + growth) as u64,
+                });
+            }
+            std::io::Write::write_all(&mut writer, &[0; 8][..growth]).map_err(|_| {
+                CodecRefusal::FrameTooLarge {
+                    limit,
+                    declared: (end + growth) as u64,
+                }
+            })?;
+            writer
+                .bytes
+                .copy_within(integer.end..end, integer.start + 9);
+            writer.bytes[integer.start] = 0xcf;
+            writer.bytes[integer.start + 1..integer.start + 9]
+                .copy_from_slice(&counter.to_be_bytes());
         }
         if limit < FRAME_HEADER_BYTES as u64 {
             return Err(CodecRefusal::FrameTooLarge {

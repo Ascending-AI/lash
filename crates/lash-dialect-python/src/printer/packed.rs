@@ -68,6 +68,50 @@ impl Renderer<'_> {
             return None;
         }
         let stored = &definition.body()?.block;
+        let positional = &definition.signature.params[0].name;
+        let keywords = &definition.signature.params[1].name;
+        if let [
+            k::Stmt::Let {
+                name: slots,
+                value: k::Rhs::Expr(value),
+            },
+            k::Stmt::Return { value: body },
+        ] = stored.as_slice()
+            && let k::Expr::If { cond, then, r#else } = value
+            && then.as_ref() == &k::Expr::Variable(positional.clone())
+            && let k::Expr::Act(binding) = r#else.as_ref()
+            && let k::ActKind::Call(target) = &binding.kind
+            && super::task::target(target)
+                .is_some_and(|target| self.operators.is(&target, "py.bind"))
+        {
+            let k::Expr::Literal(k::Literal::Text(spelling)) = &parts[NAME] else {
+                return None;
+            };
+            if !self.fixed_condition(cond, positional, keywords, metadata.len())
+                || binding.args
+                    != vec![
+                        parts[NAME].clone(),
+                        parts[PARAMETERS].clone(),
+                        k::Expr::Variable(positional.clone()),
+                        k::Expr::Variable(keywords.clone()),
+                        k::Expr::Literal(k::Literal::Bool(false)),
+                    ]
+                || metadata
+                    .iter()
+                    .any(|param| !matches!(mode(param), Some(0 | 1)))
+            {
+                return None;
+            }
+            let (names, value) = self.packed_inputs(body, slots, metadata, spelling, true)?;
+            return self.packed_source(
+                names,
+                vec![k::Stmt::Return {
+                    value: value.clone(),
+                }],
+                closure.function,
+                1,
+            );
+        }
         let mut expression_fallback = Vec::new();
         let (fast, stored) = match stored.first() {
             Some(k::Stmt::If {
@@ -150,68 +194,21 @@ impl Renderer<'_> {
             let [k::Stmt::Return { value: fast }] = fast.as_slice() else {
                 return None;
             };
-            let positional = &definition.signature.params[0].name;
-            let keywords = &definition.signature.params[1].name;
-            let k::Expr::If { cond, then, r#else } = condition else {
+            let k::Expr::Literal(k::Literal::Text(spelling)) = &parts[NAME] else {
                 return None;
             };
-            if **r#else != k::Expr::Literal(k::Literal::Bool(false))
-                || !self.exact_count(cond, "list.len", positional, metadata.len())
-                || !self.exact_count(then, "map.len", keywords, 0)
-            {
+            if !self.fixed_condition(condition, positional, keywords, metadata.len()) {
                 return None;
             }
-            let mut actual = fast;
-            for (index, (name, metadata)) in names.iter().zip(metadata).enumerate() {
-                let k::Expr::Tuple(fields) = metadata else {
-                    return None;
-                };
-                let k::Expr::Let {
-                    name: bound,
-                    value: read,
-                    body,
-                } = actual
-                else {
-                    return None;
-                };
-                if bound != name
-                    || !matches!(read.as_ref(), k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Int(at)) } if target == positional && at == &k::Integer::from(i64::try_from(index).ok()?)))
-                {
-                    return None;
-                }
-                actual = body;
-                if fields.get(2) == Some(&k::Expr::Literal(k::Literal::Bool(false)))
-                    && call.args.get(4) == Some(&k::Expr::Literal(k::Literal::Bool(false)))
-                {
-                    let k::Expr::If { cond, then, r#else } = actual else {
-                        return None;
-                    };
-                    if !matches!(cond.as_ref(), k::Expr::Call { function, args } if self.operators.is(function, "same") && args == &vec![k::Expr::Variable(name.clone()), k::Expr::Literal(k::Literal::Absent)])
-                    {
-                        return None;
-                    }
-                    let k::Expr::Act(failure) = then.as_ref() else {
-                        return None;
-                    };
-                    if !matches!(&failure.kind, k::ActKind::Call(target) if super::task::target(target).is_some_and(|target| self.operators.is(&target, "py.fail")))
-                    {
-                        return None;
-                    }
-                    let k::Expr::Literal(k::Literal::Text(spelling)) = &parts[NAME] else {
-                        return None;
-                    };
-                    if failure.args
-                        != vec![
-                            k::Expr::Literal(k::Literal::Text("TypeError".into())),
-                            k::Expr::Literal(k::Literal::Text(format!(
-                                "{spelling}() missing a required positional argument"
-                            ))),
-                        ]
-                    {
-                        return None;
-                    }
-                    actual = r#else;
-                }
+            let (fast_names, actual) = self.packed_inputs(
+                fast,
+                positional,
+                metadata,
+                spelling,
+                call.args.get(4) == Some(&k::Expr::Literal(k::Literal::Bool(false))),
+            )?;
+            if fast_names != names {
+                return None;
             }
             if actual != &value {
                 return None;
@@ -219,21 +216,103 @@ impl Renderer<'_> {
             authored = Some(vec![k::Stmt::Return { value }]);
         }
         let body = authored.as_deref().unwrap_or(body);
-        if let Some(function) = self.direct_body(body) {
+        self.packed_source(
+            names,
+            body.to_vec(),
+            closure.function,
+            if folded {
+                0
+            } else {
+                metadata.len() + 1 + usize::from(fast.is_some())
+            },
+        )
+    }
+
+    fn packed_source(
+        &self,
+        names: Vec<Name>,
+        body: k::Block,
+        unit: lash_kernel_value::FunctionId,
+        prologue: usize,
+    ) -> Option<(Vec<Name>, k::Block, lash_kernel_value::FunctionId, usize)> {
+        if let Some(function) = self.direct_body(&body) {
             let raw = self.document.functions.get(&function)?.body()?;
             Some((names, raw.block.clone(), function, 0))
         } else {
-            Some((
-                names,
-                body.to_vec(),
-                closure.function,
-                if folded {
-                    0
-                } else {
-                    metadata.len() + 1 + usize::from(fast.is_some())
-                },
-            ))
+            Some((names, body, unit, prologue))
         }
+    }
+
+    fn packed_inputs<'a>(
+        &self,
+        mut value: &'a k::Expr,
+        source: &Name,
+        metadata: &[k::Expr],
+        spelling: &str,
+        required: bool,
+    ) -> Option<(Vec<Name>, &'a k::Expr)> {
+        let mut names = Vec::new();
+        for (index, param) in metadata.iter().enumerate() {
+            let k::Expr::Tuple(fields) = param else {
+                return None;
+            };
+            let k::Expr::Literal(k::Literal::Text(spelled)) = fields.first()? else {
+                return None;
+            };
+            let k::Expr::Let {
+                name,
+                value: read,
+                body,
+            } = value
+            else {
+                return None;
+            };
+            if name.as_str() != spelled
+                || !matches!(read.as_ref(), k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Int(at)) } if target == source && at == &k::Integer::from(i64::try_from(index).ok()?)))
+            {
+                return None;
+            }
+            names.push(name.clone());
+            value = body;
+            if required && fields.get(2) == Some(&k::Expr::Literal(k::Literal::Bool(false))) {
+                let k::Expr::If { cond, then, r#else } = value else {
+                    return None;
+                };
+                if !matches!(cond.as_ref(), k::Expr::Call { function, args } if self.operators.is(function, "same") && args == &vec![k::Expr::Variable(name.clone()), k::Expr::Literal(k::Literal::Absent)])
+                {
+                    return None;
+                }
+                let k::Expr::Act(failure) = then.as_ref() else {
+                    return None;
+                };
+                if !matches!(&failure.kind, k::ActKind::Call(target) if super::task::target(target).is_some_and(|target| self.operators.is(&target, "py.fail")))
+                    || failure.args
+                        != vec![
+                            k::Expr::Literal(k::Literal::Text("TypeError".into())),
+                            k::Expr::Literal(k::Literal::Text(format!(
+                                "{spelling}() missing a required positional argument"
+                            ))),
+                        ]
+                {
+                    return None;
+                }
+                value = r#else;
+            }
+        }
+        Some((names, value))
+    }
+
+    fn fixed_condition(
+        &self,
+        value: &k::Expr,
+        positional: &Name,
+        keywords: &Name,
+        count: usize,
+    ) -> bool {
+        matches!(value, k::Expr::If { cond, then, r#else }
+            if **r#else == k::Expr::Literal(k::Literal::Bool(false))
+                && self.exact_count(cond, "list.len", positional, count)
+                && self.exact_count(then, "map.len", keywords, 0))
     }
 
     fn exact_count(&self, value: &k::Expr, length: &str, parameter: &Name, count: usize) -> bool {

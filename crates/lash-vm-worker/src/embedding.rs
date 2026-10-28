@@ -196,9 +196,10 @@ pub fn library_for(
     }
     let library = embedding
         .loaded
-        .get_or_try::<std::convert::Infallible>(
+        .get_or_try_selected::<std::convert::Infallible>(
             assembled.closure.reference(),
             embedding.library_image().helpers().identity(),
+            selection,
             || {
                 Ok(PreparedLibrary::with_charge(
                     Arc::clone(&assembled.registry),
@@ -250,7 +251,7 @@ pub(crate) fn linked_library_for(
             }));
         }
     }
-    let assembled = match loader::assemble_reach(
+    let prepared = match loader::prepare_reach(
         root,
         documents,
         functions,
@@ -259,27 +260,29 @@ pub(crate) fn linked_library_for(
         embedding.library_image().helpers(),
         selection,
     ) {
-        Ok(assembled) => assembled,
+        Ok(prepared) => prepared,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if assembled.held {
-        return Ok(Ok((frame.clone(), assembled.closure)));
+    let closure = prepared.closure().clone();
+    if prepared.is_held() {
+        return Ok(Ok((frame.clone(), closure)));
     }
-    let library = embedding
-        .loaded
-        .get_or_try::<std::convert::Infallible>(
-            assembled.closure.reference(),
-            embedding.library_image().helpers().identity(),
-            || {
-                Ok(PreparedLibrary::with_charge(
-                    Arc::clone(&assembled.registry),
-                    lash_kernel_vm::Charge::Exact,
-                )
-                .with_helper_handle(Arc::clone(embedding.library_image().helpers())))
-            },
-        )
-        .unwrap_or_else(|never| match never {});
-    Ok(Ok((library, assembled.closure)))
+    let library = match embedding.loaded.get_or_try_selected::<LoadRefusal>(
+        closure.reference(),
+        embedding.library_image().helpers().identity(),
+        selection,
+        || {
+            let assembled = prepared.assemble()?;
+            Ok(
+                PreparedLibrary::with_charge(assembled.registry, lash_kernel_vm::Charge::Exact)
+                    .with_helper_handle(Arc::clone(embedding.library_image().helpers())),
+            )
+        },
+    ) {
+        Ok(library) => library,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    Ok(Ok((library, closure)))
 }
 
 /// A worker's configuration while it is assembled: the natives the host
@@ -1086,5 +1089,86 @@ pub(crate) mod tests {
             )
             .unwrap()
             .unwrap();
+    }
+    /// A warmed authored closure does not widen a later restored selection,
+    /// and a cache hit never admits malformed original source.
+    #[test]
+    fn cached_libraries_preserve_restore_selection_and_source_admission() {
+        use lash_kernel_doc::{RestoreSelection, Selection};
+        use lash_kernel_value::{CallableId, LinkId};
+        let embedding = Embedder::new()
+            .dialect(python())
+            .unwrap()
+            .finish(&lash())
+            .unwrap();
+        let first = lash_kernel_doc::parse_definition(
+            "function first() -> Any\nkernel 1\ncharge 1\nbody { return 1 }",
+        )
+        .unwrap();
+        let second = lash_kernel_doc::parse_definition(
+            "function second() -> Any\nkernel 1\ncharge 1\nbody { return 2 }",
+        )
+        .unwrap();
+        let (first_id, second_id) = (first.identity(), second.identity());
+        let mut document = lash_kernel_doc::parse_document("main { return 0 }").unwrap();
+        document.functions = [(first_id, first), (second_id, second)].into();
+        let document = Arc::new(document);
+        let link = LinkId::from_bytes([31; 32]);
+        let functions = [(link, [first_id, second_id].into())].into();
+        let documents = [(document.identity(), Arc::clone(&document))].into();
+        let load = |selection| {
+            linked_library_for(
+                &embedding,
+                &document,
+                &documents,
+                &functions,
+                &[],
+                lash_kernel_value::KernelDataLimits::standard(),
+                selection,
+            )
+            .unwrap()
+            .unwrap()
+            .0
+        };
+        let fresh = load(&Selection::Fresh);
+        assert!(fresh.registry().get(&first_id).is_some());
+        assert!(fresh.registry().get(&second_id).is_some());
+        let restored = Selection::Restored(RestoreSelection {
+            pins: [first_id].into(),
+            live: [CallableId {
+                link,
+                function: first_id,
+            }]
+            .into(),
+        });
+        let narrow = load(&restored);
+        assert!(narrow.registry().get(&first_id).is_some());
+        assert!(
+            narrow.registry().get(&second_id).is_none(),
+            "fresh cache widened restored reach"
+        );
+        assert!(Arc::ptr_eq(narrow.registry(), load(&restored).registry()));
+        assert!(Arc::ptr_eq(
+            fresh.registry(),
+            load(&Selection::Fresh).registry()
+        ));
+        let mut invalid = (*document).clone();
+        invalid.functions.get_mut(&second_id).unwrap().kernel = u32::MAX;
+        let invalid = Arc::new(invalid);
+        let invalid_documents = [(invalid.identity(), Arc::clone(&invalid))].into();
+        assert!(
+            linked_library_for(
+                &embedding,
+                &invalid,
+                &invalid_documents,
+                &functions,
+                &[],
+                lash_kernel_value::KernelDataLimits::standard(),
+                &Selection::Fresh,
+            )
+            .unwrap()
+            .is_err(),
+            "cached closure bypassed source admission"
+        );
     }
 }

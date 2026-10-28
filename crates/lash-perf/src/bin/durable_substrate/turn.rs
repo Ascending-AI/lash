@@ -193,7 +193,7 @@ async fn admitted_messages(backend: &Backend, row: &TurnRow) -> Result<Vec<Messa
     Ok(messages)
 }
 
-fn text_of(request: &LlmRequest, marker: &str) -> usize {
+fn text_of(request: &lash_protocol_types::llm::types::RetainedLlmRequest, marker: &str) -> usize {
     request
         .messages
         .iter()

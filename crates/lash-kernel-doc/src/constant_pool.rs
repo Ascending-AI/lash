@@ -72,8 +72,12 @@ impl ConstantPool {
     #[doc(hidden)]
     pub fn extract(owner: PoolOwner, body: &Block) -> Self {
         let mut pool = Self::default();
-        let mut pending = vec![(Vec::new(), Node::Block(body))];
-        while let Some((path, node)) = pending.pop() {
+        let mut pending = vec![(0, None, Node::Block(body))];
+        let mut path = Vec::new();
+        let mut children = Vec::new();
+        while let Some((depth, index, node)) = pending.pop() {
+            path.truncate(depth);
+            path.extend(index);
             match node {
                 Node::Expr(expr) if closed(expr) => {
                     pool.push(owner, path.clone(), None, expr);
@@ -94,11 +98,15 @@ impl ConstantPool {
                 }
                 _ => {}
             }
-            for (index, child) in node.children().into_iter().enumerate().rev() {
-                let mut coordinate = path.clone();
-                coordinate.push(index as u32);
-                pending.push((coordinate, child));
-            }
+            children.clear();
+            node.children_into(&mut children);
+            pending.extend(
+                children
+                    .drain(..)
+                    .enumerate()
+                    .rev()
+                    .map(|(index, child)| (path.len(), Some(index as u32), child)),
+            );
         }
         pool.entries
             .sort_by(|a, b| a.key.coordinate.cmp(&b.key.coordinate));

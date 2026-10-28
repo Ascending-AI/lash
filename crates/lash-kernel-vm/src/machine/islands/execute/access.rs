@@ -279,7 +279,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return self.commit_access(frame, site, answer);
         }
-        let value = self.inputs::<1>(&frame.slots, std::slice::from_ref(&site.target))?[0];
+        let mut values = [Value::Absent; 1];
+        self.inputs(
+            &frame.slots,
+            std::slice::from_ref(&site.target),
+            &mut values,
+        )?;
+        let [value] = values;
         frame.regs[site.kind.same.reg as usize] = self
             .retaining(&mut frame.transient, |island| {
                 island.kind_test(&site.kind, value)
@@ -343,7 +349,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let Some(reads) = &original.reads else {
             unreachable!("a combined initializer retains its literal operand")
         };
-        let value = self.inputs::<1>(&frame.slots, reads)?[0];
+        let value = {
+            let mut values = [Value::Absent; 1];
+            self.inputs(&frame.slots, reads, &mut values)?;
+            values[0]
+        };
         self.write_value(frame, original, value)
     }
 

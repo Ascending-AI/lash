@@ -54,6 +54,20 @@ fn cpu_receipts_preserve_values_without_changing_frame_size() {
                 message,
             };
             let bytes = codec().encode_worker(&frame).unwrap();
+            let bounded = |limit| {
+                FrameCodec::new(DecodeLimits {
+                    max_frame_bytes: limit,
+                    ..DecodeLimits::standard()
+                })
+            };
+            assert_eq!(
+                bounded(bytes.len() as u32).encode_worker(&frame).unwrap(),
+                bytes
+            );
+            assert!(matches!(
+                bounded(bytes.len() as u32 - 1).encode_worker(&frame),
+                Err(CodecRefusal::FrameTooLarge { .. })
+            ));
             assert_eq!(codec().decode_worker(&bytes).unwrap(), frame);
             // The ordinary integer decoder also represents the old reader.
             let decoded: WorkerFrame = rmp_serde::from_slice(&bytes[FRAME_HEADER_BYTES..]).unwrap();

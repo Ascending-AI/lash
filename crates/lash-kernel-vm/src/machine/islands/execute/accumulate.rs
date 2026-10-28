@@ -177,7 +177,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if write.accumulates {
             self.accumulate(frame, write.at);
         }
-        let values = self.inputs::<2>(&frame.slots, reads)?;
+        let mut values = [Value::Absent; 2];
+        self.inputs(&frame.slots, reads, &mut values)?;
         if let Some(append) = append {
             let before = self.transient;
             if let Some(answer) = self.text_accumulation(site, append.charge, &values) {

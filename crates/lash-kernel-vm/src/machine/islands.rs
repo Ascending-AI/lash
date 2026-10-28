@@ -352,15 +352,15 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         if OBSERVING { self.watching } else { None }
     }
 
-    /// Resolve pure operand addresses in source order. The instruction
-    /// handler owns every operator, effect and control transition.
+    /// Resolve pure operands into the caller's window in source order.
+    /// The instruction handler owns every operator, effect and control transition.
     #[inline(always)]
     fn inputs<const N: usize>(
         &mut self,
         slots: &Slots,
         reads: &[Read],
-    ) -> Result<[Value; N], Stop> {
-        let mut values = [Value::Absent; N];
+        values: &mut [Value; N],
+    ) -> Result<(), Stop> {
         for (index, read) in reads.iter().enumerate() {
             let (value, miss) = match read {
                 Read::Literal { value, .. } => (Some(*value), 0),
@@ -380,7 +380,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             };
             values[index] = value;
         }
-        Ok(values)
+        Ok(())
     }
 
     /// The stop of a read that missed at op `miss`, keeping the operands

@@ -270,7 +270,15 @@ fn assemble_admitted(
     library: &lash_kernel_doc::LibraryDependencies,
     selection: &lash_kernel_doc::Selection,
 ) -> Result<Assembled, LoadRefusal> {
-    let closure = admitted.closure;
+    check_selected_natives(&admitted.closure, held, selection)?;
+    assemble_checked_admitted(admitted, held, library, selection)
+}
+
+fn check_selected_natives(
+    closure: &Closure,
+    held: &FunctionRegistry,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<(), LoadRefusal> {
     for member in closure
         .body()
         .functions()
@@ -287,6 +295,16 @@ fn assemble_admitted(
             });
         }
     }
+    Ok(())
+}
+
+fn assemble_checked_admitted(
+    admitted: Admitted,
+    held: &Arc<FunctionRegistry>,
+    library: &lash_kernel_doc::LibraryDependencies,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<Assembled, LoadRefusal> {
+    let closure = admitted.closure;
     if closure.stored().is_empty() {
         return Ok(Assembled {
             registry: Arc::clone(held),
@@ -552,6 +570,7 @@ pub struct Libraries<L> {
 type LibraryKey = (
     lash_core_store::checkpoint_graph::NodeId,
     lash_kernel_value::HelperLibraryId,
+    lash_kernel_doc::Selection,
 );
 
 impl<L: Clone> Libraries<L> {
@@ -575,7 +594,18 @@ impl<L: Clone> Libraries<L> {
         helpers: lash_kernel_value::HelperLibraryId,
         make: impl FnOnce() -> Result<L, E>,
     ) -> Result<L, E> {
-        let closure = (closure, helpers);
+        self.get_or_try_selected(closure, helpers, &lash_kernel_doc::Selection::Fresh, make)
+    }
+
+    /// Cache derived execution only for this exact restored permission set.
+    pub fn get_or_try_selected<E>(
+        &self,
+        closure: lash_core_store::checkpoint_graph::NodeId,
+        helpers: lash_kernel_value::HelperLibraryId,
+        selection: &lash_kernel_doc::Selection,
+        make: impl FnOnce() -> Result<L, E>,
+    ) -> Result<L, E> {
+        let closure = (closure, helpers, selection.clone());
         {
             let mut held = self
                 .held
@@ -623,6 +653,50 @@ pub fn declare_reach(
         registry: Arc::new(registry),
         closure,
         held: false,
+    })
+}
+
+/// Linked source and selected native availability, checked before any cache hit.
+/// The token owns the exact registry and selection its assembly may use.
+pub struct PreparedReach {
+    admitted: Admitted,
+    library: lash_kernel_doc::LibraryDependencies,
+    held: Arc<FunctionRegistry>,
+    selection: lash_kernel_doc::Selection,
+}
+
+impl PreparedReach {
+    pub fn closure(&self) -> &Closure {
+        &self.admitted.closure
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.admitted.closure.stored().is_empty()
+    }
+
+    /// Derive the registry only when the caller's bounded cache misses.
+    pub fn assemble(self) -> Result<Assembled, LoadRefusal> {
+        assemble_checked_admitted(self.admitted, &self.held, &self.library, &self.selection)
+    }
+}
+
+/// Check every original source and selected native before consulting a cache.
+pub fn prepare_reach(
+    root: &Document,
+    documents: &BTreeMap<lash_kernel_value::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<lash_kernel_value::LinkId, std::collections::BTreeSet<FunctionId>>,
+    machine: &lash_kernel_value::claims::NodeRequirements,
+    held: &Arc<FunctionRegistry>,
+    helpers: &lash_kernel_doc::BuildHelpers,
+    selection: &lash_kernel_doc::Selection,
+) -> Result<PreparedReach, LoadRefusal> {
+    let (admitted, library) = admit_reach(root, documents, functions, machine, held, helpers)?;
+    check_selected_natives(&admitted.closure, held, selection)?;
+    Ok(PreparedReach {
+        admitted,
+        library,
+        held: Arc::clone(held),
+        selection: selection.clone(),
     })
 }
 
