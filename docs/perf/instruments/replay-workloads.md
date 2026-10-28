@@ -759,10 +759,11 @@ allocations matched. The slot removes that scheduling-dependent allocation
 while preserving stack limits, one parser thread, diagnostics and joined
 shutdown. Parsing remains inside the measured worker.
 
-Worker CPU receipts encode exact nanoseconds as eight big-endian binary
-bytes. JSON stays numeric. Variable-width MessagePack integers previously
-made CPU counter boundaries change counted transport allocation. Parent
-and worker binaries must match, as the host-upgrade entry describes.
+Worker CPU receipts encode exact nanoseconds as full-width unsigned
+MessagePack integers, marker `0xcf` and eight big-endian payload bytes.
+JSON stays numeric. Compact integer widths previously made CPU counter
+boundaries change counted transport allocation. Existing integer readers
+accept these receipts, and decoding still accepts older compact integers.
 
 Counted node startup initializes the five JSON Schema meta-validator engines;
 counted workers initialize them before installing their resource observer.

@@ -54,6 +54,16 @@ fn cpu_receipts_preserve_values_without_changing_frame_size() {
             };
             let bytes = codec().encode_worker(&frame).unwrap();
             assert_eq!(codec().decode_worker(&bytes).unwrap(), frame);
+            // The ordinary integer decoder also represents the old reader.
+            let decoded: WorkerFrame = rmp_serde::from_slice(&bytes[FRAME_HEADER_BYTES..]).unwrap();
+            assert_eq!(decoded, frame);
+            let compact = rmp_serde::to_vec_named(&frame).unwrap();
+            assert_eq!(
+                codec()
+                    .decode_worker(&frame_around(&codec(), &compact))
+                    .unwrap(),
+                frame
+            );
             assert_eq!(
                 bytes.len(),
                 *size.get_or_insert(bytes.len()),
@@ -64,6 +74,16 @@ fn cpu_receipts_preserve_values_without_changing_frame_size() {
             assert_eq!(json[variant]["cpu_nanos"], cpu_nanos);
         }
     }
+    // A user payload containing the field name must remain byte-for-byte intact.
+    let mut ordinary = request_frame();
+    if let WorkerMessage::HostRead { request, .. } = &mut ordinary.message {
+        request.0 = b"cpu_nanos".to_vec();
+    }
+    let bytes = codec().encode_worker(&ordinary).unwrap();
+    assert_eq!(
+        &bytes[FRAME_HEADER_BYTES..],
+        rmp_serde::to_vec_named(&ordinary).unwrap()
+    );
 }
 
 /// A frame header around an arbitrary payload, for hostile payloads.

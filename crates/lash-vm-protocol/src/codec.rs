@@ -28,6 +28,9 @@ use serde::de::DeserializeOwned;
 use crate::message::{BorrowedParentFrame, ParentFrame, WorkerFrame};
 use lash_protocol_types::engine_fault::Detail;
 
+mod cpu;
+use cpu::FrameEncoding;
+
 pub const FRAME_MAGIC: [u8; 4] = *b"LVMP";
 
 /// Magic and payload length.
@@ -151,6 +154,7 @@ impl FrameCodec {
             #[serde(with = "serde_bytes")]
             part: &'a [u8],
         }
+        impl FrameEncoding for Part<'_> {}
         let length = holdings.len() as u64;
         let empty = self.encode(&Part { length, part: &[] })?;
         if holdings.is_empty() {
@@ -184,7 +188,7 @@ impl FrameCodec {
         self.decode_exact(bytes)
     }
 
-    fn encode<T: Serialize>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
+    fn encode<T: FrameEncoding>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
         let limit = u64::from(self.limits.max_frame_bytes);
         // The payload is serialized behind its header's place, so a frame is
         // written once, into one allocation (FIG-4433). The writer's bound is
@@ -201,14 +205,23 @@ impl FrameCodec {
             limit: self.limits.max_frame_bytes as usize,
             refused: None,
         };
-        let result =
-            frame.serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
+        let (result, complete) = {
+            let mut outgoing = cpu::Writer::new(&mut writer, frame.cpu_counter());
+            let result =
+                frame.serialize(&mut rmp_serde::Serializer::new(&mut outgoing).with_struct_map());
+            (result, outgoing.complete())
+        };
         if let Some(declared) = writer.refused {
             return Err(CodecRefusal::FrameTooLarge { limit, declared });
         }
         result.map_err(|error| CodecRefusal::Malformed {
             reason: Detail::new(format_args!("frame does not encode: {error}")),
         })?;
+        if !complete {
+            return Err(CodecRefusal::Malformed {
+                reason: Detail::new("CPU receipt did not encode its named integer field"),
+            });
+        }
         if limit < FRAME_HEADER_BYTES as u64 {
             return Err(CodecRefusal::FrameTooLarge {
                 limit,
