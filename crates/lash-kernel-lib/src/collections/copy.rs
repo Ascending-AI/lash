@@ -85,17 +85,17 @@ impl Copy<'_, '_> {
         items
             .iter()
             .map(|x| {
-                let value = self.value(x, depth + 1)?;
+                let answer = self.value(x, depth + 1);
                 #[cfg(test)]
-                {
-                    _completed.push(value);
+                if let Ok(value) = &answer {
+                    _completed.push(*value);
                     _prefix.resize(crate::native_contract_laws::new_values_bytes(
                         *self.args,
                         self.new,
                         &_completed,
                     ));
                 }
-                Ok(value)
+                answer
             })
             .collect()
     }

@@ -913,16 +913,16 @@ fn decode_with_numbers(
             let values = items
                 .iter()
                 .map(|item| {
-                    let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                    let answer = decode_with_numbers(item, numbers, policy, maps, ieee, new);
                     #[cfg(test)]
-                    {
-                        _completed.push(value);
+                    if let Ok(value) = &answer {
+                        _completed.push(*value);
                         _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
                             new,
                             &_completed,
                         ));
                     }
-                    Ok::<Value, NativeError>(value)
+                    answer
                 })
                 .collect::<Result<_, _>>()?;
             Ok(new.allocate(NewObject::List(values)))
@@ -944,16 +944,16 @@ fn decode_with_numbers(
                             &_completed,
                         ));
                     }
-                    let value = decode_with_numbers(item, numbers, policy, maps, ieee, new)?;
+                    let answer = decode_with_numbers(item, numbers, policy, maps, ieee, new);
                     #[cfg(test)]
-                    {
-                        _completed.push(value);
+                    if let Ok(value) = &answer {
+                        _completed.push(*value);
                         _prefix.resize(crate::native_contract_laws::decoded_values_bytes(
                             new,
                             &_completed,
                         ));
                     }
-                    Ok::<(Value, Value), NativeError>((key, value))
+                    Ok::<(Value, Value), NativeError>((key, answer?))
                 })
                 .collect::<Result<_, NativeError>>()?;
             Ok(new.allocate(if maps {
