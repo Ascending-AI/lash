@@ -86,14 +86,16 @@ impl WorkerLibrary {
                     .ok_or_else(|| malformed("the successor has no helper migration"))?;
             let pairs = lash_kernel_migrate::migrate_registry(&mut registry, migration)
                 .map_err(malformed)?;
-            let members = helpers.members().copied().chain(
-                pairs
-                    .iter()
-                    .filter_map(|(from, to)| helpers.contains(from).then_some(*to)),
-            );
-            let current = lash_kernel_value::HelperLibraryId::of_members(members.clone());
+            let members = || {
+                helpers.members().copied().chain(
+                    pairs
+                        .iter()
+                        .filter_map(|(from, to)| helpers.contains(from).then_some(*to)),
+                )
+            };
+            let current = lash_kernel_value::HelperLibraryId::of_members(members());
             let helpers = Arc::new(
-                BuildHelpers::new(registry.clone(), members)
+                BuildHelpers::new(registry.clone(), members())
                     .map_err(malformed)?
                     .with_library_identities(helpers.library_identities().iter().copied())
                     .with_claim_generations(current, helpers.claim_generations().clone())
