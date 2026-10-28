@@ -37,7 +37,7 @@ impl Build<'_> {
             }
             if !protected.contains(&at) {
                 instruction.op = fixed(instruction.op);
-                if let (Op::MemberStore { finish, .. } | Op::Store { finish, .. }) =
+                if let Op::MemberStore { finish, .. } | Op::Store { finish, .. } =
                     &mut instruction.op
                     && let Some((next, following)) = old.peek()
                     && !targets.contains(next)
