@@ -1,4 +1,4 @@
-//! One durable turn grows across two owner handoffs and closes.
+//! Durable turn handoffs and fixed-history idle populations.
 use anyhow::{Context as _, Result, ensure};
 use clap::{Parser, ValueEnum};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
@@ -48,7 +48,7 @@ struct Args {
     /// Total model/tool rounds in the single turn, including both handoffs.
     #[arg(long, default_value_t = 10)]
     rounds: usize,
-    /// Number of sequential sessions for --phase sessions.
+    /// Session population bound for sessions and idle-population phases.
     #[arg(long, default_value_t = 1)]
     sessions: usize,
     /// Close facade handles but retain durable sessions in --phase sessions.

@@ -104,41 +104,79 @@ fn provider(
             reliability: super::ProviderReliability::disabled(),
             ..Default::default()
         });
-    builder.complete(move |request: LlmRequest| {
-        let counts = Arc::clone(&counts);
-        let meter = Arc::clone(&meter);
-        async move {
-            meter.model_request(&request);
-            counts.model_calls.fetch_add(1, Ordering::Relaxed);
-            let current = request.messages.iter().rposition(|m| {
-                m.role == LlmRole::User && m.blocks.iter().any(|b| matches!(b, LlmContentBlock::Text { .. }))
-            }).unwrap_or(0);
-            let messages = &request.messages[current..];
-            let result = messages.iter().flat_map(|m| m.blocks.iter())
-                .any(|b| matches!(b, LlmContentBlock::ToolResult { .. }));
-            let pending = messages.first().is_some_and(|m| m.blocks.iter().any(|b| {
-                matches!(b, LlmContentBlock::Text { text, .. } if text.as_ref() == "idlepop-pending")
-            }));
-            let part = if result {
-                lash::direct::LlmOutputPart::Text {
-                    text: "idle population turn complete".into(), response_meta: None,
+    builder
+        .complete(move |request: LlmRequest| {
+            let counts = Arc::clone(&counts);
+            let meter = Arc::clone(&meter);
+            async move {
+                meter.model_request(&request);
+                counts.model_calls.fetch_add(1, Ordering::Relaxed);
+                // Code feedback can follow the tool result as another User
+                // message. Locate the actual scripted input, not that feedback.
+                let mut input_seen = false;
+                let mut result = false;
+                let mut pending = false;
+                let mut called = false;
+                for message in &request.messages {
+                    for block in message.blocks.iter() {
+                        match block {
+                            LlmContentBlock::Text { text, .. }
+                                if message.role == LlmRole::User
+                                    && matches!(
+                                        text.as_ref(),
+                                        "idlepop fixed history"
+                                            | "idlepop-pending"
+                                            | "idlepop usability probe"
+                                    ) =>
+                            {
+                                input_seen = true;
+                                result = false;
+                                called = false;
+                                pending = text.as_ref() == "idlepop-pending";
+                            }
+                            LlmContentBlock::ToolResult { .. } if input_seen => result = true,
+                            LlmContentBlock::ToolCall { .. } if input_seen => called = true,
+                            _ => {}
+                        }
+                    }
                 }
-            } else if protocol == Protocol::Code {
-                lash::testing::execute_code(if pending {
-                    "await tools.idleWait({});".to_owned()
+                if !input_seen || (called && !result) {
+                    return Err(lash_transport_failure::LlmTransportError::new(
+                        "idle script expected an input followed by one successful tool round",
+                    ));
+                }
+                let part = if result {
+                    lash::direct::LlmOutputPart::Text {
+                        text: "idle population turn complete".into(),
+                        response_meta: None,
+                    }
+                } else if protocol == Protocol::Code {
+                    lash::testing::execute_code(if pending {
+                        "await tools.idleWait({});".to_owned()
+                    } else {
+                        "console.log(await tools.idlePayload({}));".to_owned()
+                    })
                 } else {
-                    "console.log(await tools.idlePayload({}));".to_owned()
+                    lash::direct::LlmOutputPart::ToolCall {
+                        call_id: "idlepop-call".into(),
+                        tool_name: if pending {
+                            "tools__idle_wait"
+                        } else {
+                            "tools__idle_payload"
+                        }
+                        .into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }
+                };
+                Ok(lash::provider::LlmResponse {
+                    parts: vec![part],
+                    ..Default::default()
                 })
-            } else {
-                lash::direct::LlmOutputPart::ToolCall {
-                    call_id: "idlepop-call".into(),
-                    tool_name: if pending { "tools__idle_wait" } else { "tools__idle_payload" }.into(),
-                    input_json: "{}".into(), replay: None,
-                }
-            };
-            Ok(lash::provider::LlmResponse { parts: vec![part], ..Default::default() })
-        }
-    }).build().into_handle()
+            }
+        })
+        .build()
+        .into_handle()
 }
 
 async fn boot(
@@ -240,15 +278,34 @@ async fn quiescent(
             let mut owned = 0;
             let mut materialized = 0;
             let mut states = BTreeMap::<String, usize>::new();
+            let mut owner_details = BTreeMap::new();
+            let mut pending_waits = 0;
             let mut clean = true;
             for ordinal in 1..=count {
                 let id = id(ordinal)?;
-                let actor = core.backend().durable().actor(&lash::durable::ActorKey::session(id.as_str())?).await?
+                let key = lash::durable::ActorKey::session(id.as_str())?;
+                let actor = core.backend().durable().actor(&key).await?
                     .context("population actor disappeared")?;
                 owned += usize::from(actor.owner.is_some());
                 *states.entry(actor.state.as_str().to_owned()).or_default() += 1;
-                clean &= !actor.has_mail && matches!(actor.state, lash::durable::ActorState::Idle | lash::durable::ActorState::Waiting);
-                let observation = core.plugin_diagnostics().installed(&lash::plugins::InventoryScope::Owner(lash::RuntimeOwner::Session(id)));
+                if mode == Mode::Pending {
+                    let calls = core.completions().parked(lash::admin::CallOwner::Session(id.clone())).await?;
+                    clean &= calls.len() == 1 && matches!(actor.state,
+                        lash::durable::ActorState::Owned | lash::durable::ActorState::Ready | lash::durable::ActorState::Waiting);
+                    pending_waits += calls.len();
+                    owner_details.insert(id.as_str().to_owned(), json!({
+                        "state":actor.state.as_str(),"epoch":actor.epoch.0,
+                        "owned":actor.owner.is_some(),"pending_mail":actor.pending_mail,
+                        "local_owner_idle":core.backend().stores().wake_sink().actor_is_idle_for_testing(&key),
+                        "next_due_ms":actor.next_due.map(|due|due.0),
+                        "pending_calls":calls.iter().map(super::park_identity).collect::<Vec<_>>()
+                    }));
+                } else {
+                    clean &= !actor.has_mail && matches!(actor.state,
+                        lash::durable::ActorState::Idle | lash::durable::ActorState::Waiting);
+                }
+                let observation = core.plugin_diagnostics().installed(
+                    &lash::plugins::InventoryScope::Owner(lash::RuntimeOwner::Session(id)));
                 match observation {
                     lash::plugins::diagnostics::InstalledObservation::Present(_) => materialized += 1,
                     lash::plugins::diagnostics::InstalledObservation::NotMaterialized { .. } => {},
@@ -257,16 +314,19 @@ async fn quiescent(
             }
             let stats = pool.map(lash::vm::WorkerPool::stats);
             let workers_idle = stats.is_none_or(|s| s.workers == s.idle && s.queued_items == 0 && s.queued_bytes == 0 && !s.restart_storm);
-            let materializations_released = mode == Mode::Held || materialized == 0;
-            if clean && owned == 0 && materializations_released && workers_idle {
+            let owners_released = mode == Mode::Pending || owned == 0;
+            let materializations_released = matches!(mode, Mode::Held | Mode::Pending) || materialized == 0;
+            if clean && owners_released && materializations_released && workers_idle {
                 return Ok(json!({"actor_owners":owned,"materialized_session_owners":materialized,
                     "held_facade_handles":if mode == Mode::Held {count} else {0},
+                    "endpoint":if mode == Mode::Pending {"owners retained while waiting; committed pending keys; actor churn may persist"} else {"actor owners released; workers idle"},
+                    "pending_tool_waits":pending_waits,"pending_owner_details":owner_details,
                     "actor_states":states,"workers":stats.map_or(0, |s|s.workers),
                     "idle_workers":stats.map_or(0, |s|s.idle),"queued_worker_items":stats.map_or(0, |s|s.queued_items)}));
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    }).await.context("population did not reach released actors and idle workers")?
+    }).await.context("population did not reach its declared residency endpoint and idle workers")?
 }
 
 fn command(args: &[&str]) -> Result<String> {
