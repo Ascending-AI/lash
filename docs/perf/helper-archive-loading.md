@@ -23,6 +23,61 @@ one step through one dispatch and publish it after the existing admission
 checks. Regex engines retain at most 256 patterns each. These are entry bounds;
 bytes still depend on supported history, admitted code and pattern sizes.
 
+## Host replay fix forward
+
+FIG-7512's requested one-pair control used `317ed3c0ad^` (`d9fab3f459`)
+and `8d2974c088`. Python host instructions rose from 86,469,071 to
+87,844,099 (+1.590%); TypeScript rose from 124,348,908 to 125,402,343
+(+0.847%). Workload digests and lengths matched.
+
+The requested FIG-7519 pair, `8f905ce03c^` (`42f9c96f8a`) against
+`8f905ce03c`, measured Python at 89,622,089 and 89,325,595, and TypeScript
+at 127,092,728 and 127,282,761. The second leg reuses the existing exact-base
+control. These two commits differ by automatic format witnesses; both contain
+the FIG-7519 implementation. This pair does not isolate that implementation's
+cost.
+
+Paired instruction and allocation profiles exposed copied claim debt and
+repeated JSON tree construction when publishing consumption receipts. Helper
+debt now shares immutable maps, and resolved requirements share a published
+snapshot. Protocol payload serialization streams its stored JSON without
+building a temporary tree. Exact reach checks and `restore_selection` remain.
+
+The remaining dominant cost was SQLite expanding streamed candidate node
+bodies into SQL text for accounting, then parsing that text back into byte
+counts. The ordinary graph installer already supplied known blob lengths;
+the streamed installer bypassed that path. Both installers now supply exact
+blob and JSON text binding lengths. Quotes, Unicode and SQLite's existing
+first-NUL spelling semantics keep identical accounting. SQL, parameters,
+publication behavior and stored bytes are unchanged.
+
+The final instruction gate ran once on optimized `6be6b5a9f6`, with the
+unchanged shared baseline and 1% ceilings, under the 8 GiB virtual-memory cap.
+Every host row passed:
+
+| Host replay | Instructions/turn | Unchanged ceiling |
+| --- | ---: | ---: |
+| chat-short | 35,802,271.5 | 36,162,534.395 |
+| chat-long-compacting | 39,657,603.5 | 40,102,463.595 |
+| ts-codemode | 107,272,796 | 125,584,456.460 |
+| py-codemode | 72,842,706 | 86,670,950.220 |
+
+Median SQL bytes written stayed exactly 127,681 for Python and 149,768 for
+TypeScript relative to the preceding failed candidate. No baseline, ceiling
+or workload changed. The full gate passed 37/40 rows; the remaining Python
+kernel property/array reads and Python worker replay belong to r36-perfbis.
+No quiet-host latency claim follows from these counts.
+
+Eleven focused laws passed across the compact debt, payload serialization,
+CPU/consumption decision, SQLite rolling-node and publication/accounting
+changes. The debt-sharing, payload-serialization and known-text accounting
+laws each failed semantically before their fixes. Schema checks passed after
+preserving the original flat helper schema and regenerating worker v3 schemas
+for the already allocated protocol witness. Earlier failed candidates remain
+in the evidence and are not passing proof. See
+`hload-evidence/fix-forward/candidate-gate/` in the lane's external evidence
+root for the final decision and raw receipts.
+
 ## Retained instruction evidence
 
 The following observations use optimized source `546b658504` and exact parent
