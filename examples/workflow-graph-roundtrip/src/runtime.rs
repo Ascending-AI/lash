@@ -231,9 +231,10 @@ pub(crate) async fn observe(
     host: Arc<crate::display::HostTools>,
 ) -> Result<(), RunError> {
     let observed = core.processes().observe(&process);
-    let snapshot = observed.snapshot().await?;
-    // The feed retains everything published while the document is read.
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (snapshot, mut feed) = observed
+        .follow(lash::process::ProcessFeedStart::Retained)
+        .await?;
+    // The cursor continues through publications made while the document is read.
     let document = execution_document(&core, &snapshot.read_view).await?;
     let authority = core
         .processes()

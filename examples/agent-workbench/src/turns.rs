@@ -434,8 +434,7 @@ async fn subscribe_session_runs(
     session_id: &SessionId,
 ) -> Result<SessionRunSubscription, lash::EmbedError> {
     let session = state.open_session_for_observation(session_id).await?;
-    let cursor = session.observe().snapshot().await?.cursor;
-    let updates = session.observe().subscribe_and_recover(cursor);
+    let (_, updates) = session.observe().follow(lash::FeedStart::Head).await?;
     Ok((session, updates))
 }
 

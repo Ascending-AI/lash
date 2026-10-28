@@ -50,7 +50,7 @@ use lash_core::{
 };
 use lash_kernel_value::identity::SessionId;
 
-use crate::session::SessionObservationStreamItem;
+use crate::session::{FeedStart, SessionObservationStreamItem};
 use crate::support::{
     Arc, EmbedError, Result, RuntimeErrorCode, RuntimeHandle, SessionCursor, SessionObservation,
     SessionReadView,
@@ -74,6 +74,29 @@ pub(crate) struct FeedSource {
 }
 
 impl FeedSource {
+    async fn changes(&self) -> Result<lash_durable::runner::KeyWatch> {
+        let stores = self.backend.stores();
+        let actor = lash_durable::ActorKey::session(self.session_id.as_str())
+            .map_err(|error| live_replay_error(LiveReplayStoreError::Store(error.to_string())))?;
+        let transport = (self.backend.config().settings().notifier
+            == lash_durable::Notifier::AfterCommit)
+            .then(|| stores.node_wakes())
+            .flatten();
+        stores
+            .wake_sink()
+            .observe(actor, transport)
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    store = %stores.binding_identity(),
+                    session_id = %self.session_id,
+                    %error,
+                    "session observation notification source could not be opened",
+                );
+                EmbedError::Durable(error)
+            })
+    }
+
     pub(crate) fn new(
         resident: RuntimeHandle,
         store: lash_core::store::SessionStore,
@@ -231,9 +254,9 @@ impl FeedSource {
         ))
     }
 
-    /// Attach to the durable head and replay all retained provisional
-    /// evidence, including language executions that completed before attach.
-    pub(crate) async fn attach(&self) -> Result<SessionObservation> {
+    /// The durable head with a cursor before all retained provisional
+    /// evidence, including language executions that already completed.
+    pub(crate) async fn retained(&self) -> Result<SessionObservation> {
         let mut observation = self.snapshot().await?;
         let revision = self.requested_revision(&observation.cursor)?;
         observation.cursor = self.live_replay.earliest_cursor(&self.session_id, revision);
@@ -543,7 +566,8 @@ impl AppliedEventIds {
     }
 }
 
-/// Stream returned by [`ObservableSession::subscribe_and_recover`](crate::ObservableSession::subscribe_and_recover):
+/// Stream returned by [`ObservableSession::follow`](crate::ObservableSession::follow)
+/// and [`ObservableSession::subscribe_and_recover`](crate::ObservableSession::subscribe_and_recover):
 /// the session feed from a cursor.
 ///
 /// It yields the live replay's events after the cursor, each durable commit
@@ -565,7 +589,28 @@ pub struct SessionObservationStream {
 type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<SessionObservationStreamItem>>)>;
 
 impl SessionObservationStream {
-    pub(crate) fn new(source: FeedSource, cursor: SessionCursor) -> Self {
+    pub(crate) async fn follow(
+        source: FeedSource,
+        start: FeedStart,
+    ) -> Result<(SessionObservation, Self)> {
+        let changes = source.changes().await.map(Some);
+        let observation = match start {
+            FeedStart::Head => source.snapshot().await?,
+            FeedStart::Retained => source.retained().await?,
+        };
+        let stream = Self::new(source, observation.cursor.clone(), changes);
+        Ok((observation, stream))
+    }
+
+    pub(crate) fn new(
+        source: FeedSource,
+        cursor: SessionCursor,
+        changes: Result<Option<lash_durable::runner::KeyWatch>>,
+    ) -> Self {
+        let (changes, opening_error) = match changes {
+            Ok(changes) => (changes, None),
+            Err(error) => (None, Some(error)),
+        };
         let limits = source.work_limits;
         Self {
             cursor: cursor.clone(),
@@ -575,7 +620,8 @@ impl SessionObservationStream {
                 done: false,
                 delivered: None,
                 live: None,
-                changes: None,
+                changes,
+                opening_error,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -669,6 +715,7 @@ struct FeedState {
     delivered: Option<SessionRevision>,
     live: Option<LiveReplaySubscription>,
     changes: Option<lash_durable::runner::KeyWatch>,
+    opening_error: Option<EmbedError>,
 }
 
 impl FeedState {
@@ -687,32 +734,14 @@ impl FeedState {
     }
 
     async fn step(&mut self) -> Option<Result<SessionObservationStreamItem>> {
+        if let Some(error) = self.opening_error.take() {
+            return Some(Err(error));
+        }
         if self.changes.is_none() {
-            let stores = self.source.backend.stores();
-            let actor = match lash_durable::ActorKey::session(self.source.session_id.as_str()) {
-                Ok(actor) => actor,
-                Err(error) => {
-                    return Some(Err(live_replay_error(LiveReplayStoreError::Store(
-                        error.to_string(),
-                    ))));
-                }
-            };
-            let transport = (self.source.backend.config().settings().notifier
-                == lash_durable::Notifier::AfterCommit)
-                .then(|| stores.node_wakes())
-                .flatten();
-            self.changes = match stores.wake_sink().observe(actor, transport).await {
-                Ok(watch) => Some(watch),
-                Err(error) => {
-                    tracing::error!(
-                        store = %stores.binding_identity(),
-                        session_id = %self.source.session_id,
-                        %error,
-                        "session observation notification source could not be opened",
-                    );
-                    return Some(Err(EmbedError::Durable(error)));
-                }
-            };
+            self.changes = Some(match self.source.changes().await {
+                Ok(changes) => changes,
+                Err(error) => return Some(Err(error)),
+            });
         }
         loop {
             if self.done {
@@ -743,8 +772,9 @@ impl FeedState {
                     }
                     match self.source.durable_revision().await {
                         Ok(head) if self.delivered.is_none_or(|held| head > held) => {
-                            self.rewind_to_held_revision();
-                            self.set_live(None);
+                            if let Err(error) = self.recover_retained_commit(head).await {
+                                return Some(Err(error));
+                            }
                         }
                         Ok(_) => {},
                         Err(error) => return Some(Err(error)),
@@ -775,6 +805,37 @@ impl FeedState {
                 Some(Err(error)) => return Some(Err(live_replay_error(error))),
             }
         }
+    }
+
+    /// Recover a commit whose live notification was lost without dropping
+    /// the live tail while another core is still publishing that commit.
+    async fn recover_retained_commit(&mut self, head: SessionRevision) -> Result<()> {
+        let Some(held) = self.delivered else {
+            return Ok(());
+        };
+        let cursor = self
+            .source
+            .live_replay
+            .current_cursor(&self.source.session_id, held);
+        match self
+            .source
+            .live_replay
+            .subscribe_after_cursor(&cursor)
+            .await
+            .map_err(live_replay_error)?
+        {
+            LiveReplaySubscribeOutcome::Subscribed(subscription) => {
+                if subscription.bridges_to(head) {
+                    self.cursor = cursor;
+                    self.set_live(Some(subscription));
+                }
+            }
+            LiveReplaySubscribeOutcome::Gap(_) => {
+                self.rewind_to_held_revision();
+                self.set_live(None);
+            }
+        }
+        Ok(())
     }
 
     /// Auxiliary traffic can pass a commit whose live notification was
@@ -910,10 +971,8 @@ mod cancellation_law {
         .build(crate::tests::host::runtime_lease_owner())?;
         let id = SessionId::from("tool-live-divergence");
         let session = created_session(&core, id.clone()).await.open().await?;
-        let snapshot = session.observe().snapshot().await?;
-        let mut feed = session
-            .observe()
-            .subscribe_and_recover(snapshot.cursor.clone());
+        let (_, mut feed) = session.observe().follow(crate::FeedStart::Head).await?;
+
         let barrier = Arc::new(tokio::sync::Notify::new());
         let state = feed.state.as_mut().expect("unpolled feed");
         state.source.rebuild_barrier = Some(barrier.clone());

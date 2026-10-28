@@ -726,9 +726,9 @@ async fn rendered_live_and_after_recovery(
         .open()
         .await
         .expect("the session opens for observation");
-    let snapshot = observed
+    let (snapshot, mut feed) = observed
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("the snapshot reads the durable head");
     let mut live = LiveView::default();
@@ -738,7 +738,7 @@ async fn rendered_live_and_after_recovery(
             .transcript()
             .expect("the snapshot decodes"),
     );
-    let mut feed = observed.observe().subscribe_and_recover(snapshot.cursor);
+
     let output = world.send(&session, name).await;
     if !output.outcome.is_success() {
         let transcript = session.transcript().await.expect("the transcript decodes");

@@ -117,8 +117,11 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         .expect("start a blocked process");
     let process = &started.process_id;
     let observed = core.processes().observe(process);
-    let snapshot = observed.snapshot().await.expect("initial durable snapshot");
-    let mut subscription = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut subscription) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("initial durable snapshot");
+
     let mut graph = lash_trace::WorkflowExecutionOverlayAccumulator::default();
     // The observation boundary receives these records from the language VM.
     // The held engine isolates its terminal writer from VM segment execution.
@@ -328,9 +331,13 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                 .open()
                 .await
                 .expect("session");
-            let snapshot = session.observe().snapshot().await.expect("snapshot");
+            let (snapshot, mut feed) = session
+                .observe()
+                .follow(crate::FeedStart::Head)
+                .await
+                .expect("snapshot");
             let revision = snapshot.cursor.parse().expect("cursor").revision;
-            let mut feed = session.observe().subscribe_and_recover(snapshot.cursor);
+
             replay
                 .publish(
                     &session.session_id(),
@@ -570,13 +577,16 @@ async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() 
     .await;
     let process = dispatch.register().await;
     let observed = dispatch.observe(&process);
-    let snapshot = observed.snapshot().await.expect("snapshot before commit");
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot before commit");
     // A stalled worker may leave an admitted language fact queued when a
     // follower discovers a durable commit. Keep it queued until recovery
     // starts the publisher, making the ordering independent of scheduling.
     dispatch.admit_language(&process, "accepted-first");
     dispatch.commit_fact(&process).await;
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     let first = next(&mut feed).await;
     assert!(
         is_language(&first),
@@ -647,7 +657,10 @@ async fn a_feed_whose_reconcile_publication_overflowed_gaps_and_keeps_delivering
     let followed = dispatch.register().await;
     let noisy = ProcessId::fixture("noisy-process");
     let observed = dispatch.observe(&followed);
-    let snapshot = observed.snapshot().await.expect("snapshot before commit");
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot before commit");
     dispatch.commit_fact(&followed).await;
 
     // The worker takes the noisy process's observation first and stalls in
@@ -657,7 +670,7 @@ async fn a_feed_whose_reconcile_publication_overflowed_gaps_and_keeps_delivering
     while dispatch.publisher.process.pending() > 0 {
         tokio::task::yield_now().await;
     }
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     while dispatch.publisher.process.admitted() < 2 {
         assert!(
             tokio::time::timeout(Duration::from_millis(10), feed.next())
@@ -714,11 +727,17 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         let other = dispatch.register().await;
         dispatch.commit_fact(&large).await;
         let observed = dispatch.observe(&large);
-        let snapshot = observed.snapshot().await.expect("snapshot");
-        let mut large_feed = observed.subscribe_and_recover(snapshot.cursor);
+        let (_, mut large_feed) = observed
+            .follow(crate::process::ProcessFeedStart::Retained)
+            .await
+            .expect("snapshot");
+
         let observed = dispatch.observe(&other);
-        let snapshot = observed.snapshot().await.expect("snapshot");
-        let mut other_feed = observed.subscribe_and_recover(snapshot.cursor);
+        let (_, mut other_feed) = observed
+            .follow(crate::process::ProcessFeedStart::Retained)
+            .await
+            .expect("snapshot");
+
         dispatch.admit_language(&other, "other before");
         dispatch.publisher.start();
         assert!(is_language(&next(&mut other_feed).await));

@@ -32,7 +32,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
         let published = publish(&node.core, &loop_document(args.operations, args.callers)).await?;
         let process = Box::pin(start(&node.core, &published, "overlay")).await?;
         let observed = node.core.processes().observe(&process);
-        let snapshot = within("process snapshot", observed.snapshot()).await??;
+        let (snapshot, mut feed) = within("process snapshot", observed.follow(lash::process::ProcessFeedStart::Retained)).await??;
         let ProcessReadView::Retained(view) = &snapshot.read_view else {
             anyhow::bail!("the process is not retained");
         };
@@ -48,7 +48,6 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             document.graph().execution_sites().len(),
         );
 
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor.clone());
         let mut observations = Vec::new();
         let mut gaps = 0;
         loop {

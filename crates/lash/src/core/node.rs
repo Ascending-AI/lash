@@ -392,8 +392,8 @@ mod tests {
     ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
         tokio::time::timeout(std::time::Duration::from_secs(30), async {
             let observable = core.processes().observe(process);
-            let snapshot = observable.snapshot().await?;
-            let mut events = observable.subscribe_and_recover(snapshot.cursor);
+            let (_, mut events) = observable.follow(crate::process::ProcessFeedStart::Retained).await?;
+
             loop {
                 let record = core
                     .processes()

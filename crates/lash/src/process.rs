@@ -33,7 +33,7 @@ pub mod authority {
     };
 }
 pub use crate::process_feed::{
-    ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
+    ObservableProcess, ProcessFeedStart, ProcessObservationEventId, ProcessObservationStream,
     ProcessObservationStreamItem,
 };
 pub use crate::process_history::{ProcessEventsRead, ProcessHistoryContinuation};

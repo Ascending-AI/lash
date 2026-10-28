@@ -1492,8 +1492,7 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
     .await
     .open()
     .await?;
-    let cursor = session.observe().snapshot().await?.cursor;
-    let mut observations = session.observe().subscribe_and_recover(cursor);
+    let (_, mut observations) = session.observe().follow(lash::FeedStart::Head).await?;
     let host_run = lash_vocabulary::identity::RunId::parse("job:agent-frame:1")?;
     let sent = session
         .send(TurnInput::text("switch frames"))

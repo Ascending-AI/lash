@@ -1814,12 +1814,12 @@ impl Scenario for Crash {
                 .open()
                 .await
                 .map_err(|error| format!("open the session for observation: {error}"))?;
-            let snapshot = observed
+            let (_, mut chat) = observed
                 .observe()
-                .snapshot()
+                .follow(lash::FeedStart::Head)
                 .await
                 .map_err(|error| format!("snapshot the session: {error}"))?;
-            let mut chat = observed.observe().subscribe_and_recover(snapshot.cursor);
+
             // The host follows the chat while the deployment runs, as a
             // host's live view does.
             let (updates, received) = tokio::sync::mpsc::unbounded_channel();

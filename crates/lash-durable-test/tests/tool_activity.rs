@@ -685,12 +685,12 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .open()
             .await
             .expect("the session opens");
-        let snapshot = observed
+        let (_, mut updates) = observed
             .observe()
-            .snapshot()
+            .follow(lash::FeedStart::Head)
             .await
             .expect("the snapshot reads the durable head");
-        let mut updates = observed.observe().subscribe_and_recover(snapshot.cursor);
+
         let run = lash_vocabulary::identity::TurnId::from("provider-activity-run");
         let sink = Recorded::default();
         let (outcome, ()) = tokio::time::timeout(WATCHDOG, async {
@@ -891,14 +891,11 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         .open()
         .await
         .expect("the session opens for observation");
-    let snapshot = observed
+    let (snapshot, mut updates) = observed
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("the snapshot reads the durable head");
-    let mut updates = observed
-        .observe()
-        .subscribe_and_recover(snapshot.cursor.clone());
 
     let (output, first) = tokio::join!(
         world.send(&session, NAME),
@@ -1039,14 +1036,11 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .open()
         .await
         .expect("the session opens for observation");
-    let snapshot = observed
+    let (snapshot, mut updates) = observed
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("the snapshot reads the durable head");
-    let mut updates = observed
-        .observe()
-        .subscribe_and_recover(snapshot.cursor.clone());
 
     let (output, seen) = tokio::join!(
         async {

@@ -893,9 +893,9 @@ async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tie
         .open()
         .await
         .expect("the session opens for observation");
-    let snapshot = observed
+    let (snapshot, mut updates) = observed
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("the snapshot reads the durable head");
     let incarnation = snapshot
@@ -904,9 +904,7 @@ async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tie
         .expect("the snapshot cursor parses")
         .replay_incarnation_id
         .to_owned();
-    let mut updates = observed
-        .observe()
-        .subscribe_and_recover(snapshot.cursor.clone());
+
     let (settled, ends) = tokio::join!(
         settled_or_parked(&world, &session, input),
         cell_ends(&mut updates),

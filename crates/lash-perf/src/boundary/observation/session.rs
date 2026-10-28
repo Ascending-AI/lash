@@ -121,9 +121,9 @@ async fn replay(args: &Args, node: &Node, meter: &Meter) -> Outcome {
     for _ in 0..args.callers {
         let observed = session.observe();
         let start = Instant::now();
-        let snapshot = within("session snapshot", observed.snapshot()).await??;
+        let (_snapshot, mut feed) =
+            within("session snapshot", observed.follow(lash::FeedStart::Head)).await??;
         meter.operation("session.feed.snapshot", session.session_id(), "ok", start);
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor);
         let (meter, operations) = (meter.clone(), args.operations);
         observers.push(tokio::spawn(async move {
             let mut delivered = Delivered::default();
@@ -241,8 +241,8 @@ async fn resume(args: &Args, node: &Node, meter: &Meter) -> Outcome {
     let mut feeds = Vec::new();
     for (_, session) in &sessions {
         let observed = session.observe();
-        let snapshot = within("session snapshot", observed.snapshot()).await??;
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+        let (_snapshot, mut feed) =
+            within("session snapshot", observed.follow(lash::FeedStart::Head)).await??;
         // The feed subscribes at its first poll; nothing is pending yet.
         ensure!(
             tokio::time::timeout(std::time::Duration::from_millis(200), feed.next())

@@ -369,9 +369,9 @@ async fn notification_acquisition_scenario(has_transport: bool) -> Result<()> {
     .expect("created durable head")
     .state;
     let observed = reader.session(session_id).observe_with_state(state).await?;
-    let cursor = observed.observe().snapshot().await?.cursor;
+    let (snapshot, mut feed) = observed.observe().follow(crate::FeedStart::Head).await?;
+    let cursor = snapshot.cursor;
     *replay.reader.lock_recover() = Some(cursor.clone());
-    let mut feed = observed.observe().subscribe_and_recover(cursor.clone());
     tokio::time::pause();
     let acquisition_time = tokio::time::Instant::now();
     let mut first = None;
@@ -565,9 +565,9 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
                 .session(session_id.clone())
                 .observe_with_state(state)
                 .await?;
-            let snapshot = reader.observe().snapshot().await?;
+            let (snapshot, mut feed) = reader.observe().follow(crate::FeedStart::Head).await?;
             *replay.reader.lock_recover() = Some(snapshot.cursor.clone());
-            let mut feed = reader.observe().subscribe_and_recover(snapshot.cursor);
+
             tokio::select! {
                 biased;
                 _ = feed.next() => panic!("the initial feed has no events"),
@@ -1017,10 +1017,11 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
         .await?
         .id;
     let observed = core.processes().observe(&process_id);
-    let snapshot = observed.snapshot().await?;
+    let (snapshot, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await?;
     let base = snapshot.read_view.sequence().expect("retained").as_u64();
     let published_before = replay.facts.load(Ordering::SeqCst);
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
 
     // The first commit, its publication held.
     replay

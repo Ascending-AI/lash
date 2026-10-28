@@ -1170,13 +1170,24 @@ impl LashSession {
     }
 }
 
+/// Where a new session feed begins in the bounded live replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedStart {
+    /// Continue after the session's current durable head.
+    Head,
+    /// Replay retained observations, including completed language cells,
+    /// while skipping commits already reflected in the durable head.
+    Retained,
+}
+
 #[derive(Clone)]
 /// Exposes read models and replayable observations for an active session.
 ///
-/// The session feed is durable-anchored: [`snapshot`](Self::snapshot) is the
-/// durable head with a cursor bound to its revision, and
-/// [`subscribe_and_recover`](Self::subscribe_and_recover) tails every
-/// durable commit past a cursor, whichever process made it. The raw cursor
+/// Start a feed with [`follow`](Self::follow), which returns the durable
+/// head and its continuing stream together. Use [`snapshot`](Self::snapshot)
+/// for a read without a feed, or
+/// [`subscribe_and_recover`](Self::subscribe_and_recover) to resume from a
+/// persisted cursor, whichever process made the commits. The raw cursor
 /// reads ([`resume_from_cursor`](Self::resume_from_cursor),
 /// [`subscribe_from_cursor`](Self::subscribe_from_cursor)) judge their cursor
 /// against the same durable head. The synchronous reads
@@ -1206,26 +1217,31 @@ impl ObservableSession {
         )
     }
 
-    /// The session's durable head and the cursor bound to its revision:
-    /// the snapshot a feed from [`subscribe_and_recover`](Self::subscribe_and_recover)
-    /// continues.
+    /// The session's durable head and the cursor bound to its revision.
     ///
     /// It reads the store's head, so a commit any process made is in it.
     /// The resident runtime adopts the head first unless a run holds it.
+    /// Use [`follow`](Self::follow) to start a feed from this head.
     pub async fn snapshot(&self) -> Result<SessionObservation> {
         self.feed_source().snapshot().await
     }
 
-    /// Attach to the session's current durable head with a cursor before
-    /// its earliest retained replay evidence.
+    /// The session's durable head and the stream that continues it.
     ///
-    /// A feed from this cursor replays retained language observations,
-    /// including cells completed before attachment, while skipping commits
-    /// already included in the returned read view. Replay remains bounded:
-    /// evidence the store has released cannot be rebuilt from this operation.
-    /// Use [`snapshot`](Self::snapshot) for an ordinary transcript snapshot.
-    pub async fn attach(&self) -> Result<SessionObservation> {
-        self.feed_source().attach().await
+    /// [`FeedStart::Head`] continues after the head's cursor.
+    /// [`FeedStart::Retained`] also replays retained language observations,
+    /// including completed cells, while skipping commits already included
+    /// in the returned read view. Evidence the store released is not rebuilt.
+    /// Stream errors and gaps have the same contract as
+    /// [`subscribe_and_recover`](Self::subscribe_and_recover).
+    /// The notification watch is acquired before the initial head read.
+    /// A failed acquisition is returned by the stream's first item, then
+    /// the stream ends without consuming its cursor.
+    pub async fn follow(
+        &self,
+        start: FeedStart,
+    ) -> Result<(SessionObservation, SessionObservationStream)> {
+        SessionObservationStream::follow(self.feed_source(), start).await
     }
 
     /// The live replay after `cursor`, or a gap whose replacement is the
@@ -1263,7 +1279,7 @@ impl ObservableSession {
     /// applied cursor. The stream does not retry or fall back to polling.
     /// Stores with no notification transport still follow local commits.
     pub fn subscribe_and_recover(&self, cursor: SessionCursor) -> SessionObservationStream {
-        SessionObservationStream::new(self.feed_source(), cursor)
+        SessionObservationStream::new(self.feed_source(), cursor, Ok(None))
     }
 
     /// The tool-live owner a call admitted at the durable head runs under.
@@ -1301,13 +1317,12 @@ impl ObservableSession {
                     Follow::Done => return None,
                     Follow::Feed(feed, last) => (feed, last),
                     Follow::Start => {
-                        let observation = match session.snapshot().await {
-                            Ok(observation) => observation,
+                        let (observation, feed) = match session.follow(FeedStart::Head).await {
+                            Ok(followed) => followed,
                             Err(error) => return Some((Err(error), Follow::Done)),
                         };
                         let owner = observation.tool_live_owner();
-                        let feed =
-                            Box::new(session.subscribe_and_recover(observation.cursor.clone()));
+                        let feed = Box::new(feed);
                         if let Some(owner) = owner {
                             return Some((Ok(owner.clone()), Follow::Feed(feed, Some(owner))));
                         }

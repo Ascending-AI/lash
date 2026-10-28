@@ -480,7 +480,7 @@ async fn follow_session(graphs: ExecutionGraphs, state: AppState, session_id: Se
         let observed = session.observe();
         // The earliest retained cursor: the feed replays what the session's
         // cells published before the workbench attached.
-        let mut feed = observed.subscribe_and_recover(observed.attach().await?.cursor);
+        let (_, mut feed) = observed.follow(lash::FeedStart::Retained).await?;
         while let Some(item) = feed.next().await {
             match item? {
                 SessionObservationStreamItem::Event(event) => match &event.payload {
@@ -561,11 +561,13 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
     };
     let followed = async {
         let observed = state.core.processes().observe(&process_id);
-        let snapshot = observed.snapshot().await?;
+        let (snapshot, mut feed) = observed
+            .follow(lash::process::ProcessFeedStart::Retained)
+            .await?;
         let Some(mut ended) = apply(&snapshot.read_view) else {
             return Ok(());
         };
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
         loop {
             let item = if ended {
                 // The feed of an ended process only replays what it retains.

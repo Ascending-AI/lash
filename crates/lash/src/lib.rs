@@ -292,7 +292,7 @@ pub use crate::send::{
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, TurnEvents, TurnStatus,
 };
 pub use crate::session::{
-    LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
+    FeedStart, LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
 pub use crate::turn::{ToolCallRead, TurnActivityFanout, TurnOutput, TurnToolCallRef};
@@ -509,10 +509,10 @@ pub use lash_vocabulary::identity::InvalidProcessId;
 /// from the crate root.
 pub mod prelude {
     pub use crate::{
-        ChargeSafetyPolicy, DeploymentDrainStatus, DurableSession, EmbedError, InputItem, LashCore,
-        LashCoreBuilder, LashSession, LlmProfileConfig, LlmProfileKey, LlmProfileLimits,
-        LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder, LlmProfileRegistry,
-        MaxToolCalls, NoProgressBudget, ObservableSession, ParkedSession,
+        ChargeSafetyPolicy, DeploymentDrainStatus, DurableSession, EmbedError, FeedStart,
+        InputItem, LashCore, LashCoreBuilder, LashSession, LlmProfileConfig, LlmProfileKey,
+        LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
+        LlmProfileRegistry, MaxToolCalls, NoProgressBudget, ObservableSession, ParkedSession,
         PendingTurnInputCancelOutcome, PluginStack, RegisteredLlmProfile, Result, SendBuilder,
         SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
@@ -527,6 +527,7 @@ pub mod prelude {
 /// recovery for host frontends. Entry point: [`LashSession::observe`] /
 /// [`ObservableSession`].
 pub mod observe {
+    pub use crate::session::FeedStart;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     /// The stream trait a live replay subscription's tail and the session
     /// feed implement: a custom [`LiveReplayStore`] builds its

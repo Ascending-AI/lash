@@ -27,8 +27,11 @@ async fn an_idle_follower_recovers_a_commit_whose_publication_was_dropped() {
     let mut fixture = Fixture::new().await;
     fixture.reconcile.changes = fixture.commits.clone();
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
+
     quiet(&mut feed).await;
 
     let dropped = fixture.commit().await;
@@ -52,8 +55,11 @@ async fn a_follower_whose_missed_facts_were_released_gets_one_gap() {
     let wake = ProcessChangeHub::new();
     fixture.reconcile.changes = wake.clone();
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
+
     quiet(&mut feed).await;
 
     fixture.commit().await;
@@ -88,9 +94,12 @@ async fn a_follower_behind_the_bridge_bound_gaps_and_republishes_nothing() {
     let wake = ProcessChangeHub::new();
     fixture.reconcile.changes = wake.clone();
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
+    let (snapshot, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
     let window = snapshot.cursor.clone();
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     fixture.observe_node(0, "node kept").await;
     expect_event(next(&mut feed).await, "node kept");
 
@@ -188,9 +197,12 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
         .id;
 
     let observed = core_a.processes().observe(&process_id);
-    let snapshot = observed.snapshot().await.expect("snapshot on core A");
+    let (snapshot, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot on core A");
     let mut sequence = snapshot.read_view.sequence().expect("retained").as_u64();
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     quiet(&mut feed).await;
 
     let terminal = committer
@@ -315,8 +327,11 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
     let observed = core.processes().observe(&process_id);
     let (items, mut delivered) = tokio::sync::mpsc::unbounded_channel();
     for feed in 0..FEEDS {
-        let snapshot = observed.snapshot().await.expect("snapshot");
-        let mut stream = observed.subscribe_and_recover(snapshot.cursor);
+        let (_, mut stream) = observed
+            .follow(crate::process::ProcessFeedStart::Retained)
+            .await
+            .expect("snapshot");
+
         let items = items.clone();
         tokio::spawn(async move {
             while let Some(item) = stream.next().await {

@@ -159,11 +159,14 @@ async fn observe(
 ) -> Result<tokio::task::JoinHandle<Result<(ProcessObservationCursor, Delivered)>>> {
     let observed = node.core.processes().observe(process);
     let start = Instant::now();
-    let snapshot = within("process snapshot", observed.snapshot()).await??;
+    let (snapshot, mut feed) = within(
+        "process snapshot",
+        observed.follow(lash::process::ProcessFeedStart::Retained),
+    )
+    .await??;
     meter.operation("process.feed.snapshot", process, "ok", start);
     let meter = meter.clone();
     Ok(tokio::spawn(async move {
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor.clone());
         let delivered = follow(&mut feed, &meter, boundary).await?;
         Ok((snapshot.cursor, delivered))
     }))
@@ -435,12 +438,12 @@ async fn convergence(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 /// port, with no execution: `facts` wait facts and then its terminal. Long
 /// histories are written this way because an executed process slows with its
 /// own length.
-async fn append_facts(
+async fn append_facts<T>(
     node: &Node,
     facts: usize,
-    snapshot: impl AsyncFnOnce(&lash::ProcessId) -> Result<lash_core::ProcessObservation>,
+    snapshot: impl AsyncFnOnce(&lash::ProcessId) -> Result<T>,
     meter: &Meter,
-) -> Result<(lash::ProcessId, lash_core::ProcessObservation)> {
+) -> Result<(lash::ProcessId, T)> {
     use lash_core::ToolCallId;
     use lash_execution_contracts::process::ProcessCompletionAuthority;
     use lash_execution_contracts::process::ProcessEventAppendRequest;
@@ -502,21 +505,28 @@ async fn append_facts(
 async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let (node, stalled) = (&fleet.nodes[0], &fleet.nodes[1]);
     let appended = args.workload == "registry-facts";
-    let (process, snapshot) = if appended {
+    let (process, (snapshot, mut feed)) = if appended {
         let stale = async |process: &lash::ProcessId| {
             let observed = stalled.core.processes().observe(process);
-            Ok(within("process snapshot", observed.snapshot()).await??)
+            Ok(within(
+                "process snapshot",
+                observed.follow(lash::process::ProcessFeedStart::Retained),
+            )
+            .await??)
         };
         append_facts(node, args.operations, stale, meter).await?
     } else {
         let published = publish(&node.core, &commit_document(args.operations)).await?;
         let process = Box::pin(start(&node.core, &published, "reconcile")).await?;
         let observed = stalled.core.processes().observe(&process);
-        let snapshot = within("process snapshot", observed.snapshot()).await??;
+        let (snapshot, feed) = within(
+            "process snapshot",
+            observed.follow(lash::process::ProcessFeedStart::Retained),
+        )
+        .await??;
         settled(&node.core, &process).await?;
-        (process, snapshot)
+        (process, (snapshot, feed))
     };
-    let observed = stalled.core.processes().observe(&process);
     let held = snapshot
         .read_view
         .sequence()
@@ -526,7 +536,7 @@ async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let before = stalled.process_replay.counts();
 
     let start = Instant::now();
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     let recovered = follow(&mut feed, meter, "process.feed.recover.next").await?;
     meter.operation("process.feed.recover", process, "ok", start);
     meter.window("process.reconcile.recover", recovered.committed, start);

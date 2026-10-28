@@ -734,15 +734,17 @@ fn settlement(status: ProcessStatus, at_ms: Option<u64>) -> Option<WorkflowOverl
     })
 }
 
-/// Attach a new follower to `process` now: read its snapshot, follow its
-/// one recovering feed from the snapshot's cursor, read the document the
-/// snapshot names and fold what the feed delivers into that document's
+/// Follow `process` from its snapshot and continuing stream, read the
+/// document the snapshot names and fold the feed into that document's
 /// overlay. The follower keeps folding after this request answers.
 async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) -> ApiResult {
     let process = process_id(process)?;
     let observed = host.core.processes().observe(&process);
-    let snapshot = observed.snapshot().await.map_err(api_error)?;
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (snapshot, mut feed) = observed
+        .follow(lash::process::ProcessFeedStart::Retained)
+        .await
+        .map_err(api_error)?;
+
     let lash::process::ProcessReadView::Retained(view) = snapshot.read_view else {
         return Err(api_error("the process is not retained"));
     };

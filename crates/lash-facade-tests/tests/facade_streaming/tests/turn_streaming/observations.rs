@@ -29,9 +29,9 @@ async fn store_wide_invalidation_resnapshots_every_session_feed() -> Result<()> 
             .await
             .open()
             .await?;
-        let snapshot = session.observe().snapshot().await?;
+        let (snapshot, mut feed) = session.observe().follow(lash::FeedStart::Head).await?;
         let revision = snapshot.cursor.parse().expect("snapshot cursor").revision;
-        let mut feed = session.observe().subscribe_and_recover(snapshot.cursor);
+
         replay
             .publish(
                 &session.session_id(),
@@ -973,19 +973,17 @@ async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_c
     .await
     .open()
     .await?;
-    let cursor = session
+    let (_, mut reconnect) = session
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
+        .expect("durable feed");
 
     session
         .send(TurnInput::text("commit before becoming idle"))
         .output()
         .await?;
 
-    let mut reconnect = session.observe().subscribe_and_recover(cursor);
     let item = tokio::time::timeout(std::time::Duration::from_millis(250), reconnect.next())
         .await
         .expect("an idle reconnect must not wait for a future commit")
@@ -1054,9 +1052,9 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             boundary == PublicationBoundary::BeforeNotification,
             "{boundary:?}: only the pre-notification cut may expose the batch to replay"
         );
-        let snapshot = session
+        let (snapshot, mut stream) = session
             .observe()
-            .snapshot()
+            .follow(lash::FeedStart::Head)
             .await
             .expect("durable snapshot");
         let snapshot_is_new = snapshot.read_view.messages().iter().any(|message| {
@@ -1068,7 +1066,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             snapshot_is_new,
             "{boundary:?}: the snapshot is the durable head, which commits before it publishes"
         );
-        let mut stream = session.observe().subscribe_and_recover(snapshot.cursor);
+
         replay_store.release_commit_install();
         turn.await.expect("join publishing turn")?;
 
@@ -1183,9 +1181,9 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
             replay_store.wait_for_commit_append(),
         )
         .await;
-        let snapshot = session
+        let (snapshot, mut stream) = session
             .observe()
-            .snapshot()
+            .follow(lash::FeedStart::Head)
             .await
             .expect("durable snapshot");
         let revision_of = |cursor: &lash_core::SessionCursor| {
@@ -1199,7 +1197,7 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
             held > revision_of(&before.cursor),
             "{boundary:?}: the snapshot is the durable head, which commits before it publishes"
         );
-        let mut stream = session.observe().subscribe_and_recover(snapshot.cursor);
+
         replay_store.release_commit_install();
         let switched = turn.await.expect("join publishing turn")?;
         let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
@@ -1351,12 +1349,12 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
     .await
     .open()
     .await?;
-    let cursor = session
+    let (observation, mut first_delivery) = session
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
+        .expect("durable feed");
+    let cursor = observation.cursor;
     session
         .send(TurnInput::text("redelivery identity"))
         .id(
@@ -1367,7 +1365,6 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
         .await?;
     live.published(1).await;
 
-    let mut first_delivery = session.observe().subscribe_and_recover(cursor.clone());
     let first_id = match first_delivery.next().await.expect("first replay event")? {
         lash::observe::SessionObservationStreamItem::Event(event) => {
             lash::observe::SessionObservationEventId::of(&event)
@@ -1436,17 +1433,16 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
     .await
     .open()
     .await?;
-    let cursor = session
+    let (_, mut stream) = session
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
+        .expect("durable feed");
     session
         .send(TurnInput::text("trim the initial cursor"))
         .output()
         .await?;
-    let mut stream = session.observe().subscribe_and_recover(cursor);
+
     let update = stream.next().await.expect("gap update")?;
     let lash::observe::SessionObservationStreamItem::Gap {
         observation: snapshot,
@@ -1537,13 +1533,12 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
     .await
     .open()
     .await?;
-    let cursor = session
+    let (_, stream) = session
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
-    let stream = session.observe().subscribe_and_recover(cursor);
+        .expect("durable feed");
+
     let run_session = session.clone();
     let mut turn = tokio::spawn(async move {
         run_session

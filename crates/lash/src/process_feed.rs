@@ -649,7 +649,8 @@ impl AppliedEventIds {
 }
 
 /// Stream returned by
-/// [`ObservableProcess::subscribe_and_recover`](crate::ObservableProcess::subscribe_and_recover):
+/// [`ObservableProcess::follow`] and
+/// [`ObservableProcess::subscribe_and_recover`]:
 /// the process feed from a cursor.
 ///
 /// It yields the replay's events after the cursor, each committed fact once
@@ -1064,13 +1065,20 @@ pub(crate) fn process_replay_error(err: ProcessReplayStoreError) -> EmbedError {
     ))
 }
 
+/// Where a new process feed begins in the bounded live replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessFeedStart {
+    /// Replay retained provisional evidence, skipping commits already
+    /// reflected in the durable snapshot.
+    Retained,
+}
+
 /// One process, observed: its durable snapshot and the feed that continues
 /// it.
 ///
 /// ```rust,ignore
 /// let observed = core.processes().observe(&process_id);
-/// let snapshot = observed.snapshot().await?;
-/// let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+/// let (snapshot, mut feed) = observed.follow(lash::process::ProcessFeedStart::Retained).await?;
 /// ```
 #[derive(Clone)]
 pub struct ObservableProcess {
@@ -1078,12 +1086,32 @@ pub struct ObservableProcess {
 }
 
 impl ObservableProcess {
+    /// The process's durable snapshot and its continuing stream together.
+    ///
+    /// [`ProcessFeedStart::Retained`] replays retained provisional evidence;
+    /// commits already reflected in the snapshot are skipped. Stream errors
+    /// and gaps have the same contract as
+    /// [`subscribe_and_recover`](Self::subscribe_and_recover).
+    pub async fn follow(
+        &self,
+        start: ProcessFeedStart,
+    ) -> Result<(ProcessObservation, ProcessObservationStream)> {
+        let observation = match start {
+            ProcessFeedStart::Retained => self.source.snapshot().await?,
+        };
+        let stream = self.subscribe_and_recover(observation.cursor.clone());
+        Ok((observation, stream))
+    }
+
     /// The process's durable read view and the cursor a feed from
     /// [`subscribe_and_recover`](Self::subscribe_and_recover) continues.
     ///
     /// The cursor is the earliest position the replay store retains for the
     /// process, so the feed replays the retained provisional evidence;
     /// retained commits the view already reflects are skipped.
+    /// Use [`follow`](Self::follow) to start a feed from this snapshot, or
+    /// [`subscribe_and_recover`](Self::subscribe_and_recover) to resume from
+    /// a persisted cursor.
     pub async fn snapshot(&self) -> Result<ProcessObservation> {
         self.source.snapshot().await
     }

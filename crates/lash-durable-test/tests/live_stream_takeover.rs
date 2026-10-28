@@ -334,10 +334,10 @@ impl Takeover {
 
     /// A feed from the session's snapshot now, and the revision it opened at.
     async fn follow(&self) -> (Feed, SessionRevision) {
-        let snapshot = self
+        let (snapshot, feed_stream) = self
             .observed
             .observe()
-            .snapshot()
+            .follow(lash::FeedStart::Head)
             .await
             .expect("the session's snapshot");
         let revision = snapshot
@@ -345,14 +345,7 @@ impl Takeover {
             .parse()
             .expect("a store cursor parses")
             .revision;
-        (
-            Feed::follow(
-                self.observed
-                    .observe()
-                    .subscribe_and_recover(snapshot.cursor),
-            ),
-            revision,
-        )
+        (Feed::follow(feed_stream), revision)
     }
 
     /// Send the turn's input and run A until it dies before its call's
@@ -476,9 +469,13 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
         .open()
         .await
         .unwrap();
-    let snapshot = observed.observe().snapshot().await.unwrap();
+    let (snapshot, feed_stream) = observed
+        .observe()
+        .follow(lash::FeedStart::Head)
+        .await
+        .unwrap();
     let revision = snapshot.cursor.parse().unwrap().revision;
-    let feed = Feed::follow(observed.observe().subscribe_and_recover(snapshot.cursor));
+    let feed = Feed::follow(feed_stream);
     let output = world.send(&durable, "answer after checking").await;
     served::assert_answered(name, &output);
     feed.until("the feed reaches the two-call turn's commit", |feed| {
@@ -805,13 +802,13 @@ async fn an_invalidated_feed_gaps_once_and_follows_on(tier: served::Tier) {
         .open()
         .await
         .expect("the session opens for observation");
-    let snapshot = observed
+    let (snapshot, feed_stream) = observed
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("the session's snapshot");
     let revision = snapshot.cursor.parse().expect("a cursor parses").revision;
-    let feed = Feed::follow(observed.observe().subscribe_and_recover(snapshot.cursor));
+    let feed = Feed::follow(feed_stream);
     for label in ["elsewhere one", "elsewhere two"] {
         store
             .publish(&session_id, revision, vec![activity(label)])

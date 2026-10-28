@@ -92,27 +92,30 @@ pub(crate) async fn session_observations_with_shutdown(
     let session = Box::pin(state.open_session_for_observation(&session_id))
         .await
         .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
-    let cursor = match query
+    let stream = match query
         .cursor
         .as_deref()
         .filter(|cursor| !cursor.trim().is_empty())
     {
-        Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
-            .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
+        Some(cursor) => {
+            let cursor = serde_json::from_value::<SessionCursor>(json!(cursor))
+                .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?;
+            session.observe().subscribe_and_recover(cursor)
+        }
         None => {
             session
                 .observe()
-                .snapshot()
+                .follow(lash::FeedStart::Head)
                 .await
                 .map_err(|error| {
                     state.session_admission_error(&session_id, "api.observations", error)
                 })?
-                .cursor
+                .1
         }
     };
     let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
     tokio::spawn(async move {
-        forward_session_observations_until_shutdown(session, cursor, tx, shutdown).await;
+        forward_session_observations_until_shutdown(stream, tx, shutdown).await;
     });
     Ok(ndjson_response(ReceiverStream::new(rx)))
 }
@@ -141,8 +144,7 @@ async fn send_until_shutdown<T>(
 }
 
 async fn forward_session_observations_until_shutdown(
-    session: lash::LashSession,
-    cursor: SessionCursor,
+    mut stream: lash::observe::SessionObservationStream,
     tx: mpsc::Sender<ObservationStreamItem>,
     mut shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 ) {
@@ -151,7 +153,7 @@ async fn forward_session_observations_until_shutdown(
     if !send_until_shutdown(
         &tx,
         ObservationStreamItem::Cursor {
-            cursor: cursor.to_string(),
+            cursor: stream.cursor().to_string(),
         },
         &mut shutdown,
     )
@@ -159,7 +161,6 @@ async fn forward_session_observations_until_shutdown(
     {
         return;
     }
-    let mut stream = session.observe().subscribe_and_recover(cursor);
     let mut sequence = 0;
     loop {
         let item = match shutdown.as_mut() {

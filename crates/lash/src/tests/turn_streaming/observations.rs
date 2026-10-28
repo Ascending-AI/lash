@@ -43,12 +43,11 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     .await
     .open()
     .await?;
-    let initial_cursor = first_session
+    let (_, mut first_stream) = first_session
         .observe()
-        .snapshot()
+        .follow(crate::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
+        .expect("durable feed");
     first_session
         .observe()
         .runtime
@@ -61,9 +60,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
             })),
         )
         .await;
-    let mut first_stream = first_session
-        .observe()
-        .subscribe_and_recover(initial_cursor);
+
     let old_id = match first_stream.next().await.expect("pre-restart event")? {
         crate::observe::SessionObservationStreamItem::Event(event) => {
             crate::observe::SessionObservationEventId::of(&event)
@@ -90,16 +87,12 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     .await
     .open()
     .await?;
-    let restarted_at = second_session
+    let (_, retained_applied_ids) = second_session
         .observe()
-        .snapshot()
+        .follow(crate::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
-    let mut retained_applied_ids = second_session
-        .observe()
-        .subscribe_and_recover(restarted_at)
-        .with_applied_event_ids([old_id.clone()]);
+        .expect("durable feed");
+    let mut retained_applied_ids = retained_applied_ids.with_applied_event_ids([old_id.clone()]);
     let mut recovered = second_session
         .observe()
         .subscribe_and_recover(old_cursor)
@@ -194,13 +187,12 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
     .await
     .open()
     .await?;
-    let cursor = session
+    let (_, mut stream) = session
         .observe()
-        .snapshot()
+        .follow(crate::FeedStart::Head)
         .await
-        .expect("durable snapshot")
-        .cursor;
-    let mut stream = session.observe().subscribe_and_recover(cursor);
+        .expect("durable feed");
+
     assert!(
         futures_util::poll!(stream.next()).is_pending(),
         "the initial poll must wait for a live event"

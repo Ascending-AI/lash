@@ -713,8 +713,11 @@ async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
     )
     .await;
     let observed = core.processes().observe(&process);
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(lash::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
+
     assert_eq!(finished(&core, &process).await, serde_json::json!("done"));
     let mut overlay = ProcessWorkflowOverlayAccumulator::new(process);
     let mut entries = std::collections::BTreeSet::new();
@@ -818,8 +821,11 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     };
     let process = start_with(&core, &env_ref, &publication.definition, "fan", args).await;
     let observed = core.processes().observe(&process);
-    let snapshot = observed.snapshot().await.expect("the durable snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(lash::process::ProcessFeedStart::Retained)
+        .await
+        .expect("the durable snapshot");
+
     assert_eq!(
         finished(&core, &process).await,
         serde_json::json!(["x", "y", "z"])
@@ -1053,11 +1059,11 @@ async fn timer_park_after(
     let mut trace = Vec::new();
     let parked = async {
         let observable = core.processes().observe(process);
-        let snapshot = observable
-            .snapshot()
+        let (_, mut feed) = observable
+            .follow(lash::process::ProcessFeedStart::Retained)
             .await
             .expect("the process snapshot reads");
-        let mut feed = observable.subscribe_and_recover(snapshot.cursor);
+
         loop {
             let observed = core
                 .processes()

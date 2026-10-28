@@ -148,9 +148,9 @@ async fn subscriber_lag_from_retained_cursor_replays_every_event_then_continues(
         .await
         .open()
         .await?;
-    let cursor = session.observe().snapshot().await?.cursor;
+    let (observation, mut feed) = session.observe().follow(lash::FeedStart::Head).await?;
+    let cursor = observation.cursor;
     let revision = cursor.parse().expect("snapshot cursor").revision;
-    let mut feed = session.observe().subscribe_and_recover(cursor.clone());
     assert!(futures_util::poll!(feed.next()).is_pending());
 
     let draft = || {
@@ -247,14 +247,12 @@ async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() 
         .send(TurnInput::text("durable before the gap"))
         .output()
         .await?;
-    let before = session
+    let (before, mut stream) = session
         .observe()
-        .snapshot()
+        .follow(lash::FeedStart::Head)
         .await
         .expect("durable snapshot");
-    let mut stream = session
-        .observe()
-        .subscribe_and_recover(before.cursor.clone());
+
     assert!(
         stream.next().now_or_never().is_none(),
         "subscription is active before invalidation"

@@ -333,7 +333,10 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
     assert_eq!(list.processes[0].park, get.park);
 
     let observed = processes.observe(&process_id);
-    let snapshot = observed.snapshot().await.expect("initial feed snapshot");
+    let (snapshot, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("initial feed snapshot");
     let ProcessReadView::Retained(initial) = &snapshot.read_view else {
         panic!("the parked process is retained");
     };
@@ -345,7 +348,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .invalidate_all()
         .await
         .expect("lose replay continuity");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
     let (replacement, _) = expect_gap(
         next(&mut feed).await,
         ProcessObservationGapCause::Replay {
@@ -373,7 +376,10 @@ async fn an_attach_replays_the_retained_window_and_delivers_each_later_commit_on
     let reflected = fixture.commit_published().await;
 
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
+    let (snapshot, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
     let ProcessReadView::Retained(view) = &snapshot.read_view else {
         panic!("the process is retained");
     };
@@ -384,7 +390,6 @@ async fn an_attach_replays_the_retained_window_and_delivers_each_later_commit_on
     );
     assert_eq!(view.effects.coverage, ProcessEffectCoverage::Complete);
 
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     expect_event(next(&mut feed).await, "node before");
     quiet(&mut feed).await;
     assert_eq!(held(&feed), reflected.sequence);
@@ -419,8 +424,11 @@ async fn an_attach_replays_the_retained_window_and_delivers_each_later_commit_on
 async fn a_commit_without_its_bridge_is_one_gap_with_the_durable_process() {
     let fixture = Fixture::new().await;
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
+
     quiet(&mut feed).await;
 
     fixture.observe_node(0, "node kept").await;
@@ -509,8 +517,11 @@ async fn a_stale_cursor_continues_only_across_every_commit_it_missed() {
 async fn a_replay_that_loses_continuity_is_one_gap_and_the_feed_resumes() {
     let fixture = Fixture::new().await;
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
+
     fixture.observe_node(0, "node lost").await;
     expect_event(next(&mut feed).await, "node lost");
 
@@ -565,11 +576,13 @@ async fn a_cursor_for_another_process_is_refused() {
 async fn a_process_that_is_not_retained_is_typed_absence_and_ends_the_feed() {
     let fixture = Fixture::new().await;
     let unknown = fixture.observe_process(&ProcessId::fixture("never-registered"));
-    let snapshot = unknown.snapshot().await.expect("snapshot");
+    let (snapshot, mut feed) = unknown
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
     assert!(matches!(snapshot.read_view, ProcessReadView::Unknown));
     assert_eq!(snapshot.read_view.sequence(), None);
 
-    let mut feed = unknown.subscribe_and_recover(snapshot.cursor);
     let ProcessObservationStreamItem::Gap { replacement, .. } = next(&mut feed).await else {
         panic!("expected ended gap");
     };
@@ -590,7 +603,10 @@ async fn a_snapshot_of_an_unretained_id_takes_no_replay_window() {
     })
     .await;
     let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
+    let (_, mut feed) = observed
+        .follow(crate::process::ProcessFeedStart::Retained)
+        .await
+        .expect("snapshot");
     fixture.observe_node(0, "node kept").await;
 
     let unknown = fixture
@@ -600,7 +616,6 @@ async fn a_snapshot_of_an_unretained_id_takes_no_replay_window() {
         .expect("snapshot of an unknown id");
     assert!(matches!(unknown.read_view, ProcessReadView::Unknown));
 
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     expect_event(next(&mut feed).await, "node kept");
     quiet(&mut feed).await;
 }
