@@ -8,6 +8,10 @@ use lash_protocol_types::sync::MutexExt;
 
 use super::*;
 
+#[cfg(test)]
+#[path = "registration_tests.rs"]
+mod registration_tests;
+
 #[derive(Clone)]
 pub struct PluginHost {
     pub(super) package_namespace: Arc<super::packages::HostPackageNamespace>,
@@ -568,10 +572,10 @@ impl PluginHost {
         session
             .materialized
             .store(true, std::sync::atomic::Ordering::Release);
-        if let Some(inventory) = session.shared_inventory() {
-            self.materialized_inventories
-                .observe(&session.owner, &inventory);
-        }
+        session
+            .capabilities()
+            .composition
+            .observe_inventory(&self.materialized_inventories, &session.owner);
         Ok(())
     }
 
@@ -864,8 +868,8 @@ impl PluginHost {
         session: &Arc<PluginSession>,
     ) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
-        if let Some(existing) = sessions.get(owner).and_then(Weak::upgrade) {
-            if !Arc::ptr_eq(&existing, session) {
+        if let Some(existing) = sessions.get(owner).filter(|weak| weak.strong_count() > 0) {
+            if !Weak::ptr_eq(existing, &Arc::downgrade(session)) {
                 return Err(PluginError::Session(format!(
                     "plugin session for `{owner}` is already registered on this plugin host"
                 )));
@@ -877,11 +881,9 @@ impl PluginHost {
     }
 
     pub fn unregister_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
-        let mut sessions = self.sessions.lock_recover();
         let owner = RuntimeOwner::Session(session_id.clone());
-        if let Some(session) = sessions
-            .remove(&owner)
-            .and_then(|session| session.upgrade())
+        let removed = self.sessions.lock_recover().remove(&owner);
+        if let Some(session) = removed.and_then(|session| session.upgrade())
             && let Some(inventory) = session.shared_inventory()
         {
             self.materialized_inventories.forget(&owner, &inventory);
@@ -889,17 +891,28 @@ impl PluginHost {
         Ok(())
     }
 
+    fn forget_dropped_session(&self, owner: &RuntimeOwner) {
+        let mut sessions = self.sessions.lock_recover();
+        if sessions
+            .get(owner)
+            .is_some_and(|weak| weak.strong_count() == 0)
+        {
+            sessions.remove(owner);
+        }
+    }
+
     pub fn session(
         &self,
         session_id: &SessionId,
     ) -> Result<Arc<PluginSession>, PluginOperationInvokeError> {
-        let mut sessions = self.sessions.lock_recover();
+        let sessions = self.sessions.lock_recover();
         let owner = RuntimeOwner::Session(session_id.clone());
         let Some(weak) = sessions.get(&owner).cloned() else {
             return Err(PluginOperationInvokeError::UnknownSession(
                 session_id.to_string(),
             ));
         };
+        drop(sessions);
         match weak.upgrade() {
             Some(session) => {
                 if self.export_plugin_namespaces == session.host.export_plugin_namespaces {
@@ -911,12 +924,18 @@ impl PluginHost {
                 }
             }
             None => {
-                sessions.remove(&owner);
+                self.forget_dropped_session(&owner);
                 Err(PluginOperationInvokeError::UnknownSession(
                     session_id.to_string(),
                 ))
             }
         }
+    }
+}
+
+impl Drop for PluginSession {
+    fn drop(&mut self) {
+        self.host.forget_dropped_session(&self.owner);
     }
 }
 

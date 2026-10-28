@@ -14,7 +14,31 @@ pub struct MaterializedInventoryReader(Arc<Observations>);
 #[derive(Clone)]
 pub struct WeakMaterializedInventoryReader(Weak<Observations>);
 
+#[must_use = "the observation lives for this guard's lifetime"]
+pub(super) struct InventoryObservation {
+    reader: WeakMaterializedInventoryReader,
+    owner: RuntimeOwner,
+    inventory: Weak<InstalledInventory>,
+}
+
+impl Drop for InventoryObservation {
+    fn drop(&mut self) {
+        if let Some(reader) = self.reader.upgrade() {
+            reader.forget_weak(&self.owner, &self.inventory);
+        }
+    }
+}
+
 impl MaterializedInventoryReader {
+    #[cfg(test)]
+    pub(super) fn retained_slots_for_testing(&self) -> (usize, usize) {
+        let owners = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (owners.len(), owners.values().map(Vec::len).sum())
+    }
+
     pub fn downgrade(&self) -> WeakMaterializedInventoryReader {
         WeakMaterializedInventoryReader(Arc::downgrade(&self.0))
     }
@@ -47,15 +71,30 @@ impl MaterializedInventoryReader {
             .or_default()
             .push(Arc::downgrade(inventory));
     }
+    pub(super) fn observe_scoped(
+        &self,
+        owner: &RuntimeOwner,
+        inventory: &Arc<InstalledInventory>,
+    ) -> InventoryObservation {
+        let observation = InventoryObservation {
+            reader: self.downgrade(),
+            owner: owner.clone(),
+            inventory: Arc::downgrade(inventory),
+        };
+        self.observe(owner, inventory);
+        observation
+    }
     pub(super) fn forget(&self, owner: &RuntimeOwner, inventory: &Arc<InstalledInventory>) {
-        let weak = Arc::downgrade(inventory);
+        self.forget_weak(owner, &Arc::downgrade(inventory));
+    }
+    fn forget_weak(&self, owner: &RuntimeOwner, weak: &Weak<InstalledInventory>) {
         let mut owners = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(instances) = owners.get_mut(owner) {
             instances
-                .retain(|instance| instance.strong_count() > 0 && !Weak::ptr_eq(instance, &weak));
+                .retain(|instance| instance.strong_count() > 0 && !Weak::ptr_eq(instance, weak));
             if instances.is_empty() {
                 owners.remove(owner);
             }

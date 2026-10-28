@@ -140,8 +140,21 @@ pub fn authority(
 // references. Bound both entry count and retained serialized bytes. Validation
 // runs outside the cache lock, then insertion reclassifies under that lock.
 struct BodyEntry {
-    json: String,
+    /// Canonical bytes already belong to `body`; retain another encoding only
+    /// when it differs, since cache hits require exact stored bytes.
+    json: Option<String>,
     body: EnvironmentBody,
+}
+impl BodyEntry {
+    fn json(&self) -> Option<&str> {
+        self.json
+            .as_deref()
+            .or_else(|| self.body.canonical_json().ok())
+    }
+
+    fn bytes(&self) -> usize {
+        self.json().map_or(BODY_BYTES, str::len)
+    }
 }
 static BODIES: std::sync::LazyLock<std::sync::Mutex<std::collections::VecDeque<BodyEntry>>> =
     std::sync::LazyLock::new(Default::default);
@@ -155,7 +168,7 @@ pub fn decoded_body(version: &EnvironmentId, json: &str) -> Result<EnvironmentBo
     if let Some(body) = BODIES
         .lock_recover()
         .iter()
-        .find(|entry| entry.body.id() == version && entry.json == json)
+        .find(|entry| entry.body.id() == version && entry.json() == Some(json))
         .map(|entry| entry.body.clone())
     {
         return Ok(body);
@@ -167,31 +180,32 @@ fn validated_body(version: &EnvironmentId, json: String) -> Result<EnvironmentBo
     let body = decoded_body(version, &json)?;
     body.validate().map_err(corrupt)?;
     if body.id() == version {
-        remember_body(&body, json);
+        remember_body(&body, &json);
     }
     Ok(body)
 }
 
-fn remember_body(body: &EnvironmentBody, json: String) {
+fn remember_body(body: &EnvironmentBody, json: &str) {
     use lash_protocol_types::sync::MutexExt;
     if json.len() > BODY_BYTES {
         return;
     }
+    let stored = (body.canonical_json().ok() != Some(json)).then(|| json.to_owned());
     let mut entries = BODIES.lock_recover();
     if entries
         .iter()
-        .any(|entry| entry.body.id() == body.id() && entry.json == json)
+        .any(|entry| entry.body.id() == body.id() && entry.json() == Some(json))
     {
         return;
     }
-    let mut bytes: usize = entries.iter().map(|entry| entry.json.len()).sum();
+    let mut bytes: usize = entries.iter().map(BodyEntry::bytes).sum();
     while entries.len() >= BODY_ENTRIES || bytes + json.len() > BODY_BYTES {
         if let Some(entry) = entries.pop_front() {
-            bytes -= entry.json.len();
+            bytes -= entry.bytes();
         }
     }
     entries.push_back(BodyEntry {
-        json,
+        json: stored,
         body: body.clone(),
     });
 }
@@ -335,7 +349,7 @@ impl EnvironmentWrite {
             return Err(EnvironmentRefusal::Content.into());
         }
         let body_json = body.canonical_json().map_err(corrupt)?.to_owned();
-        remember_body(body, body_json.clone());
+        remember_body(body, &body_json);
         Ok(Self::Prepare { owner, body_json })
     }
 }
@@ -459,6 +473,47 @@ mod tests {
                     .unwrap(),
             ),
             "ENV-BODY-REUSE: identical reads rebuilt validated fragments"
+        );
+        {
+            use lash_protocol_types::sync::MutexExt;
+            let entries = BODIES.lock_recover();
+            let entry = entries
+                .iter()
+                .find(|entry| entry.body.id() == body.id() && entry.json() == Some(&encoded))
+                .unwrap();
+            assert_eq!(
+                entry.json().unwrap().as_ptr(),
+                first
+                    .body
+                    .as_ref()
+                    .unwrap()
+                    .canonical_json()
+                    .unwrap()
+                    .as_ptr(),
+                "ENV-BODY-REUSE: canonical cache bytes duplicate the body's own encoding"
+            );
+        }
+        let spaced = format!(" {encoded} ");
+        let spaced_first = read(body.id(), "published", Some(spaced.clone())).unwrap();
+        let spaced_second = read(body.id(), "published", Some(spaced)).unwrap();
+        let fragment = |record: &EnvironmentRecord| {
+            record
+                .body
+                .as_ref()
+                .unwrap()
+                .fragments()
+                .values()
+                .next()
+                .unwrap()
+                .clone()
+        };
+        assert!(std::sync::Arc::ptr_eq(
+            &fragment(&spaced_first),
+            &fragment(&spaced_second)
+        ));
+        assert!(
+            !std::sync::Arc::ptr_eq(&fragment(&first), &fragment(&spaced_first)),
+            "ENV-BODY-REUSE: differently encoded input must not reuse a cached validation"
         );
         assert!(read(body.id(), "published", None).is_err());
         let retired = read(body.id(), "retired", None).unwrap();

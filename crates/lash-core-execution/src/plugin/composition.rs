@@ -3,7 +3,7 @@ use super::prompt::{PromptCatalog, PromptRegistry};
 use super::*;
 
 use lash_core_store::tool_run::{AttributedVerdict, CheckRecord};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
@@ -25,6 +25,7 @@ pub struct ExecutionComposition {
     prompt: PromptRegistry,
     cell_failure_feedback: Vec<RegisteredHook<CellFailureFeedbackHook>>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
+    inventory_observation: OnceLock<super::inventory_reader::InventoryObservation>,
 }
 
 impl ExecutionComposition {
@@ -54,6 +55,19 @@ impl ExecutionComposition {
             prompt: std::mem::take(&mut contributions.prompt),
             tool_registry,
             cell_failure_feedback: Vec::new(),
+            inventory_observation: OnceLock::new(),
+        }
+    }
+
+    pub(super) fn observe_inventory(
+        &self,
+        reader: &super::MaterializedInventoryReader,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
+    ) {
+        if let Some(inventory) = &self.inventory {
+            let _ = self
+                .inventory_observation
+                .get_or_init(|| reader.observe_scoped(owner, inventory));
         }
     }
 

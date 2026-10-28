@@ -41,8 +41,10 @@ use crate::SessionRevision;
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
-/// The durable heads this node published, per session, and the commits it
-/// is still publishing.
+const PUBLISHED_HEAD_HINTS: usize = 4096;
+
+/// At most 4,096 durable heads this node published, and the commits it is
+/// still publishing. Evicting a head hint only repeats its announcement.
 #[derive(Default)]
 pub struct PublishedHeads {
     heads: Mutex<HashMap<SessionId, SessionRevision>>,
@@ -52,6 +54,9 @@ pub struct PublishedHeads {
 impl PublishedHeads {
     fn note(&self, session: &SessionId, revision: SessionRevision) {
         let mut heads = self.heads.lock_recover();
+        if heads.len() >= PUBLISHED_HEAD_HINTS && !heads.contains_key(session) {
+            heads.clear();
+        }
         let held = heads.entry(session.clone()).or_insert(revision);
         *held = (*held).max(revision);
     }
@@ -198,5 +203,54 @@ async fn publish(
         Err(error) => {
             tracing::warn!(session_id = %session, %error, "a commit's observation was not published");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7545: publication hints cannot grow with every released session;
+    /// forgetting a hint must still announce the durable head on the next pass.
+    #[tokio::test]
+    async fn published_head_hints_are_bounded_and_forgotten_heads_are_reannounced() {
+        let backend = crate::testing::sqlite_recording_backend().await;
+        let session = SessionId::fixture("forgotten-publication");
+        crate::testing::runtime_helpers::recording_session_store(&backend, session.clone()).await;
+        let head = super::super::head::SessionHead::load(&backend, &session)
+            .await
+            .expect("load the durable head");
+        let revision = crate::runtime::observation::observation_revision(head.state());
+        let live = crate::facade_support::InMemoryLiveReplayStore::new(
+            crate::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        );
+        let published = PublishedHeads::default();
+        let start = live.current_cursor(&session, revision);
+        announce_retained(&live, &published, &head).await;
+        for ordinal in 0..4096 {
+            published.note(&SessionId::fixture(format!("released-{ordinal}")), revision);
+        }
+        assert!(
+            published.heads.lock_recover().len() <= 4096,
+            "publication hints retain every released session without a bound"
+        );
+        assert!(!published.holds(&session, revision));
+        announce_retained(&live, &published, &head).await;
+        announce_retained(&live, &published, &head).await;
+        let crate::runtime::LiveReplayOutcome::Replayed(events) = live
+            .replay_after_cursor(&start)
+            .await
+            .expect("read the announcements")
+        else {
+            panic!("the announcements remain replayable");
+        };
+        assert_eq!(
+            events.len(),
+            2,
+            "forgetting reannounces the durable head once"
+        );
+        assert!(events.iter().all(|event| event.revision() == revision
+            && matches!(&event.payload, SessionObservationEventPayload::Committed { base_revision, entries }
+                if *base_revision == revision && entries.is_empty())));
     }
 }
