@@ -1924,6 +1924,23 @@ await build()
         execution_observation_with_memory(on.clone(), BOUNDS, false, ExecutionStrategy::Optimized,),
         "completed guest state is independent of earlier memory pressure",
     );
+    // FIG-7513 / K-CHG-002: a construction bailout must retain every
+    // unpaid expression event, including adjacent split region heads.
+    // The bound reaches the repr closure after its nested text.join calls.
+    let bounds = Bounds {
+        memory: 38_912,
+        ..BOUNDS
+    };
+    assert_eq!(
+        execution_observation_with_memory(on.clone(), bounds, false, ExecutionStrategy::Optimized),
+        execution_observation_with_memory(
+            bodies.clone(),
+            bounds,
+            false,
+            ExecutionStrategy::Interpreted
+        ),
+        "a memory refusal keeps the same completed charge prefix",
+    );
     for charge_limit in 0..=reference.charged {
         let bounds = Bounds {
             charge_limit,

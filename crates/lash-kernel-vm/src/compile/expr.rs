@@ -345,15 +345,16 @@ impl Expr {
                 // A binding or pin can separate the first constant from
                 // its unpaid region head. Never cross an operation that
                 // closes that region; use the source inventory's rule.
+                // Every split head in this unpaid prefix must be replayed.
+                let mut start = self.pc;
                 for (pc, op) in stream.ops[..self.pc as usize].iter().enumerate().rev() {
                     if matches!(op, Op::Region { .. }) {
-                        return pc as u32;
-                    }
-                    if !op.kind().in_region() {
+                        start = pc as u32;
+                    } else if !op.kind().in_region() {
                         break;
                     }
                 }
-                self.pc
+                start
             }
         }
     }
