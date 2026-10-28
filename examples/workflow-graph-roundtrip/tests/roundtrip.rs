@@ -134,6 +134,8 @@ async fn each_edit_response_maps_its_immediate_base() {
     for number in 0..2 {
         let first = &previous["view"]["statements"][0];
         let slot = &echo_action(&previous)["callee"]["effect"]["slot"];
+        assert_eq!(slot["kind"], "import", "echo is an authored operation");
+        let slot = &slot["value"];
         let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
             "version": previous["version"],
             "edits": [{"insert_step": {

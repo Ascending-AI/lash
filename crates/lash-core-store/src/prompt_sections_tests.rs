@@ -207,6 +207,20 @@ fn lo_prefix_tail_work_matches_full_render() {
             owner.retained_leaves()
         );
     }
+    // Retained bodies put immutable configuration before messages. Compare
+    // request values, exact attachment slots and all transport metadata.
+    let canonical = |template: &RecordedRequestTemplate| {
+        (
+            template.fetch_horizon,
+            template.route.clone(),
+            template.stream(),
+            template.transport_stream(),
+            template.generation,
+            template.wire_features.clone(),
+            template.slots().cloned().collect::<Vec<_>>(),
+            serde_json::to_value(template.canonical_request().unwrap()).unwrap(),
+        )
+    };
     let measured = [10, 100, 1000].map(|depth| {
         let base: lash_protocol_types::AppendVec<_> =
             (0..depth).map(message).collect::<Vec<_>>().into();
@@ -237,6 +251,7 @@ fn lo_prefix_tail_work_matches_full_render() {
                 .unwrap();
         let mut owner = OwnerPromptState::default();
         let (old, held) = owner.chunk(&template);
+        let original_template = template.clone();
         let prior = owner.clone();
         let next_source = crate::MessageSequence::from_base_and_delta(base, vec![message(depth)])
             .with_base_render_cache(cache);
@@ -274,22 +289,22 @@ fn lo_prefix_tail_work_matches_full_render() {
             &SegmentCache::disabled(),
         )
         .unwrap();
-        assert_eq!(
-            chunked
-                .assemble(|hash| texts.get(hash.as_str()).map(|text| &*text.text))
-                .unwrap(),
-            reference
-        );
-        assert_eq!(
-            old.assemble(|hash| held.get(hash.as_str()).map(|text| &*text.text))
-                .unwrap(),
-            RecordedRequestTemplate::of_request(
-                route.clone(),
-                &request.materialize(),
-                &SegmentCache::disabled()
-            )
-            .unwrap()
-        );
+        let assembled = chunked
+            .assemble(|hash| texts.get(hash.as_str()).map(|text| &*text.text))
+            .unwrap();
+        assert_eq!(assembled, template);
+        assert_eq!(canonical(&assembled), canonical(&reference));
+        let assembled = old
+            .assemble(|hash| held.get(hash.as_str()).map(|text| &*text.text))
+            .unwrap();
+        assert_eq!(assembled, original_template);
+        let reference = RecordedRequestTemplate::of_request(
+            route.clone(),
+            &request.materialize(),
+            &SegmentCache::disabled(),
+        )
+        .unwrap();
+        assert_eq!(canonical(&assembled), canonical(&reference));
         let mut changed = next.messages().get(depth / 2).unwrap().clone();
         changed.role = lash_protocol_types::llm::types::LlmRole::Assistant;
         changed.starts_user_segment = true;
@@ -340,12 +355,12 @@ fn lo_prefix_tail_work_matches_full_render() {
                 &SegmentCache::disabled(),
             )
             .unwrap();
-            assert_eq!(template, reference);
+            assert_eq!(canonical(&template), canonical(&reference));
             assert_eq!(
                 chunked
                     .assemble(|hash| texts.get(hash.as_str()).map(|text| &*text.text))
                     .unwrap(),
-                reference
+                template
             );
             let mut digest = lash_protocol_types::core_support::Blake3DomainHasher::new(
                 "lash-llm-request-content/v1",

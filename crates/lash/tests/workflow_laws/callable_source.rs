@@ -364,8 +364,8 @@ async fn callable_caption_overrides_validate_identity_and_limits() {
     core.shutdown().await.unwrap();
 }
 
-/// FIG-7475: a saved arrow's tool import must not occupy the clock helper's
-/// fixed slot. Publication, materialization and source republication preserve
+/// FIG-7475: a saved arrow's authored tool import stays separate from the
+/// clock helper's operation declaration. Publication, materialization and source republication preserve
 /// both operations and the returned value.
 #[tokio::test]
 async fn saved_arrow_with_clock_and_tool_materializes_and_prints() {
@@ -379,16 +379,21 @@ async fn saved_arrow_with_clock_and_tool_materializes_and_prints() {
         .open_workflow(&definition.id, None)
         .await
         .unwrap();
-    for operation in ["typescript.clock", "tools.echo"] {
-        assert!(
-            opened
-                .draft
-                .document()
-                .imports
-                .values()
-                .any(|import| import.name.to_string() == operation)
-        );
-    }
+    let document = opened.draft.document();
+    let release = lash::vm::helper_release().unwrap();
+    let helper_imports =
+        lash_kernel_doc::helper_imports(document, release.helpers.as_ref()).unwrap();
+    assert!(
+        helper_imports
+            .values()
+            .any(|import| import.name.to_string() == "typescript.clock")
+    );
+    assert!(
+        document
+            .imports
+            .values()
+            .any(|import| import.name.to_string() == "tools.echo")
+    );
     let printed = core
         .host_artifacts()
         .print_workflow(&definition.id, None, format, Default::default())

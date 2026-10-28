@@ -1,7 +1,7 @@
 //! One drainer per class. All execution-side work is synchronous admission;
 //! retries and store invalidation stay on these workers. A worker takes
-//! everything pending at once; the process worker publishes it through its
-//! store's batch API, one process's drafts in order.
+//! process drafts in batches through its store's API, one process's drafts
+//! in order. The serial session publisher takes one draft at a time.
 //!
 //! A loss the process worker can name is that process's alone: a draft the
 //! ingress could not admit for its size, or one the store refused,
@@ -103,10 +103,10 @@ impl<T: Draft> Channel<T> {
         }
     }
 
-    async fn next(&self) -> Work<T> {
+    async fn next<P>(&self, take: fn(&mut Ingress<T>) -> Option<Work<P>>) -> Work<P> {
         loop {
             let notified = self.wake.notified();
-            if let Some(work) = self.queue.lock_recover().next() {
+            if let Some(work) = take(&mut self.queue.lock_recover()) {
                 return work;
             }
             notified.await;
@@ -148,7 +148,7 @@ pub(super) async fn process(
 ) {
     let limits = store.publish_limits();
     loop {
-        let result = match channel.next().await {
+        let result = match channel.next(Ingress::next).await {
             Work::Invalidate => store.invalidate_all().await.map(|_| ()),
             Work::Publish(pending) => {
                 // Order matters only within one process: each process's
@@ -282,22 +282,16 @@ pub(super) async fn session(
     store: Arc<dyn LiveReplayStore>,
 ) {
     loop {
-        let result = match channel.next().await {
+        let result = match channel.next(Ingress::next_one).await {
             Work::Invalidate => store.invalidate_all().await,
-            Work::Publish(pending) => {
-                let mut round = Ok(());
-                for ((id, draft), charge) in pending {
-                    if round.is_ok() {
-                        // A provisional observation never proves a durable
-                        // advance.
-                        round = store
-                            .publish(&id, SessionRevision::new(0), vec![draft])
-                            .await
-                            .map(|_| ());
-                    }
-                    channel.finish(1, charge);
-                }
-                round
+            Work::Publish(((id, draft), charge)) => {
+                // A provisional observation never proves a durable advance.
+                let result = store
+                    .publish(&id, SessionRevision::new(0), vec![draft])
+                    .await
+                    .map(|_| ());
+                channel.finish(1, charge);
+                result
             }
         };
         if let Err(error) = result {

@@ -608,9 +608,12 @@ impl Counted {
             let draws = output["reads"]["effects"]
                 .as_array_mut()
                 .expect("the operation tape");
+            let random_slot = serde_json::json!(lash_kernel_value::OperationSlot::Import(
+                lash_kernel_value::ImportSlot(2)
+            ));
             let draw = draws
                 .iter_mut()
-                .find(|read| read["use_"]["slot"] == 2)
+                .find(|read| read["use_"]["slot"] == random_slot)
                 .expect("the random read");
             let bytes = &mut draw["answer"]["Ok"]["bytes"];
             let text = bytes.as_str().expect("a recorded byte draw");

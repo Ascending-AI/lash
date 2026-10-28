@@ -7,8 +7,7 @@ use std::collections::VecDeque;
 
 pub(super) enum Work<T> {
     Invalidate,
-    /// Everything pending, in admission order, each with its charge.
-    Publish(Vec<(T, usize)>),
+    Publish(T),
 }
 
 pub(super) struct Ingress<T> {
@@ -66,11 +65,20 @@ impl<T> Ingress<T> {
             .collect()
     }
 
-    pub(super) fn next(&mut self) -> Option<Work<T>> {
+    /// Everything pending, in admission order, each with its charge.
+    pub(super) fn next(&mut self) -> Option<Work<Vec<(T, usize)>>> {
         if std::mem::take(&mut self.dirty) {
             return Some(Work::Invalidate);
         }
         (!self.pending.is_empty()).then(|| Work::Publish(self.pending.drain(..).collect()))
+    }
+
+    /// A serial publisher takes one charged draft without allocating a batch.
+    pub(super) fn next_one(&mut self) -> Option<Work<(T, usize)>> {
+        if std::mem::take(&mut self.dirty) {
+            return Some(Work::Invalidate);
+        }
+        self.pending.pop_front().map(Work::Publish)
     }
 
     pub(super) fn has_work(&self) -> bool {

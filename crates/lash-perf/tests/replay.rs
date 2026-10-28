@@ -95,10 +95,6 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
                 .expect("the counted fixture has a host-byte slope")
         })
         .collect();
-    assert!(
-        slopes.iter().all(|slope| *slope == slopes[0]),
-        "same-commit host allocation slopes differ: {slopes:?}"
-    );
     for first in captures[0]["workloads"].as_array().unwrap() {
         let name = first["workload"].as_str().unwrap();
         for (metric, summary) in first["summary"].as_object().unwrap() {
@@ -112,10 +108,6 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
                     .iter()
                     .find(|row| row["workload"] == name)
                     .unwrap();
-                assert_eq!(
-                    summary, &next["summary"][metric],
-                    "same-build counted summary differs: {name}/{metric}, run {run}"
-                );
                 let series = |row: &serde_json::Value| {
                     let mut series = Vec::new();
                     for phase in ["rounds", "compactions"] {
@@ -134,9 +126,17 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
                     series(next),
                     "same-build counted turns differ: {name}/{metric}, run {run}"
                 );
+                assert_eq!(
+                    summary, &next["summary"][metric],
+                    "same-build counted summary differs: {name}/{metric}, run {run}"
+                );
             }
         }
     }
+    assert!(
+        slopes.iter().all(|slope| *slope == slopes[0]),
+        "same-commit host allocation slopes differ: {slopes:?}"
+    );
     assert!(
         output.status.success(),
         "the replay gate failed: {}",

@@ -10,7 +10,7 @@ use super::Request;
 
 impl Request {
     pub(super) fn restrict_namespaces(&mut self) {
-        let (source, namespaces) = match self {
+        let (source, namespaces, typescript) = match self {
             Self::Lower {
                 dialect,
                 source,
@@ -22,10 +22,19 @@ impl Request {
                 source,
                 namespaces,
                 ..
-            } if matches!(dialect.as_str(), "typescript" | "python") => (source, namespaces),
+            } if matches!(dialect.as_str(), "typescript" | "python") => {
+                (source, namespaces, dialect.as_str() == "typescript")
+            }
             Self::ImportWorkflow {
-                source, namespaces, ..
-            } => (source, namespaces),
+                language,
+                source,
+                namespaces,
+                ..
+            } => (
+                source,
+                namespaces,
+                matches!(language, lash_kernel_doc::SourceLanguage::TypeScript),
+            ),
             _ => return,
         };
         // Path roots have identical verbatim spellings in both dialects. Keep
@@ -35,7 +44,13 @@ impl Request {
         if source.contains('\\') || !source.is_ascii() {
             return;
         }
-        let reached = |path: &PackagePath| source.contains(path.as_slice()[0].as_str());
+        // An ordinary TypeScript await also awaits durable process handles.
+        // Its implicit processes.await call need not appear in the source.
+        let process_await = typescript && source.contains("await");
+        let reached = |path: &PackagePath| {
+            let root = path.as_slice()[0].as_str();
+            source.contains(root) || process_await && root == "processes"
+        };
         let packages = namespaces
             .packages()
             .iter()

@@ -48,49 +48,58 @@ fn holder(
     for package in lash::vm::DIALECT_SERVICE_PACKAGES.iter() {
         content.packages.insert(package.identity(), package.clone());
     }
+    let fill = |import: &lash_kernel_value::Import| match &import.kind {
+        lash_kernel_value::ImportKind::Operation { signature } => {
+            let offered = content
+                .packages
+                .values()
+                .find(|package| package.path == import.name.package)
+                .and_then(|package| package.members.get(&import.name.member))
+                .and_then(|member| match &member.kind {
+                    MemberKind::Operation(offer) => Some(offer.requirement.clone()),
+                    _ => None,
+                });
+            Fill::Operation(offered.unwrap_or_else(|| {
+                lash_kernel_value::OperationRequirement::new(
+                    signature.clone(),
+                    k::ContractId::new("1"),
+                )
+            }))
+        }
+        _ => {
+            let member = content
+                .packages
+                .values()
+                .find(|package| package.path == import.name.package)
+                .and_then(|package| package.members.get(&import.name.member))
+                .expect("an authored helper member");
+            let MemberKind::Export { link, export } = &member.kind else {
+                panic!("code helper")
+            };
+            Fill::Export {
+                link: *link,
+                export: export.clone(),
+            }
+        }
+    };
     let fills = document
         .imports
         .iter()
-        .map(|(slot, import)| {
-            let fill = match &import.kind {
-                lash_kernel_value::ImportKind::Operation { signature } => {
-                    let offered = content
-                        .packages
-                        .values()
-                        .find(|package| package.path == import.name.package)
-                        .and_then(|package| package.members.get(&import.name.member))
-                        .and_then(|member| match &member.kind {
-                            MemberKind::Operation(offer) => Some(offer.requirement.clone()),
-                            _ => None,
-                        });
-                    Fill::Operation(offered.unwrap_or_else(|| {
-                        lash_kernel_value::OperationRequirement::new(
-                            signature.clone(),
-                            k::ContractId::new("1"),
-                        )
-                    }))
-                }
-                _ => {
-                    let member = content
-                        .packages
-                        .values()
-                        .find(|package| package.path == import.name.package)
-                        .and_then(|package| package.members.get(&import.name.member))
-                        .expect("an authored helper member");
-                    let MemberKind::Export { link, export } = &member.kind else {
-                        panic!("code helper")
-                    };
-                    Fill::Export {
-                        link: *link,
-                        export: export.clone(),
-                    }
-                }
+        .map(|(slot, import)| (*slot, fill(import)))
+        .collect();
+    let helper_fills = lash_kernel_doc::helper_imports(&document, release.helpers.as_ref())
+        .unwrap()
+        .into_iter()
+        .map(|(id, import)| {
+            let binding = lash_kernel_value::HelperFill {
+                fill: fill(&import),
+                import,
             };
-            (*slot, fill)
+            (id, binding)
         })
         .collect();
     let link = Link {
-        helper_fills: Default::default(),
+        helper_fills,
         document: document.identity(),
         fills,
     };
@@ -386,8 +395,26 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
         let unit = export_unit(&document, &entry);
         let (document, context) = holder(document);
         let mut view = lash::workflow::view::derive_callable(&document, &unit, &context).unwrap();
-        assert_eq!(view.nodes.len(), 3, "{language:?}");
-        assert_eq!(view.statements.len(), 3, "{language:?}");
+        assert_eq!(view.nodes.len(), 3, "{language:?}: {:#?}", view.nodes);
+        // The execution inventory keeps TypeScript's synthetic return; its
+        // authored projection folds that coordinate into the last send.
+        let statements = if language == k::SourceLanguage::TypeScript {
+            4
+        } else {
+            3
+        };
+        assert_eq!(view.statements.len(), statements, "{language:?}");
+        if language == k::SourceLanguage::TypeScript {
+            let ending = view.statements.last().unwrap();
+            assert!(matches!(
+                &ending.statement,
+                k::Stmt::ReturnVia {
+                    value: k::Expr::Literal(k::Literal::Absent),
+                    ..
+                }
+            ));
+            assert!(view.nodes.last().unwrap().folded.contains(&ending.site));
+        }
         assert_eq!(
             view.dataflow
                 .actions
