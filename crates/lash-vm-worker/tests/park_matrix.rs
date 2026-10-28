@@ -59,6 +59,7 @@ use lash_kernel_doc::{
 };
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
 use lash_kernel_value::identity::SessionId;
+use lash_kernel_value::{OperationUse, QualifiedName};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
 use lash_protocol_types::ToolCallId;
 use lash_vm_broker::kernel::graph::{
@@ -720,6 +721,11 @@ impl Activation for ParkActivation {
         let host = LawHost {
             shared: Arc::clone(&self.shared),
             store: Arc::clone(&store),
+            operations: self
+                .program
+                .operation_imports()
+                .map(|(use_, import)| (use_, import.name.clone()))
+                .collect(),
         };
         let identities = identities();
         let plan = page_plan();
@@ -1152,6 +1158,7 @@ impl MemberBodies for LawBodies {
 struct LawHost {
     shared: Arc<Shared>,
     store: Arc<DurableSnapshotStore>,
+    operations: BTreeMap<OperationUse, QualifiedName>,
 }
 
 impl Projections for LawHost {
@@ -1195,7 +1202,11 @@ impl KernelEffects for LawHost {
             .map_err(|error| ParentFault(error.to_string()))?;
         let args = datum_to_json(&Datum::List(request.args.clone()))
             .map_err(|refusal| ParentFault(refusal.to_string()))?;
-        let effect = operation_name(request.use_);
+        let effect = self
+            .operations
+            .get(&request.use_)
+            .expect("operation declaration")
+            .to_string();
         let text = format!(r#"{{"effect":"{effect}","args":{args}}}"#);
         self.shared.admissions.lock().expect("admissions").push((
             request.identity.clone(),
@@ -1454,12 +1465,4 @@ mod postgres {
         )
         .await;
     }
-}
-
-fn operation_name(use_: lash_kernel_value::OperationUse) -> String {
-    program(NumberPolicy::BySpelling)
-        .operation_import(&use_)
-        .expect("operation declaration")
-        .name
-        .to_string()
 }
