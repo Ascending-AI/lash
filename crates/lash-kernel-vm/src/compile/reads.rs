@@ -172,10 +172,35 @@ mod tests {
                 ])),
             )
             .unwrap();
-        let (replaced, _) = find(arena, record, slot, &Key::of_text("a")).unwrap();
+        let (replaced, slot) = find(arena, record, slot, &Key::of_text("a")).unwrap();
         assert!(
             matches!(replaced, Some(Value::Int(7))),
             "a decoded body revokes its old position proof"
         );
+        let slot = slot.expect("resident property");
+        let short = ShortText::new("a").unwrap();
+        let held = arena.held();
+        for (value, size) in [
+            (Value::Int(0), 9),
+            (Value::Int(7), 10),
+            (Value::Int(9), 10),
+            (Value::Null, 9),
+            (Value::Bool(true), 9),
+            (Value::Float(lash_kernel_doc::Float::new(1.5)), 9),
+            (Value::Int(0), 9),
+            (Value::Int(1), 10),
+        ] {
+            assert!(write(arena, record, slot, &short, value).unwrap());
+            let actual = arena.table_get(record, &a).unwrap().unwrap();
+            assert_eq!(
+                lash_kernel_doc::scalar::immediate_equal(&actual, &value),
+                Some(true)
+            );
+            assert_eq!(
+                arena.flat_charge_size(&Value::Record(record)).unwrap(),
+                Some(size)
+            );
+            assert_eq!(arena.held(), held);
+        }
     }
 }

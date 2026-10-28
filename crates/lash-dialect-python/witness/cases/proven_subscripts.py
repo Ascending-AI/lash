@@ -56,3 +56,19 @@ try:
     print(values[0.0])
 except TypeError:
     print('float index')
+
+for i in range(4):
+    if i % 2:
+        target = {'a': 0, 'b': 1}
+    else:
+        target = {'b': 1, 'a': 0}
+    alias = target
+    for j in range(4):
+        if j == 1:
+            del alias['a']
+            target['c'] = 9
+        value = i * 3 + j
+        if j == 3:
+            value = 0
+        target['a'] = value
+    print(target)

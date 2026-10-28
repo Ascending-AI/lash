@@ -620,7 +620,7 @@
   },
   {
    "name": "proven_subscripts",
-   "source": "d = {'a': 1, 'b': 2}\nprint(d['a'])\nd['a'] = 3\nprint(d['a'])\nd['a'] += 4\nprint(d['a'])\nalias = d\ndel alias['a']\ntry:\n    print(d['a'])\nexcept KeyError as error:\n    print(type(error).__name__, error.args)\nd['a'] = await host.echo(8)\nprint(d['a'])\n\nxs = [10, 20]\nprint(xs[0], xs[-1])\nxs[0] = await host.echo(30)\nxs[0] += 1\nprint(xs)\nxs.clear()\nfor action in [0, 1]:\n    try:\n        if action == 0:\n            print(xs[0])\n        else:\n            xs[0] = 99\n    except IndexError:\n        print('bounds')\ntry:\n    print(xs[9223372036854775808])\nexcept IndexError:\n    print('huge bounds')\n\nprint((1, 2)[0])\ntry:\n    print((1, 2)[3])\nexcept IndexError:\n    print('tuple bounds')\n\ndef annotated(xs: dict):\n    return xs[0]\nprint(annotated([42]))\n\nprint({'x': 5}[await host.echo('x')])\n\n# An empty tuple is a Python value, including through an alias and a shifted index.\nvalues = [(), (1,), [2], None, False]\nprint(values[0], values[1], values[2], values[3], values[4])\nalias = values\nalias[0] = (3,)\nprint(values[0])\ndel alias[0]\nprint(values[0], values[1])\ntry:\n    print(values[0.0])\nexcept TypeError:\n    print('float index')\n",
+   "source": "d = {'a': 1, 'b': 2}\nprint(d['a'])\nd['a'] = 3\nprint(d['a'])\nd['a'] += 4\nprint(d['a'])\nalias = d\ndel alias['a']\ntry:\n    print(d['a'])\nexcept KeyError as error:\n    print(type(error).__name__, error.args)\nd['a'] = await host.echo(8)\nprint(d['a'])\n\nxs = [10, 20]\nprint(xs[0], xs[-1])\nxs[0] = await host.echo(30)\nxs[0] += 1\nprint(xs)\nxs.clear()\nfor action in [0, 1]:\n    try:\n        if action == 0:\n            print(xs[0])\n        else:\n            xs[0] = 99\n    except IndexError:\n        print('bounds')\ntry:\n    print(xs[9223372036854775808])\nexcept IndexError:\n    print('huge bounds')\n\nprint((1, 2)[0])\ntry:\n    print((1, 2)[3])\nexcept IndexError:\n    print('tuple bounds')\n\ndef annotated(xs: dict):\n    return xs[0]\nprint(annotated([42]))\n\nprint({'x': 5}[await host.echo('x')])\n\n# An empty tuple is a Python value, including through an alias and a shifted index.\nvalues = [(), (1,), [2], None, False]\nprint(values[0], values[1], values[2], values[3], values[4])\nalias = values\nalias[0] = (3,)\nprint(values[0])\ndel alias[0]\nprint(values[0], values[1])\ntry:\n    print(values[0.0])\nexcept TypeError:\n    print('float index')\n\nfor i in range(4):\n    if i % 2:\n        target = {'a': 0, 'b': 1}\n    else:\n        target = {'b': 1, 'a': 0}\n    alias = target\n    for j in range(4):\n        if j == 1:\n            del alias['a']\n            target['c'] = 9\n        value = i * 3 + j\n        if j == 3:\n            value = 0\n        target['a'] = value\n    print(target)\n",
    "deliveries": [],
    "epochs": [
     {
@@ -674,7 +674,11 @@
       "() (1,) [2] None False",
       "(3,)",
       "(1,) [2]",
-      "float index"
+      "float index",
+      "{'b': 1, 'c': 9, 'a': 0}",
+      "{'b': 1, 'c': 9, 'a': 0}",
+      "{'b': 1, 'c': 9, 'a': 0}",
+      "{'b': 1, 'c': 9, 'a': 0}"
      ]
     }
    ],

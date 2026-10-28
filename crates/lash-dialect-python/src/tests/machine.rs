@@ -922,6 +922,15 @@ fn execution_observation_with_layout(
     rebuild: bool,
     layout: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> ExecutionObservation {
+    execution_observation_with_memory(program, bounds, rebuild, layout).0
+}
+
+fn execution_observation_with_memory(
+    program: Program,
+    bounds: Bounds,
+    rebuild: bool,
+    layout: lash_kernel_vm::testing::ExecutionStrategy,
+) -> (ExecutionObservation, u64) {
     let session = Session::default();
     let mut machine = lash_kernel_vm::testing::start(
         program.clone(),
@@ -952,13 +961,16 @@ fn execution_observation_with_layout(
                 }),
                 _ => None,
             };
-            return ExecutionObservation {
-                end,
-                lines: host.lines,
-                requests,
-                charged: machine.meters().charged.expect("exact charge"),
-                carry,
-            };
+            return (
+                ExecutionObservation {
+                    end,
+                    lines: host.lines,
+                    requests,
+                    charged: machine.meters().charged.expect("exact charge"),
+                    carry,
+                },
+                machine.meters().memory,
+            );
         }
         if rebuild {
             let sealed = machine.checkpoint().unwrap();
@@ -1812,7 +1824,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 
 /// FIG-6960 PB, PLAN-INDEP: the direct operations preserve results,
 /// effects and exact charge against the bodies' layout, across slices and
-/// every bound.
+/// every bound. Member cases also compare metered held bytes.
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     use lash_kernel_vm::testing::{ExecutionStrategy, library};
@@ -1891,6 +1903,38 @@ await build()
             ),
             "bound {charge_limit}"
         );
+    }
+
+    for source in [
+        "values = [(), (1,), [2]]\nprint(values[0], values[1], values[2])\n",
+        "data = {'key': (1,), 'other': [2]}\nalias = data\nfirst = data['key']\nalias['key'] = (3,)\nprint(first, data['key'])\n",
+        "values = []\nvalues.append(())\nvalues.append({'key': 1})\nalias = values\nalias.append([2])\nprint(values)\n",
+        "data = {'key': [()]}\nprint(data['key'][0])\nprint(await host.echo(data['key']))\nprint(data['key'][0])\n",
+    ] {
+        let lowered = lower(source).unwrap();
+        let program = |layout| {
+            crate::tests::linked::program(
+                Arc::clone(lowered.document.shared()),
+                library(&installed().prepared, layout),
+            )
+        };
+        for rebuild in [false, true] {
+            assert_eq!(
+                execution_observation_with_memory(
+                    program(ExecutionStrategy::Optimized),
+                    BOUNDS,
+                    rebuild,
+                    ExecutionStrategy::Optimized
+                ),
+                execution_observation_with_memory(
+                    program(ExecutionStrategy::Interpreted),
+                    BOUNDS,
+                    rebuild,
+                    ExecutionStrategy::Interpreted
+                ),
+                "member result, charge and metered held bytes, rebuild {rebuild}: {source}"
+            );
+        }
     }
 }
 
