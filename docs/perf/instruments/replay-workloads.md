@@ -736,73 +736,80 @@ p95 and maximum diagnostics.
 
 The full-run triage reproduced stale corpus identities, ready-worker cold
 allocation, a restored tool/sleep race, workflow coverage/path disagreement
-and the counted replay failure on `613172eefb49`.
+and the counted replay failure on `613172eefb49`. The original laws and all
+strict replay determinism assertions remain intact.
 
-The replay measurement now waits for local owner idle and complete renderer
-capture disposal. Attachment write tokens retain their random identity and
-32 lowercase hexadecimal digits, while UUID's stack encoder prevents the
-leading-zero formatter from adding two random allocation calls to a first
-code-mode turn. The earlier formatter came from `a2f2938d5e0`; a targeted
-allocator stack proved its 8-to-32-byte growth through SQLite attachment
-fencing. Cold fenced-read recovery introduced in `c166d5df16` is boxed only
-on the error branch, keeping that state out of successful read futures.
+The replay cut waits for local owner idle and complete renderer capture
+disposal. Inline SQLite replies wait for disposal of their command and its
+captures. Compaction readback follows a new owner-idle generation after
+command admission, so polling cannot move four SQL statements and a
+transaction between records. Attachment write tokens retain their random
+identity and 32 lowercase hexadecimal digits; UUID's stack encoder avoids
+the leading-zero formatter's random allocation calls. That formatter came
+from `a2f2938d5e0`. Cold fenced-read recovery introduced in `c166d5df16` is
+boxed on the error branch, keeping its state out of successful read futures.
 
-The baseline refresh preserves intended feature changes since its prior
-calibration. `35ad2a50c3` replaced the batch wrapper's small untyped result
-schema with the complete tagged outcome schema, which is retained and
-serialized in the standard protocol's advertised contract. The standard
-workloads consequently write roughly 160 KB more SQL payload per turn and
-allocate roughly 4.76 MB more host bytes. Caching schema construction showed
-no steady benefit and was removed. `613172eefb` replaced source locations
-with a tagged, validated representation, changing code-mode transport and
-stored source-map sizes. `519c8530f0` preserves typed saved-definition
-refusals, while `3bc885f086` prunes source catalogues and preserves typed
-worker restart causes; those current-main contracts remain intact.
-
-Calibration uses five ordinary captures from one clean committed tree. Every
-counted summary and every turn/compaction metric must be identical before
-refreshing medians. The refresh sets zero measured noise, retains the tighter
-of the previous and observed depth slopes, and leaves `budgets.json`, its
-hard ceilings, tolerances, known-breach policy, the normal blessing guard
-and the determinism assertions unchanged. The lane explicitly authorizes
-this attributed refresh for intended feature changes; it does not change the
-normal blessing command's refusal to raise ceilings.
-
-The final five-capture population at `ef40d5165d` matched every counted
-summary and every turn/compaction record. It uses zero measured noise and
-preserves the tighter prior/observed depth slopes. Inline SQLite replies
-wait for disposal of the command and its captures, and compaction readback
-waits for the owner to return idle after applying the command.
-
-The counted node-start phase initializes all five JSON Schema meta-validator
-engines. Counted workers initialize them before installing the resource
-observer. A targeted stack showed randomized alias-cache rehashing in lazy
-Draft 2020-12 meta-validator initialization, accounting for an intermittent
-3,152-byte first-turn allocation. Startup still pays this engine setup cost.
-Actual workload schemas retain their full admission and validation paths.
-The final ordinary law runs against the compiled baseline; rejected earlier
-populations remain diagnostic evidence.
-
-The TypeScript parser now uses one reusable mutex/condition-variable
+The TypeScript parser uses one reusable mutex/condition-variable
 request/response slot. Its previous rendezvous response channel, introduced
 in `ce55f7e26da`, allocated a four-entry waiter vector only when a receive
-first blocked. A comparison of every 96-byte allocation stack in the affected
-worker interval identified exactly one added stack in the higher sample,
-through `std::sync::mpmc::zero::Channel::recv` and `Parser::parse`. The slot
-removes that scheduling-dependent allocation without moving parsing out of
-the measured worker. Stack limits, one parser thread, diagnostics and joined
-shutdown are preserved.
+first blocked. Comparing every 96-byte allocation stack in the affected
+worker interval found exactly one added stack in the higher sample, through
+`std::sync::mpmc::zero::Channel::recv` and `Parser::parse`. Normal parser
+allocations matched. The slot removes that scheduling-dependent allocation
+while preserving stack limits, one parser thread, diagnostics and joined
+shutdown. Parsing remains inside the measured worker.
 
+Worker CPU receipts encode exact nanoseconds as eight big-endian binary
+bytes. JSON stays numeric. Variable-width MessagePack integers previously
+made CPU counter boundaries change counted transport allocation. Parent
+and worker binaries must match, as the host-upgrade entry describes.
+
+Counted node startup initializes the five JSON Schema meta-validator engines;
+counted workers initialize them before installing their resource observer.
 The standard protocol driver prepares its optional batch declaration at
-construction and clones the admitted model-tool schemas into preambles.
-A separate first-turn 3,152-byte allocation came from jsonschema's pending
-node-table rehash during the former lazy bootstrap admission. Preparing the
-immutable declaration makes the startup boundary include that metadata work.
-It does not remove schema admission or claim a steady-turn speedup.
+construction and clones its admitted model-tool schemas into preambles.
+Separate targeted stacks identified 3,152-byte rehashes in lazy meta-validator
+and batch-schema admission. Startup pays that metadata work; workload schema
+admission and validation remain complete. No steady-turn speedup is claimed
+for moving this initialization.
 
-The counted SQLite fixture uses a serial inline queue and complete command
-disposal before reply return. Production retains its unbounded queue and
-asynchronous batching. This gate measures the counted workload and its
-durable operations under serial execution. It does not qualify production
-queue block allocation, contention, batching opportunities or scheduling
-latency. Warmturn's retained-byte cache-tail fix remains in effect.
+The calibration includes intended main changes. `35ad2a50c3` expanded the
+batch outcome contract and `613172eefb` changed source-location encoding.
+`779b641db8` separated helper operation declarations from authored imports,
+adding scoped fills and tagged operation identities to durable state.
+`768e9f3b95` guards durable token encodings. `dfc0365d94` gives external
+TypeScript integers binary64 Number semantics, with explicit BigInt tags,
+new JSON conversion and regenerated helper plans. `8b4ea7efc0` retains
+released helper definitions and exact native bindings. These contracts and
+their changed code-mode transport, retained state and allocation costs are
+preserved. Their individual numerical contributions were not isolated.
+
+Main's `cc0e5b332f` reuses immutable batch schemas, checkpoint environments
+and canonical request fields, and counts SQLite blob binding sizes directly.
+Environment references add graph rows while reducing repeated schema bytes.
+The combined ordinary population has these host allocation medians:
+
+| Workload | Previous baseline | Current population |
+| --- | ---: | ---: |
+| chat-short | 8,388,543 B | 4,368,477 B |
+| chat-long-compacting | 8,700,913 B | 4,681,295 B |
+| ts-codemode | 11,088,014 B | 11,983,899 B |
+| py-codemode | 8,275,273 B | 8,256,481 B |
+
+Five ordinary captures at clean `f088bd47dd` matched every counted summary
+and every turn/compaction record across four workloads: 1,280 turns and
+15 compactions. Their executable digest is identical and no diagnostic
+probe or attribution mode is enabled. The refresh updates 34 medians,
+sets zero measured noise and retains the tighter prior/observed depth
+slopes. The TypeScript host slope is 23,795.667 B per prior turn and remains
+within the existing allowance around the retained 23,166.143 B baseline.
+No depth-slope baseline rises. Hard budgets, tolerances, known-breach policy,
+normal blessing guard and all determinism assertions remain unchanged.
+The original full-path law separately checks the compiled baseline.
+
+The counted SQLite fixture uses a serial inline queue. Production retains
+its unbounded queue and asynchronous batching. This gate measures counted
+workload and durable operations under serial execution; it does not qualify
+production queue block allocation, contention, batching opportunities or
+scheduling latency. Warmturn's retained-byte cache-tail fix remains in effect.
+No PostgreSQL or quiet-host wall-time acceptance is claimed.
