@@ -539,6 +539,24 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
                 },
             ),
         ]);
+        if format == SourceFormat::TypeScriptV1 {
+            let sleep_slot = original
+                .imports
+                .iter()
+                .find(|(_, import)| {
+                    import.name == lash::dialect::service_name("typescript", "sleep")
+                })
+                .unwrap()
+                .0;
+            let action = canvas_site(
+                &original,
+                |node| matches!(node, Node::Expr(k::Expr::Act(act)) if matches!(act.kind, k::ActKind::Perform { slot, .. } if slot == *sleep_slot)),
+            );
+            rows.push((
+                "remove_authored_wait".into(),
+                Operation::RemoveStep { base, action },
+            ));
+        }
         for (name, wrapper) in [
             (
                 "wrap_if",

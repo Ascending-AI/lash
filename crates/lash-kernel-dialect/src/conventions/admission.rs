@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 
 pub(super) struct CatalogLibrary<'a> {
     catalog: &'a dyn FunctionCatalog,
+    document: &'a k::Document,
     pinned: BTreeMap<String, Option<FunctionId>>,
 }
 impl<'a> CatalogLibrary<'a> {
-    pub(super) fn new(catalog: &'a dyn FunctionCatalog, document: &k::Document) -> Self {
+    pub(super) fn new(catalog: &'a dyn FunctionCatalog, document: &'a k::Document) -> Self {
         let mut pinned = BTreeMap::new();
         let listed = document
             .library
@@ -35,7 +36,11 @@ impl<'a> CatalogLibrary<'a> {
                 })
                 .or_insert(Some(id));
         }
-        Self { catalog, pinned }
+        Self {
+            catalog,
+            document,
+            pinned,
+        }
     }
 }
 impl FunctionCatalog for CatalogLibrary<'_> {
@@ -43,13 +48,20 @@ impl FunctionCatalog for CatalogLibrary<'_> {
         crate::Library::resolve(self, name)
     }
     fn definition(&self, id: &FunctionId) -> Option<&k::FunctionDefinition> {
-        self.catalog.definition(id)
+        self.document
+            .functions
+            .get(id)
+            .or_else(|| self.catalog.definition(id))
     }
     fn registered(&self, id: &FunctionId) -> Option<&k::RegisteredFunction> {
         self.catalog.registered(id)
     }
     fn header(&self, id: &FunctionId) -> Option<std::sync::Arc<k::FunctionHeader>> {
-        self.catalog.header(id)
+        self.document
+            .functions
+            .get(id)
+            .map(|definition| std::sync::Arc::new(k::FunctionHeader::of(definition)))
+            .or_else(|| self.catalog.header(id))
     }
     fn helper_library(&self) -> Option<&k::BuildHelpers> {
         self.catalog.helper_library()

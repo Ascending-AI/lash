@@ -1122,3 +1122,13 @@ fn regenerate_readable_workflow_outputs() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// FIG-7514: authored waits are canvas steps, so removing one must print and re-lower.
+#[test]
+fn authored_wait_removal_prints_and_relowers() -> anyhow::Result<()> {
+    workflow_corpus::canvas_prints(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        "sleep",
+        (0, 1),
+    )
+}

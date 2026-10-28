@@ -44,6 +44,7 @@ pub(super) fn check(
     checker: &Checker<'_>,
     printing: &Printing<'_>,
     partition: (usize, usize),
+    steps: &BTreeMap<Site, lash_kernel_view::ActionView>,
 ) -> Result<()> {
     let base = document.identity();
     let mut positions = Vec::new();
@@ -145,15 +146,86 @@ pub(super) fn check(
     {
         selected += 1;
         let mut draft = Draft::open(document.clone())?;
-        let Ok(applied) = draft.apply(
+        let applied = draft.apply(
             &Transaction {
                 base,
                 edits: vec![operation.clone()],
             },
             checker,
             lash::workflow::edit::CONVENTIONS,
-        ) else {
-            continue;
+        );
+        let applied = match applied {
+            Ok(applied) => applied,
+            Err(refusal) => {
+                if let Operation::RemoveStep { action, .. } = &operation
+                    && let Some(step) = steps.get(action)
+                {
+                    let siblings = steps
+                        .values()
+                        .filter(|other| other.statement == step.statement)
+                        .count();
+                    let structural = matches!(
+                        document.node(&step.statement),
+                        Some(Node::Stmt(
+                            k::Stmt::Do { .. } | k::Stmt::Let { .. } | k::Stmt::Assign { .. }
+                        ))
+                    );
+                    let member_write = matches!(
+                        document.node(&step.statement),
+                        Some(Node::Stmt(k::Stmt::Assign {
+                            place: k::Place::Member(_),
+                            ..
+                        }))
+                    );
+                    let mut pending = vec![(
+                        document
+                            .node(&step.statement)
+                            .context("visible step statement")?,
+                        step.statement.clone(),
+                    )];
+                    let mut sibling_computation = false;
+                    while let Some((node, site)) = pending.pop() {
+                        if !site.path.starts_with(&action.path)
+                            && !action.path.starts_with(&site.path)
+                            && matches!(node, Node::Action(_) | Node::Expr(Expr::Act(_)))
+                        {
+                            sibling_computation = true;
+                        }
+                        pending.extend(
+                            node.children()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, node)| (node, site.child(i as u32))),
+                        );
+                    }
+                    let semantic_refusal =
+                        refusal
+                            .diagnostics
+                            .iter()
+                            .all(|diagnostic| match diagnostic.kind {
+                                lash_kernel_edit::EditDiagnosticKind::EscapingBinding
+                                | lash_kernel_edit::EditDiagnosticKind::Refused(
+                                    lash_kernel_check::RefusalReason::UnboundVariable { .. },
+                                ) => true,
+                                lash_kernel_edit::EditDiagnosticKind::NonSeparableStep {
+                                    ..
+                                } => {
+                                    !structural
+                                        || siblings > 1
+                                        || member_write
+                                        || sibling_computation
+                                }
+                                _ => false,
+                            });
+                    if !semantic_refusal {
+                        failures.push(format!(
+                            "visible {:?} deletion at {action}: {refusal}",
+                            step.role
+                        ));
+                    }
+                }
+                continue;
+            }
         };
         admitted += 1;
         match &operation {
@@ -193,7 +265,7 @@ pub(super) fn check(
     );
     ensure!(
         failures.is_empty(),
-        "{} unprintable admitted edits:\n{}",
+        "{} canvas deletion or print failures:\n{}",
         failures.len(),
         failures.join("\n")
     );

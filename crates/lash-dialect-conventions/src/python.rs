@@ -61,6 +61,8 @@ pub const CONVENTIONS: Conventions = Conventions {
         literals_passthrough: false,
     },
     then_yield: false,
+    discard_result: None,
+    separable_step: |_, _, _| true,
     returns: lash_kernel_dialect::conventions::Returns::DIRECT,
 };
 pub fn iteration(view: Option<&str>) -> Option<&'static Iteration> {

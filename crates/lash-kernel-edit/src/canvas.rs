@@ -103,6 +103,23 @@ fn header(expr: &Expr, base: &Site) -> Result<(), Fault> {
     }
 }
 
+/// A forwarding factory can construct deferred callables, but cannot run them
+/// or perform any observable work while the boundary applies the factory.
+fn pure_factory(node: Node<'_>) -> bool {
+    match node {
+        Node::Action(_) | Node::Expr(Expr::Act(_)) => false,
+        Node::Stmt(stmt)
+            if !matches!(
+                stmt,
+                Stmt::Let { .. } | Stmt::If { .. } | Stmt::Return { .. }
+            ) =>
+        {
+            false
+        }
+        _ => node.children().into_iter().all(pure_factory),
+    }
+}
+
 /// Argument helpers may call other library helpers, but cannot wait, apply a
 /// callback, or reach another effect. Library identity pins the complete body.
 fn pure_argument(
@@ -111,13 +128,24 @@ fn pure_argument(
     known: &mut BTreeMap<FunctionId, bool>,
     source: &Conventions,
 ) -> bool {
-    if let Node::Expr(value) = node
+    if let Node::Expr(expr) = node
         && let Some(helper) = source.argument.helper()
-        && let Some(value) = source.argument.unwrap(value, |id, name| {
+        && let Some(value) = source.argument.unwrap(expr, |id, name| {
             name == helper && source.argument.resolve(catalog, name) == Some(*id)
         })
     {
-        return data(value, catalog);
+        let Expr::Act(boundary) = expr else {
+            return false;
+        };
+        return data(value, catalog)
+            && boundary.args[1..].iter().all(|operand| match operand {
+                Expr::Literal(Literal::Absent) => true,
+                Expr::Closure(closure) => catalog
+                    .definition(&closure.function)
+                    .and_then(|definition| definition.body())
+                    .is_some_and(|body| pure_factory(Node::Block(&body.block))),
+                _ => false,
+            });
     }
     let forbidden = match node {
         Node::Action(Action::Call {
@@ -159,7 +187,7 @@ fn pure_library(
     pure
 }
 
-/// The sole perform must occupy the entire carrier, with pure argument helpers.
+/// The sole action must occupy the entire carrier, with pure argument helpers.
 /// Assignment receivers cannot contain actions or other effects either.
 fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog, source: &Conventions) -> Option<Vec<u32>> {
     let (rhs, index) = match stmt {
@@ -189,12 +217,11 @@ fn step(stmt: &Stmt, catalog: &dyn FunctionCatalog, source: &Conventions) -> Opt
         return None;
     }
     match rhs {
-        Rhs::Action(Action::Perform { .. }) => Some(vec![index]),
+        Rhs::Action(_) => Some(vec![index]),
         Rhs::Expr(expr) => expression_step(expr, catalog, source).map(|mut path| {
             path.insert(0, index);
             path
         }),
-        _ => None,
     }
 }
 
@@ -203,6 +230,11 @@ fn expression_step(
     catalog: &dyn FunctionCatalog,
     source: &Conventions,
 ) -> Option<Vec<u32>> {
+    if let Some(value) = source.discard_result.and_then(|recipe| recipe.unwrap(expr)) {
+        let mut path = expression_step(value, catalog, source)?;
+        path.insert(0, 0);
+        return Some(path);
+    }
     let Expr::Act(act) = expr else {
         return None;
     };
@@ -216,12 +248,10 @@ fn expression_step(
         return Some(path);
     }
     let mut known = BTreeMap::new();
-    (matches!(act.kind, ActKind::Perform { .. })
-        && act
-            .args
-            .iter()
-            .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known, source)))
-    .then(Vec::new)
+    act.args
+        .iter()
+        .all(|arg| pure_argument(Node::Expr(arg), catalog, &mut known, source))
+        .then(Vec::new)
 }
 
 impl Working {
@@ -272,7 +302,9 @@ impl Working {
                 if enclosing_statement.is_none() {
                     enclosing_statement = self.origin(&ancestor);
                 }
-                if let Some(path) = index {
+                if let Some(path) =
+                    index.filter(|_| (source.separable_step)(&self.document, &ancestor, catalog))
+                {
                     let mut action = ancestor.clone();
                     action.path.extend(path);
                     separable_step = self.origin(&action);
@@ -308,7 +340,7 @@ impl Working {
             };
             let mut performed = parent.clone();
             performed.path.extend(&path);
-            if performed != site {
+            if performed != site || !(source.separable_step)(&self.document, &parent, catalog) {
                 break;
             }
             // Return the original statement address even after an earlier

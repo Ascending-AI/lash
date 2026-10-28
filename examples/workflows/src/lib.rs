@@ -466,6 +466,7 @@ pub(crate) fn render_with(
                     .map(|name| StartSelector::Export(Name::new(name)))
                     .collect()
             };
+            let mut canvas_steps = BTreeMap::new();
             for entry in selected {
                 let checked = WorkflowDocument::entered(
                     shipped.clone(),
@@ -493,6 +494,22 @@ pub(crate) fn render_with(
                     view.scopes.len(),
                     code_sites(document, env.library).len()
                 )?;
+                for action in &view.dataflow.actions {
+                    if matches!(
+                        action.role,
+                        lash_kernel_view::ActionRole::Effect
+                            | lash_kernel_view::ActionRole::Wait
+                            | lash_kernel_view::ActionRole::SubWorkflow
+                    ) && view.nodes.iter().any(|node| {
+                        node.site == action.site
+                            && matches!(
+                                node.body,
+                                lash_kernel_view::WorkflowNodeBody::Action { .. }
+                            )
+                    }) {
+                        canvas_steps.insert(action.site.clone(), action.clone());
+                    }
+                }
                 views.push_str(&readable::view(&checked, &view)?);
                 views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
             }
@@ -511,6 +528,7 @@ pub(crate) fn render_with(
                     &checker,
                     &printing,
                     partition,
+                    &canvas_steps,
                 ) {
                     eprintln!(
                         "canvas inverse failure {} {extension}: {error:#}",

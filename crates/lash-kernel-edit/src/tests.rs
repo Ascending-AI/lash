@@ -1355,3 +1355,104 @@ fn typed_data_constructors_use_installed_helpers() {
     );
     assert_eq!(draft.document(), &before);
 }
+
+/// FIG-7514: deleting a result must not retarget surviving uses to an outer binding.
+#[test]
+fn canvas_step_removal_preserves_surviving_bindings() {
+    let name = Name::new("answer");
+    let mut draft = Draft::open(document(vec![
+        Stmt::Let {
+            name: name.clone(),
+            value: Rhs::Expr(text("outer")),
+        },
+        Stmt::If {
+            condition: boolean(true),
+            then_block: vec![
+                Stmt::Let {
+                    name: name.clone(),
+                    value: Rhs::Action(lash_kernel_doc::Action::Perform {
+                        slot: ImportSlot(0),
+                        args: vec![lash_kernel_doc::Atom::Literal(Literal::Text(
+                            "inner".into(),
+                        ))],
+                        result: Type::Text,
+                        then_yield: false,
+                    }),
+                },
+                Stmt::Print {
+                    value: Expr::Variable(name),
+                },
+            ],
+            else_block: vec![],
+        },
+    ]))
+    .unwrap();
+    let base = draft.identity();
+    let refusal = refuse(
+        &mut draft,
+        vec![Operation::RemoveStep {
+            base,
+            action: site(&[1, 1, 0, 0]),
+        }],
+    );
+    assert_eq!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::EscapingBinding
+    );
+}
+
+/// FIG-7514: a copy boundary may own a factory, but not an extra executed effect.
+#[test]
+fn canvas_argument_boundaries_refuse_effectful_factories() {
+    use lash_kernel_dialect::conventions::{Boundary, BoundaryOperand, Conventions};
+    let copy = parse_definition("function law.copy(value: Any, forward: Any) -> Any\nkernel 1\ncharge 1\nbody { return value }").unwrap();
+    let copy_id = copy.identity();
+    let factory = parse_definition("function law.factory(value: Any) -> Text\nkernel 1\ncharge 1\nimport 0 operation service.read(value: Any) -> Text\nbody { let answer = perform 0(value) as Text return answer }").unwrap();
+    let factory_id = factory.identity();
+    let boundary = Expr::Act(Box::new(ActExpr {
+        kind: ActKind::Call(Callee::Local(copy_id)),
+        args: vec![
+            text("value"),
+            Expr::Closure(Box::new(lash_kernel_doc::Closure {
+                function: factory_id,
+                presentation: None,
+            })),
+        ],
+    }));
+    let mut doc = document(vec![Stmt::Do {
+        value: perform(0, vec![boundary]),
+    }]);
+    doc.library.0.insert(copy_id);
+    doc.functions.insert(factory_id, factory.clone());
+    let functions = BTreeMap::from([(copy_id, copy), (factory_id, factory)]);
+    let before = doc.clone();
+    let mut draft = Draft::open(doc).unwrap();
+    let base = draft.identity();
+    let refusal = draft
+        .apply(
+            &Transaction {
+                base,
+                edits: vec![Operation::RemoveStep {
+                    base,
+                    action: site(&[0, 0]),
+                }],
+            },
+            &Environment::new(&functions),
+            &[Conventions {
+                helper_prefix: "law.",
+                argument: Boundary::Call {
+                    helper: "law.copy",
+                    role: None,
+                    tail: &[BoundaryOperand::Forwarder],
+                    literals_passthrough: false,
+                },
+                ..Conventions::KERNEL
+            }],
+        )
+        .unwrap_err();
+    assert!(matches!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::NonSeparableStep { .. }
+    ));
+    assert_eq!(draft.document(), &before);
+}

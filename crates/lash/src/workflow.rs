@@ -148,8 +148,8 @@ pub mod edit {
         lash_dialect_conventions::python::CONVENTIONS,
     ];
     pub use lash_kernel_dialect::conventions::{
-        BindingScope, Boundary, BoundaryOperand, Conventions, Inverse, Iteration, ReturnRefusal,
-        Returns, SourceOnlyOperation,
+        BindingScope, Boundary, BoundaryOperand, Conventions, DiscardResult, Inverse, Iteration,
+        ReturnRefusal, Returns, SourceOnlyOperation,
     };
     pub use lash_kernel_edit::{
         Applied, Draft, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction, Location,

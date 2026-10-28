@@ -626,11 +626,7 @@ impl Lowerer<'_> {
                 );
                 let name = self.temp();
                 Ok(self.inline(
-                    Expr::Let {
-                        name,
-                        value: Box::new(sleep.expr()),
-                        body: Box::new(Operand::undefined().expr()),
-                    },
+                    lash_dialect_conventions::typescript::SLEEP_RESULT.wrap(name, sleep.expr()),
                     Ty::Undefined,
                 ))
             }

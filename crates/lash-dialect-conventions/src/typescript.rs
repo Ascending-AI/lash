@@ -1,3 +1,7 @@
+pub const SLEEP_RESULT: lash_kernel_dialect::conventions::DiscardResult =
+    lash_kernel_dialect::conventions::DiscardResult {
+        result: BoundaryOperand::Absent,
+    };
 pub const SOURCE_ONLY: &[lash_kernel_dialect::conventions::SourceOnlyOperation] = &[
     lash_kernel_dialect::conventions::SourceOnlyOperation {
         package: "typescript",
@@ -36,10 +40,12 @@ pub const CONVENTIONS: Conventions = Conventions {
     argument: Boundary::Call {
         role: Some(lash_kernel_doc::ProjectionRole::ArgumentCopy),
         helper: ARGUMENT_COPY,
-        tail: &[BoundaryOperand::Absent],
+        tail: &[BoundaryOperand::Forwarder],
         literals_passthrough: true,
     },
     reply: Boundary::Identity,
     then_yield: true,
+    discard_result: Some(SLEEP_RESULT),
+    separable_step: |_, _, _| true,
     returns: RETURNS,
 };

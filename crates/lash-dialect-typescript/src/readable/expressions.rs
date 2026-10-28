@@ -337,7 +337,7 @@ impl Lifter<'_> {
                 import.name == lash_kernel_dialect::service_name("typescript", "sleep")
             })
             && let [duration] = act.args.as_slice()
-            && matches!(body, k::Expr::Literal(k::Literal::Absent))
+            && lash_dialect_conventions::typescript::SLEEP_RESULT.matches_result(body)
         {
             let k::Expr::Act(conversion) = duration else {
                 return refuse("a sleep duration conversion");
@@ -517,10 +517,9 @@ impl Lifter<'_> {
 
     /// An argument crossing to a tool: the boundary copy is implicit.
     fn crossing(&mut self, arg: &k::Expr) -> Lift<Expr> {
-        if let k::Expr::Act(boundary) = arg
-            && let k::ActKind::Call(k::Callee::Local(id)) = &boundary.kind
-            && self.is(id, crate::constructs::conventions::ARGUMENT_COPY)
-            && let [value, _factory] = boundary.args.as_slice()
+        if let Some(value) = crate::constructs::conventions::CONVENTIONS
+            .argument
+            .unwrap(arg, |id, name| self.is(id, name))
         {
             return self.expr(value);
         }

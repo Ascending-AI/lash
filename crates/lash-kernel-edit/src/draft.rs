@@ -133,6 +133,7 @@ impl Draft {
                 operation,
                 crate::authoring::Operation::InsertBinding { .. }
                     | crate::authoring::Operation::RemoveBinding { .. }
+                    | crate::authoring::Operation::RemoveStep { .. }
                     | crate::authoring::Operation::MoveStep { .. }
                     | crate::authoring::Operation::WrapSteps { .. }
                     | crate::authoring::Operation::UnwrapSteps { .. }
@@ -152,6 +153,10 @@ impl Draft {
             environment.functions,
             conventions,
         );
+        let authoring_catalog = lash_kernel_dialect::conventions::Conventions::authoring_catalog(
+            &self.document,
+            environment.functions,
+        );
         for (index, edit) in (0u32..).zip(&transaction.edits) {
             if edit.base() != self.identity {
                 return Err(EditRefusal {
@@ -166,7 +171,7 @@ impl Draft {
                 });
             }
             working
-                .canvas(edit, environment.functions, source)
+                .canvas(edit, &authoring_catalog, source)
                 .map_err(|fault| match *fault {
                     FaultKind::At(location, kind) => EditRefusal {
                         diagnostics: vec![EditDiagnostic {
@@ -192,7 +197,8 @@ impl Draft {
                     }],
                 }
             })?;
-        source.refresh_imports(&mut working.document);
+        source.refresh_document(&self.document, &mut working.document, &authoring_catalog);
+        drop(authoring_catalog);
         let mut published = working.publish(self.identity, environment)?;
         let (canonical, identities) = source
             .verify_inverse(&published.document, environment.functions)

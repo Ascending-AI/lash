@@ -114,13 +114,13 @@ pub enum EditDiagnosticKind {
     #[error("this value contains executable syntax")]
     ValueOutsideCanvasSet,
     #[error(
-        "this action is not a separable perform step; select the enclosing step or edit its statement in source"
+        "this action is part of surrounding computation or control flow; select the enclosing step or edit its statement in source"
     )]
     NonSeparableStep {
         /// Nearest enclosing complete statement in the transaction's base,
         /// for editing the inseparable actions together in source.
         enclosing_statement: Option<Site>,
-        /// Nearest enclosing perform accepted by structural step operations,
+        /// Nearest enclosing action accepted by structural step operations,
         /// when one exists. A statement with two performs has none.
         separable_step: Option<Site>,
     },

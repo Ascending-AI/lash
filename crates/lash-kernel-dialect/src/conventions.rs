@@ -57,12 +57,17 @@ pub enum Boundary {
 #[derive(Clone, Copy, Debug)]
 pub enum BoundaryOperand {
     Absent,
+    /// Optional source-owned factory, whose evaluation must only construct values.
+    Forwarder,
 }
 impl BoundaryOperand {
     fn expression(self) -> Expr {
         match self {
-            Self::Absent => Expr::Literal(Literal::Absent),
+            Self::Absent | Self::Forwarder => Expr::Literal(Literal::Absent),
         }
+    }
+    fn matches(self, found: &Expr) -> bool {
+        *found == self.expression() || matches!((self, found), (Self::Forwarder, Expr::Closure(_)))
     }
 }
 impl Boundary {
@@ -103,7 +108,7 @@ impl Boundary {
                     && act.args[1..]
                         .iter()
                         .zip(*tail)
-                        .all(|(found, expected)| *found == expected.expression()))
+                        .all(|(found, expected)| expected.matches(found)))
                 .then(|| &act.args[0])
             }
             _ => None,
@@ -122,6 +127,32 @@ impl Boundary {
             Self::Identity => None,
             Self::Call { helper, .. } => Some(helper),
         }
+    }
+}
+
+/// An authored action consumes its result and returns a fixed dialect value.
+#[derive(Clone, Copy, Debug)]
+pub struct DiscardResult {
+    pub result: BoundaryOperand,
+}
+impl DiscardResult {
+    pub fn wrap(&self, name: lash_kernel_value::Name, value: Expr) -> Expr {
+        Expr::Let {
+            name,
+            value: Box::new(value),
+            body: Box::new(self.result.expression()),
+        }
+    }
+
+    pub fn unwrap<'a>(&self, expression: &'a Expr) -> Option<&'a Expr> {
+        let Expr::Let { value, body, .. } = expression else {
+            return None;
+        };
+        (**body == self.result.expression()).then_some(value)
+    }
+
+    pub fn matches_result(&self, body: &Expr) -> bool {
+        *body == self.result.expression()
     }
 }
 
@@ -296,6 +327,10 @@ pub struct Conventions {
     pub argument: Boundary,
     pub reply: Boundary,
     pub then_yield: bool,
+    pub discard_result: Option<DiscardResult>,
+    /// Whether a statement is independent of its enclosing source construct.
+    pub separable_step:
+        fn(&k::Document, &lash_kernel_value::sites::Site, &dyn FunctionCatalog) -> bool,
     pub returns: Returns,
     pub bindings: BindingScope,
     pub inverse: Inverse,
@@ -310,6 +345,8 @@ impl Conventions {
         argument: Boundary::Identity,
         reply: Boundary::Identity,
         then_yield: false,
+        discard_result: None,
+        separable_step: |_, _, _| true,
         returns: Returns::DIRECT,
         bindings: BindingScope::Block,
         inverse: Inverse::Unavailable,
@@ -333,11 +370,114 @@ impl Conventions {
             })
     }
 
-    /// Remove operation declarations no authored statement still uses.
-    pub fn refresh_imports(&self, document: &mut k::Document) {
+    /// Resolve authoring helpers against the exact release this document pins.
+    pub fn authoring_catalog<'a>(
+        document: &'a k::Document,
+        catalog: &'a dyn FunctionCatalog,
+    ) -> impl FunctionCatalog + 'a + use<'a> {
+        admission::CatalogLibrary::new(catalog, document)
+    }
+
+    /// Remove abandoned boundary factories, preserving all authored guest declarations.
+    fn argument_factories(
+        &self,
+        document: &k::Document,
+        catalog: &dyn FunctionCatalog,
+    ) -> BTreeSet<FunctionId> {
+        let Boundary::Call { helper, tail, .. } = self.argument else {
+            return BTreeSet::new();
+        };
+        let mut factories = Vec::new();
+        let mut nodes: Vec<_> = document
+            .units()
+            .map(|(_, block)| k::Node::Block(block))
+            .collect();
+        while let Some(node) = nodes.pop() {
+            if let k::Node::Expr(expression @ Expr::Act(act)) = node
+                && self
+                    .argument
+                    .unwrap(expression, |id, name| {
+                        name == helper && self.argument.resolve(catalog, name) == Some(*id)
+                    })
+                    .is_some()
+            {
+                factories.extend(tail.iter().zip(&act.args[1..]).filter_map(
+                    |(kind, value)| match (kind, value) {
+                        (BoundaryOperand::Forwarder, Expr::Closure(closure)) => {
+                            Some(closure.function)
+                        }
+                        _ => None,
+                    },
+                ));
+            }
+            nodes.extend(node.children());
+        }
+        let mut owned = BTreeSet::new();
+        while let Some(id) = factories.pop() {
+            if document.functions.contains_key(&id)
+                && owned.insert(id)
+                && let Some(body) = document.functions[&id].body()
+            {
+                factories.extend(k::Node::Block(&body.block).functions_within());
+            }
+        }
+        owned
+    }
+
+    /// Refresh source-owned artifacts after an edit. Unreferenced authored
+    /// declarations remain data; only abandoned boundary-owned code is removed.
+    pub fn refresh_document(
+        &self,
+        before: &k::Document,
+        document: &mut k::Document,
+        catalog: &dyn FunctionCatalog,
+    ) {
         if self.language.is_none() {
             return;
         }
+        let owned = self.argument_factories(before, catalog);
+        let mut pending: Vec<_> = document
+            .functions
+            .keys()
+            .filter(|id| !owned.contains(*id))
+            .copied()
+            .collect();
+        pending.extend(document.library.iter().copied());
+        pending.extend(document.requires.natives.iter().copied());
+        if let Some(main) = &document.main {
+            pending.extend(k::Node::Block(main).functions_within());
+        }
+        for export in document.exports.values() {
+            let functions = match export {
+                k::Export::Function(function) => vec![function],
+                k::Export::Type(ty) => {
+                    pending.push(ty.checker);
+                    ty.members
+                        .values()
+                        .map(|member| member.function())
+                        .collect()
+                }
+                k::Export::Error { .. } => continue,
+            };
+            for function in functions {
+                pending.push(function.function);
+                pending.extend(function.convention.functions().into_iter().copied());
+            }
+        }
+        let mut retained = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if retained.insert(id)
+                && let Some(body) = document
+                    .functions
+                    .get(&id)
+                    .and_then(|function| function.body())
+            {
+                pending.extend(k::Node::Block(&body.block).functions_within());
+            }
+        }
+        document
+            .functions
+            .retain(|id, _| !owned.contains(id) || retained.contains(id));
         let used: BTreeSet<_> = document
             .units()
             .flat_map(|(_, block)| k::Node::Block(block).imports_within())

@@ -30,6 +30,7 @@ pub struct WorkflowEnvironment {
     namespaces: Namespaces,
     workers: lash_vm_client::service::Service,
     functions: Arc<lash_kernel_doc::FunctionRegistry>,
+    authoring: lash_kernel_dialect::NamedLibrary,
 }
 impl WorkflowEnvironment {
     pub fn namespaces(&self) -> &Namespaces {
@@ -42,7 +43,7 @@ impl WorkflowEnvironment {
         &self.functions
     }
     pub fn checker(&self) -> lash_kernel_check::Environment<'_> {
-        lash_kernel_check::Environment::new(self.functions.as_ref())
+        lash_kernel_check::Environment::new(&self.authoring)
     }
 }
 fn descriptor(name: QualifiedName, function: &FunctionExport) -> FunctionMember {
@@ -430,10 +431,22 @@ impl ProcessDocumentProvider for KernelDocumentProvider {
             .namespace(&request)
             .await
             .map_err(lash_execution_contracts::PluginError::from)?;
+        let library = self
+            .engine
+            .workers
+            .config()
+            .worker_library()
+            .map_err(|error| lash_execution_contracts::PluginError::Session(error.to_string()))?;
+        let authoring =
+            lash_kernel_dialect::NamedLibrary::resolving(self.engine.functions.as_ref(), |id| {
+                library.roots().contains(id)
+            })
+            .map_err(|error| lash_execution_contracts::PluginError::Session(error.to_string()))?;
         Ok(ProcessDocument::new(WorkflowEnvironment {
             namespaces,
             workers: self.engine.workers.clone(),
             functions: self.engine.functions.clone(),
+            authoring,
         }))
     }
     async fn replay(
