@@ -439,25 +439,27 @@ pub(super) fn typed(
     charging: bool,
 ) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
-    let answer = match (x, y) {
-        (Value::Float(p), Value::Float(q)) => Some((
-            scalar::floats(pair.floats?, p, q)?,
-            if charging { site.floats } else { Some(0) },
-        )),
+    match (x, y) {
+        (Value::Float(p), Value::Float(q)) => pair
+            .floats
+            .and_then(|op| scalar::floats(op, p, q))
+            .map(|value| (value, if charging { site.floats } else { Some(0) })),
         (Value::Int(p), Value::Int(q)) => {
-            let value = scalar::ints(pair.ints?, p, q)?;
-            Some((
-                value,
-                if charging {
-                    site.table.units(super::sizes(&[x, y], &value))
-                } else {
-                    Some(0)
-                },
-            ))
+            pair.ints
+                .and_then(|op| scalar::ints(op, p, q))
+                .map(|value| {
+                    (
+                        value,
+                        if charging {
+                            site.table.units(super::sizes(&[x, y], &value))
+                        } else {
+                            Some(0)
+                        },
+                    )
+                })
         }
         _ => None,
-    }?;
-    Some(answer)
+    }
 }
 
 /// A native's certified text relation. Keep arena reads and variable-length
