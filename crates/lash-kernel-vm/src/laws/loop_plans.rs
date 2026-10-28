@@ -493,6 +493,7 @@ fn room_join(
 fn source_room_peak_bounds_follow_source_lifetimes() {
     use crate::compile::room::{Balance, Phase, Refused};
     room_shared_binding_growth();
+    room_unpooled_immutable_growth();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
     assert_eq!(
@@ -565,6 +566,80 @@ fn room_shared_binding_growth() {
         let event = &source.room.peak_extra[&point];
         assert_eq!(event.peak.fixed, expected, "{point:?}");
         assert_eq!(event.delta.fixed, expected, "{point:?}");
+    }
+}
+
+fn room_unpooled_immutable_growth() {
+    use crate::compile::room::{
+        Balance, CallSource, CheckedRoom, Execution, Facts, Measure, Owner, Point, Source,
+    };
+    use lash_kernel_value::{
+        FunctionId,
+        sites::{Site, Unit},
+    };
+    struct Values(bool);
+    impl Facts for Values {
+        fn measure(&self, measure: &Measure) -> Option<i128> {
+            match measure {
+                Measure::Local(Owner::Operand(site)) => Some(if !self.0 {
+                    16
+                } else if site.path == [0, 0] {
+                    16 + 2 * (16 + 4)
+                } else {
+                    16 + 4
+                }),
+                Measure::Release(owners) => owners.iter().try_fold(0, |sum, owner| {
+                    Some(
+                        sum + match owner {
+                            Owner::Operand(_) => self.measure(&Measure::Local(owner.clone()))?,
+                            _ => 0,
+                        },
+                    )
+                }),
+                _ => None,
+            }
+        }
+        fn call(&self, _: &Site, _: CallSource) -> Option<&CheckedRoom> {
+            None
+        }
+        fn raised(&self) -> bool {
+            false
+        }
+        fn resolved(&self, _: &Site) -> Option<FunctionId> {
+            None
+        }
+    }
+    impl Execution for Values {
+        fn event(&mut self, _: &Point) -> Option<Box<dyn Facts + '_>> {
+            Some(Box::new(Values(self.0)))
+        }
+        fn choose(&mut self, _: &Site) -> Option<bool> {
+            None
+        }
+    }
+    let document = lash_kernel_doc::parse_document(
+        "numbers by_spelling\nkernel 1\nmain { return (\"abcd\", \"efgh\") }",
+    )
+    .unwrap();
+    let source = Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(document.identity()),
+        Site::new(Unit::Main, vec![]),
+        document.main.as_ref().unwrap(),
+        &[],
+        Default::default(),
+        &std::collections::BTreeMap::new(),
+        &Default::default(),
+    );
+    source.verify().unwrap();
+    for (owned, peak_extra, retained_delta) in [(false, 112, 16), (true, 120, 56)] {
+        assert_eq!(
+            source.evaluate(&mut Values(owned), 32).unwrap().balance(),
+            Balance {
+                peak_extra,
+                retained_delta
+            },
+            "ordinary immutable values must retain their payload, owned={owned}"
+        );
     }
 }
 

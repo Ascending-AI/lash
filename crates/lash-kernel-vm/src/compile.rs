@@ -1052,7 +1052,7 @@ impl Stmt {
 
 impl Form {
     /// The blocks the statement holds.
-    fn blocks(&self) -> Vec<BlockId> {
+    pub(crate) fn blocks(&self) -> Vec<BlockId> {
         match self {
             Form::Plain | Form::ReturnVia { .. } | Form::Action(_) => Vec::new(),
             Form::If {
