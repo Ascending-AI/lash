@@ -253,7 +253,7 @@
                       "type": "null"
                     }
                   ],
-                  "description": "Nearest enclosing perform accepted by structural step operations,\nwhen one exists. A statement with two performs has none."
+                  "description": "Nearest enclosing action accepted by structural step operations,\nwhen one exists. A statement with two performs has none."
                 }
               },
               "type": "object"
