@@ -829,3 +829,23 @@ workload and durable operations under serial execution; it does not qualify
 production queue block allocation, contention, batching opportunities or
 scheduling latency. Warmturn's retained-byte cache-tail fix remains in effect.
 No PostgreSQL or quiet-host wall-time acceptance is claimed.
+
+The compatible full-width unsigned CPU encoding removes one byte per receipt.
+Against the preceding qualified population, code-mode host allocation and IPC
+medians each fall by 19 B; TypeScript worker bytes fall by 4 B and Python by
+5 B. The unchanged replay law passes that encoding without a baseline change.
+Main's subsequent `54b4f002b6` changes Python field ordering/conversion and
+resident literal, numeric-answer and certified text-join plans. With all
+sixteen lane patches unchanged, its paired population reduces TypeScript
+worker medians by 11,836 B and 94 allocations, and raises Python worker bytes
+by 64 B. Other counted medians agree. Individual internal contributions were
+not isolated. The exact combined-tree law passes determinism and rejects only
+Python's median, 4,358,643 B against 4,358,584 B.
+
+Five fresh ordinary captures at clean `d9d7c44ff7` reproduce the same changes
+and match every counted summary and turn/compaction record: 1,280 turns and
+15 compactions, with one executable digest and no diagnostic modes. The final
+refresh records the seven changed medians, including the transport reductions.
+Measured noise stays zero, and every depth-slope baseline keeps the tighter
+old/observed value. Hard budgets, tolerance rules, known breaches, the blessing
+guard and all strict determinism assertions remain unchanged.
