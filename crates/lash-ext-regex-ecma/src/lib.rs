@@ -43,6 +43,8 @@ mod matcher;
 mod pattern;
 
 #[cfg(test)]
+mod native_contract_laws;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod testsupport;

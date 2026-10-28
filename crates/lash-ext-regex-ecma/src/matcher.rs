@@ -73,6 +73,8 @@ impl Search<'_> {
         let mut expected = start;
         let step = |found: Match| {
             let found = Found::from(found);
+            #[cfg(test)]
+            crate::native_contract_laws::observe(crate::native_contract_laws::found_bytes(&found));
             if sticky && found.range.start != expected {
                 return ControlFlow::Break(());
             }

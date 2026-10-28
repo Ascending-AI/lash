@@ -2,6 +2,10 @@
 //!
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
+#[cfg(test)]
+mod native_contract_laws;
+mod resources;
+
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::NativeCall;
 use lash_kernel_doc::NativeError;
@@ -151,12 +155,16 @@ fn text<'call>(
 fn pairs(call: &mut NativeCall<'_, '_>, input: &str) -> Value {
     let mut result = Vec::new();
     for (name, value) in form_urlencoded::parse(input.trim_start_matches('?').as_bytes()) {
+        #[cfg(test)]
+        native_contract_laws::observe(32 + (name.len() + value.len()) as u64);
         let (name, value) = (call.new.text(&name), call.new.text(&value));
         result.push(call.new.allocate(NewObject::List(vec![name, value])));
     }
     call.new.allocate(NewObject::List(result))
 }
 fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: FunctionId) -> Value {
+    #[cfg(test)]
+    let mut component_bytes = 16 + url.as_str().len() as u64;
     let fields = [
         ("href", url.as_str().to_owned()),
         ("origin", url.origin().ascii_serialization()),
@@ -195,7 +203,14 @@ fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: FunctionId) -> Value 
         ),
     ]
     .into_iter()
-    .map(|(name, value)| (call.new.text(name), call.new.text(&value)))
+    .map(|(name, value)| {
+        #[cfg(test)]
+        {
+            component_bytes += 16 + value.len() as u64;
+            native_contract_laws::observe(component_bytes);
+        }
+        (call.new.text(name), call.new.text(&value))
+    })
     .collect();
     let state = call.new.allocate(NewObject::Record(fields));
     let decoded = pairs(call, url.query().unwrap_or(""));
@@ -228,6 +243,12 @@ struct Function {
 }
 
 impl NativeFunction for Function {
+    fn resource_contract(
+        &self,
+        args: lash_kernel_doc::Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::contract(self, args)
+    }
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match self.operation {
             Operation::Parse => {
@@ -236,7 +257,11 @@ impl NativeFunction for Function {
                     Some(Value::Absent) => Url::parse(&input),
                     Some(Value::Text(_) | Value::LongText(_)) => {
                         let base = text(&mut call, 1)?;
-                        Url::parse(&base).and_then(|base| base.join(&input))
+                        Url::parse(&base).and_then(|base| {
+                            #[cfg(test)]
+                            native_contract_laws::observe(16 + base.as_str().len() as u64);
+                            base.join(&input)
+                        })
                     }
                     _ => return Err(raise("Expected text or absent base")),
                 }
@@ -245,6 +270,8 @@ impl NativeFunction for Function {
             }
             Operation::Update => {
                 let mut url = Url::parse(&text(&mut call, 0)?).map_err(|_| raise("Invalid URL"))?;
+                #[cfg(test)]
+                native_contract_laws::observe(16 + url.as_str().len() as u64);
                 let field = text(&mut call, 1)?;
                 let value = text(&mut call, 2)?;
                 match field.as_ref() {
@@ -263,7 +290,16 @@ impl NativeFunction for Function {
                     }
                     "host" => {
                         let authority = format!("{}://{value}/", url.scheme());
+                        #[cfg(test)]
+                        native_contract_laws::observe(
+                            32 + (url.as_str().len() + authority.len()) as u64,
+                        );
                         if let Ok(parsed) = Url::parse(&authority) {
+                            #[cfg(test)]
+                            native_contract_laws::observe(
+                                48 + (url.as_str().len() + authority.len() + parsed.as_str().len())
+                                    as u64,
+                            );
                             let _ = url.set_host(parsed.host_str());
                             let _ = url.set_port(parsed.port());
                         }
@@ -300,7 +336,14 @@ impl NativeFunction for Function {
                 let (Value::List(_), Some(list)) = (list, args.sequence(list)?) else {
                     return Err(raise("Expected pair list"));
                 };
+                #[cfg(not(test))]
                 let mut serializer = form_urlencoded::Serializer::new(String::new());
+                #[cfg(test)]
+                let mut serializer = form_urlencoded::Serializer::new(
+                    native_contract_laws::ObservedString::default(),
+                );
+                #[cfg(test)]
+                native_contract_laws::observe(16);
                 for index in 0..list.len() {
                     let pair = list.get(index)?.ok_or_else(|| raise("Missing pair"))?;
                     let (Value::List(_), Some(pair)) = (pair, args.sequence(pair)?) else {

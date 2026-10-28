@@ -44,7 +44,9 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-ext-date-ecma", "lash_ext_date_ecma", "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-lib:rust_sources",
+    ],
     manifest_dir = "crates/lash-ext-date-ecma",
     package_name = "lash-ext-date-ecma",
     tags = [],

@@ -233,6 +233,8 @@ impl Engine {
         pattern: &str,
         flags: Flags,
     ) -> Result<Arc<lash_regress::Regex>, SyntaxError> {
+        #[cfg(test)]
+        crate::native_contract_laws::observe(16);
         check_shape(pattern, self.limits)?;
         let key = Key {
             pattern: pattern.into(),

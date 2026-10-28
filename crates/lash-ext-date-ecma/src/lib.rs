@@ -4,6 +4,9 @@
 //! `{__lash_brand: ("date.ecma", "invalid_date")}`. Natives never mutate their arguments; calendar
 //! arithmetic and JavaScript coercion live in the dialect's kernel helpers.
 mod calendar;
+#[cfg(test)]
+mod native_contract_laws;
+mod resources;
 
 use lash_kernel_doc::Args;
 use lash_kernel_doc::Float;
@@ -124,6 +127,12 @@ fn milliseconds(value: &Value, args: &Args<'_>) -> Result<f64, NativeError> {
             let Some(nanoseconds) = args.timestamp(value)? else {
                 return Err(raise("type_error", "Date receiver required"));
             };
+            #[cfg(test)]
+            native_contract_laws::observe(
+                16 + (&*nanoseconds.as_bigint() / 1_000_000_i64)
+                    .bits()
+                    .div_ceil(8),
+            );
             (&*nanoseconds.as_bigint() / 1_000_000_i64)
                 .to_f64()
                 .ok_or_else(|| raise("RangeError", "Timestamp out of range"))
@@ -169,6 +178,12 @@ struct Function {
 }
 
 impl NativeFunction for Function {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::contract(self, args)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         let first = args
@@ -193,6 +208,10 @@ impl NativeFunction for Function {
                 }
                 let integer = Integer::parse(&format!("{clipped:.0}"))
                     .map_err(|_| raise("RangeError", "Invalid time"))?;
+                #[cfg(test)]
+                native_contract_laws::observe(
+                    32 + format!("{clipped:.0}").len() as u64 + integer.bits().div_ceil(8),
+                );
                 Ok(call
                     .new
                     .timestamp(Integer::new(&*integer.as_bigint() * 1_000_000)))
@@ -235,6 +254,8 @@ impl NativeFunction for Function {
                     "locale" => calendar::date_locale_string(time),
                     _ => return Err(raise("type_error", "Unknown date format")),
                 };
+                #[cfg(test)]
+                native_contract_laws::observe(16 + text.len() as u64);
                 Ok(call.new.text(&text))
             }
         }

@@ -44,7 +44,9 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-ext-url-whatwg", "lash_ext_url_whatwg", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-lib:rust_sources",
+    ],
     manifest_dir = "crates/lash-ext-url-whatwg",
     package_name = "lash-ext-url-whatwg",
     tags = [],

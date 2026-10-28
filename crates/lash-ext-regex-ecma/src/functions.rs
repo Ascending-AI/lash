@@ -10,6 +10,9 @@
 //! and each list of values is reserved against the run's memory bound
 //! ([`Nursery::reserve`]) before it is allocated.
 
+#[path = "resources.rs"]
+mod resources;
+
 use std::borrow::Cow;
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
@@ -40,6 +43,12 @@ pub(crate) struct Function {
 }
 
 impl NativeFunction for Function {
+    fn resource_contract(
+        &self,
+        args: Args<'_>,
+    ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+        resources::contract(self, args)
+    }
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let NativeCall {
             args,
@@ -59,7 +68,12 @@ impl NativeFunction for Function {
             .engine
             .program(&regex.pattern, regex.flags)
             .map_err(syntax_error)?;
+        #[cfg(test)]
+        let _program_reference = crate::native_contract_laws::observer::hold(16);
         let units: Vec<u16> = input.encode_utf16().collect();
+        #[cfg(test)]
+        let _subject_units =
+            crate::native_contract_laws::observer::hold(16 + 2 * units.len() as u64);
         let subject = Subject {
             search: Search {
                 program: &program,
@@ -73,10 +87,26 @@ impl NativeFunction for Function {
             },
             regex: &regex,
         };
+        #[cfg(test)]
+        let _capture_names = crate::native_contract_laws::observer::hold(
+            32 + subject
+                .capture_names
+                .iter()
+                .map(|(name, index)| {
+                    32 + name.len() as u64 + Integer::new(*index).bits().div_ceil(8)
+                })
+                .sum::<u64>(),
+        );
         match self.operation {
             Operation::CompileCheck => unreachable!("answered above"),
             Operation::Exec => {
                 let (found, last_index) = subject.exec(counter)?;
+                #[cfg(test)]
+                let _found = crate::native_contract_laws::observer::hold(
+                    found
+                        .as_ref()
+                        .map_or(0, crate::native_contract_laws::found_bytes),
+                );
                 let found = match found {
                     Some(found) => {
                         spend_text(counter, match_units(&found))?;
@@ -89,6 +119,12 @@ impl NativeFunction for Function {
             }
             Operation::Test => {
                 let (found, last_index) = subject.exec(counter)?;
+                #[cfg(test)]
+                let _found = crate::native_contract_laws::observer::hold(
+                    found
+                        .as_ref()
+                        .map_or(0, crate::native_contract_laws::found_bytes),
+                );
                 let last_index = heap.integer(last_index);
                 Ok(record(
                     heap,
@@ -100,6 +136,13 @@ impl NativeFunction for Function {
             }
             Operation::MatchAll => {
                 let matches = subject.match_all(heap, counter)?;
+                #[cfg(test)]
+                let _matches = crate::native_contract_laws::observer::hold(
+                    32 + matches
+                        .iter()
+                        .map(crate::native_contract_laws::found_bytes)
+                        .sum::<u64>(),
+                );
                 spend_text(counter, matches.iter().map(match_units).sum())?;
                 reserve_values(heap, matches.len())?;
                 let matches = matches
@@ -132,6 +175,13 @@ impl NativeFunction for Function {
                     other => return Err(wrong_type("limit", "an integer", other)),
                 };
                 let pieces = subject.split(limit, heap, counter)?;
+                #[cfg(test)]
+                let _pieces = crate::native_contract_laws::observer::hold(
+                    32 + pieces
+                        .iter()
+                        .map(crate::native_contract_laws::range_bytes)
+                        .sum::<u64>(),
+                );
                 spend_text(
                     counter,
                     pieces
@@ -305,9 +355,20 @@ impl Subject<'_> {
             let (found, last_index) = self.exec(counter)?;
             (found.into_iter().collect(), last_index)
         };
+        #[cfg(test)]
+        let _matches = crate::native_contract_laws::observer::hold(
+            32 + matches
+                .iter()
+                .map(crate::native_contract_laws::found_bytes)
+                .sum::<u64>(),
+        );
         let units = self.units();
         let template: Vec<char> = replacement.chars().collect();
+        #[cfg(test)]
+        let _template = crate::native_contract_laws::observer::hold(16 + 4 * template.len() as u64);
         let mut output = Output {
+            #[cfg(test)]
+            scratch: crate::native_contract_laws::observer::hold(16),
             units: Vec::new(),
             counter,
             heap,
@@ -319,7 +380,13 @@ impl Subject<'_> {
             end = found.range.end;
         }
         output.push(&units[end..])?;
-        let Output { units, heap, .. } = output;
+        let Output {
+            units,
+            heap,
+            #[cfg(test)]
+                scratch: _output_scratch,
+            ..
+        } = output;
         Ok((text_value(heap, &units)?, last_index))
     }
 
@@ -334,6 +401,8 @@ impl Subject<'_> {
         counter: &mut WorkCounter,
     ) -> Result<Vec<Option<Range<usize>>>, NativeError> {
         let mut pieces = Vec::new();
+        #[cfg(test)]
+        let mut pieces_scratch = crate::native_contract_laws::observer::hold(32);
         let mut refused = None;
         if limit == 0 {
             return Ok(pieces);
@@ -363,6 +432,13 @@ impl Subject<'_> {
             }
             pieces.push(Some(end..found.range.start));
             pieces.extend(found.captures);
+            #[cfg(test)]
+            pieces_scratch.resize(
+                32 + pieces
+                    .iter()
+                    .map(crate::native_contract_laws::range_bytes)
+                    .sum::<u64>(),
+            );
             end = found.range.end;
             if pieces.len() >= limit {
                 Break(())
@@ -438,6 +514,14 @@ impl Subject<'_> {
             let named_spans = if found.named.is_empty() {
                 Value::Null
             } else {
+                #[cfg(test)]
+                let _name_index = crate::native_contract_laws::observer::hold(
+                    32 + self
+                        .capture_names
+                        .iter()
+                        .map(|(name, _)| 16 + name.len() as u64)
+                        .sum::<u64>(),
+                );
                 let mut by_name =
                     std::collections::HashMap::with_capacity(self.capture_names.len());
                 for (group, index) in &self.capture_names {
@@ -485,6 +569,8 @@ struct Kept<'a, 'call> {
     heap: &'a mut Nursery<'call>,
     matches: Vec<Found>,
     refused: Option<NativeError>,
+    #[cfg(test)]
+    scratch: crate::native_contract_laws::observer::Lease,
 }
 
 impl<'a, 'call> Kept<'a, 'call> {
@@ -493,6 +579,8 @@ impl<'a, 'call> Kept<'a, 'call> {
             heap,
             matches: Vec::new(),
             refused: None,
+            #[cfg(test)]
+            scratch: crate::native_contract_laws::observer::hold(32),
         }
     }
 
@@ -505,6 +593,14 @@ impl<'a, 'call> Kept<'a, 'call> {
         match self.heap.reserve(ranges as u64, names as u64) {
             Ok(()) => {
                 self.matches.push(found);
+                #[cfg(test)]
+                self.scratch.resize(
+                    32 + self
+                        .matches
+                        .iter()
+                        .map(crate::native_contract_laws::found_bytes)
+                        .sum::<u64>(),
+                );
                 ControlFlow::Continue(())
             }
             Err(refused) => {
@@ -536,6 +632,8 @@ fn text_value(heap: &mut Nursery<'_>, units: &[u16]) -> Result<Value, NativeErro
         .sum();
     heap.reserve(0, 2 * bytes as u64)?;
     let text = text_from_units(units).ok_or_else(lone_surrogate)?;
+    #[cfg(test)]
+    crate::native_contract_laws::observe(16 + text.len() as u64);
     Ok(heap.text(&text))
 }
 
@@ -545,6 +643,8 @@ struct Output<'a, 'call> {
     units: Vec<u16>,
     counter: &'a mut WorkCounter,
     heap: &'a mut Nursery<'call>,
+    #[cfg(test)]
+    scratch: crate::native_contract_laws::observer::Lease,
 }
 
 impl Output<'_, '_> {
@@ -552,6 +652,8 @@ impl Output<'_, '_> {
         self.counter.spend(piece.len() as u64)?;
         self.heap.reserve(0, 2 * piece.len() as u64)?;
         self.units.extend_from_slice(piece);
+        #[cfg(test)]
+        self.scratch.resize(16 + 2 * self.units.len() as u64);
         Ok(())
     }
 
@@ -599,6 +701,9 @@ impl Output<'_, '_> {
                     };
                     let close = index + 2 + length;
                     let name: String = template[index + 2..close].iter().collect();
+                    #[cfg(test)]
+                    let _identifier =
+                        crate::native_contract_laws::observer::hold(16 + name.len() as u64);
                     let group = found.named.iter().find(|(candidate, _)| *candidate == name);
                     if let Some((_, Some(range))) = group {
                         self.push(&input[range.clone()])?;
@@ -650,6 +755,8 @@ fn regex_value(heap: &mut Nursery<'_>, pattern: &str, flags: Flags, built: Funct
     let brand = heap.allocate(NewObject::Tuple(vec![name(BRAND), name("reg_exp")]));
     let built = heap.bytes(built.as_bytes());
     let pattern = heap.text(pattern);
+    #[cfg(test)]
+    crate::native_contract_laws::observe(16 + flags.canonical().len() as u64);
     let flags = heap.text(&flags.canonical());
     record(
         heap,

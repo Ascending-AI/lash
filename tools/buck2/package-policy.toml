@@ -816,3 +816,9 @@ packages = ["lash-runtime"]
 kinds = ["test"]
 targets = ["workflow_laws"]
 data = ["//examples:typescript_host_flow_cells", "//examples/kernel-engine-hello:package_files"]
+
+# Native resource laws share the independent allocation observer, compiled only in tests.
+[[rule]]
+packages = ["lash-ext-date-ecma", "lash-ext-url-whatwg", "lash-ext-regex-ecma"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-kernel-lib:rust_sources"]

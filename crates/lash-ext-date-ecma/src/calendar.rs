@@ -10,6 +10,19 @@
 // MIT licensed. Local modifications: standalone UTC-pinned fixed-format Date
 // operations for Lash's durable TypeScript VM; no host timezone access.
 
+// The production expansion is the original formatter. Tests observe each buffer
+// at its allocation site, including canonical parse-validation renderings.
+#[cfg(not(test))]
+use std::format as observed_format;
+#[cfg(test)]
+macro_rules! observed_format {
+    ($($args:tt)*) => {{
+        let text = format!($($args)*);
+        super::native_contract_laws::observe(16 + text.len() as u64);
+        text
+    }};
+}
+
 const MS_PER_SECOND: f64 = 1_000.0;
 const MS_PER_MINUTE: f64 = 60.0 * MS_PER_SECOND;
 const MS_PER_HOUR: f64 = 60.0 * MS_PER_MINUTE;
@@ -313,13 +326,15 @@ fn date_parts(milliseconds: f64) -> Option<DateParts> {
 pub(crate) fn to_iso_string(milliseconds: f64) -> Option<String> {
     let parts = date_parts(milliseconds)?;
     let year = if (0..=9_999).contains(&parts.year) {
-        format!("{:04}", parts.year)
+        observed_format!("{:04}", parts.year)
     } else if parts.year < 0 {
-        format!("-{:06}", parts.year.unsigned_abs())
+        observed_format!("-{:06}", parts.year.unsigned_abs())
     } else {
-        format!("+{:06}", parts.year)
+        observed_format!("+{:06}", parts.year)
     };
-    Some(format!(
+    #[cfg(test)]
+    let _year = super::native_contract_laws::observer::hold(16 + year.len() as u64);
+    Some(observed_format!(
         "{year}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
         parts.month + 1,
         parts.date,
@@ -340,9 +355,9 @@ const MONTH_NAMES: [&str; 12] = [
 /// `275760`.
 fn date_year_text(year: i64) -> String {
     if year < 0 {
-        format!("-{:04}", year.unsigned_abs())
+        observed_format!("-{:04}", year.unsigned_abs())
     } else {
-        format!("{:04}", year)
+        observed_format!("{:04}", year)
     }
 }
 
@@ -352,7 +367,7 @@ pub(crate) fn date_utc_string(milliseconds: f64) -> String {
     let Some(parts) = date_parts(milliseconds) else {
         return "Invalid Date".to_string();
     };
-    format!(
+    observed_format!(
         "{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
         WEEKDAY_NAMES[parts.weekday as usize],
         parts.date,
@@ -369,7 +384,7 @@ pub(crate) fn date_date_string(milliseconds: f64) -> String {
     let Some(parts) = date_parts(milliseconds) else {
         return "Invalid Date".to_owned();
     };
-    format!(
+    observed_format!(
         "{} {} {:02} {}",
         WEEKDAY_NAMES[parts.weekday as usize],
         MONTH_NAMES[parts.month as usize],
@@ -383,9 +398,11 @@ pub(crate) fn date_time_string(milliseconds: f64) -> String {
     let Some(parts) = date_parts(milliseconds) else {
         return "Invalid Date".to_owned();
     };
-    format!(
+    observed_format!(
         "{:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
-        parts.hour, parts.minute, parts.second
+        parts.hour,
+        parts.minute,
+        parts.second
     )
 }
 
@@ -394,7 +411,7 @@ pub(crate) fn date_to_string(milliseconds: f64) -> String {
     if date_parts(milliseconds).is_none() {
         return "Invalid Date".to_owned();
     }
-    format!(
+    observed_format!(
         "{} {}",
         date_date_string(milliseconds),
         date_time_string(milliseconds)
@@ -408,7 +425,7 @@ fn locale_date(parts: DateParts) -> String {
     } else {
         parts.year
     };
-    format!("{}/{}/{}", parts.month + 1, parts.date, year)
+    observed_format!("{}/{}/{}", parts.month + 1, parts.date, year)
 }
 
 /// The en-US clock field shared by the three locale Date methods.
@@ -418,9 +435,12 @@ fn locale_time(parts: DateParts) -> String {
         hour => hour,
     };
     let period = if parts.hour < 12 { "AM" } else { "PM" };
-    format!(
+    observed_format!(
         "{}:{:02}:{:02} {}",
-        hour, parts.minute, parts.second, period
+        hour,
+        parts.minute,
+        parts.second,
+        period
     )
 }
 
@@ -428,7 +448,7 @@ fn locale_time(parts: DateParts) -> String {
 pub(crate) fn date_locale_string(milliseconds: f64) -> String {
     date_parts(milliseconds).map_or_else(
         || "Invalid Date".to_owned(),
-        |parts| format!("{}, {}", locale_date(parts), locale_time(parts)),
+        |parts| observed_format!("{}, {}", locale_date(parts), locale_time(parts)),
     )
 }
 
@@ -446,7 +466,8 @@ pub(crate) fn parse_date(input: &str) -> Result<f64, IsoDateError> {
     match parse_iso_date(input) {
         Err(IsoDateError::NonIso) => {
             if !WEEKDAY_NAMES.iter().any(|day| {
-                input.starts_with(&format!("{day} ")) || input.starts_with(&format!("{day}, "))
+                input.starts_with(&observed_format!("{day} "))
+                    || input.starts_with(&observed_format!("{day}, "))
             }) {
                 return Err(IsoDateError::NonIso);
             }
@@ -470,6 +491,13 @@ fn parse_rendered_date(input: &str) -> Option<f64> {
         )
     };
     let fields: Vec<_> = date.split(' ').collect();
+    #[cfg(test)]
+    let _fields = super::native_contract_laws::observer::hold(
+        32 + fields
+            .iter()
+            .map(|field| 16 + field.len() as u64)
+            .sum::<u64>(),
+    );
     let [_, first, second, year, clock] = fields.as_slice() else {
         return None;
     };
@@ -499,5 +527,7 @@ fn parse_rendered_date(input: &str) -> Option<f64> {
     } else {
         date_to_string(time)
     };
+    #[cfg(test)]
+    super::native_contract_laws::observe(16 + rendered.len() as u64);
     (rendered == input).then_some(time)
 }
