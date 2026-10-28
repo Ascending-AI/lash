@@ -1,7 +1,7 @@
 //! Formation reads the unchanged source tree before layout placement.
 use super::*;
 
-pub(super) fn body(authority: &Source, pool: &doc::constant_pool::ConstantPool) -> SourceRoom {
+pub(super) fn body(authority: &Description, pool: &doc::constant_pool::ConstantPool) -> SourceRoom {
     let source = &authority.site;
     let body = &authority.body;
     let params = &authority.params;
@@ -375,7 +375,7 @@ fn event(
 }
 
 fn formula(
-    authority: &Source,
+    authority: &Description,
     site: &Site,
     node: doc::Node<'_>,
     ins: &[Owner],

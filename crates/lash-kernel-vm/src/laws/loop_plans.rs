@@ -370,6 +370,12 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                     &program.instances,
                 )
                 .unwrap_or_else(|_| panic!("room corpus compiles"));
+            for index in 0..exe.code_count() {
+                assert!(
+                    !exe.code(CodeId(index as u32)).source_room.is_derived(),
+                    "compilation must not derive source memory programs on the worker path"
+                );
+            }
             exe.verify_stream().unwrap();
             for index in 0..exe.code_count() {
                 let code = exe.code(CodeId(index as u32));

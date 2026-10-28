@@ -494,7 +494,9 @@ impl LoopPlan {
     /// an allocating plan. Summaries are numbered in order: the head 0,
     /// then the body's statements depth first.
     pub(crate) fn verify(&self, lowered: &Lowered<'_>, loop_test: u64) -> Result<(), Refused> {
-        self.source_room.verify().map_err(Refused::Room)?;
+        self.source_room
+            .verify_if_derived()
+            .map_err(Refused::Room)?;
         if (lowered.block)(self.source_block).site != self.source_room.site {
             return Err(Refused::Room(super::super::room::Refused::Source));
         }
@@ -513,7 +515,12 @@ impl LoopPlan {
             site: source_site.ok_or(Refused::Room(super::super::room::Refused::Source))?,
             phase: super::super::room::Phase::Test,
         };
-        if at.site != self.source_site || !self.source_room.room.peak_extra.contains_key(&at) {
+        if at.site != self.source_site
+            || self
+                .source_room
+                .room_if_derived()
+                .is_some_and(|room| !room.peak_extra.contains_key(&at))
+        {
             return Err(Refused::Room(super::super::room::Refused::Source));
         }
         if self.loop_test != loop_test {

@@ -49,7 +49,15 @@ impl Compiler<'_> {
         free: bool,
     ) -> Code {
         let site = self.site();
-        let source_body = body;
+        let source_body = if site.path.is_empty() {
+            room::UnitBody::capture(&site.unit, body, &self.resolve.library.registry)
+        } else {
+            self.source_body
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("enclosing source unit"))
+                .clone()
+        };
+        let enclosing_source = self.source_body.replace(source_body.clone());
         let source_params = params;
         // A body's statements have roles of their own: the operands of an
         // enclosing expression are no role of theirs.
@@ -143,7 +151,7 @@ impl Compiler<'_> {
                 }))
             }
         };
-        let source_room = Arc::new(room::Source::compile(
+        let source_room = Arc::new(room::Source::deferred(
             owner,
             site.clone(),
             source_body,
@@ -153,9 +161,10 @@ impl Compiler<'_> {
                 .iter()
                 .map(|s| ((s.declared.clone(), s.name.clone()), s.shared))
                 .collect(),
-            self.resolve.library.registry.as_ref(),
+            Arc::clone(&self.resolve.library.registry),
             self.private,
         ));
+        self.source_body = enclosing_source;
         Code {
             source_room,
             capture_names,

@@ -9,7 +9,7 @@ use lash_kernel_doc::{self as doc, LogicalHeldV1 as Cost};
 use lash_kernel_value::sites::{Site, Unit};
 use lash_kernel_value::{FunctionId, Name};
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 mod bulk;
 mod derive;
@@ -236,6 +236,60 @@ pub(crate) struct SourceRoom {
 pub(crate) struct Source {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) site: Site,
+    description: OnceLock<Box<Description>>,
+    seed: Option<Seed>,
+    verified: OnceLock<Result<(), Refused>>,
+}
+
+/// One immutable compilation unit shared by its lexical code bodies. The
+/// registry is the exact snapshot compilation resolved against. No executable
+/// or prepared library is retained, so the description cannot retain itself.
+struct Seed {
+    unit: UnitBody,
+    params: Box<[Name]>,
+    shared: Vec<((Site, Name), bool)>,
+    catalog: Arc<doc::FunctionRegistry>,
+    private: std::collections::BTreeSet<Name>,
+}
+
+/// Registered bodies already belong to the immutable prepared registry.
+/// Inline units retain one AST shared by all their lexical code descriptions.
+#[derive(Clone)]
+pub(super) enum UnitBody {
+    Inline(Arc<doc::Block>),
+    Registered(FunctionId),
+}
+impl UnitBody {
+    pub(super) fn capture(unit: &Unit, body: &doc::Block, catalog: &doc::FunctionRegistry) -> Self {
+        if let Unit::Library(function) = unit
+            && catalog
+                .get(function)
+                .is_some_and(|r| r.definition().body().is_some())
+        {
+            Self::Registered(*function)
+        } else {
+            Self::Inline(Arc::new(body.clone()))
+        }
+    }
+    fn block<'a>(&'a self, catalog: &'a doc::FunctionRegistry) -> &'a doc::Block {
+        match self {
+            Self::Inline(body) => body,
+            Self::Registered(function) => {
+                &catalog
+                    .get(function)
+                    .and_then(|r| r.definition().body())
+                    .unwrap_or_else(|| unreachable!("exact registered source body"))
+                    .block
+            }
+        }
+    }
+}
+
+/// Cold field access keeps the SourceRoom API while initializing its source
+/// authority once. Ordinary compilation uses only Source's owner and site.
+pub(crate) struct Description {
+    pub(crate) owner: doc::constant_pool::PoolOwner,
+    pub(crate) site: Site,
     pub(crate) body: Arc<doc::Block>,
     pub(crate) params: Box<[Name]>,
     pub(crate) shared: BTreeMap<(Site, Name), bool>,
@@ -312,16 +366,105 @@ impl CheckedRoom {
         self.balance
     }
 }
+impl std::ops::Deref for Source {
+    type Target = Description;
+    fn deref(&self) -> &Description {
+        self.description.get_or_init(|| {
+            let seed = self
+                .seed
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("source seed"));
+            let mut node = doc::Node::Block(seed.unit.block(&seed.catalog));
+            for index in &self.site.path {
+                node = *node
+                    .children()
+                    .get(*index as usize)
+                    .unwrap_or_else(|| unreachable!("canonical source body"));
+            }
+            let doc::Node::Block(body) = node else {
+                unreachable!("a code site names its source block")
+            };
+            let body = match (&seed.unit, self.site.path.is_empty()) {
+                (UnitBody::Inline(unit), true) => Arc::clone(unit),
+                _ => Arc::new(body.to_vec()),
+            };
+            Box::new(Self::form(
+                self.owner,
+                self.site.clone(),
+                body,
+                &seed.params,
+                seed.shared.iter().cloned().collect(),
+                seed.catalog.as_ref(),
+                &seed.private,
+            ))
+        })
+    }
+}
 impl Source {
+    #[cfg(test)]
+    pub(crate) fn is_derived(&self) -> bool {
+        self.description.get().is_some()
+    }
+
+    pub(super) fn deferred(
+        owner: doc::constant_pool::PoolOwner,
+        site: Site,
+        unit: UnitBody,
+        params: &[Name],
+        shared: Vec<((Site, Name), bool)>,
+        catalog: Arc<doc::FunctionRegistry>,
+        private: &std::collections::BTreeSet<Name>,
+    ) -> Self {
+        Self {
+            owner,
+            site,
+            description: OnceLock::new(),
+            verified: OnceLock::new(),
+            seed: Some(Seed {
+                unit,
+                params: params.into(),
+                shared,
+                catalog,
+                private: private.clone(),
+            }),
+        }
+    }
     pub(crate) fn compile(
         owner: doc::constant_pool::PoolOwner,
         site: Site,
         body: &doc::Block,
         params: &[Name],
-        mut shared: BTreeMap<(Site, Name), bool>,
+        shared: BTreeMap<(Site, Name), bool>,
         catalog: &dyn doc::FunctionCatalog,
         private: &std::collections::BTreeSet<Name>,
     ) -> Self {
+        let description = Self::form(
+            owner,
+            site.clone(),
+            Arc::new(body.clone()),
+            params,
+            shared,
+            catalog,
+            private,
+        );
+        Self {
+            owner,
+            site,
+            description: OnceLock::from(Box::new(description)),
+            seed: None,
+            verified: OnceLock::new(),
+        }
+    }
+    fn form(
+        owner: doc::constant_pool::PoolOwner,
+        site: Site,
+        source_body: Arc<doc::Block>,
+        params: &[Name],
+        mut shared: BTreeMap<(Site, Name), bool>,
+        catalog: &dyn doc::FunctionCatalog,
+        private: &std::collections::BTreeSet<Name>,
+    ) -> Description {
+        let body = source_body.as_ref();
         let mut persistent = BTreeMap::new();
         if site.unit == Unit::Main {
             for (index, stmt) in body.iter().enumerate() {
@@ -389,10 +532,10 @@ impl Source {
             _ => None,
         };
         let pool = doc::constant_pool::ConstantPool::extract(owner, body);
-        let mut source = Self {
+        let mut source = Description {
             owner,
             site: site.clone(),
-            body: Arc::new(body.clone()),
+            body: Arc::clone(&source_body),
             params: params.into(),
             shared,
             persistent,
@@ -411,9 +554,31 @@ impl Source {
         source
     }
     pub(crate) fn verify(&self) -> Result<(), Refused> {
-        verify::body(self, &self.room)
+        self.verify_identity()?;
+        *self.verified.get_or_init(|| verify::body(self, &self.room))
+    }
+    fn verify_identity(&self) -> Result<(), Refused> {
+        let description = std::ops::Deref::deref(self);
+        if self.owner != description.owner || self.site != description.site {
+            return Err(Refused::Source);
+        }
+        Ok(())
+    }
+    pub(crate) fn room_if_derived(&self) -> Option<&SourceRoom> {
+        self.description.get().map(|d| &d.room)
+    }
+    /// KIR formation does not consume memory authority in phase one. If a
+    /// consumer has requested that authority, retain its independent check.
+    pub(crate) fn verify_if_derived(&self) -> Result<(), Refused> {
+        if self.description.get().is_some() {
+            self.verify()
+        } else {
+            Ok(())
+        }
     }
     pub(crate) fn verify_room(&self, room: &SourceRoom) -> Result<(), Refused> {
+        self.verify_identity()?;
+        // A changed projection is never covered by the immutable default's cache.
         verify::body(self, room)
     }
     /// A finite source execution, including selected branches and repeated

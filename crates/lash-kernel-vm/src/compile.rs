@@ -1287,6 +1287,8 @@ struct Compiler<'a> {
     /// The site path length of the statement being compiled.
     stmt_depth: u32,
     document_owner: Option<lash_kernel_value::DocumentId>,
+    /// The current immutable unit shared by its deferred source descriptions.
+    source_body: Option<room::UnitBody>,
     constant_pools: BTreeMap<Unit, doc::constant_pool::ConstantPool>,
 }
 
@@ -1378,6 +1380,7 @@ impl<'a> Compiler<'a> {
             live: Vec::new(),
             stmt_depth: 0,
             document_owner: None,
+            source_body: None,
             constant_pools: BTreeMap::new(),
         }
     }

@@ -1421,7 +1421,9 @@ impl IslandPlan {
         if self.source_site != self.source_room.site {
             return Err(Refused::Room(super::room::Refused::Source));
         }
-        self.source_room.verify().map_err(Refused::Room)?;
+        self.source_room
+            .verify_if_derived()
+            .map_err(Refused::Room)?;
         let mut calls = Vec::new();
         verify_block(&self.body, stream, &mut calls)?;
         if *calls != *self.calls {
