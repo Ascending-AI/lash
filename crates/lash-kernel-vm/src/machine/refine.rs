@@ -154,6 +154,10 @@ impl ResidentRoots for Holdings<'_> {
 }
 
 impl KernelMachine {
+    fn operand_roots(&self) -> Vec<Value> {
+        self.regs.source_projection()
+    }
+
     /// The census's sweep over what the run holds in memory, with nothing
     /// published (FIG-6748): it removes the entities nothing reaches and
     /// advances the sweep generation. It retires the results of the ended
@@ -167,13 +171,14 @@ impl KernelMachine {
         }
         self.heap.set_saved_functions(&self.functions);
         let access = self.heap.pages().clone();
+        let registers = self.operand_roots();
         let mut holdings = Holdings {
             arena: &self.arena,
             access: &access,
             tasks: &mut self.tasks,
             session: &self.session,
             joins: &self.joins,
-            registers: self.regs.projection(),
+            registers,
             pins: &self.pins,
             roots: Vec::new(),
             reach: None,
@@ -183,5 +188,84 @@ impl KernelMachine {
         // nothing of the heap's replaces them.
         self.census_refinements = self.heap.certificate().refinements;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+    use crate::compile::{Form, Stmt, Stream};
+    use crate::laws::embedder::Embedder;
+    use lash_kernel_exec::{ConstIx, LocalRef, Op, OpRange, Reg};
+    use lash_kernel_value::sites::{Site, Unit};
+    use std::sync::Arc;
+
+    fn normalized_operands(machine: &mut KernelMachine) -> (u64, u64) {
+        let access = machine.heap.pages().clone();
+        let registers = machine.operand_roots();
+        let mut roots = Holdings {
+            arena: &machine.arena,
+            access: &access,
+            tasks: &mut machine.tasks,
+            session: &machine.session,
+            joins: &machine.joins,
+            registers,
+            pins: &machine.pins,
+            roots: Vec::new(),
+            reach: None,
+        };
+        let walked = roots.walk().unwrap();
+        let result = (
+            walked.root_and_control_bytes,
+            roots.anonymous_entity_bytes(),
+        );
+        roots.finish();
+        result
+    }
+
+    /// K-BND-003: normalization prices source operand occurrences, including
+    /// a value whose register mirror was cleared, and never storage ghosts.
+    #[test]
+    fn source_normalization_ignores_unwritten_and_consumed_register_mirrors() {
+        let mut embedder = Embedder::new("main { return null }");
+        let machine = &mut embedder.machine;
+        let baseline = normalized_operands(machine);
+        let site = Arc::new(Site::new(Unit::Main, vec![0, 0]));
+        let stream = Stream {
+            ops: vec![
+                Op::Const {
+                    dst: Reg(19),
+                    c: ConstIx(0),
+                },
+                Op::Bind {
+                    local: LocalRef { slot: 0, at: 0 },
+                    src: Reg(19),
+                },
+            ],
+            source_sites: vec![Some(Arc::clone(&site)), Some(site)],
+            ..Default::default()
+        };
+        let stmt = Stmt {
+            ordinal: None,
+            ops: OpRange { start: 0, len: 2 },
+            regs: 64,
+            form: Form::Plain,
+            source_roles: std::sync::Mutex::new(Default::default()),
+        };
+        machine.regs.statement(stmt.regs);
+        machine.regs.source_begin(&stream, &stmt, 0).unwrap();
+        assert_eq!(normalized_operands(machine), baseline, "unwritten storage");
+        let held = machine.arena.borrow_mut().create_list(&[Value::Null]);
+        machine.regs.put(19, held);
+        machine.regs.source_complete(&stream, 0).unwrap();
+        // Source ownership survives a cleared physical mirror.
+        machine.regs.clear_range(19..20);
+        let (bytes, bodies) = normalized_operands(machine);
+        assert_eq!(bytes, baseline.0 + 16);
+        assert_eq!(bodies, baseline.1 + 48, "one list header and one member");
+        // A consumed occurrence must disappear even if its mirror is restored.
+        machine.regs.put(19, held);
+        machine.regs.source_complete(&stream, 1).unwrap();
+        assert_eq!(normalized_operands(machine), baseline, "consumed storage");
     }
 }

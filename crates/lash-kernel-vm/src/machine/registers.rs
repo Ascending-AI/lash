@@ -235,6 +235,22 @@ impl Registers {
         }
     }
 
+    /// Active stream operands are source occurrences. Outside a stream, an
+    /// action may still be assembling arguments in explicitly written slots.
+    pub(super) fn source_projection(&self) -> Vec<Value> {
+        if self.source.active {
+            let mut values = Vec::new();
+            self.source.each_value(&mut |value| values.push(*value));
+            values
+        } else {
+            self.values[..self.extent]
+                .iter()
+                .zip(&self.written)
+                .filter_map(|(value, written)| written.then_some(*value))
+                .collect()
+        }
+    }
+
     pub(super) fn each_source_value(&self, visit: &mut dyn FnMut(&Value)) {
         self.source.each_value(visit);
     }
