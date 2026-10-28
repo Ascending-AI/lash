@@ -550,7 +550,7 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
         .unwrap();
     assert!(store.claim(&previous, 1).await.unwrap().is_empty());
     assert_eq!(
-        requirements
+        *requirements
             .unmet_by(&previous.capabilities)
             .machine
             .helpers
