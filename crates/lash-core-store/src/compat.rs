@@ -89,7 +89,7 @@ pub struct CompatDescriptor {
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const POSTGRES_SCHEMA_VERSION: u32 = 4;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 5;
 
 /// The SQLite database's version: its `lash_compat` row and its entry in the
 /// release stamp. A SQLite deployment is one database file (ADR 0132 §12),
