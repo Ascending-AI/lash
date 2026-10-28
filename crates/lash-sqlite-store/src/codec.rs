@@ -21,11 +21,17 @@ impl rusqlite::ToSql for SqlHash<'_> {
 
 /// Decode only the binary baseline; a text key is corrupt stored data.
 pub(crate) fn hash_column(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<String> {
-    let bytes: Vec<u8> = row.get(column)?;
-    let digest: [u8; 32] = bytes.try_into().map_err(|_| {
+    node_column(row, column).map(|node| node.to_hex())
+}
+
+pub(crate) fn node_column(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<lash_core_store::checkpoint_graph::NodeId> {
+    let digest = row.get_ref(column)?.as_blob()?.try_into().map_err(|_| {
         sqlite_conversion_error(stored_data_corrupt("content address", "expected 32 bytes"))
     })?;
-    Ok(lash_core_store::checkpoint_graph::NodeId(digest).to_hex())
+    Ok(lash_core_store::checkpoint_graph::NodeId(digest))
 }
 
 pub(crate) fn optional_hash_column(

@@ -206,7 +206,10 @@ lash_store_sql::statements! {
             SELECT child.value FROM reached,
                  json_each(json_extract(?2, '$.' || reached.hash)) AS child
             WHERE NOT EXISTS (SELECT 1 FROM blobs WHERE hash = unhex(reached.hash))
-        ) SELECT unhex(reached.hash), stored.content, stored.encoding
+        ) SELECT unhex(reached.hash),
+                 CASE WHEN json_type(?2, '$.' || reached.hash) = 'array'
+                      THEN stored.content ELSE NULL END,
+                 stored.encoding
           FROM reached LEFT JOIN blobs AS stored ON stored.hash = unhex(reached.hash)
           ORDER BY reached.hash";
 
@@ -1181,44 +1184,25 @@ pub(super) fn install(
             }
         };
     }
-    // External references and the changed staged frontier each need one
-    // set-based read. Absent bodies install in bounded batches, followed by
-    // one edge write.
     let named: BTreeSet<&NodeId> = graph
         .external
         .iter()
         .chain(graph.external_roots.iter())
         .collect();
-    if !named.is_empty() {
-        let mut present = BTreeMap::new();
-        let mut statement = tx.prepare_cached(SQL.sqlite.stored_encodings.sql())?;
-        let rows = statement.query_map([digest_array(named)], |row| {
-            Ok((crate::codec::hash_column(row, 0)?, row.get::<_, i64>(1)?))
-        })?;
-        for row in rows {
-            let (hash, encoding) = row?;
-            present.insert(
-                hash,
-                answer!(Ok::<_, rusqlite::Error>(encoding_of(encoding))),
-            );
-        }
-        for node in &graph.external {
-            if !present.contains_key(&node.to_hex()) {
-                return Ok(Err(GraphRefusal::MissingNode(*node)));
-            }
-        }
-        for root in &graph.external_roots {
-            match present.get(&root.to_hex()) {
-                None => return Ok(Err(GraphRefusal::MissingNode(*root))),
-                Some(BlobEncoding::Opaque) => {
-                    return Ok(Err(GraphRefusal::EncodingConflict(*root)));
-                }
-                Some(BlobEncoding::Graph) => {}
-            }
-        }
-    }
+    let mut present = BTreeMap::new();
     let mut installed = InstalledGraphMeasurement::default();
     if graph.nodes.is_empty() {
+        if !named.is_empty() {
+            let mut statement = tx.prepare_cached(SQL.sqlite.stored_encodings.sql())?;
+            let rows = statement.query_map([digest_array(named)], |row| {
+                Ok((crate::codec::node_column(row, 0)?, row.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (id, encoding) = row?;
+                present.insert(id, answer!(Ok::<_, rusqlite::Error>(encoding_of(encoding))));
+            }
+        }
+        answer!(Ok::<_, rusqlite::Error>(check_external(graph, &present)));
         return Ok(Ok(installed));
     }
     // The staged nodes are read from the roots of the supplied DAG down by
@@ -1234,12 +1218,7 @@ pub(super) fn install(
     let slot = |id: &NodeId| staged.binary_search_by(|node| node.id.cmp(id)).ok();
     let mut state = vec![Staged::Unread; staged.len()];
     let mut followed = vec![false; staged.len()];
-    let mut children = BTreeMap::new();
     for node in staged {
-        children.insert(
-            node.id.to_hex(),
-            node.children.iter().map(NodeId::to_hex).collect::<Vec<_>>(),
-        );
         for child in &node.children {
             if let Some(index) = slot(child) {
                 followed[index] = true;
@@ -1251,33 +1230,50 @@ pub(super) fn install(
             .iter()
             .enumerate()
             .filter(|(index, _)| !followed[*index])
-            .map(|(_, node)| &node.id),
+            .map(|(_, node)| &node.id)
+            .chain(named.iter().copied()),
     );
     let mut absent = 0;
-    let children = json_array(&children);
+    let mut staged_refusal = None;
+    let children = staged_children(staged);
     let mut statement = tx.prepare_cached(SQL.sqlite.install_frontier.sql())?;
-    let _bindings =
-        crate::observed_sql::text_bindings(SQL.sqlite.install_frontier.sql(), &[&roots, &children]);
+    let _bindings = crate::observed_sql::text_bindings(
+        SQL.sqlite.install_frontier.sql(),
+        &[&roots, &children, &children],
+    );
     let mut rows = statement.query(rusqlite::params![roots, children])?;
     while let Some(row) = rows.next()? {
-        let hash = crate::codec::hash_column(row, 0)?;
-        // Children outside the supplied graph are validated by the external
-        // reference read above, and have no staged body to compare or insert.
-        let Some(index) = NodeId::from_hex(&hash).and_then(|id| slot(&id)) else {
-            continue;
-        };
+        let id = crate::codec::node_column(row, 0)?;
+        let encoding = row.get::<_, Option<i64>>(2)?;
+        if named.contains(&id)
+            && let Some(encoding) = encoding
+        {
+            present.insert(id, answer!(Ok::<_, rusqlite::Error>(encoding_of(encoding))));
+        }
+        let Some(index) = slot(&id) else { continue };
         let node = &staged[index];
-        match row.get::<_, Option<i64>>(2)? {
+        match encoding {
             None => {
                 state[index] = Staged::Absent;
                 absent += 1;
             }
             Some(encoding) => {
-                if answer!(Ok::<_, rusqlite::Error>(encoding_of(encoding))) != BlobEncoding::Graph {
-                    return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
-                }
-                if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
-                    return Ok(Err(GraphRefusal::ContentConflict(node.id)));
+                let checked = encoding_of(encoding).and_then(|encoding| {
+                    if encoding != BlobEncoding::Graph {
+                        Err(GraphRefusal::EncodingConflict(node.id))
+                    } else {
+                        Ok(())
+                    }
+                });
+                let refusal = match checked {
+                    Err(refusal) => Some(refusal),
+                    Ok(()) if row.get_ref(1)?.as_blob()? != &node.bytes[..] => {
+                        Some(GraphRefusal::ContentConflict(node.id))
+                    }
+                    Ok(()) => None,
+                };
+                if staged_refusal.is_none() {
+                    staged_refusal = refusal;
                 }
                 state[index] = Staged::Present;
             }
@@ -1285,6 +1281,10 @@ pub(super) fn install(
     }
     drop(rows);
     drop(statement);
+    answer!(Ok::<_, rusqlite::Error>(check_external(graph, &present)));
+    if let Some(refusal) = staged_refusal {
+        return Ok(Err(refusal));
+    }
     if absent == 0 {
         return Ok(Ok(installed));
     }
@@ -1375,17 +1375,56 @@ enum Staged {
 /// `ids` as one JSON array of digests, the binding a `json_each`
 /// statement reads.
 pub(super) fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
-    let mut array = String::from("[");
-    for id in ids {
-        if array.len() > 1 {
+    let mut array = String::new();
+    append_digests(&mut array, ids);
+    array
+}
+
+fn append_digests<'a>(array: &mut String, ids: impl IntoIterator<Item = &'a NodeId>) {
+    array.push('[');
+    for (index, id) in ids.into_iter().enumerate() {
+        if index != 0 {
             array.push(',');
         }
         array.push('"');
-        id.write_hex(&mut array);
+        id.write_hex(array);
         array.push('"');
     }
     array.push(']');
-    array
+}
+
+fn staged_children(nodes: &[CheckedNode]) -> String {
+    let mut children = String::from("{");
+    for (index, node) in nodes.iter().enumerate() {
+        if index != 0 {
+            children.push(',');
+        }
+        children.push('"');
+        node.id.write_hex(&mut children);
+        children.push_str("\":");
+        append_digests(&mut children, &node.children);
+    }
+    children.push('}');
+    children
+}
+
+fn check_external(
+    graph: &CheckedGraph,
+    present: &BTreeMap<NodeId, BlobEncoding>,
+) -> Result<(), GraphRefusal> {
+    for id in &graph.external {
+        if !present.contains_key(id) {
+            return Err(GraphRefusal::MissingNode(*id));
+        }
+    }
+    for root in &graph.external_roots {
+        match present.get(root) {
+            None => return Err(GraphRefusal::MissingNode(*root)),
+            Some(BlobEncoding::Opaque) => return Err(GraphRefusal::EncodingConflict(*root)),
+            Some(BlobEncoding::Graph) => {}
+        }
+    }
+    Ok(())
 }
 
 fn backend(error: DurableError) -> GraphRefusal {
