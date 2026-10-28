@@ -445,15 +445,15 @@ lash_rust_integration_test(
 )
 
 export_file(
-    name = "schema.sql",
-    src = "schema.sql",
+    name = "postgres-host-config-v1.schema.json",
+    src = "postgres-host-config-v1.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "postgres-host-config-v1.schema.json",
-    src = "postgres-host-config-v1.schema.json",
+    name = "schema.sql",
+    src = "schema.sql",
     mode = "reference",
     visibility = ["PUBLIC"],
 )

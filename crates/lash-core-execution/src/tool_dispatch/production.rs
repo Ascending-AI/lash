@@ -1130,7 +1130,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
         // A cell's call closes its span from its committed outcome, on the
         // owner whose commit wrote it (`CellMembers::observe`), not here.
-        context.emit_tool_call_completed_activity(call_id.as_str(), &record, None);
+        context.emit_tool_call_returned_activity(call_id.as_str(), &record, None);
         Ok(())
     }
     fn observe_started(&self, _call_id: &crate::ToolCallId, request: &SingletonPreparedRequest) {

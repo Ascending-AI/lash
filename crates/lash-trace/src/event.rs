@@ -170,6 +170,33 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issuing_node_id: Option<String>,
     },
+    /// A provisional tool return, which may never commit (ADR 0122).
+    ToolCallReturned {
+        /// Lash's identity for the call (ADR 0117).
+        call_id: lash_protocol_types::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the store, so provider correlation travels with the trace.
+        provider_call_id: Option<String>,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
+        name: TraceToolName,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
+        args: TraceToolArgs,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
+        output: TraceToolCallOutput,
+        duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the store, so issuer correlation travels with the trace.
+        issuing_node_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the journal, so the observed retry ladder travels with the trace.
+        attempts: Option<Vec<TraceRetryAttempt>>,
+        /// What the body of the attempt that settled the call set on its own
+        /// tool span: in memory only, stamped by the span's closer.
+        #[serde(default, skip_serializing_if = "crate::ToolSpanAnnotations::is_empty")]
+        span_attributes: crate::ToolSpanAnnotations,
+    },
+    /// The tool outcome from an accepted commit.
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
         call_id: lash_protocol_types::ToolCallId,
@@ -392,7 +419,8 @@ impl TraceEvent {
                 TraceLanguageExecutionPayload::ExecutionStarted { .. }
                 | TraceLanguageExecutionPayload::Counts { .. } => false,
             },
-            Self::TurnStarted { .. }
+            Self::ToolCallReturned { .. }
+            | Self::TurnStarted { .. }
             | Self::ExecCodeDiscarded { .. }
             | Self::PromptBuilt { .. }
             | Self::AttachmentDegraded { .. }

@@ -7,9 +7,8 @@
 //!
 //! - **Activity:** a native call's `ToolCallStarted` reaches the host's
 //!   sink live, while the call's body still holds, so before the round's
-//!   outcome commit; its `ToolIntentOutcome` and `ToolCallCompleted` follow
-//!   once the call settles. The live stream is provisional (ADR 0002): the
-//!   turn's commit settles it, and only a turn's terminal waits for that
+//!   outcome commit; `ToolIntentOutcome` and `ToolCallReturned` carry live
+//!   progress as it settles. `ToolCallCompleted` follows the accepted outcome
 //!   commit (ADR 0122). The crash half, one committed outcome per call
 //!   after a cut at `round.outcome`, is in `tool_crash_laws.rs`.
 //! - **Presentation:** a plugin's presentation step presents every native

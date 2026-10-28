@@ -314,7 +314,6 @@ impl RuntimeExecutionContext<'_> {
             let context = self.with_call_observation_key(self.call_observation_key(call_key));
             let this = &context;
             let call_id = &ids.call_id;
-            let attempts = outcome.attempts.clone();
             let output = outcome.record.output.clone();
             let facts = crate::plugin::ToolPresentationFacts {
                 intent_outcomes: outcome.intent_outcomes.clone(),
@@ -385,8 +384,7 @@ impl RuntimeExecutionContext<'_> {
                 args: outcome.record.args.clone(),
                 output: output.clone(),
             };
-            this.emit_tool_call_completed(call_key, &record, &attempts, Some(duration_ms))
-                .await;
+            this.emit_tool_call_returned_activity(call_key, &record, Some(duration_ms));
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
                     control_origin: crate::sansio::ToolControlOrigin::OwnCall,
@@ -442,6 +440,32 @@ impl RuntimeExecutionContext<'_> {
                 },
             );
         }
+    }
+
+    pub(crate) fn emit_tool_call_returned_activity(
+        &self,
+        call_key: &str,
+        record: &ToolCallRecord,
+        duration_ms: Option<u64>,
+    ) {
+        self.trace_tool_call_returned(record, &[], None);
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let mut cursor = context.observation_cursor(&format!("tool:{}:returned", record.call_id));
+        cursor.observe(
+            context.dispatch.observer.as_ref(),
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(tool_activity_id(&record.call_id)),
+                event: TurnEvent::ToolCallReturned {
+                    call_id: record.call_id.clone(),
+                    provider_call_id: record.provider_call_id.clone(),
+                    name: record.tool.clone(),
+                    args: record.args.clone(),
+                    output: record.output.clone(),
+                    duration_ms,
+                    graph_key: self.code_block_graph_key(),
+                },
+            },
+        );
     }
 
     pub(crate) fn emit_tool_call_completed_activity(

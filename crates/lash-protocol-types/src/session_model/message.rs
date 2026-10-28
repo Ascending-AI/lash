@@ -148,7 +148,9 @@ pub fn message_content_equal<'left, 'right>(
         && (Arc::ptr_eq(left.parts, right.parts) || left.parts == right.parts)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub enum MessageRole {
     User,
     Assistant,
@@ -156,14 +158,18 @@ pub enum MessageRole {
     Event,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnOutputSource {
     Runtime,
     Plugin { plugin_id: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum MessageOrigin {
@@ -206,8 +212,9 @@ pub enum MessageOrigin {
 /// except on a tool result, whose content is its ordered blocks.
 /// Serialization uses a flat object and rejects unknown fields and invalid
 /// kind/field combinations through [`InvalidPartCombination`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, schemars::JsonSchema)]
 #[non_exhaustive]
+#[schemars(with = "FlatPart")]
 pub enum Part {
     /// Ordinary response text; `response_meta` carries provider-assigned
     /// phase/replay metadata when present.
@@ -302,7 +309,7 @@ impl std::fmt::Display for InvalidPartCombination {
 impl std::error::Error for InvalidPartCombination {}
 
 /// Strict flat wire shape, validated into the variant selected by `kind`.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct FlatPart {
     id: String,
@@ -513,8 +520,9 @@ impl<'de> serde::Deserialize<'de> for Part {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, schemars::JsonSchema)]
 #[non_exhaustive]
+#[schemars(with = "String")]
 pub enum PartKind {
     Text,
     Attachment,
@@ -597,7 +605,9 @@ impl<'de> serde::Deserialize<'de> for PartKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct PartAttachment {
     pub reference: AttachmentRef,

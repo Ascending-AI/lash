@@ -567,19 +567,26 @@ fn a_content_hook_selects_a_completed_tools_result_by_name() {
         content: ContentPolicy::captured(),
         ..Default::default()
     };
-    for (name, kept) in [("tool", false), ("other", true)] {
-        let mut event = tool(json!({"secret": "tool-specific secret"}));
-        if let TraceEvent::ToolCallCompleted { name: target, .. } = &mut event {
-            *target = name.into();
+    for returned in [false, true] {
+        for (name, kept) in [("tool", false), ("other", true)] {
+            let mut event = tool(json!({"secret": "tool-specific secret"}));
+            if let TraceEvent::ToolCallCompleted { name: target, .. } = &mut event {
+                *target = name.into();
+            }
+            if returned {
+                let mut encoded = serde_json::to_value(event).unwrap();
+                encoded["type"] = json!("tool_call_returned");
+                event = serde_json::from_value(encoded).unwrap();
+            }
+            let mut record = record(event);
+            record.apply_content(&policy, Some(&PerTool));
+            assert_eq!(
+                serde_json::to_string(&record)
+                    .unwrap()
+                    .contains("tool-specific secret"),
+                kept
+            );
         }
-        let mut record = record(event);
-        record.apply_content(&policy, Some(&PerTool));
-        assert_eq!(
-            serde_json::to_string(&record)
-                .unwrap()
-                .contains("tool-specific secret"),
-            kept
-        );
     }
 }
 

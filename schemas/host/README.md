@@ -28,6 +28,7 @@ target runs all of them:
 
 | Shape directory | Rust shape | Version owner | Generator |
 | --- | --- | --- | --- |
+| `turn-activity` | `TurnActivity` with its `TurnEvent` | `TURN_ACTIVITY_SCHEMA_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `workflow-execution-overlay` | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `kernel-migration-refusal` | `KernelMigrationRefusal`, including document and parked causes | `KERNEL_VERSION` | `crates/lash-core/src/bin/process_workflow_schema_generator.rs` |

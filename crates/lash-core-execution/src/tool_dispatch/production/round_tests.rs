@@ -129,10 +129,10 @@ fn a_tool_answered_without_admission_has_no_duration() {
         observed.try_recv().expect("the call starts").event,
         crate::TurnEvent::ToolCallStarted { .. }
     ));
-    let crate::TurnEvent::ToolCallCompleted { duration_ms, .. } =
+    let crate::TurnEvent::ToolCallReturned { duration_ms, .. } =
         observed.try_recv().expect("the call answers").event
     else {
-        panic!("a completion follows its start")
+        panic!("a return follows its start")
     };
     assert_eq!(duration_ms, None);
 }

@@ -178,7 +178,14 @@ checkpoint, and never feeds it back
   `TurnStarted` if none was recorded, and remove those whose correlation IDs
   a later `ModelAttemptReset` retracts. Resubmitting that text is your
   choice, as ordinary input. Tool arguments are not streamed, and a tool's
-  output arrives only with `ToolCallCompleted`.
+  provisional output arrives with `ToolCallReturned`. Only
+  `ToolCallCompleted` reports an outcome accepted by the owning round or cell
+  commit. A return may never complete after an Immediate stop or worker loss;
+  a restored Once member can complete with Interrupted instead of its lost
+  success. `CodeBlockReturned` and `CodeBlockCompleted` make the same split
+  for cells: completion follows the commit consuming the cell answer and
+  carries its committed `CellOutcome`. Use returns for live progress and
+  completions for done state.
 - **Keep up, or the tail is gone for good.** Follow the stream within the live
   replay window: 2,048 events or 120 seconds per session by default, on the
   replay of the process the turn runs in. A replay gap, a follower that lags

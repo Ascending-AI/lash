@@ -47,7 +47,8 @@ const DEFINITION_ID_HEX_LEN: usize = 64;
 ///
 /// Serializes as `{"$lash_definition_id": "<spelling>"}` and refuses any other
 /// field on the way in. Ordering is over the spelling.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
+#[schemars(with = "TaggedDefinitionId<String>")]
 pub struct ProcessDefinitionId(String);
 
 /// Why a spelling or a record is not a definition id.
@@ -173,7 +174,7 @@ impl TryFrom<&str> for ProcessDefinitionId {
 }
 
 /// The serde form of the tagged record: one field, nothing else.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TaggedDefinitionId<Spelling> {
     #[serde(rename = "$lash_definition_id")]

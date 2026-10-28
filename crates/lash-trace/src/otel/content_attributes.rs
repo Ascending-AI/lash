@@ -69,7 +69,9 @@ pub(super) fn attributes(record: &TraceRecord, out: &mut Vec<KeyValue>) {
             i64::try_from(record.content.dropped_messages).unwrap_or(i64::MAX),
         ));
     }
-    if let crate::TraceEvent::ToolCallCompleted { args, output, .. } = &record.event {
+    if let crate::TraceEvent::ToolCallReturned { args, output, .. }
+    | crate::TraceEvent::ToolCallCompleted { args, output, .. } = &record.event
+    {
         if out
             .iter()
             .any(|a| a.key.as_str() == "gen_ai.tool.call.arguments")

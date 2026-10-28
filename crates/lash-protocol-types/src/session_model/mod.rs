@@ -245,9 +245,10 @@ pub use protocol_payload::ProtocolPayload;
 
 /// Durable protocol payload stored in session history. Its payload is
 /// shared by every clone of the event (see [`ProtocolPayload`]).
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ProtocolEvent {
     pub plugin_id: String,
+    #[schemars(with = "serde_json::Value")]
     pub payload: ProtocolPayload,
 }
 
@@ -283,7 +284,7 @@ impl ProtocolEvent {
 /// identity encoder. Adding or changing a variant or nested semantic field
 /// requires an identity encoding version bump and replacement golden corpus;
 /// serde representation itself is deliberately not the identity format.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 // justification: append nodes are public durable DTOs kept inline to preserve their established Rust construction API.
 #[allow(clippy::large_enum_variant)]
@@ -401,7 +402,7 @@ impl ConversationRecord {
 /// These events may be partial, duplicated, or display-only and are not proof
 /// of durable session history. Persisted semantic history uses
 /// [`SessionHistoryRecord`].
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ErrorEnvelope {
     /// The operation and controller answer behind an effect refusal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -436,7 +437,7 @@ pub struct ErrorEnvelope {
 
 /// A failure reported to hosts: the single payload both host lanes carry for
 /// it (`SessionStreamEvent::Error` and the turn activity's `Error`).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ReportedFailure {
     pub message: String,
     /// The failure's typed kind, code, terminal reason, retryability and
@@ -448,7 +449,7 @@ pub struct ReportedFailure {
 /// A retry that is about to wait: the single payload the provider stream and
 /// both host lanes carry for it (`LlmStreamEvent::RetryStatus`,
 /// `SessionStreamEvent::RetryStatus` and the turn activity's `RetryStatus`).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RetryProgress {
     pub wait_seconds: u64,
     pub attempt: usize,

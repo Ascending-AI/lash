@@ -306,7 +306,7 @@ function toolSucceeded(event) {
 }
 
 function toolRunning(event) {
-  return event?.type === "tool_call_started" || event?.phase === "running";
+  return event?.type === "tool_call_started" || event?.type === "tool_call_returned" || event?.phase === "running";
 }
 
 function cleanArgs(args) {
@@ -321,7 +321,7 @@ function compactToolPayload(event) {
   const running = toolRunning(event);
   return {
     args: cleanArgs(event.args),
-    status: toolOutcome(event).status || (running ? "running" : (succeeded ? "success" : "unknown")),
+    status: event?.type === "tool_call_returned" ? "returned" : toolOutcome(event).status || (running ? "running" : (succeeded ? "success" : "unknown")),
     ...(succeeded ? { result: toolResult(event) } : {})
   };
 }
@@ -370,14 +370,18 @@ function patchToolView(view, event) {
   const ok = toolSucceeded(event);
   view.node.className = "tool" + (running ? " pending" : (ok ? "" : " fail"));
   view.name.textContent = durable ? event.operation : displayToolName(event.name);
-  view.badge.textContent = running ? "running" : (ok ? "completed" : "failed");
+  view.badge.textContent = event.type === "tool_call_returned" ? "returned" : running ? "running" : (ok ? "completed" : "failed");
   view.timing.textContent = durable
     ? "durable outcome only"
+    : event.type === "tool_call_returned"
+    ? "awaiting commit"
     : running
     ? "in progress"
     : `${ok ? "ok" : "failed"}${event.duration_ms == null ? "" : ` in ${event.duration_ms}ms`}`;
   view.summary.textContent = durable
     ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity are not loaded after reload`
+    : event.type === "tool_call_returned"
+    ? "Tool returned; awaiting commit"
     : running
     ? "Tool running"
     : (ok ? summarizeToolResult(event.name, toolResult(event)) : "Tool failed");
@@ -403,6 +407,7 @@ function codeBlockOutput(event) {
 }
 
 function codeBlockStateLabel(event) {
+  if (event.type === "code_block_returned") return "returned";
   if (event.phase === "running") return "running";
   return codeBlockFailure(event) ? "failed" : "completed";
 }
@@ -1241,8 +1246,9 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
 
   function applyTool(turnId, event) {
     const state = turn(turnId);
-    if (state.openCode) {
-      liveRow(turnId, state.openCode, "code", live => {
+    const codeKey = (event.graph_key ? `code:${turnId}:${event.graph_key}` : state.openCode);
+    if (codeKey) {
+      liveRow(turnId, codeKey, "code", live => {
         const tools = [...(live?.tools || [])];
         const index = tools.findIndex(tool => tool.event.call_id === event.call_id);
         const next = { event: event.type === "tool_call_started" ? { ...event, phase: "running" } : event };
@@ -1288,20 +1294,20 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
       liveRow(turnId, `retry:${turnId}`, "retry", () => ({ event, at: new Date(serverNow()).toISOString() }));
     }
     if (event.type === "code_block_started") {
-      const key = `code:${turnId}:${state.code++}`;
+      const key = event.graph_key ? `code:${turnId}:${event.graph_key}` : `code:${turnId}:${state.code++}`;
       state.openCode = key;
       liveRow(turnId, key, "code", () => ({ event: { ...event, phase: "running" }, tools: [] }));
       if (event.graph_key) hooks.executionStarted?.(event.graph_key);
     }
-    if (event.type === "code_block_completed") {
-      const key = state.openCode || `code:${turnId}:${state.code++}`;
-      state.openCode = null;
+    if (event.type === "code_block_returned" || event.type === "code_block_completed") {
+      const key = (event.graph_key ? `code:${turnId}:${event.graph_key}` : state.openCode) || `code:${turnId}:${state.code++}`;
+      if (state.openCode === key) state.openCode = null;
       liveRow(turnId, key, "code", live => ({
         tools: live?.tools || [],
         event: { ...event, code: event.code || live?.event?.code || "" }
       }));
     }
-    if (event.type === "tool_call_started" || event.type === "tool_call_completed") applyTool(turnId, event);
+    if (event.type === "tool_call_started" || event.type === "tool_call_returned" || event.type === "tool_call_completed") applyTool(turnId, event);
   }
 
   /* A commit's rows: each upserts the row its key names. A row the reader

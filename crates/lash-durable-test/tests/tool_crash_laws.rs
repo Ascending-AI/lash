@@ -19,8 +19,8 @@
 //!   entry of one call sees one call id, and the three calls are three ids.
 //! - **Activity (FIG-5251):** a step of one native call cut at its
 //!   `round.outcome`: the host's sink was handed the call's
-//!   `ToolCallStarted` and `ToolCallCompleted` (a dead owner's provisional
-//!   activity may precede the redrive's), and the session's committed
+//!   `ToolCallStarted`, provisional `ToolCallReturned` and, when its
+//!   acknowledgement survives, committed `ToolCallCompleted`, and the session's committed
 //!   observation holds exactly one outcome for the call. Cut at its
 //!   `turn.commit`, the commit reaches a host following the session's
 //!   observation feed from before the turn even when the owner lost the
@@ -179,6 +179,10 @@ enum Turn {
     CellIdentity,
     /// One step of one native call, followed by a host's sink.
     Activity,
+    /// A Once call whose successful return is lost before its outcome commit.
+    OnceActivity,
+    /// A cell returned before its turn records its answer.
+    CellReturn,
     /// One step of one [`STATE_SET`] call.
     State,
     /// One step of two members: [`STATE_SET`], and [`STATE_OBSERVE`]
@@ -205,6 +209,7 @@ impl Turn {
         matches!(
             self,
             Self::LimitCell
+                | Self::CellReturn
                 | Self::CellIdentity
                 | Self::StateCell
                 | Self::StatePairCell
@@ -272,7 +277,10 @@ impl Turn {
                     aggregate(leaves(LIMIT..LIMIT + 1)),
                 ))]
             }
-            Self::Activity => vec![served::response(vec![served::call(
+            Self::CellReturn => vec![served::cell(
+                "await tools.crashProbe({ label: \"cell-return\" }); await control.finish(\"cell returned\");",
+            )],
+            Self::Activity | Self::OnceActivity => vec![served::response(vec![served::call(
                 &format!("call-{ACTIVITY}"),
                 PROBE_OPERATION,
                 serde_json::json!({ "label": ACTIVITY }),
@@ -345,7 +353,8 @@ impl Turn {
                 ],
                 Vec::new(),
             ),
-            Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
+            Self::CellReturn => (vec!["cell-return".to_owned()], Vec::new()),
+            Self::Activity | Self::OnceActivity => (vec![ACTIVITY.to_owned()], Vec::new()),
             Self::Put => (vec![PUT.to_owned()], Vec::new()),
             Self::Trace => (vec![TRACE.to_owned()], Vec::new()),
             Self::CellTrace => (vec![CELL_TRACE.to_owned()], Vec::new()),
@@ -458,6 +467,19 @@ fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
 
 struct Probe {
     world: Arc<World>,
+    once: bool,
+}
+
+impl Probe {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
+        let definition = probe_definition();
+        if self.once {
+            definition
+                .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
+        } else {
+            definition
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -469,7 +491,7 @@ impl lash_core::ToolProvider for Probe {
         Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        Ok(vec![probe_definition().manifest()])
+        Ok(vec![self.definition().manifest()])
     }
 
     fn resolve_contract(
@@ -477,7 +499,7 @@ impl lash_core::ToolProvider for Probe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
+        (name == PROBE_OPERATION).then(|| Arc::new(self.definition().contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -933,6 +955,7 @@ struct Crash {
             tokio::sync::mpsc::UnboundedReceiver<lash::observe::SessionObservationStreamItem>,
         )>,
     >,
+    before_recovery: Mutex<Vec<lash::TurnActivity>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     /// What the deployment installs beside the scenario's own plugins.
     installed: plugin_sections::Installed,
@@ -961,6 +984,7 @@ impl Crash {
             losses: publication_loss::Losses::default(),
             host: Mutex::default(),
             chat: Mutex::default(),
+            before_recovery: Mutex::default(),
             keep: Mutex::default(),
             installed: plugin_sections::Installed::Nothing,
         }
@@ -1042,6 +1066,7 @@ impl Crash {
                             .with_tool_provider(
                                 lash::tool_provider_key!("probe"),
                                 Arc::new(Probe {
+                                    once: self.turn == Turn::OnceActivity,
                                     world: Arc::clone(&self.world),
                                 }),
                             )
@@ -1127,8 +1152,97 @@ impl Crash {
         }
         violations.extend(self.limit_laws().await);
 
-        if self.turn == Turn::Activity {
+        if self.turn == Turn::OnceActivity && cut.is_some() {
+            use lash_core_execution::runtime::actor::round;
+            let run = self
+                .host
+                .lock_recover()
+                .as_ref()
+                .unwrap()
+                .1
+                .id()
+                .unwrap()
+                .clone();
+            // The terminal retires the ledger. Fold the facts the store accepted,
+            // retained by the crash harness before that retirement.
+            let facts = nodes
+                .script()
+                .ledger(&lash_durable::domain::OwnerKey::Turn(session(), run));
+            match round::fold(
+                &facts,
+                &round::PolicyView::default(),
+                &round::PinnedWaits::ledger(),
+            ) {
+                Ok(fold) => {
+                    let outcomes = fold
+                        .rounds()
+                        .flat_map(|round| round.members())
+                        .map(|member| member.outcome())
+                        .collect::<Vec<_>>();
+                    if !matches!(
+                        outcomes.as_slice(),
+                        [Some(lash_core_store::tool_run::SettledOutput::Interrupted)]
+                    ) {
+                        violations.push(format!(
+                            "the restored Once member was not Interrupted: {outcomes:?}"
+                        ));
+                    }
+                }
+                Err(error) => {
+                    violations.push(format!("the committed tool outcomes did not fold: {error}"))
+                }
+            }
+        }
+        if matches!(self.turn, Turn::Activity | Turn::OnceActivity) {
             violations.extend(self.activity_laws(cut).await);
+        }
+        if self.turn == Turn::CellReturn && cut.is_some() {
+            let before = self.before_recovery.lock_recover();
+            if !before.iter().any(|activity| {
+                serde_json::to_value(&activity.event).unwrap()["type"] == "code_block_returned"
+            }) {
+                violations.push("the lost cell did not publish its provisional return".into());
+            }
+            if before.iter().any(|activity| {
+                matches!(activity.event, lash::TurnEvent::CodeBlockCompleted { .. })
+            }) {
+                violations
+                    .push("the lost cell completed before its owning commit was accepted".into());
+            }
+        }
+        if self.turn == Turn::CellReturn {
+            use lash_core::LiveReplayStore as _;
+            let cursor = self
+                .host
+                .lock_recover()
+                .as_ref()
+                .unwrap()
+                .1
+                .cursor()
+                .clone();
+            let lash_core::LiveReplayOutcome::Replayed(events) =
+                self.live_replay.replay_after_cursor(&cursor).await.unwrap()
+            else {
+                panic!("the completed cell's live replay was lost");
+            };
+            let completed = events
+                .iter()
+                .filter_map(|event| match &event.payload {
+                    lash::observe::SessionObservationEventPayload::TurnActivity(activity) => {
+                        match &activity.event {
+                            lash::TurnEvent::CodeBlockCompleted { result, .. } => Some(result),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !matches!(completed.as_slice(), [outcome] if outcome.finish() == Some(&lash::attachments::OutputValue::Inline(serde_json::json!("cell returned"))))
+            {
+                violations.push(format!(
+                    "the accepted cell did not complete with its committed outcome: {completed:?}"
+                ));
+            }
         }
         violations.extend(self.installed.laws(&self.scripts.requests(INPUT)));
         if self.turn.changes_state() {
@@ -1414,6 +1528,32 @@ impl Crash {
         };
         let replay = self.live_replay.replay_after_cursor(handle.cursor()).await;
         if let Ok(lash_core::LiveReplayOutcome::Replayed(events)) = replay {
+            if self.turn == Turn::OnceActivity && cut.is_some() {
+                let activities = events
+                    .iter()
+                    .filter_map(|event| match &event.payload {
+                        SessionObservationEventPayload::TurnActivity(activity) => {
+                            Some(&activity.event)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let returned = activities
+                    .iter()
+                    .any(|event| matches!(event, lash_core::TurnEvent::ToolCallReturned { .. }));
+                if !returned {
+                    violations.push(
+                        "the lost worker's tool return was not published as provisional".into(),
+                    );
+                }
+                for event in activities {
+                    if let lash_core::TurnEvent::ToolCallCompleted { output, .. } = event
+                        && !matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_interrupted")
+                    {
+                        violations.push(format!("the lost worker's completion disagreed with the committed Interrupted outcome: {output:?}"));
+                    }
+                }
+            }
             for event in &events {
                 if matches!(&event.payload,
                     SessionObservationEventPayload::TurnActivity(activity)
@@ -1444,7 +1584,8 @@ impl Crash {
             other => violations.push(format!("the host's follow did not settle: {other:?}")),
         }
         // A dead owner's provisional activity may precede the redrive,
-        // but the feed deduplicates a call's completion by its stable identity,
+        // but only the outcome's acknowledged writer completes it. The feed
+        // deduplicates that completion by its stable identity,
         // from the run that answers the call. A cut at `turn.commit` resumes
         // past the answered round and runs the call in no later run, and
         // what a lost owner never published is not promised (ADR 0122, decision 4).
@@ -1466,9 +1607,21 @@ impl Crash {
                 *completed.entry(call_id.clone()).or_insert(0) += 1;
             }
         }
-        if rerun && (!started || completed.len() != 1) {
+        let returned = activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                lash_core::TurnEvent::ToolCallReturned { call_id, .. } => Some(call_id),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        if rerun && (!started || returned.len() != 1) {
             violations.push(format!(
-                "the host's sink was not handed the call's start and completion: {activities:#?}"
+                "the host's sink was not handed the call's start and provisional return: {activities:#?}"
+            ));
+        }
+        if cut.is_none() && completed.len() != 1 {
+            violations.push(format!(
+                "the uncut call has no committed completion: {activities:#?}"
             ));
         }
         if completed.values().any(|count| *count != 1) {
@@ -1654,7 +1807,7 @@ impl Scenario for Crash {
             .create(lash::SessionCreation::root(self.turn.spec()))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
-        if self.turn == Turn::Activity {
+        if matches!(self.turn, Turn::Activity | Turn::OnceActivity) {
             let observed = self
                 .core()
                 .session(crate::session())
@@ -1749,6 +1902,34 @@ impl Scenario for Crash {
     }
 
     async fn done(&self, nodes: &SimNodes) -> bool {
+        use lash_core::LiveReplayStore as _;
+        if self.turn == Turn::CellReturn
+            && nodes.life("a") == lash_durable_test::Life::Dead
+            && self.before_recovery.lock_recover().is_empty()
+        {
+            let cursor = self
+                .host
+                .lock_recover()
+                .as_ref()
+                .unwrap()
+                .1
+                .cursor()
+                .clone();
+            let lash_core::LiveReplayOutcome::Replayed(events) =
+                self.live_replay.replay_after_cursor(&cursor).await.unwrap()
+            else {
+                panic!("the cell's live replay was lost before recovery");
+            };
+            *self.before_recovery.lock_recover() = events
+                .iter()
+                .filter_map(|event| match &event.payload {
+                    lash::observe::SessionObservationEventPayload::TurnActivity(activity) => {
+                        Some(activity.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+        }
         matches!(
             nodes.database().actor(&actor()).await,
             Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
@@ -1923,9 +2104,32 @@ async fn code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill(tier
     prove(Turn::CellIdentity, tier).await;
 }
 
-/// A native call cut at its combined outcome and model admission and redriven on the other node
-/// streams its start and completion to the host's sink, and the session's
-/// committed observation holds exactly one outcome for it (FIG-5251).
+/// FIG-7529: a returned Once member whose worker is lost before commit restores
+/// Interrupted. Its successful return must never be reported as committed.
+async fn a_lost_workers_tool_return_never_completes_successfully(tier: Tier) {
+    prove_under(
+        Turn::OnceActivity,
+        tier,
+        &[CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START],
+        &[Fault::Abort],
+    )
+    .await;
+}
+
+/// FIG-7529: a cell lost after return but before its owning turn commits must
+/// never publish a completion from the lost activation.
+async fn a_lost_cells_return_never_completes_before_commit(tier: Tier) {
+    prove_under(
+        Turn::CellReturn,
+        tier,
+        &[CommitLabel::TURN_COMMIT],
+        &[Fault::Abort],
+    )
+    .await;
+}
+
+/// A native call cut at its outcome streams its provisional return, completes
+/// only from an acknowledged outcome, and commits exactly one result (FIG-5251).
 async fn a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome(tier: Tier) {
     prove_at(
         Turn::Activity,
@@ -2133,6 +2337,8 @@ tiered_laws!(
     a_cell_member_never_observes_another_members_uncommitted_state,
     a_tool_state_change_cut_at_its_outcome_is_the_committed_value_after_resume,
     a_member_never_observes_another_members_uncommitted_state,
+    a_lost_workers_tool_return_never_completes_successfully,
+    a_lost_cells_return_never_completes_before_commit,
     a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
     a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_outcome,
     a_commit_whose_publication_was_lost_still_reaches_the_host,

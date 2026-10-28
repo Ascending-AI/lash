@@ -1074,7 +1074,19 @@ def filegroups(package_name: str) -> str:
     return "".join(chunks)
 
 
-def exported_files(package_name: str) -> str:
+def exported_paths(package_name: str, package_dir: str) -> list[str]:
+    """Resolve exported source patterns, including newly generated contracts."""
+    directory = ROOT / package_dir
+    paths = set()
+    for pattern in PACKAGE_POLICY.get("exported_files", {}).get(package_name, []):
+        matches = [path for path in directory.glob(pattern) if path.is_file()]
+        if not matches:
+            raise ValueError(f"exported source pattern matches nothing: {package_dir}/{pattern}")
+        paths.update(path.relative_to(directory).as_posix() for path in matches)
+    return sorted(paths)
+
+
+def exported_files(package_name: str, package_dir: str) -> str:
     """Single package files other packages' rules take as source artifacts."""
     return "".join(
         "export_file(\n"
@@ -1083,7 +1095,7 @@ def exported_files(package_name: str) -> str:
         '    mode = "reference",\n'
         '    visibility = ["PUBLIC"],\n'
         ")\n\n"
-        for path in PACKAGE_POLICY.get("exported_files", {}).get(package_name, [])
+        for path in exported_paths(package_name, package_dir)
     )
 
 
@@ -1489,7 +1501,7 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
                 )
 
     chunks.append(filegroups(package["name"]))
-    chunks.append(exported_files(package["name"]))
+    chunks.append(exported_files(package["name"], package_dir))
 
     # One batch is only worth its wrapper action when it replaces at least
     # two per-test runfiles forests.

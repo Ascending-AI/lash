@@ -166,7 +166,11 @@ impl TraceEvent {
                     }
                 }
                 "gen_ai.tool.call.arguments" => match self {
-                    Self::ToolCallCompleted {
+                    Self::ToolCallReturned {
+                        args: crate::TraceToolArgs::Value(args),
+                        ..
+                    }
+                    | Self::ToolCallCompleted {
                         args: crate::TraceToolArgs::Value(args),
                         ..
                     }
@@ -177,11 +181,12 @@ impl TraceEvent {
                     _ => {}
                 },
                 "gen_ai.tool.call.result" => match self {
-                    Self::ToolCallCompleted { .. } => self.visit_content(&mut |field| {
-                        if field.category() == C::ToolResults {
-                            field.omit();
-                        }
-                    }),
+                    Self::ToolCallReturned { .. } | Self::ToolCallCompleted { .. } => self
+                        .visit_content(&mut |field| {
+                            if field.category() == C::ToolResults {
+                                field.omit();
+                            }
+                        }),
                     Self::ExecCodeCompleted { output, .. } => output.clear(),
                     _ => {}
                 },

@@ -42,6 +42,31 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.typescript_declarations(schema)
 
+    def test_trace_tuples_keep_fixed_arity(self) -> None:
+        """Trace span tuples must retain their two distinct elements in TypeScript."""
+        schema = {"title": "TraceTuple", "type": ["array", "null"],
+                  "prefixItems": [{"type": "string"}, {"type": "integer"}],
+                  "minItems": 2, "maxItems": 2, "x-lash-schema-version": 37}
+        declarations = MODULE.typescript_declarations(schema)
+        self.assertIn("export type TraceTuple = ([string, number] | null);", declarations)
+        self.assertIn("Derived from v37.schema.json", declarations)
+        schema.pop("maxItems")
+        with self.assertRaises(ValueError):
+            MODULE.typescript_declarations(schema)
+
+    def test_trace_flattened_unions_keep_common_fields(self) -> None:
+        """A flattened trace union must retain the context beside its payload."""
+        schema = {"title": "TraceUnion", "type": "object",
+                  "properties": {"context": {"type": "string"}},
+                  "required": ["context"], "unevaluatedProperties": False,
+                  "oneOf": [{"type": "object", "properties": {"kind": {"const": "node"}},
+                             "required": ["kind"], "additionalProperties": False}]}
+        declarations = MODULE.typescript_declarations(schema)
+        self.assertIn('"kind": "node";', declarations)
+        self.assertIn('"context": string;', declarations)
+        self.assertIn(" & ", declarations)
+        self.assertNotIn("[key: string]", declarations)
+
     def test_rendered_documents_use_shape_and_version(self) -> None:
         documents = MODULE.rendered_documents(
             [{"shape": "workflow", "version": 7, "schema": {"type": "object"}}]

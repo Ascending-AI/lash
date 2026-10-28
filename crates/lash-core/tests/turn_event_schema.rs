@@ -62,8 +62,10 @@ turn_event_tags! {
     ModelAttemptReset => "model_attempt_reset",
     ModelCallRecorded => "model_call_recorded",
     CodeBlockStarted => "code_block_started",
+    CodeBlockReturned => "code_block_returned",
     CodeBlockCompleted => "code_block_completed",
     ToolCallStarted => "tool_call_started",
+    ToolCallReturned => "tool_call_returned",
     ToolCallCompleted => "tool_call_completed",
     ToolIntentOutcome => "tool_intent_outcome",
     Finished => "finished",
@@ -172,6 +174,74 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             }),
         ),
         (
+            "code_block_returned (failed + graph_key present)",
+            TurnEvent::CodeBlockReturned {
+                            consumption: Vec::new(),
+                language: "python".to_string(),
+                prints: Some(vec!["1".to_string().into()]),
+                prints_retained: None,
+                result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    "boom",
+                )),
+                duration_ms: Some(5),
+                tool_call_ids: Some(vec![lash_core::ToolCallId::fixture("call-1")]),
+                graph_key: Some("effect:s:e".to_string()),
+            },
+            json!({
+                "type": "code_block_returned",
+                "consumption": [],
+                "language": "python",
+                "prints": [{
+                    "text": "1",
+                    "value": "1",
+                    "projection": {
+                        "truncated": false,
+                        "original_chars": 1,
+                        "projected_chars": 1,
+                        "limit_chars": 1,
+                    },
+                }],
+                "result": {
+                    "kind": "failed",
+                    "value": { "kind": "program", "message": "boom" },
+                },
+                "duration_ms": 5,
+                "tool_call_ids": [lash_core::ToolCallId::fixture("call-1").as_str()],
+                "graph_key": "effect:s:e",
+            }),
+        ),
+        (
+            "code_block_returned (finished + graph_key absent)",
+            TurnEvent::CodeBlockReturned {
+                            consumption: Vec::new(),
+                language: "python".to_string(),
+                prints: Some(Vec::new()),
+                prints_retained: None,
+                result: lash_core::CellOutcome::finished_by(
+                    "finish",
+                    lash_core::ToolCallId::fixture("call-1"),
+                    json!(null),
+                ),
+                duration_ms: Some(5),
+                tool_call_ids: Some(vec![]),
+                graph_key: None,
+            },
+            json!({
+                "type": "code_block_returned",
+                "consumption": [],
+                "language": "python",
+                "prints": [],
+                "result": { "kind": "controlled", "value": {
+                    "tool_name": "finish",
+                    "call_id": lash_core::ToolCallId::fixture("call-1"),
+                    "control": { "type": "finish", "value": { "inline": null } },
+                } },
+                "duration_ms": 5,
+                "tool_call_ids": [],
+            }),
+        ),
+        (
             "code_block_completed (failed + graph_key present)",
             TurnEvent::CodeBlockCompleted {
                             consumption: Vec::new(),
@@ -271,6 +341,36 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "call_id": lash_core::ToolCallId::fixture("call-2").as_str(),
                 "name": "read_file",
                 "args": { "path": "x" },
+            }),
+        ),
+        (
+            "tool_call_returned (all options present, success)",
+            TurnEvent::ToolCallReturned {
+                call_id: lash_core::ToolCallId::fixture("call-1"),
+                provider_call_id: Some("provider-1".to_string()),
+                name: "read_file".to_string(),
+                args: json!({ "path": "x" }),
+                output: ToolCallOutput::success("ok"),
+                duration_ms: Some(7),
+                graph_key: Some("effect:s:e".to_string()),
+            },
+            json!({
+                "type": "tool_call_returned",
+                "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
+                "provider_call_id": "provider-1",
+                "name": "read_file",
+                "args": { "path": "x" },
+                "output": {
+                    "outcome": {
+                        "status": "success",
+                        "payload": {
+                            "$lash_tool_value": "untrusted_json",
+                            "value": "ok",
+                        },
+                    },
+                },
+                "duration_ms": 7,
+                "graph_key": "effect:s:e",
             }),
         ),
         (

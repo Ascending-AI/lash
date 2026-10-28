@@ -28,7 +28,11 @@
 //!   ([`TurnObserver::release_terminal`]). A commit that fails, or that a
 //!   cancel the commit fences wins over, publishes none of it: the drive
 //!   that held it is dropped (FIG-5800).
-//! - **Everything else publishes before its commit.** A durable turn waits
+//! - **Tool completions follow their outcome commit.** The round and cell
+//!   lifecycle observers retain completion until the outcome commit is
+//!   acknowledged, then enqueue `ToolCallCompleted` from its folded output.
+//!   `ToolCallReturned` carries the earlier provisional return (ADR 0122).
+//! - **Other live activity publishes before its commit.** A durable turn waits
 //!   for what it queued to reach the host ([`TurnObserver::published`])
 //!   before it commits, so whoever reads the turn's terminal from the store
 //!   finds its activity already published (FIG-5507).
@@ -124,6 +128,8 @@ struct QueueState {
     /// A turn's outcome and everything after it, held until its commit is
     /// accepted.
     held: Option<Vec<Observation>>,
+    /// Completion observations whose owning commit has not acknowledged them.
+    completions: Vec<Observation>,
 }
 
 impl QueueState {
@@ -246,6 +252,46 @@ impl TurnObserver {
         }
     }
 
+    /// Keep a completion off the stream until its owner acknowledges the
+    /// commit. Dropping the close leaves it unpublished, just as a terminal.
+    pub(in crate::runtime) fn hold_completion(
+        &self,
+        activity: TurnActivity,
+    ) -> super::durable::session::CellClose {
+        let id = activity.id.clone();
+        let mut state = self.queue.state.lock_recover();
+        if !self.quiet_activities && !state.closed {
+            state.completions.push(Observation {
+                turn: self.turn.clone(),
+                event: RuntimeStreamEvent::Turn(activity),
+            });
+        }
+        drop(state);
+        let observer = self.clone();
+        super::durable::session::CellClose::new(move || observer.release_completion(&id))
+    }
+
+    fn release_completion(&self, id: &TurnActivityId) {
+        let mut state = self.queue.state.lock_recover();
+        let Some(index) = state.completions.iter().position(|observation| {
+            matches!(&observation.event, RuntimeStreamEvent::Turn(activity) if &activity.id == id)
+        }) else {
+            return;
+        };
+        let completion = state.completions.remove(index);
+        if state.closed {
+            return;
+        }
+        // Its commit is already accepted. Queue it before any terminal
+        // still held for that same acknowledgement.
+        if state.push(completion, &self.queue.framing, self.queue.frame_due())
+            && let Some(publisher) = state.publisher.take()
+        {
+            drop(state);
+            publisher.wake();
+        }
+    }
+
     /// Hold everything published from now on: the turn recorded its outcome,
     /// which no host may see before its commit (ADR 0122, FIG-5800).
     pub(in crate::runtime) fn hold_terminal(&self) {
@@ -281,6 +327,7 @@ impl TurnObserver {
         let mut state = self.queue.state.lock_recover();
         state.seal_frames();
         state.closed = true;
+        state.completions.clear();
         if let Some(publisher) = state.publisher.take() {
             drop(state);
             publisher.wake();
@@ -372,6 +419,7 @@ impl ObservationSource for TurnObservations {
         let mut state = self.queue.state.lock_recover();
         state.seal_frames();
         state.closed = true;
+        state.completions.clear();
         if let Some(waiter) = state.published_waiter.take() {
             drop(state);
             waiter.wake();

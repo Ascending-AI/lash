@@ -538,7 +538,18 @@ impl TraceEvent {
                 name: _,
                 issuing_node_id: _,
             } => value(C::ToolArguments, "tool_arguments", args, f),
-            Self::ToolCallCompleted {
+            Self::ToolCallReturned {
+                args,
+                output,
+                attempts,
+                call_id: _,
+                provider_call_id: _,
+                name: _,
+                duration_ms: _,
+                issuing_node_id: _,
+                span_attributes: _,
+            }
+            | Self::ToolCallCompleted {
                 args,
                 output,
                 attempts,

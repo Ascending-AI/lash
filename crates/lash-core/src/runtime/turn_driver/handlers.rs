@@ -629,7 +629,7 @@ impl RuntimeTurnDriver<'_> {
                     cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
-                        event: TurnEvent::CodeBlockCompleted {
+                        event: TurnEvent::CodeBlockReturned {
                             consumption: Vec::new(),
                             language: language.clone(),
                             prints: Some(Vec::new()),
@@ -737,7 +737,7 @@ impl RuntimeTurnDriver<'_> {
                     cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
-                        event: TurnEvent::CodeBlockCompleted {
+                        event: TurnEvent::CodeBlockReturned {
                             consumption: Vec::new(),
                             language: language.clone(),
                             prints: None,
@@ -809,53 +809,49 @@ impl RuntimeTurnDriver<'_> {
             // by the consuming commit, never copied into the turn.
             self.answered_cell_calls.records = output.tool_calls.clone();
         }
-        match &result {
-            Ok(output) => {
-                code_observations.observe(
-                    cell_tx,
-                    crate::engine::ObservedEvent::Activity {
-                        correlation_id: Some(code_correlation_id.clone()),
-                        event: TurnEvent::CodeBlockCompleted {
-                            consumption: output.consumption.clone(),
-                            language: language.clone(),
-                            prints: Some(output.prints.clone()),
-                            prints_retained: output.prints_retained.clone(),
-                            result: output.result.clone(),
-                            duration_ms: Some(cell_duration_ms),
-                            tool_call_ids: Some(
-                                output
-                                    .tool_calls
-                                    .iter()
-                                    .map(|record| record.call_id.clone())
-                                    .collect(),
-                            ),
-                            graph_key: graph_key.clone(),
-                        },
-                    },
-                );
-            }
-            Err(error) => {
-                code_observations.observe(
-                    cell_tx,
-                    crate::engine::ObservedEvent::Activity {
-                        correlation_id: Some(code_correlation_id.clone()),
-                        event: TurnEvent::CodeBlockCompleted {
-                            consumption: Vec::new(),
-                            language: language.clone(),
-                            prints: None,
-                            prints_retained: None,
-                            result: crate::CellOutcome::Failed(crate::CellFailure::new(
-                                crate::CellFailureKind::Host,
-                                error.message.clone(),
-                            )),
-                            duration_ms: Some(cell_duration_ms),
-                            tool_call_ids: None,
-                            graph_key: graph_key.clone(),
-                        },
-                    },
-                );
-            }
-        }
+        let activity_close = match &result {
+            Ok(output) => hold_and_observe_cell_return(
+                &mut code_observations,
+                cell_tx,
+                &cell_key,
+                code_correlation_id.clone(),
+                TurnEvent::CodeBlockReturned {
+                    consumption: output.consumption.clone(),
+                    language: language.clone(),
+                    prints: Some(output.prints.clone()),
+                    prints_retained: output.prints_retained.clone(),
+                    result: output.result.clone(),
+                    duration_ms: Some(cell_duration_ms),
+                    tool_call_ids: Some(
+                        output
+                            .tool_calls
+                            .iter()
+                            .map(|record| record.call_id.clone())
+                            .collect(),
+                    ),
+                    graph_key: graph_key.clone(),
+                },
+            ),
+            Err(error) => hold_and_observe_cell_return(
+                &mut code_observations,
+                cell_tx,
+                &cell_key,
+                code_correlation_id.clone(),
+                TurnEvent::CodeBlockReturned {
+                    consumption: Vec::new(),
+                    language: language.clone(),
+                    prints: None,
+                    prints_retained: None,
+                    result: crate::CellOutcome::Failed(crate::CellFailure::new(
+                        crate::CellFailureKind::Host,
+                        error.message.clone(),
+                    )),
+                    duration_ms: Some(cell_duration_ms),
+                    tool_call_ids: None,
+                    graph_key: graph_key.clone(),
+                },
+            ),
+        };
         // The cell answered: its span closes once the commit that consumes
         // the answer is acknowledged, from its first start to this end (P1).
         self.cell_start = None;
@@ -955,6 +951,16 @@ impl RuntimeTurnDriver<'_> {
                     Some((id, cell_trace.close(standing, ended_at_ms, event)));
             }
         }
+        let trace_close = self.answered_cell_close.take();
+        self.answered_cell_close = Some((
+            id,
+            crate::runtime::durable::session::CellClose::new(move || {
+                activity_close.publish();
+                if let Some((_, close)) = trace_close {
+                    close.publish();
+                }
+            }),
+        ));
         // A turn-stopping call cancellation discards the cell's state.
         // Closing a race loser leaves the winner's cell state accepted.
         let tool_call_cancelled = result.as_ref().ok().is_some_and(|output| {
@@ -981,6 +987,52 @@ impl RuntimeTurnDriver<'_> {
         self.handle_machine_response(machine, Response::ExecResult { id, result })?;
         Ok(CellExit::Answered)
     }
+}
+
+/// The returned outcome is exactly the cell answer the owning commit consumes.
+/// Keep its completion on the observer until that commit acknowledges it.
+fn hold_and_observe_cell_return(
+    cursor: &mut crate::engine::ObservationCursor,
+    sink: &HeldObservations<'_>,
+    key: &str,
+    correlation_id: TurnActivityId,
+    returned: TurnEvent,
+) -> crate::runtime::durable::session::CellClose {
+    let TurnEvent::CodeBlockReturned {
+        consumption,
+        language,
+        prints,
+        prints_retained,
+        result,
+        duration_ms,
+        tool_call_ids,
+        graph_key,
+    } = &returned
+    else {
+        unreachable!("the cell return owns its completion");
+    };
+    let completion = sink.inner.hold_completion(TurnActivity {
+        id: TurnActivityId::observed(format!("{key}:completed"), 0),
+        correlation_id: correlation_id.clone(),
+        event: TurnEvent::CodeBlockCompleted {
+            consumption: consumption.clone(),
+            language: language.clone(),
+            prints: prints.clone(),
+            prints_retained: prints_retained.clone(),
+            result: result.clone(),
+            duration_ms: *duration_ms,
+            tool_call_ids: tool_call_ids.clone(),
+            graph_key: graph_key.clone(),
+        },
+    });
+    cursor.observe(
+        sink,
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: Some(correlation_id),
+            event: returned,
+        },
+    );
+    completion
 }
 
 /// The host stream a cell publishes on: once a commit holds the model

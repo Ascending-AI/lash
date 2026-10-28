@@ -1351,7 +1351,9 @@ impl fmt::Debug for TurnContext {
 /// deltas is named by the ordinal range it covers, `{key}#{first}..{last}`
 /// (FIG-5098). Both re-derive identically on a redrive, which is what lets a
 /// live replay store drop what it already delivered. Any other id is opaque.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct TurnActivityId(pub Arc<str>);
 impl TurnActivityId {

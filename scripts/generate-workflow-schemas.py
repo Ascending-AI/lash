@@ -60,7 +60,7 @@ def typescript_declarations(schema: dict[str, object]) -> str:
             "$defs", "$id", "$schema", "title", "description", "default",
             "x-lash-schema-version", "x-lash-version-constant",
             "$ref", "const", "enum", "oneOf", "anyOf", "allOf", "type",
-            "properties", "required", "additionalProperties", "patternProperties", "items",
+            "properties", "required", "additionalProperties", "unevaluatedProperties", "patternProperties", "items", "prefixItems",
             "format", "pattern", "minimum", "maximum", "minLength", "maxLength",
             "minItems", "maxItems", "uniqueItems", "multipleOf",
             "exclusiveMinimum", "exclusiveMaximum",
@@ -80,11 +80,20 @@ def typescript_declarations(schema: dict[str, object]) -> str:
             return "(" + " | ".join(literal(value) for value in node["enum"]) + ")"
         for keyword, operator in [("oneOf", " | "), ("anyOf", " | "), ("allOf", " & ")]:
             if keyword in node:
-                return "(" + operator.join(render(part, indent) for part in node[keyword]) + ")"
+                alternatives = "(" + operator.join(render(part, indent) for part in node[keyword]) + ")"
+                if node.get("properties"):
+                    shared = {key: value for key, value in node.items() if key != keyword}
+                    return "(" + alternatives + " & " + render(shared, indent) + ")"
+                return alternatives
         kind = node.get("type")
         if isinstance(kind, list):
             return "(" + " | ".join(render(dict(node, type=part), indent) for part in kind) + ")"
         if kind == "array":
+            if "prefixItems" in node:
+                prefix = node["prefixItems"]
+                if node.get("minItems") != len(prefix) or node.get("maxItems") != len(prefix):
+                    raise ValueError("TypeScript tuples require a fixed length")
+                return "[" + ", ".join(render(item, indent) for item in prefix) + "]"
             return "Array<" + render(node.get("items", True), indent) + ">"
         if kind == "object":
             patterns = node.get("patternProperties", {})
@@ -101,7 +110,7 @@ def typescript_declarations(schema: dict[str, object]) -> str:
                     rows.append(comment(field["description"], indent + 2).rstrip())
                 optional = "" if name in required else "?"
                 rows.append(pad + json.dumps(name) + optional + ": " + render(field, indent + 2) + ";")
-            extra = node.get("additionalProperties", True)
+            extra = node.get("additionalProperties", node.get("unevaluatedProperties", True))
             if extra is not False:
                 rows.append(pad + "[key: string]: " + render(extra, indent + 2) + ";")
             if not rows:
@@ -116,7 +125,7 @@ def typescript_declarations(schema: dict[str, object]) -> str:
         raise ValueError(f"unsupported TypeScript schema form: {node}")
 
     output = [
-        "// Derived from v1.schema.json by scripts/generate-workflow-schemas.py.\n",
+        f"// Derived from v{schema.get('x-lash-schema-version', 1)}.schema.json by scripts/generate-workflow-schemas.py.\n",
         "// JSON Schema remains authoritative for value constraints and validation.\n\n",
     ]
     for name, definition in [(title, schema), *definitions.items()]:
@@ -136,7 +145,7 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
             raise ValueError("generator returned an invalid shape registration")
         relative = Path(shape) / f"v{version}.schema.json"
         documents[relative] = json.dumps(schema, indent=2) + "\n"
-        if shape.startswith("kernel-helper-") or shape in {"kernel-workflow-view", "kernel-authoring-operation",
+        if shape.startswith("kernel-helper-") or shape in {"turn-activity", "trace-record", "kernel-workflow-view", "kernel-authoring-operation",
                      "kernel-migration-refusal", "kernel-parked-refusal",
                      "kernel-captions", "kernel-caption-view"}:
             documents[Path(shape) / f"v{version}.d.ts"] = typescript_declarations(schema)

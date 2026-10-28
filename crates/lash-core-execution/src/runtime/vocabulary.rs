@@ -119,12 +119,19 @@ impl EventSink for NoopEventSink {
     async fn emit(&self, _event: SessionStreamEvent) {}
 }
 
+/// Version of the generated turn-activity host contract.
+///
+/// version_guard(roots(TurnActivity))
+/// version_surface = "coexist"
+/// format_outside_manifest = "host turn-activity wire contract: live stream readers, not a fleet store format"
+pub const TURN_ACTIVITY_SCHEMA_VERSION: u32 = 1;
+
 /// App-facing semantic activity emitted during a turn.
 ///
 /// `id` is unique per emitted activity event. `correlation_id` groups related
 /// events in the same logical activity, such as code start/completion, tool
 /// start/completion, or text deltas from one output block.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TurnActivity {
     pub id: TurnActivityId,
     pub correlation_id: TurnActivityId,
@@ -152,7 +159,7 @@ impl TurnActivity {
 /// Unlike [`SessionStreamEvent`], these events are stable application signals rather
 /// than low-level runtime/debug events. Public streams carry these payloads
 /// inside [`TurnActivity`] so every emitted item has identity.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 // justification: public turn events are transient stream DTOs kept inline for allocation-free emission and stable pattern matching.
 #[allow(clippy::large_enum_variant)]
@@ -211,8 +218,8 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
-    /// Provisional cell activity; a later commit settles it (ADR 0122).
-    CodeBlockCompleted {
+    /// The live cell return, retractable until its owning commit (ADR 0122).
+    CodeBlockReturned {
         consumption: Vec<lash_protocol_types::CellConsumption>,
         /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         language: String,
@@ -233,6 +240,23 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
+    /// The owning commit accepted this cell and its outcome.
+    CodeBlockCompleted {
+        consumption: Vec<lash_protocol_types::CellConsumption>,
+        language: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prints: Option<Vec<crate::CellPrint>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prints_retained: Option<crate::RetainedValue>,
+        result: crate::CellOutcome,
+        /// The observed invocation window, absent when unmeasured.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_ids: Option<Vec<crate::ToolCallId>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        graph_key: Option<String>,
+    },
     ToolCallStarted {
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
@@ -246,19 +270,35 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
+    /// The live tool return. Retractable until its outcome commits (ADR 0122).
+    ToolCallReturned {
+        /// Lash's identity for the call (ADR 0117).
+        call_id: crate::ToolCallId,
+        /// The model provider's id for the call, when a model issued it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
+        name: String,
+        args: serde_json::Value,
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
+        output: crate::ToolCallOutput,
+        /// The observed call window, absent when unmeasured.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        /// Graph key of the enclosing code block, when this tool call ran
+        /// inside one. `None` when the call did not run inside a code block.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        graph_key: Option<String>,
+    },
+    /// The accepted commit holds this outcome, including Interrupted on recovery.
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         provider_call_id: Option<String>,
-        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         name: String,
-        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         args: serde_json::Value,
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         output: crate::ToolCallOutput,
         /// The observed call window, absent when unmeasured.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -469,7 +509,7 @@ pub async fn admit_session_state_generation(
 }
 
 /// The new fact a tool intent produced, without copying its committed process record.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolIntentActivityOutcome {
     Executed {
@@ -488,7 +528,7 @@ pub enum ToolIntentActivityOutcome {
 }
 
 /// The typed identity and admission outcome of a realized intent.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "result",

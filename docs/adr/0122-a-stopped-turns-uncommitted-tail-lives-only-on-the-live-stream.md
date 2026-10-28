@@ -35,8 +35,8 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
    `CheckpointRecorded { protocol_iteration }`, or after `TurnStarted` when
    no checkpoint was recorded, less the deltas a later `ModelAttemptReset`
    retracts. Resubmitting it is the host's choice, as ordinary input. Tool
-   arguments are not streamed, and a tool's output arrives only with
-   `ToolCallCompleted`.
+   arguments are not streamed, and a tool's provisional output arrives with
+   `ToolCallReturned`, and a cell's with `CodeBlockReturned`.
 
 4. **Keeping up is the host's job.** A host follows the session observation
    stream by cursor within the live replay window (ADR 0002: 2,048 events or
@@ -61,6 +61,22 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
 6. **Stops stay typed.** `TurnStop`, its cancellation evidence with mode and
    iteration, and `RunTerminalCause` (including `Refused`) carry why a turn
    or run stopped.
+
+7. **Tool completion means committed.** `ToolCallReturned` carries the live,
+   provisional output when a tool returns. It is retractable and may have no
+   completion after an Immediate stop or worker loss. `ToolCallCompleted`
+   carries the outcome accepted by the owning round or cell commit, from the
+   same `ToolCallOutput` the batch fold reads. The lifecycle observer holds
+   completions until that commit is acknowledged, as decision 5 holds stop
+   terminals. A refused commit publishes no completion. Recovery may complete
+   a lost Once member as Interrupted; it never completes the lost success.
+   Traces and OTel close tool spans only for the committed completion. This
+   split also applies to code cells: `CodeBlockReturned` carries the live,
+   provisional `CellOutcome`; `CodeBlockCompleted` carries that outcome only
+   after the commit consuming the cell answer acknowledges it. The turn
+   observer holds that completion beside the cell's trace close and releases
+   it before the turn's terminal events. Losing that commit publishes neither
+   completion.
 
 ## Consequences
 

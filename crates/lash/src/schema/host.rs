@@ -172,7 +172,21 @@ host_schemas! {
             include_str!("../../../../schemas/host/process-workflow-overlay/v1.schema.json")
         ),
     }
+    turn_activity {
+        TYPESCRIPT_DECLARATION: (
+            include_str!("../../host-schemas/turn-activity/v1.d.ts"),
+            include_str!("../../../../schemas/host/turn-activity/v1.d.ts")
+        ),
+        JSON_SCHEMA: (
+            include_str!("../../host-schemas/turn-activity/v1.schema.json"),
+            include_str!("../../../../schemas/host/turn-activity/v1.schema.json")
+        ),
+    }
     trace_record {
+        TYPESCRIPT_DECLARATION: (
+            include_str!("../../host-schemas/trace-record/v37.d.ts"),
+            include_str!("../../../../schemas/host/trace-record/v37.d.ts")
+        ),
         JSON_SCHEMA: (
             include_str!("../../host-schemas/trace-record/v37.schema.json"),
             include_str!("../../../../schemas/host/trace-record/v37.schema.json")

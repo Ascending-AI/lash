@@ -1113,6 +1113,23 @@ def host_schema_generator_labels() -> str:
     return generate_model.string_list([generator.label for generator in GENERATORS])
 
 
+def host_schema_checked_labels(inventory: dict) -> str:
+    """The schema check reads the same crate-local files the facade exports."""
+    facade = generate_model.PACKAGE_POLICY["facade"]["package"]
+    package = next(package for package in inventory["packages"] if package["package"] == facade)
+    directory = pathlib.PurePosixPath(package["manifest"]).parent.as_posix()
+    copies = [
+        f"//{directory}:{path}"
+        for path in generate_model.exported_paths(facade, directory)
+        if path.startswith("host-schemas/")
+    ]
+    return generate_model.string_list(copies + [
+        "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",
+        "//crates/lash-kernel-view:kernel-workflow-view-v1.d.ts",
+        "//crates/lash-kernel-view:kernel-workflow-view-v1.schema.json",
+    ])
+
+
 def root_buck(inventory: dict) -> str:
     def suite(name: str, labels: list[str]) -> str:
         return (
@@ -1273,54 +1290,7 @@ schema_documents(
 schema_check(
     name = "host_schema_check",
     documents = ":host_schema_documents",
-    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]) + [
-        "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",
-        "//crates/lash:host-schemas/kernel-authoring-operation/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-authoring-operation/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-caption-view/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-caption-view/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-captions/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-captions/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-correspondence/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-document/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-edit-refusal/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-edit-transaction/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-entry-extraction/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-function/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-function-declarations/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-publication-upgrade-request/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-publication-upgrade-request/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-publication-upgrade/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-publication-upgrade/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-run-upgrade-request/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-run-upgrade-request/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-upgrade-refusal/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-upgrade-refusal/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-upgrade-safety/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-upgrade-safety/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-helper-run-upgrade/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-helper-run-upgrade/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-migration-refusal/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-migration-refusal/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-parked-refusal/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-parked-refusal/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-source-map/v1.schema.json",
-        "//crates/lash:host-schemas/kernel-workflow-view/v1.d.ts",
-        "//crates/lash:host-schemas/kernel-workflow-view/v1.schema.json",
-        "//crates/lash:host-schemas/postgres-host-config/v1.schema.json",
-        "//crates/lash:host-schemas/process-effect-omissions/v1.schema.json",
-        "//crates/lash:host-schemas/process-effect-outcome/v1.schema.json",
-        "//crates/lash:host-schemas/process-ran/v1.schema.json",
-        "//crates/lash:host-schemas/process-workflow-overlay/v1.schema.json",
-        "//crates/lash:host-schemas/trace-record/v37.schema.json",
-        "//crates/lash:host-schemas/worker-page-reply/v3.schema.json",
-        "//crates/lash:host-schemas/worker-page-request/v3.schema.json",
-        "//crates/lash:host-schemas/worker-seal-batch/v3.schema.json",
-        "//crates/lash:host-schemas/worker-start/v3.schema.json",
-        "//crates/lash:host-schemas/workflow-execution-overlay/v37.schema.json",
-        "//crates/lash-kernel-view:kernel-workflow-view-v1.d.ts",
-        "//crates/lash-kernel-view:kernel-workflow-view-v1.schema.json",
-    ],
+    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]) + ''' + host_schema_checked_labels(inventory) + ''',
     script = "scripts/generate-workflow-schemas.py",
 )
 

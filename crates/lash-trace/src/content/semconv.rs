@@ -265,7 +265,8 @@ pub(crate) fn attributes(
             .then_some(("gen_ai.output.messages", Attribute::Response(response))),
             None,
         ],
-        TraceEvent::ToolCallCompleted { args, output, .. } => [
+        TraceEvent::ToolCallReturned { args, output, .. }
+        | TraceEvent::ToolCallCompleted { args, output, .. } => [
             match args {
                 crate::TraceToolArgs::Value(args) => {
                     Some(("gen_ai.tool.call.arguments", Attribute::Object(args)))

@@ -31,7 +31,7 @@ macro_rules! define_realized {
 }
 lash_vocabulary::tool_intent_variants!(define_realized);
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum ToolIntentRefusalReason {
     UnsupportedProtocolVersion {

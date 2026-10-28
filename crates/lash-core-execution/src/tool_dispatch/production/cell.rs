@@ -263,24 +263,6 @@ impl CellTools {
         }
         pending
     }
-
-    /// Observe `call`'s completion from `output`, its committed outcome,
-    /// which no body of it answered: the Run's closing settled it. Its
-    /// cancellation is the closing's own.
-    fn observe_closed(&self, call: &CellCall, output: &SettledOutput) {
-        let completed = cell_answer(&self.named(call), output);
-        self.context.emit_tool_call_completed_activity(
-            call.id.as_str(),
-            &ToolCallRecord {
-                call_id: completed.call_id,
-                provider_call_id: completed.provider_call_id,
-                tool: completed.tool_name,
-                args: completed.args,
-                output: completed.output,
-            },
-            None,
-        );
-    }
 }
 
 /// A cell's runtime-settled cancellation is its Run's Closing. A stopped
@@ -491,16 +473,17 @@ impl MemberBodies for CellMembers {
             if !settled_here.contains(&round.id_of(member)) {
                 continue;
             }
-            let (Some(output), Some(scope), Some(CellMember::Tool(call))) = (
+            let (Some(output), Some(CellMember::Tool(call))) = (
                 member.outcome(),
-                member.draft().trace(),
                 self.calls.lock_recover().get(member.call()).cloned(),
             ) else {
                 continue;
             };
             let pending = self.tools.named(&call);
             let context = &self.tools.context;
-            context.adopt_tool_call_trace(&call.id, scope.clone());
+            if let Some(scope) = member.draft().trace() {
+                context.adopt_tool_call_trace(&call.id, scope.clone());
+            }
             let attempts = member
                 .attempts()
                 .map(|(ordinal, output, delay)| {
@@ -511,11 +494,16 @@ impl MemberBodies for CellMembers {
                     )
                 })
                 .collect::<Vec<_>>();
-            context.trace_tool_call_completed(
-                &super::round::member_record(&pending, output),
-                &attempts,
-                member.ended_at_ms(),
-            );
+            let completed = cell_answer(&pending, output);
+            let record = ToolCallRecord {
+                call_id: completed.call_id,
+                provider_call_id: completed.provider_call_id,
+                tool: completed.tool_name,
+                args: completed.args,
+                output: completed.output,
+            };
+            context.trace_tool_call_completed(&record, &attempts, member.ended_at_ms());
+            context.emit_tool_call_completed_activity(call.id.as_str(), &record, None);
         }
     }
 
@@ -558,15 +546,6 @@ impl MemberBodies for CellMembers {
 
     fn closing(&self) {
         self.tools.closing.close();
-    }
-
-    fn unanswered(&self, execution: &AdmittedExecution, output: &SettledOutput) {
-        if !self.tools.closing.is_closing() {
-            return;
-        }
-        if let Some(CellMember::Tool(call)) = self.member(execution) {
-            self.tools.observe_closed(&call, output);
-        }
     }
 
     fn discharge<'a>(

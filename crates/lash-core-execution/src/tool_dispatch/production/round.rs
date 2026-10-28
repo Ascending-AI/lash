@@ -387,7 +387,7 @@ impl ProductionToolHandlers<'_> {
             call.args.clone(),
             crate::session::tool_execution::tool_activity_id(&call.call_id),
         );
-        self.context.emit_tool_call_completed_activity(
+        self.context.emit_tool_call_returned_activity(
             call.call_id.as_str(),
             &ToolCallRecord {
                 call_id: completed.call_id.clone(),
@@ -677,7 +677,7 @@ pub(super) async fn present_resolved(
         &call.call_id,
         &completed.intent_outcomes,
     );
-    context.emit_tool_call_completed_activity(
+    context.emit_tool_call_returned_activity(
         call.call_id.as_str(),
         &ToolCallRecord {
             call_id: completed.call_id.clone(),
@@ -886,6 +886,8 @@ impl RoundTools for ProductionRoundTools {
                 .collect::<Vec<_>>();
             self.context
                 .trace_tool_call_completed(&record, &attempts, member.ended_at_ms());
+            self.context
+                .emit_tool_call_completed_activity(call.call_id.as_str(), &record, None);
         }
     }
 

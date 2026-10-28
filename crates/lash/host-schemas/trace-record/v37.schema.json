@@ -7598,6 +7598,74 @@
       "type": "object"
     },
     {
+      "description": "A provisional tool return, which may never commit (ADR 0122).",
+      "properties": {
+        "args": {
+          "$ref": "#/$defs/TraceToolArgs",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
+        },
+        "attempts": {
+          "description": "Exporters outside lash cannot read the journal, so the observed retry ladder travels with the trace.",
+          "items": {
+            "$ref": "#/$defs/TraceRetryAttempt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "call_id": {
+          "description": "Lash's identity for the call (ADR 0117).",
+          "type": "string"
+        },
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "issuing_node_id": {
+          "description": "Exporters outside lash cannot read the store, so issuer correlation travels with the trace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/TraceToolName",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
+        },
+        "output": {
+          "$ref": "#/$defs/TraceToolCallOutput",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
+        },
+        "provider_call_id": {
+          "description": "The model provider's id for the call, when a model issued it.\nExporters outside lash cannot read the store, so provider correlation travels with the trace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "span_attributes": {
+          "$ref": "#/$defs/ToolSpanAnnotations",
+          "description": "What the body of the attempt that settled the call set on its own\ntool span: in memory only, stamped by the span's closer."
+        },
+        "type": {
+          "const": "tool_call_returned",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "call_id",
+        "name",
+        "args",
+        "output",
+        "duration_ms"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The tool outcome from an accepted commit.",
       "properties": {
         "args": {
           "$ref": "#/$defs/TraceToolArgs",

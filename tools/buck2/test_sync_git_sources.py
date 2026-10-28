@@ -160,5 +160,28 @@ class GitSources(unittest.TestCase):
                     sync.materialize_git_sources()
 
 
+class HostSchemaInputs(unittest.TestCase):
+    def test_new_schema_files_are_exported_and_checked(self):
+        """A newly generated host contract must be present in hermetic schema checks."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            contracts = root / "crates/facade/host-schemas/new-contract"
+            contracts.mkdir(parents=True)
+            (contracts / "v1.schema.json").write_text("{}")
+            (contracts / "v1.d.ts").write_text("export type NewContract = string;")
+            policy = {"facade": {"package": "fixture"}, "exported_files": {
+                "fixture": ["host-schemas/*/*.schema.json", "host-schemas/*/*.d.ts"]}}
+            inventory = {"packages": [{"package": "fixture", "manifest": "crates/facade/Cargo.toml"}]}
+            with patch.object(sync.generate_model, "ROOT", root), patch.object(sync.generate_model, "PACKAGE_POLICY", policy):
+                checked = sync.host_schema_checked_labels(inventory)
+                exported = sync.generate_model.exported_files("fixture", "crates/facade")
+                for relative in ["host-schemas/new-contract/v1.schema.json", "host-schemas/new-contract/v1.d.ts"]:
+                    self.assertIn("//crates/facade:" + relative, checked)
+                    self.assertIn('name = "' + relative + '"', exported)
+                (contracts / "v2.schema.json").write_text("{}")
+                self.assertIn("//crates/facade:host-schemas/new-contract/v2.schema.json", sync.host_schema_checked_labels(inventory))
+                self.assertIn('name = "host-schemas/new-contract/v2.schema.json"', sync.generate_model.exported_files("fixture", "crates/facade"))
+
+
 if __name__ == "__main__":
     unittest.main()

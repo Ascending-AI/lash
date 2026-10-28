@@ -293,7 +293,9 @@ impl From<ExecCodeFailure> for CellFailure {
 /// printed, and how the text was projected from it. The one shape a print
 /// has in the executor's response, in a cell's committed record, in a step's
 /// attachment archive and in the completion activity.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct CellPrint {
     pub text: String,

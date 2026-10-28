@@ -862,33 +862,33 @@ await control.finish("done");"#,
         .iter()
         .position(|event| matches!(&event.event, TurnEvent::ToolCallStarted { .. }))
         .expect("tool started");
-    let tool_completed = events
+    let tool_returned = events
         .iter()
-        .position(|event| matches!(&event.event, TurnEvent::ToolCallCompleted { .. }))
-        .expect("tool completed");
-    let code_completed = events
+        .position(|event| matches!(&event.event, TurnEvent::ToolCallReturned { .. }))
+        .expect("tool returned");
+    let code_returned = events
         .iter()
-        .position(|event| matches!(&event.event, TurnEvent::CodeBlockCompleted { .. }))
-        .expect("code completed");
+        .position(|event| matches!(&event.event, TurnEvent::CodeBlockReturned { .. }))
+        .expect("code returned");
     let terminal_output = events
         .iter()
         .position(|event| matches!(&event.event, TurnEvent::Finished { .. }))
         .expect("terminal output");
     assert!(code_started < tool_started);
-    assert!(tool_started < tool_completed);
-    assert!(tool_completed < code_completed);
-    assert!(code_completed < terminal_output);
-    assert!(!events[code_completed + 1..].iter().any(|event| matches!(
+    assert!(tool_started < tool_returned);
+    assert!(tool_returned < code_returned);
+    assert!(code_returned < terminal_output);
+    assert!(!events[code_returned + 1..].iter().any(|event| matches!(
         &event.event,
-        TurnEvent::ToolCallStarted { .. } | TurnEvent::ToolCallCompleted { .. }
+        TurnEvent::ToolCallStarted { .. } | TurnEvent::ToolCallReturned { .. }
     )));
 
-    let TurnEvent::ToolCallCompleted {
+    let TurnEvent::ToolCallReturned {
         call_id,
         output,
-        graph_key: tool_completed_graph_key,
+        graph_key: tool_returned_graph_key,
         ..
-    } = &events[tool_completed].event
+    } = &events[tool_returned].event
     else {
         unreachable!();
     };
@@ -931,13 +931,13 @@ await control.finish("done");"#,
         replay_key,
         format!("rlm-live-tool-events:{execution_id}:1:0:exec_code:3")
     );
-    let TurnEvent::CodeBlockCompleted {
+    let TurnEvent::CodeBlockReturned {
         language,
         result: cell_outcome,
         tool_call_ids,
         graph_key: completed_graph_key,
         ..
-    } = &events[code_completed].event
+    } = &events[code_returned].event
     else {
         unreachable!();
     };
@@ -958,7 +958,7 @@ await control.finish("done");"#,
         unreachable!();
     };
     assert_eq!(tool_started_graph_key, started_graph_key);
-    assert_eq!(tool_completed_graph_key, started_graph_key);
+    assert_eq!(tool_returned_graph_key, started_graph_key);
     let read_view = committed(&session).await;
     assert!(
         read_view.messages().iter().all(|message| message

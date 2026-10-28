@@ -118,6 +118,8 @@ impl Turn {
             Self::Plain
             | Self::CellIdentity
             | Self::Activity
+            | Self::OnceActivity
+            | Self::CellReturn
             | Self::Put
             | Self::State
             | Self::StatePair

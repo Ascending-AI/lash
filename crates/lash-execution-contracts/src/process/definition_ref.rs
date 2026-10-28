@@ -140,7 +140,7 @@ impl From<ProcessDefinitionValue> for serde_json::Value {
 /// (ADR 0090's unknown process type). It is not a wildcard that matches: it is
 /// the absence of a claim, so resolution adopts the authority outright. A
 /// [`ProcessSignature::Known`] claim must equal the authority exactly.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "signature", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessSignature {
     Unknown,

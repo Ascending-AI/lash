@@ -1258,15 +1258,15 @@ async fn phase_loop(
                         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                     })?;
                     heads.acknowledged(cx, &session).await?;
+                    for close in cell_closes {
+                        close.publish();
+                    }
                     drive.committed(cx, &receipt).await?;
                     // The turn's commit carried a held receipt: the call's
                     // sealed record is in it, and nothing reads the receipt
                     // once the turn has ended. A commit that failed leaves it
                     // held, and it commits on its own as the loop leaves.
                     slot.take();
-                    for close in cell_closes {
-                        close.publish();
-                    }
                     if let Some(discarded) = discarded {
                         turn_trace::members_ended(
                             services.tracing(),

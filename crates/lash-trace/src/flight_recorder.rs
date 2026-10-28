@@ -262,6 +262,7 @@ impl FlightRecorderRecord {
         };
         match &record.event {
             TraceEvent::ToolCallStarted { call_id, .. }
+            | TraceEvent::ToolCallReturned { call_id, .. }
             | TraceEvent::ToolCallCompleted { call_id, .. } => {
                 metadata.tool_call_id = Some(call_id.clone());
             }
@@ -308,7 +309,8 @@ fn operation_duration(record: &TraceRecord) -> Option<Duration> {
             .as_ref()
             .map(|position| record.timestamp.duration_since(position.started_at))
             .or_else(|| profile.as_ref().map(|p| Duration::from_nanos(p.elapsed_ns))),
-        TraceEvent::ToolCallCompleted { duration_ms, .. }
+        TraceEvent::ToolCallReturned { duration_ms, .. }
+        | TraceEvent::ToolCallCompleted { duration_ms, .. }
         | TraceEvent::ExecCodeCompleted { duration_ms, .. }
         | TraceEvent::ExecCodeDiscarded { duration_ms, .. } => {
             Some(Duration::from_millis(*duration_ms))

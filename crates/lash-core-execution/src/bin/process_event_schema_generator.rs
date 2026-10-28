@@ -45,7 +45,7 @@ fn main() -> Result<(), String> {
 }
 
 fn documents() -> Result<Vec<Document>, String> {
-    SHAPES
+    let mut documents: Vec<Document> = SHAPES
         .into_iter()
         .map(|(shape, event_type, title)| {
             let mut schema = ProcessEventKind::parse(event_type)
@@ -82,5 +82,27 @@ fn documents() -> Result<Vec<Document>, String> {
                 schema,
             })
         })
-        .collect()
+        .collect::<Result<_, String>>()?;
+    let version = lash_core_execution::runtime::TURN_ACTIVITY_SCHEMA_VERSION;
+    let mut schema = serde_json::to_value(schemars::schema_for!(lash_core_execution::TurnActivity))
+        .map_err(|error| format!("cannot encode turn-activity schema: {error}"))?;
+    let root = schema
+        .as_object_mut()
+        .ok_or("turn-activity schema is not an object")?;
+    root.insert(
+        "$id".into(),
+        json!(format!("https://lash.dev/schemas/turn-activity/v{version}")),
+    );
+    root.insert("x-lash-schema-version".into(), json!(version));
+    root.insert(
+        "x-lash-version-constant".into(),
+        json!("TURN_ACTIVITY_SCHEMA_VERSION"),
+    );
+    documents.push(Document {
+        shape: "turn-activity",
+        version,
+        version_constant: "TURN_ACTIVITY_SCHEMA_VERSION",
+        schema,
+    });
+    Ok(documents)
 }

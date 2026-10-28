@@ -191,6 +191,58 @@ impl RuntimeExecutionContext<'_> {
         });
     }
 
+    /// Observe the live return while retaining the scope for its committed outcome.
+    pub(crate) fn trace_tool_call_returned(
+        &self,
+        record: &crate::ToolCallRecord,
+        attempts: &[lash_trace::TraceRetryAttempt],
+        ended_at_ms: Option<u64>,
+    ) {
+        let Some(tracing) = &self.tracing else {
+            return;
+        };
+        let Some(TracedToolCall {
+            scope,
+            context,
+            annotations,
+        }) = self
+            .tool_requests
+            .lock_recover()
+            .get(&record.call_id)
+            .cloned()
+        else {
+            return;
+        };
+        let ended_at_ms = ended_at_ms.unwrap_or_else(|| self.dispatch.clock.timestamp_ms());
+        let duration_ms = ended_at_ms.saturating_sub(scope.started_at_ms);
+        let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
+        let standing = self
+            .coordination_standing(tracing)
+            .under(scope)
+            .selected(lash_trace::TraceSpanKind::Tool, &context.ids());
+        let content = standing.content();
+        standing.observe(|| {
+            (
+                context,
+                lash_trace::TraceEvent::ToolCallReturned {
+                    call_id: record.call_id.clone(),
+                    provider_call_id: record.provider_call_id.clone(),
+                    name: record.tool.clone().into(),
+                    args: content
+                        .capture(lash_trace::ContentCategory::ToolArguments, || {
+                            record.args.clone()
+                        })
+                        .into(),
+                    output: crate::trace::trace_tool_call_output(&record.output, content),
+                    duration_ms,
+                    issuing_node_id: issuing_node,
+                    attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+                    span_attributes: annotations.lock_recover().clone(),
+                },
+            )
+        });
+    }
+
     /// The position the tool hooks of `call_id` run at: the call's tool
     /// span, from the scope its start traced, else the scope its admission
     /// will select. They run with the shift that issues the call's steps,

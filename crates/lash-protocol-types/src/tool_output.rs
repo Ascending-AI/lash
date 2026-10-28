@@ -13,7 +13,7 @@ const UNTRUSTED_JSON_TAG: &str = "untrusted_json";
 const REFERENCE_KEY: &str = "reference";
 const VALUE_KEY: &str = "value";
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 pub struct ToolCallOutput {
     #[serde(serialize_with = "crate::durable_serde::serialize")]
@@ -383,7 +383,7 @@ impl ToolCallOutput {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallStatus {
     Success,
@@ -955,13 +955,14 @@ fn project_raw_tool_value(mut value: Value, raw: Option<&ToolValue>) -> Value {
     value
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnControl {
     /// End the turn with `value`.
     Finish {
         #[serde(serialize_with = "crate::durable_serde::serialize")]
+        #[schemars(with = "serde_json::Value")]
         value: ToolValue,
         /// The schema `value` was checked against when its call settled: the
         /// admitted declaration's ([`FinishDeclaration`](lash_kernel_value::tool_declaration::FinishDeclaration)).
@@ -990,7 +991,7 @@ pub enum TurnControl {
 /// switching run's shape is passing that run's recorded spec back, and a
 /// different spec is exactly that spec. The switch's commit mails the
 /// follow-on under it, so every retry of that commit mails the same one.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct NextRun(Value);
 
@@ -1017,7 +1018,7 @@ impl TurnControl {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolControl {
@@ -1215,7 +1216,7 @@ impl ModelToolReturn {
 /// history (FIG-1643). The same blocks travel unchanged into the
 /// transcript's one [`crate::Part::ToolResult`] and the provider request's
 /// one tool-result block.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelToolReturnPart {
     Text {

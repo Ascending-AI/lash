@@ -322,7 +322,7 @@ fn push_framed(bytes: &mut Vec<u8>, value: &[u8]) {
 /// Returned by create, get and publish with the derived signature. When a
 /// value carries one back in, its signature is a claim that
 /// `ProcessEngineRegistry::verify_definition_claim` checks.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProcessDefinition {
     pub id: ProcessDefinitionId,
