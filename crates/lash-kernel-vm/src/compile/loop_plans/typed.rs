@@ -1,5 +1,5 @@
 //! Typed blocks (`docs/design/kernel-regions.md` §2.4, FIG-6946): a
-//! straight-line run of a scalar plan's statements whose operands are all
+//! representation of admitted register instructions whose operands are all
 //! floats or all word integers at the run's entry, compiled to one run over
 //! unboxed registers. An integer control prefix and a float tail may repeat
 //! together when their frame slots are disjoint; both guard before entry.
@@ -36,6 +36,9 @@ use crate::perf_witness::execution;
 use lash_kernel_doc::scalar::{self, Pair, ScalarOp};
 use lash_kernel_doc::{Float, Value};
 
+use crate::machine::islands::compiled::{
+    Instruction as RegisterInstruction, Op as RegisterOp, OperatorSite, Read as RegisterRead,
+};
 use lash_kernel_exec::Weight;
 
 use super::super::expr::{Expr, Kind};
@@ -82,11 +85,9 @@ pub(crate) struct Headroom {
 
 impl Headroom {
     #[inline(always)]
-    fn admits_iteration(self, units: u64) -> bool {
-        self.charged
-            .checked_add(units)
-            .and_then(|charged| charged.checked_add(self.iteration_max))
-            .is_some_and(|end| end <= self.bound && end < self.slice_end)
+    fn budget(self) -> Option<crate::machine::islands::admission::RepeatBudget> {
+        crate::machine::islands::admission::Window::new(self.charged, self.bound, self.slice_end)
+            .repeating(self.iteration_max)
     }
 }
 
@@ -208,7 +209,7 @@ impl Domain for f64 {
     }
     #[inline(always)]
     fn sized(self) -> u8 {
-        0
+        scalar::float_size_bit(self)
     }
     fn same(self, other: Self) -> bool {
         self.to_bits() == other.to_bits()
@@ -294,7 +295,7 @@ struct State<'t, T> {
     /// Whether a charge tape records it.
     record: bool,
     /// Its charge program, recording.
-    pending: Vec<Weight>,
+    pending: super::super::TapedCharges,
 }
 
 impl<T: Domain> State<'_, T> {
@@ -329,8 +330,7 @@ impl<T: Domain> State<'_, T> {
     #[cold]
     #[inline(never)]
     fn recorded(&mut self, program: &[Event], formulas: usize) {
-        let start = self.pending.len().saturating_sub(formulas);
-        let held: Vec<Weight> = self.pending.drain(start..).collect();
+        let held = self.pending.formulas(formulas);
         let mut held = held.into_iter();
         for event in program {
             let weight = match event {
@@ -420,7 +420,7 @@ impl<T: Domain> Program<T> {
             written: 0,
             charged: self.charged,
             record: RECORD,
-            pending: Vec::new(),
+            pending: super::super::TapedCharges::new(),
         }
     }
 
@@ -442,7 +442,7 @@ impl<T: Domain> Program<T> {
         }
         if RECORD {
             pending.clear();
-            state.pending = std::mem::take(pending);
+            state.pending.events = std::mem::take(pending);
         }
         Some(())
     }
@@ -511,13 +511,14 @@ impl<T: Domain> Program<T> {
         let mut iterations = 0_u64;
         let mut units = 0_u64;
         let mut written = 0_u32;
+        let budget = headroom.budget();
         let ended = loop {
             // The charge headroom guard, as the batch's.
-            if !headroom.admits_iteration(units) {
+            let Some(_admission) = budget.as_ref().and_then(|budget| budget.admit(units)) else {
                 break Ran::Done(0);
-            }
+            };
             let regs = state.regs;
-            let recorded = state.pending.len();
+            let recorded = state.pending.mark();
             state.units = 0;
             state.written = 0;
             let ran = self.execute::<COUNT>(
@@ -530,7 +531,7 @@ impl<T: Domain> Program<T> {
                 // The iteration that did not complete leaves nothing.
                 state.regs = regs;
                 if RECORD {
-                    state.pending.truncate(recorded);
+                    state.pending.rewind(recorded);
                 }
                 break ran;
             }
@@ -542,7 +543,7 @@ impl<T: Domain> Program<T> {
             }
         };
         if RECORD {
-            *pending = std::mem::take(&mut state.pending);
+            *pending = std::mem::take(&mut state.pending.events);
         }
         self.leave(frame, &state, written & !self.locals);
         Some((iterations, units, ended))
@@ -560,23 +561,30 @@ struct Mixed {
 impl Mixed {
     fn compile(
         exe: &Executable,
+        registers: &[RegisterInstruction],
         charged: bool,
         test: &Summary,
         body: &Body,
         from: usize,
     ) -> Option<Self> {
-        let (_, covered) = Builder::<i64>::new(exe, charged).program(Some(test), body, from)?;
+        let (_, covered) =
+            Builder::<i64>::new(exe, registers, charged).program(Some(test), body, from)?;
         // Limit speculative suffix formation to the typed register budget.
         for split in (from + 1..=from + covered).rev().take(REGISTERS) {
-            let Some((tail, rest)) = Builder::<f64>::new(exe, charged).program(None, body, split)
+            let Some((tail, rest)) =
+                Builder::<f64>::new(exe, registers, charged).program(None, body, split)
             else {
                 continue;
             };
             if split + rest != body.steps.len() {
                 continue;
             }
-            let (head, prefix) =
-                Builder::<i64>::new(exe, charged).program_until(Some(test), body, from, split)?;
+            let (head, prefix) = Builder::<i64>::new(exe, registers, charged).program_until(
+                Some(test),
+                body,
+                from,
+                split,
+            )?;
             if prefix != split - from
                 || head.slots.iter().any(|slot| tail.slots.contains(slot))
                 || !head.repeatable()
@@ -616,13 +624,14 @@ impl Mixed {
         let mut units = 0_u64;
         let mut head_written = 0_u32;
         let mut tail_written = 0_u32;
+        let budget = headroom.budget();
         let ended = loop {
-            if !headroom.admits_iteration(units) {
+            let Some(_admission) = budget.as_ref().and_then(|budget| budget.admit(units)) else {
                 break Ran::Done(0);
-            }
+            };
             let integers = head.regs;
             let floats = tail.regs;
-            let recorded = head.pending.len();
+            let recorded = head.pending.mark();
             head.units = 0;
             tail.units = 0;
             head.written = 0;
@@ -644,7 +653,7 @@ impl Mixed {
                 head.regs = integers;
                 tail.regs = floats;
                 if RECORD {
-                    head.pending.truncate(recorded);
+                    head.pending.rewind(recorded);
                     tail.pending.clear();
                 }
                 break ran;
@@ -665,7 +674,7 @@ impl Mixed {
             }
         };
         if RECORD {
-            *pending = std::mem::take(&mut head.pending);
+            *pending = std::mem::take(&mut head.pending.events);
         }
         self.head
             .leave(frame, &head, head_written & !self.head.locals);
@@ -815,14 +824,15 @@ impl<T: Domain> Program<T> {
 /// [`OPERATORS`] operators, or no domain answers it.
 pub(super) fn compile(
     exe: &Executable,
+    registers: &[RegisterInstruction],
     charged: bool,
     test: Option<&Summary>,
     body: &Body,
     from: usize,
 ) -> Option<Typed> {
-    let mixed = test.and_then(|test| Mixed::compile(exe, charged, test, body, from));
-    let floats = Builder::<f64>::new(exe, charged).program(test, body, from);
-    let ints = Builder::<i64>::new(exe, charged).program(test, body, from);
+    let mixed = test.and_then(|test| Mixed::compile(exe, registers, charged, test, body, from));
+    let floats = Builder::<f64>::new(exe, registers, charged).program(test, body, from);
+    let ints = Builder::<i64>::new(exe, registers, charged).program(test, body, from);
     let covers = match (&floats, &ints) {
         (Some((_, a)), Some((_, b))) => (*a).max(*b),
         (Some((_, covers)), None) | (None, Some((_, covers))) => *covers,
@@ -868,9 +878,41 @@ struct Formulas {
     units: u64,
 }
 
+enum SourceEnd {
+    Write(usize),
+    Test,
+    Branch { next: usize, otherwise: usize },
+}
+
+fn summary(step: &Step) -> Option<&Summary> {
+    match step {
+        Step::Write(summary)
+        | Step::Bind(summary)
+        | Step::Store(summary)
+        | Step::Discard(summary)
+        | Step::Continue(summary) => Some(summary),
+        Step::If { test, .. } => Some(test),
+        Step::Leave => None,
+    }
+}
+
+fn authorities<'a>(body: &'a Body, entries: &mut Vec<&'a Summary>) {
+    for step in &body.steps {
+        entries.extend(summary(step));
+        if let Step::If {
+            then, otherwise, ..
+        } = step
+        {
+            authorities(then, entries);
+            authorities(otherwise, entries);
+        }
+    }
+}
+
 /// Compiles a run for domain `T`.
 struct Builder<'e, T> {
     exe: &'e Executable,
+    registers: &'e [RegisterInstruction],
     charged: bool,
     state: Allotted,
     code: Vec<Instruction<T>>,
@@ -881,9 +923,10 @@ struct Builder<'e, T> {
 }
 
 impl<'e, T: Domain> Builder<'e, T> {
-    fn new(exe: &'e Executable, charged: bool) -> Self {
+    fn new(exe: &'e Executable, registers: &'e [RegisterInstruction], charged: bool) -> Self {
         Self {
             exe,
+            registers,
             charged,
             state: Allotted::default(),
             code: Vec::new(),
@@ -921,6 +964,8 @@ impl<'e, T: Domain> Builder<'e, T> {
         };
         let mut covers = 0;
         let mut units = 0_u64;
+        let mut authority = Vec::new();
+        authorities(body, &mut authority);
         for step in body.steps.get(from..until)? {
             // Failed compilation leaves neither registers nor instructions.
             let saved = self.state.clone();
@@ -928,7 +973,9 @@ impl<'e, T: Domain> Builder<'e, T> {
             let kernels = self.kernels.len();
             let unaries = self.unaries.len();
             let temps = self.temps;
-            let charge = self.step(step);
+            let charge = summary(step)
+                .and_then(|summary| self.source_start(summary))
+                .and_then(|at| self.step(at, &authority).map(|(units, _)| units));
             if charge.is_none() {
                 self.state = saved;
                 self.code.truncate(code);
@@ -1010,28 +1057,34 @@ impl<'e, T: Domain> Builder<'e, T> {
         fixed.checked_add(formulas.units)
     }
 
-    /// Appends one whole statement, including its explicit branch targets.
-    fn step(&mut self, step: &Step) -> Option<u64> {
-        match step {
-            Step::Write(summary) | Step::Bind(summary) => {
-                let Some(RegionSlot::Frame(at)) = summary.write else {
+    /// Source summaries index canonical events only. Physical writes and
+    /// control edges determine the changed representation's instructions.
+    fn step(&mut self, at: usize, authority: &[&Summary]) -> Option<(u64, usize)> {
+        let source = authority
+            .iter()
+            .copied()
+            .find(|summary| self.source_start(summary) == Some(at))?;
+        let (formulas, end) = self.project(at)?;
+        let units = self.commit(source, formulas)?;
+        match end {
+            SourceEnd::Write(after) => Some((units, after)),
+            SourceEnd::Branch { next, otherwise } => {
+                let origin = match self.registers.first()?.op {
+                    RegisterOp::Loop { header, .. } => header.checked_sub(1)?,
+                    _ => 0,
+                };
+                let otherwise = otherwise.checked_sub(origin)?;
+                let jump_at = otherwise.checked_sub(1)?;
+                let RegisterOp::Jump(after) = self.registers.get(jump_at)?.op else {
                     return None;
                 };
-                let mut formulas = Formulas::default();
-                let value = self.operand(root(summary)?, &mut formulas)?;
-                let dst = self.assign(at, matches!(step, Step::Write(_)))?;
-                self.code.push(Instruction::Set { value, dst });
-                self.commit(summary, formulas)
-            }
-            Step::If {
-                test,
-                then,
-                otherwise,
-            } if then.declares.is_empty() && otherwise.declares.is_empty() => {
-                self.test(test)?;
+                let after = after.checked_sub(origin)?;
+                if next > jump_at || otherwise > after || after > self.registers.len() {
+                    return None;
+                }
                 let branch = self.branch();
                 let before = self.state.assigned;
-                self.arm(then)?;
+                self.arm(next, jump_at, authority)?;
                 let assigned = self.state.assigned;
                 self.state.assigned = before;
                 let jump = self.code.len();
@@ -1039,85 +1092,218 @@ impl<'e, T: Domain> Builder<'e, T> {
                 self.code[branch] = Instruction::Branch {
                     otherwise: self.code.len(),
                 };
-                self.arm(otherwise)?;
+                self.arm(otherwise, after, authority)?;
                 self.state.assigned &= assigned;
                 self.code[jump] = Instruction::Jump {
                     to: self.code.len(),
                 };
-                Some(0)
+                Some((units, after))
             }
-            _ => None,
+            SourceEnd::Test => None,
         }
     }
 
-    fn arm(&mut self, body: &Body) -> Option<()> {
-        let mut units = 0_u64;
-        for step in &body.steps {
-            units = units.checked_add(self.step(step)?)?;
+    fn arm(&mut self, mut at: usize, end: usize, authority: &[&Summary]) -> Option<()> {
+        while at < end {
+            if matches!(self.registers.get(at)?.op, RegisterOp::Done { .. }) {
+                at += 1;
+            } else {
+                let (_, next) = self.step(at, authority)?;
+                if next <= at || next > end {
+                    return None;
+                }
+                at = next;
+            }
         }
         Some(())
     }
 
     fn test(&mut self, summary: &Summary) -> Option<()> {
-        let Kind::Operator {
-            lib, args, invoke, ..
-        } = &root(summary)?.kind
-        else {
+        let at = self.source_start(summary)?;
+        let (formulas, SourceEnd::Test) = self.project(at)? else {
             return None;
         };
-        let [a, b] = &**args else {
-            return None;
-        };
-        let (op, table) = self.kernel(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
-        if !op.compares() {
-            return None;
-        }
-        let mut formulas = Formulas::default();
-        let a = self.operand(a, &mut formulas)?;
-        let b = self.operand(b, &mut formulas)?;
-        formulas.count += 1;
-        formulas.units = formulas.units.checked_add(table[0])?;
-        self.state.operators += 1;
-        let kernel = self.kernels.len();
-        self.kernels.push(Kernel { op, table });
-        self.code.push(Instruction::Compare { kernel, a, b });
         self.commit(summary, formulas).map(|_| ())
     }
 
-    /// The typed kernel of operator `lib` in this domain and its scalar
-    /// table: the fused node's, which the entry's general path agrees with.
+    fn read_register(&mut self, read: &RegisterRead) -> Option<Arg<T>> {
+        match read {
+            RegisterRead::Literal { value, .. } => Some(Arg::Const(T::of(value)?)),
+            RegisterRead::Local {
+                at, shared: false, ..
+            } => Some(Arg::Reg(self.read(u32::try_from(*at).ok()?)?)),
+            _ => None,
+        }
+    }
+
+    fn operation(
+        &mut self,
+        site: &OperatorSite,
+        args: &[Arg<T>],
+        formulas: &mut Formulas,
+        comparison: bool,
+    ) -> Option<Arg<T>> {
+        if site.counted.is_some() || site.act.is_some() || site.root.is_some() {
+            return None;
+        }
+        let dst = self.next_temp;
+        self.next_temp += 1;
+        let units = match args {
+            [a] if !comparison => {
+                let unary = self.unary(site.lib, site.checked)?;
+                let units = unary.table[0];
+                let kernel = self.unaries.len();
+                self.unaries.push(unary);
+                self.code.push(Instruction::Unary { kernel, a: *a, dst });
+                units
+            }
+            [a, b] => {
+                let op = T::kernel(site.pair?)?;
+                if !T::answers(op) || op.compares() != comparison {
+                    return None;
+                }
+                let table = site.table.entries();
+                let units = table[0];
+                let kernel = self.kernels.len();
+                self.kernels.push(Kernel { op, table });
+                self.code.push(if comparison {
+                    Instruction::Compare {
+                        kernel,
+                        a: *a,
+                        b: *b,
+                    }
+                } else {
+                    Instruction::Number {
+                        kernel,
+                        a: *a,
+                        b: *b,
+                        dst,
+                    }
+                });
+                units
+            }
+            _ => return None,
+        };
+        formulas.count += 1;
+        formulas.units = formulas.units.checked_add(units)?;
+        self.state.operators += 1;
+        Some(Arg::Temp(dst))
+    }
+
+    fn source_start(&self, summary: &Summary) -> Option<usize> {
+        self.registers.iter().position(|instruction| {
+            let entry = instruction.begin.as_ref().or(match &instruction.op {
+                RegisterOp::Write { site } => site.begin.as_ref(),
+                _ => None,
+            });
+            entry.is_some_and(|entry| {
+                let statement = self.exe.stmt(entry.id);
+                let range = match statement.form {
+                    super::super::Form::While { test, .. } => test,
+                    _ => statement.ops,
+                };
+                range.start <= summary.ops.start && summary.ops.start < range.end()
+            })
+        })
+    }
+
+    fn project(&mut self, start: usize) -> Option<(Formulas, SourceEnd)> {
+        let mut values = std::collections::BTreeMap::new();
+        let mut formulas = Formulas::default();
+        for (offset, instruction) in self.registers[start..].iter().enumerate() {
+            let after = start + offset + 1;
+            match &instruction.op {
+                RegisterOp::Loop { .. }
+                | RegisterOp::Header { .. }
+                | RegisterOp::Close { .. }
+                | RegisterOp::Accumulate(_) => {}
+                RegisterOp::Constant { dst, value } => {
+                    values.insert(*dst, Arg::Const(T::of(value)?));
+                }
+                RegisterOp::Local {
+                    dst,
+                    at,
+                    shared: false,
+                    ..
+                } => {
+                    values.insert(*dst, Arg::Reg(self.read(u32::try_from(*at).ok()?)?));
+                }
+                RegisterOp::DirectOperator { site, reads, .. } => {
+                    let args = reads
+                        .iter()
+                        .map(|read| self.read_register(read))
+                        .collect::<Option<Vec<_>>>()?;
+                    let comparison = site
+                        .pair
+                        .and_then(T::kernel)
+                        .is_some_and(ScalarOp::compares);
+                    let value = self.operation(site, &args, &mut formulas, comparison)?;
+                    values.insert(site.reg, value);
+                }
+                RegisterOp::Operator { site, args, .. } => {
+                    let args = args
+                        .iter()
+                        .map(|reg| values.get(reg).copied())
+                        .collect::<Option<Vec<_>>>()?;
+                    let comparison = site
+                        .pair
+                        .and_then(T::kernel)
+                        .is_some_and(ScalarOp::compares);
+                    let value = self.operation(site, &args, &mut formulas, comparison)?;
+                    values.insert(site.reg, value);
+                }
+                RegisterOp::Accumulation {
+                    site, reads, write, ..
+                } if !write.shared => {
+                    let args = reads
+                        .iter()
+                        .map(|read| self.read_register(read))
+                        .collect::<Option<Vec<_>>>()?;
+                    let value = self.operation(site, &args, &mut formulas, false)?;
+                    let dst = self.assign(u32::try_from(write.at).ok()?, !write.bind)?;
+                    self.code.push(Instruction::Set { value, dst });
+                    return Some((formulas, SourceEnd::Write(after)));
+                }
+                RegisterOp::Write { site } if !site.shared => {
+                    let value = match &site.reads {
+                        Some(reads) => {
+                            let [read] = &**reads else {
+                                return None;
+                            };
+                            self.read_register(read)?
+                        }
+                        None => *values.get(&site.reg)?,
+                    };
+                    let dst = self.assign(u32::try_from(site.at).ok()?, !site.bind)?;
+                    self.code.push(Instruction::Set { value, dst });
+                    return Some((formulas, SourceEnd::Write(after)));
+                }
+                RegisterOp::LoopBranch { .. } => return Some((formulas, SourceEnd::Test)),
+                RegisterOp::Branch { otherwise, .. } => {
+                    return Some((
+                        formulas,
+                        SourceEnd::Branch {
+                            next: after,
+                            otherwise: *otherwise,
+                        },
+                    ));
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    // The independent summary verifier resolves the installed entry too.
     fn kernel(&self, lib: LibId, checked: bool) -> Option<(ScalarOp, [u64; 16])> {
         let function = self.exe.lib(lib);
-        let (entry, fast) = function.specialization.prepared.as_ref()?;
-        let op = T::kernel(entry.pair()?)?;
-        // A kernel that never answers this domain leaves every run to the
-        // general path.
+        let (_, fast) = function.specialization.prepared.as_ref()?;
+        let op = T::kernel(super::super::numeric_pair(function, checked)?)?;
         if !T::answers(op) {
             return None;
         }
-        if checked {
-            let signature = &function.header.signature;
-            let value = T::value(T::default());
-            let result = if op.compares() {
-                Value::Bool(false)
-            } else {
-                value
-            };
-            if !signature
-                .params
-                .iter()
-                .all(|param| super::super::import_result_fits(&param.ty, value))
-                || !super::super::import_result_fits(&signature.result, result)
-            {
-                return None;
-            }
-        }
         let table = fast.scalar()?;
-        let mut units = [0; 16];
-        for (mask, units) in units.iter_mut().enumerate() {
-            *units = table.units(u8::try_from(mask).ok()?)?;
-        }
-        Some((op, units))
+        Some((op, table.entries()))
     }
 
     fn unary(&self, lib: LibId, checked: bool) -> Option<Unary> {
@@ -1139,67 +1325,11 @@ impl<'e, T: Domain> Builder<'e, T> {
             }
         }
         let table = fast.scalar()?;
-        let mut units = [0; 16];
-        for (mask, units) in units.iter_mut().enumerate() {
-            *units = table.units(u8::try_from(mask).ok()?)?;
-        }
         Some(Unary {
             lib,
             entry: entry.clone(),
-            table: units,
+            table: table.entries(),
         })
-    }
-
-    /// The operand `expr` gives: an arithmetic operator's value, its
-    /// operands first, as the fused nodes run them, or a variable's or a
-    /// constant's.
-    fn operand(&mut self, expr: &Expr, formulas: &mut Formulas) -> Option<Arg<T>> {
-        match &expr.kind {
-            Kind::Operator {
-                lib, args, invoke, ..
-            } if args.len() == 1 => {
-                let unary = self.unary(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
-                let a = self.operand(&args[0], formulas)?;
-                formulas.count += 1;
-                formulas.units = formulas.units.checked_add(unary.table[0])?;
-                self.state.operators += 1;
-                let dst = self.next_temp;
-                self.next_temp += 1;
-                let kernel = self.unaries.len();
-                self.unaries.push(unary);
-                self.code.push(Instruction::Unary { kernel, a, dst });
-                Some(Arg::Temp(dst))
-            }
-            Kind::Operator {
-                lib, args, invoke, ..
-            } => {
-                let [a, b] = &**args else {
-                    return None;
-                };
-                let (op, table) = self.kernel(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
-                if op.compares() {
-                    return None;
-                }
-                let a = self.operand(a, formulas)?;
-                let b = self.operand(b, formulas)?;
-                formulas.count += 1;
-                formulas.units = formulas.units.checked_add(table[0])?;
-                self.state.operators += 1;
-                let dst = self.next_temp;
-                self.next_temp += 1;
-                let kernel = self.kernels.len();
-                self.kernels.push(Kernel { op, table });
-                self.code.push(Instruction::Number { kernel, a, b, dst });
-                Some(Arg::Temp(dst))
-            }
-            Kind::Local {
-                local,
-                scoped: false,
-                ..
-            } => Some(Arg::Reg(self.read(local.at)?)),
-            Kind::Const(value) => Some(Arg::Const(T::of(value)?)),
-            _ => None,
-        }
     }
 
     /// The register of the variable at `at`, which a read loads at the
@@ -1241,372 +1371,7 @@ impl<'e, T: Domain> Builder<'e, T> {
     }
 }
 
-/// Checks the private program against the already verified semantic summaries.
-/// The cursor consumes every instruction once, including both branch arms;
-/// operands must name initialized registers or earlier statement temporaries.
-struct Verify<'a, T> {
-    program: &'a Program<T>,
-    exe: &'a Executable,
-    pc: usize,
-    initialized: u32,
-    temps: usize,
-    formulas: Formulas,
-}
-
-impl<T: Domain> Program<T> {
-    fn verify(
-        &self,
-        exe: &Executable,
-        test: Option<&Summary>,
-        body: &Body,
-        from: usize,
-        covers: usize,
-    ) -> bool {
-        let locals = self
-            .slots
-            .iter()
-            .take(REGISTERS)
-            .enumerate()
-            .filter(|(_, at)| body.declares.contains(at))
-            .fold(0, |mask, (reg, _)| mask | (1 << reg));
-        if self.slots.len() > REGISTERS
-            || self.locals != locals
-            || self.tested != test.is_some()
-            || self
-                .slots
-                .iter()
-                .enumerate()
-                .any(|(i, slot)| self.slots[..i].contains(slot))
-        {
-            return false;
-        }
-        let mut initialized = 0;
-        for &(slot, reg) in &*self.loads {
-            if self.slots.get(usize::from(reg)) != Some(&slot) || initialized & (1 << reg) != 0 {
-                return false;
-            }
-            initialized |= 1 << reg;
-        }
-        if self
-            .held
-            .iter()
-            .any(|slot| !self.slots.contains(slot) || self.loads.iter().any(|(at, _)| at == slot))
-        {
-            return false;
-        }
-        let Some(steps) = body.steps.get(from..).and_then(|steps| steps.get(..covers)) else {
-            return false;
-        };
-        let mut check = Verify {
-            program: self,
-            exe,
-            pc: 0,
-            initialized,
-            temps: 0,
-            formulas: Formulas::default(),
-        };
-        let valid = (|| {
-            let branch = if let Some(test) = test {
-                check.test(test)?;
-                Some(check.branch()?)
-            } else {
-                None
-            };
-            for step in steps {
-                check.step(step)?;
-            }
-            check.exit(false)?;
-            if let Some(to) = branch {
-                if to != check.pc {
-                    return None;
-                }
-                check.exit(true)?;
-            }
-            (check.pc == self.code.len()).then_some(())
-        })();
-        valid.is_some()
-    }
-}
-
-impl<T: Domain> Verify<'_, T> {
-    fn next(&mut self) -> Option<&Instruction<T>> {
-        let instruction = self.program.code.get(self.pc)?;
-        self.pc += 1;
-        Some(instruction)
-    }
-
-    fn same(&self, actual: Arg<T>, expected: Arg<T>) -> Option<()> {
-        let valid = match (actual, expected) {
-            (Arg::Reg(a), Arg::Reg(b)) => {
-                a == b
-                    && usize::from(a) < self.program.slots.len()
-                    && self.initialized & (1 << a) != 0
-            }
-            (Arg::Const(a), Arg::Const(b)) => a.same(b),
-            (Arg::Temp(a), Arg::Temp(b)) => a == b && a < self.temps,
-            _ => false,
-        };
-        valid.then_some(())
-    }
-
-    fn kernel(&mut self, index: usize, lib: LibId, checked: bool, comparison: bool) -> Option<()> {
-        let actual = self.program.kernels.get(index)?;
-        let (op, table) = Builder::<T>::new(self.exe, self.program.charged).kernel(lib, checked)?;
-        if actual.op != op || actual.table != table || op.compares() != comparison {
-            return None;
-        }
-        self.formulas.count += 1;
-        self.formulas.units = self.formulas.units.checked_add(table[0])?;
-        Some(())
-    }
-
-    fn operand(&mut self, expr: &Expr) -> Option<Arg<T>> {
-        match &expr.kind {
-            Kind::Local {
-                local,
-                scoped: false,
-                ..
-            } => Some(Arg::Reg(
-                u8::try_from(self.program.slots.iter().position(|at| *at == local.at)?).ok()?,
-            )),
-            Kind::Const(value) => Some(Arg::Const(T::of(value)?)),
-            Kind::Operator {
-                lib, args, invoke, ..
-            } if args.len() == 1 => {
-                let a = self.operand(&args[0])?;
-                let Instruction::Unary {
-                    kernel,
-                    a: actual,
-                    dst,
-                } = *self.next()?
-                else {
-                    return None;
-                };
-                self.same(actual, a)?;
-                let expected = Builder::<T>::new(self.exe, self.program.charged)
-                    .unary(*lib, invoke.is_some_and(|invoke| invoke.checked))?;
-                let actual = self.program.unaries.get(kernel)?;
-                if actual.lib != expected.lib
-                    || actual.table != expected.table
-                    || dst != self.temps
-                    || dst >= self.program.temps
-                {
-                    return None;
-                }
-                self.formulas.count += 1;
-                self.formulas.units = self.formulas.units.checked_add(expected.table[0])?;
-                self.temps += 1;
-                Some(Arg::Temp(dst))
-            }
-            Kind::Operator {
-                lib, args, invoke, ..
-            } => {
-                let [a, b] = &**args else {
-                    return None;
-                };
-                let a = self.operand(a)?;
-                let b = self.operand(b)?;
-                let Instruction::Number {
-                    kernel,
-                    a: x,
-                    b: y,
-                    dst,
-                } = *self.next()?
-                else {
-                    return None;
-                };
-                self.same(x, a)?;
-                self.same(y, b)?;
-                self.kernel(
-                    kernel,
-                    *lib,
-                    invoke.is_some_and(|invoke| invoke.checked),
-                    false,
-                )?;
-                if dst != self.temps || dst >= self.program.temps {
-                    return None;
-                }
-                self.temps += 1;
-                Some(Arg::Temp(dst))
-            }
-            _ => None,
-        }
-    }
-
-    fn commit(&mut self, summary: &Summary) -> Option<()> {
-        let builder = Builder::<T>::new(self.exe, self.program.charged);
-        let expected = program(summary)?;
-        let units = builder.units(&expected, &self.formulas)?;
-        let formulas = self.formulas.count;
-        let Instruction::Commit {
-            at,
-            units: actual,
-            formulas: count,
-            program,
-        } = self.next()?
-        else {
-            return None;
-        };
-        if *at != summary.ops.start
-            || *actual != units
-            || *count != formulas
-            || **program != *expected
-        {
-            return None;
-        }
-        self.formulas = Formulas::default();
-        self.temps = 0;
-        Some(())
-    }
-
-    fn test(&mut self, summary: &Summary) -> Option<()> {
-        let Kind::Operator {
-            lib, args, invoke, ..
-        } = &root(summary)?.kind
-        else {
-            return None;
-        };
-        let [a, b] = &**args else {
-            return None;
-        };
-        let a = self.operand(a)?;
-        let b = self.operand(b)?;
-        let Instruction::Compare { kernel, a: x, b: y } = *self.next()? else {
-            return None;
-        };
-        self.same(x, a)?;
-        self.same(y, b)?;
-        self.kernel(
-            kernel,
-            *lib,
-            invoke.is_some_and(|invoke| invoke.checked),
-            true,
-        )?;
-        self.commit(summary)
-    }
-
-    fn branch(&mut self) -> Option<usize> {
-        let Instruction::Branch { otherwise } = *self.next()? else {
-            return None;
-        };
-        (otherwise > self.pc - 1 && otherwise < self.program.code.len()).then_some(otherwise)
-    }
-
-    fn exit(&mut self, expected: bool) -> Option<()> {
-        let Instruction::Exit { ended } = self.next()? else {
-            return None;
-        };
-        (*ended == expected).then_some(())
-    }
-
-    fn step(&mut self, step: &Step) -> Option<()> {
-        match step {
-            Step::Write(summary) | Step::Bind(summary) => {
-                let value = self.operand(root(summary)?)?;
-                let Instruction::Set { value: actual, dst } = *self.next()? else {
-                    return None;
-                };
-                self.same(actual, value)?;
-                let Some(RegionSlot::Frame(at)) = summary.write else {
-                    return None;
-                };
-                if self.program.slots.get(usize::from(dst)) != Some(&at) {
-                    return None;
-                }
-                if matches!(step, Step::Write(_))
-                    && !self.program.loads.iter().any(|(slot, _)| *slot == at)
-                    && !self.program.held.contains(&at)
-                {
-                    return None;
-                }
-                self.initialized |= 1 << dst;
-                self.commit(summary)
-            }
-            Step::If {
-                test,
-                then,
-                otherwise,
-            } if then.declares.is_empty() && otherwise.declares.is_empty() => {
-                self.test(test)?;
-                let target = self.branch()?;
-                let before = self.initialized;
-                for step in &then.steps {
-                    self.step(step)?;
-                }
-                let assigned = self.initialized;
-                let Instruction::Jump { to } = *self.next()? else {
-                    return None;
-                };
-                if target != self.pc || to < self.pc || to >= self.program.code.len() {
-                    return None;
-                }
-                self.initialized = before;
-                for step in &otherwise.steps {
-                    self.step(step)?;
-                }
-                self.initialized &= assigned;
-                (to == self.pc).then_some(())
-            }
-            _ => None,
-        }
-    }
-}
-
-#[cfg(test)]
-impl super::LoopPlan {
-    /// Semantic adversaries for the private verifier, called by the body-tree law.
-    pub(crate) fn assert_flat_verified(&self, exe: &Executable) {
-        let super::Head::While(test) = &self.head else {
-            panic!("a while plan")
-        };
-        let (program, covers) = Builder::<i64>::new(exe, true)
-            .program(Some(test), &self.body, 0)
-            .expect("the scalar plan forms a typed program");
-        assert_eq!(covers, self.body.steps.len());
-        let verify =
-            |program: &Program<i64>| program.verify(exe, Some(test), &self.body, 0, covers);
-        assert!(verify(&program));
-        let mut bad = program.clone();
-        bad.locals ^= 1;
-        assert!(!verify(&bad), "local ownership must match the block");
-        for at in 0..program.code.len() {
-            let mut bad = program.clone();
-            match &mut bad.code[at] {
-                Instruction::Assigned(_) | Instruction::Test(_) => {
-                    unreachable!("verification precedes fusion")
-                }
-                Instruction::Unary { a, .. } | Instruction::Number { a, .. } => {
-                    *a = Arg::Temp(program.temps)
-                }
-                Instruction::Compare { b, .. } => *b = Arg::Reg(REGISTERS as u8),
-                Instruction::Set { dst, .. } => *dst = REGISTERS as u8,
-                Instruction::Branch { otherwise } => *otherwise = at,
-                Instruction::Jump { to } => *to = program.code.len(),
-                Instruction::Commit { at, .. } => *at = at.saturating_add(1),
-                Instruction::Exit { ended } => *ended = !*ended,
-            }
-            assert!(!verify(&bad), "malformed instruction {at}");
-        }
-        let mut bad = program.clone();
-        bad.loads = Box::default();
-        assert!(!verify(&bad), "reads must be initialized");
-        let mut bad = program.clone();
-        let commit = bad
-            .code
-            .iter_mut()
-            .find_map(|op| match op {
-                Instruction::Commit { program, .. } if program.len() > 1 => Some(program),
-                _ => None,
-            })
-            .unwrap();
-        commit.swap(0, commit.len() - 1);
-        assert!(
-            !verify(&bad),
-            "event order must match the lowered statement"
-        );
-        assert!(!program.verify(exe, Some(test), &self.body, 0, covers - 1));
-    }
-}
+mod verify;
 
 /// The value a statement's last op takes, where the statement's program
 /// charges it alone: no guest call, no counted invoke, no conditional

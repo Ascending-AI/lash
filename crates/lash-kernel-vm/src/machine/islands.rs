@@ -28,8 +28,8 @@
 //! reference saves them, so a park or seal after the exit projects the same
 //! bytes.
 
-mod admission;
-mod compiled;
+pub(crate) mod admission;
+pub(crate) mod compiled;
 pub(crate) mod cx;
 mod entry;
 mod execute;
@@ -684,7 +684,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 [x] if self.accounting => compiled::unary(site, *x, self.exe),
                 [x, y] => site
                     .pair
-                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.exe, self.charging)),
+                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging)),
                 _ => None,
             }
         };
@@ -784,8 +784,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                     self.answered(function, fast, args, entry.answer(args, self.charging)?)
                 })
         } else if let ([x, y], Some(pair)) = (args, site.pair)
-            && let Some((value, Some(units))) =
-                compiled::typed(site, &pair, *x, *y, self.exe, self.charging)
+            && let Some((value, Some(units))) = compiled::typed(site, &pair, *x, *y, self.charging)
         {
             // A statement root's operator runs the typed kernel nested
             // operators run, charged its table's units as its entry is.

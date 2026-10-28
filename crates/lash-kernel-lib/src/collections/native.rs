@@ -331,6 +331,7 @@ pub(super) fn functions<T>(
                     entry,
                     operation: name,
                 }),
+                None,
             )) as _,
         ));
     }
@@ -364,6 +365,7 @@ pub(super) fn functions<T>(
         function: fn(&[Value]) -> Result<Value, NativeError>,
         entry: fn(&[Value]) -> Option<Value>,
         operation: &'static str,
+        symbolic: Option<lash_kernel_doc::SymbolicNative>,
     ) -> Arc<dyn NativeFunction> {
         Arc::new(Aux(
             function,
@@ -373,6 +375,7 @@ pub(super) fn functions<T>(
                 entry,
                 operation,
             }),
+            symbolic,
         ))
     }
     type NativeMaker = fn() -> Arc<dyn NativeFunction>;
@@ -384,6 +387,7 @@ pub(super) fn functions<T>(
                     bool_not,
                     |args| bool_not(args).ok(),
                     "bool.not(x: Bool) -> Bool",
+                    Some(lash_kernel_doc::SymbolicNative::Not),
                 )
             },
             "1",
@@ -401,6 +405,7 @@ pub(super) fn functions<T>(
                     function_check,
                     |args| function_check(args).ok(),
                     "collection.function_check(x: Any) -> Any",
+                    None,
                 )
             },
             "1",
@@ -474,6 +479,7 @@ impl NativeFunction for HoldsNone {
 struct Aux(
     fn(&[Value]) -> Result<Value, NativeError>,
     Option<PreparedNative>,
+    Option<lash_kernel_doc::SymbolicNative>,
 );
 impl NativeFunction for Aux {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -482,6 +488,13 @@ impl NativeFunction for Aux {
 
     fn prepare(&self) -> Option<PreparedNative> {
         self.1
+    }
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            symbolic: self.2,
+            ..Default::default()
+        }
     }
 }
 fn bool_not(args: &[Value]) -> Result<Value, NativeError> {

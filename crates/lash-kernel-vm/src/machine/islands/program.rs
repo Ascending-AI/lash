@@ -7,24 +7,24 @@ use super::*;
 mod accumulation;
 #[path = "program/numeric.rs"]
 mod numeric;
-pub(in crate::machine::islands) use numeric::{CallInputs, Destination, Operand};
+pub(crate) use numeric::{CallInputs, Destination, Operand};
 #[path = "program/access.rs"]
 mod access;
-pub(in crate::machine::islands) use access::{AccessShape, AccessSite};
+pub(crate) use access::{AccessShape, AccessSite};
 #[path = "program/guarded.rs"]
 mod guarded;
 #[path = "program/merge.rs"]
 mod merge;
 use crate::compile::expr::{Arm, Callee, Make};
 use crate::compile::islands::{Block as SourceBlock, Kind as StatementKind, Statement, unit_test};
-pub(in crate::machine::islands) use merge::{
+pub(crate) use merge::{
     Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
 };
 
-pub(in crate::machine::islands) struct Instruction {
-    pub(in crate::machine::islands) op: Op,
+pub(crate) struct Instruction {
+    pub(crate) op: Op,
     /// Source statement admission immediately before its first operation.
-    pub(in crate::machine::islands) begin: Option<StatementEntry>,
+    pub(crate) begin: Option<StatementEntry>,
     /// Evaluated operands, in source evaluation order, before this op.
     pub(in crate::machine::islands) live: Box<[u32]>,
 }
@@ -32,7 +32,7 @@ pub(in crate::machine::islands) struct Instruction {
 /// A pure source operand, read once in its original argument order.
 /// Failure retains the operand's source PC and the completed prefix.
 #[derive(Clone, Copy)]
-pub(in crate::machine::islands) enum Read {
+pub(crate) enum Read {
     Literal {
         reg: u32,
         value: Value,
@@ -64,20 +64,20 @@ impl Read {
         }
     }
 
-    pub(in crate::machine::islands) fn reg(&self) -> u32 {
+    pub(crate) fn reg(&self) -> u32 {
         match self {
             Self::Literal { reg, .. } | Self::Local { reg, .. } => *reg,
         }
     }
 }
 
-pub(in crate::machine::islands) struct StoreInputs {
-    pub(in crate::machine::islands) reads: [Read; 3],
+pub(crate) struct StoreInputs {
+    pub(crate) reads: [Read; 3],
     /// Target, index and value positions in source evaluation order.
-    pub(in crate::machine::islands) roles: [usize; 3],
+    pub(crate) roles: [usize; 3],
 }
 
-pub(in crate::machine::islands) enum Op {
+pub(crate) enum Op {
     Collection {
         step: std::sync::Arc<CollectionStep>,
         tail: bool,
@@ -350,24 +350,24 @@ pub(in crate::machine::islands) enum Op {
 }
 
 /// The most arms a guarded read enters.
-pub(in crate::machine::islands) const GUARDED_ARMS: usize = 4;
+pub(crate) const GUARDED_ARMS: usize = 4;
 
 #[derive(Clone)]
-pub(in crate::machine::islands) struct StatementEntry {
-    pub(in crate::machine::islands) id: StmtId,
+pub(crate) struct StatementEntry {
+    pub(crate) id: StmtId,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) ahead: u64,
 }
 
 #[derive(Clone)]
-pub(in crate::machine::islands) struct WriteSite {
-    pub(in crate::machine::islands) begin: Option<StatementEntry>,
-    pub(in crate::machine::islands) reads: Option<Box<[Read]>>,
-    pub(in crate::machine::islands) at: usize,
-    pub(in crate::machine::islands) shared: bool,
-    pub(in crate::machine::islands) reg: u32,
+pub(crate) struct WriteSite {
+    pub(crate) begin: Option<StatementEntry>,
+    pub(crate) reads: Option<Box<[Read]>>,
+    pub(crate) at: usize,
+    pub(crate) shared: bool,
+    pub(crate) reg: u32,
     pub(in crate::machine::islands) pc: u32,
-    pub(in crate::machine::islands) bind: bool,
+    pub(crate) bind: bool,
     pub(in crate::machine::islands) close: Option<Close>,
     pub(in crate::machine::islands) covered: bool,
     pub(in crate::machine::islands) leaves: u32,
@@ -723,7 +723,7 @@ impl<'e> Build<'e> {
                     .find(|plan| plan.stmt == statement.id)
                     .and_then(|plan| {
                         Some(Box::new(RepeatSite {
-                            run: plan.typed_repeat(self.exe)?,
+                            run: plan.typed_repeat(self.exe, &self.ops[start..exhausted])?,
                             iteration_max: plan.iteration_max,
                         }))
                     });
@@ -1197,6 +1197,7 @@ impl<'e> Build<'e> {
                     })
                 });
                 site.checked |= self.root_checked();
+                site.pair = crate::compile::numeric_pair(self.exe.lib(site.lib), site.checked);
                 site.body_when_observed |=
                     self.root.is_some() && matches!(self.exe.lib(site.lib).run, LibRun::Body(_));
                 self.site(site.depth, site.body_when_observed);
@@ -1613,7 +1614,7 @@ impl<'e> Build<'e> {
 }
 
 impl Op {
-    pub(in crate::machine::islands) fn scheduler_pc(&self) -> Option<u32> {
+    pub(crate) fn scheduler_pc(&self) -> Option<u32> {
         match self {
             Self::Spawn(pc)
             | Self::Yield(pc)

@@ -2,7 +2,7 @@
 //! steps retain the source body and callback coordinates for every exit.
 use super::*;
 
-pub(in crate::machine::islands) enum CollectionStep {
+pub(crate) enum CollectionStep {
     Merge(Merge),
     Place(Placement),
     Visit(Visit),
@@ -11,13 +11,13 @@ pub(in crate::machine::islands) enum CollectionStep {
     Append(Append),
 }
 
-pub(in crate::machine::islands) struct Append {
+pub(crate) struct Append {
     pub(in crate::machine::islands) target: usize,
     pub(in crate::machine::islands) item: usize,
     pub(in crate::machine::islands) body: usize,
 }
 
-pub(in crate::machine::islands) struct Reduction {
+pub(crate) struct Reduction {
     pub(in crate::machine::islands) accumulator: usize,
     pub(in crate::machine::islands) item: usize,
     pub(in crate::machine::islands) body: usize,
@@ -28,7 +28,7 @@ pub(in crate::machine::islands) struct Reduction {
     pub(in crate::machine::islands) depth: Depth,
 }
 
-pub(in crate::machine::islands) struct ReadSlot {
+pub(crate) struct ReadSlot {
     pub(in crate::machine::islands) target: usize,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) list: usize,
@@ -37,7 +37,7 @@ pub(in crate::machine::islands) struct ReadSlot {
     pub(in crate::machine::islands) body: usize,
 }
 
-pub(in crate::machine::islands) struct Visit {
+pub(crate) struct Visit {
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) length: usize,
     pub(in crate::machine::islands) value: usize,
@@ -46,7 +46,7 @@ pub(in crate::machine::islands) struct Visit {
     pub(in crate::machine::islands) after: [usize; 2],
 }
 
-pub(in crate::machine::islands) struct Placement {
+pub(crate) struct Placement {
     pub(in crate::machine::islands) target: usize,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) value: usize,
@@ -57,7 +57,7 @@ pub(in crate::machine::islands) struct Placement {
     pub(in crate::machine::islands) increment: Value,
 }
 
-pub(in crate::machine::islands) struct Merge {
+pub(crate) struct Merge {
     pub(in crate::machine::islands) counters: [usize; 7], // dest, end, mid, left, right, width, n
     pub(in crate::machine::islands) lists: [usize; 2],    // sorted, out
     pub(in crate::machine::islands) from_right: usize,

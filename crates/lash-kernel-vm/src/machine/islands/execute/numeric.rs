@@ -89,26 +89,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.scratch.exit.regs.push((left.reg(), x));
         })?;
         let answer = if !OBSERVING {
-            let typed = match (x, y) {
-                (Value::Float(a), Value::Float(b)) => kernel
-                    .floats
-                    .and_then(|op| lash_kernel_doc::scalar::floats(op, a, b))
-                    .map(|value| (value, if self.charging { site.floats } else { Some(0) })),
-                (Value::Int(a), Value::Int(b)) => kernel
-                    .ints
-                    .and_then(|op| lash_kernel_doc::scalar::ints(op, a, b))
-                    .map(|value| {
-                        (
-                            value,
-                            if self.charging {
-                                site.table.units(sizes(&[x, y], &value))
-                            } else {
-                                Some(0)
-                            },
-                        )
-                    }),
-                _ => None,
-            };
+            let typed = super::super::compiled::typed(site, &kernel, x, y, self.charging);
             typed.and_then(|(value, units)| self.numeric_charge(site, value, units, covered))
         } else {
             None

@@ -3,7 +3,7 @@
 use super::*;
 
 /// A compact read, whose source instructions remain its miss path.
-pub(in crate::machine::islands) struct AccessSite {
+pub(crate) struct AccessSite {
     pub(in crate::machine::islands) kind: Box<KindTest>,
     pub(in crate::machine::islands) target: Read,
     pub(in crate::machine::islands) shape: AccessShape,
@@ -20,7 +20,7 @@ pub(in crate::machine::islands) struct AccessSite {
 }
 
 /// The access alone remains a valid commit when its optional consumer declines.
-pub(in crate::machine::islands) struct AccessEnd {
+pub(crate) struct AccessEnd {
     pub(in crate::machine::islands) after: usize,
     pub(in crate::machine::islands) leaves: u32,
     pub(in crate::machine::islands) fixed: u64,
@@ -28,12 +28,12 @@ pub(in crate::machine::islands) struct AccessEnd {
     pub(in crate::machine::islands) arms: Box<[usize]>,
 }
 
-pub(in crate::machine::islands) struct AccessHole {
+pub(crate) struct AccessHole {
     pub(in crate::machine::islands) lib: LibId,
     pub(in crate::machine::islands) floats: Option<u64>,
 }
 
-pub(in crate::machine::islands) struct AccessConsumer {
+pub(crate) struct AccessConsumer {
     pub(in crate::machine::islands) operator: usize,
     pub(in crate::machine::islands) reads: [Read; 2],
     pub(in crate::machine::islands) at: usize,
@@ -42,7 +42,7 @@ pub(in crate::machine::islands) struct AccessConsumer {
     pub(in crate::machine::islands) floats: Option<(lash_kernel_doc::scalar::ScalarOp, u64)>,
 }
 
-pub(in crate::machine::islands) enum AccessShape {
+pub(crate) enum AccessShape {
     Length {
         native: u64,
         convert: usize,

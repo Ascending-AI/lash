@@ -1,3 +1,6 @@
+use law.copy_length
+use law.copy_read
+use num.to_float
 # K-FORM-014..017: departures run cleanup in order; halts bypass handlers.
 use eq
 use num.add
@@ -136,4 +139,55 @@ charge 3
 body {
   if num.lt(x, 0.0) { return -1.0 }
   return num.add(num.mul(x, 2.0), 1.0)
+}
+
+# COPY-SOURCE: the description follows the body, including its ordinary read.
+function law.copy_length(target: Any) -> Number
+kernel 1
+charge 8
+body { return num.to_float(list.len(target)) }
+
+function law.copy_read(target: Any, key: Any) -> Any
+kernel 1
+charge 12
+body {
+  let dynamic = fn(target, key) {
+    let value = target[key]
+    if same(value, ()) { return absent }
+    return value
+  }
+  let value = apply dynamic(target, key)
+  return value
+}
+
+function law.copy_snapshot(target: Any) -> List(Any)
+kernel 1
+charge sum(8, size(target), size(result))
+body {
+  let length = invoke law.copy_length(target)
+  if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) metered 2 {
+    let value = invoke law.copy_read(target, index)
+    set output[list.len(output)] = value
+    set index = num.add(index, 1)
+  }
+  return output
+}
+
+function ts.array.dense(target: Any) -> List(Any)
+kernel 1
+charge sum(8, size(target), size(result))
+body {
+  let length = invoke law.copy_length(target)
+  if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) metered 2 {
+    let value = invoke law.copy_read(target, index)
+    set output[list.len(output)] = target
+    set index = num.add(index, 1)
+  }
+  return output
 }

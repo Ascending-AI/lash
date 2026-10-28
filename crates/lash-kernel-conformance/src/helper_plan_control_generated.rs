@@ -24,13 +24,17 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_GET_COMPUTED_PLAN,
     &LAW_DECLINING_PLAN,
     &LAW_FACTORY_PLAN,
+    &LAW_COPY_SNAPSHOT_PLAN,
     &LAW_DECLINE_CALLER_PLAN,
+    &LAW_COPY_READ_PLAN,
     &LAW_HANDLERS_PLAN,
+    &TS_ARRAY_DENSE_PLAN,
     &LAW_ALLOCATING_ELEMENT_PLAN,
     &LAW_BUDGET_PLAN,
     &LAW_HALT_PLAN,
     &TS_SET_PLAN,
     &TS_GET_NUMERIC_PLAN,
+    &LAW_COPY_LENGTH_PLAN,
     &LAW_ELEMENT_READ_PLAN,
 ];
 
@@ -54,7 +58,7 @@ const TS_GET_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_numeric,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_get_numeric_heap, depth: 1, writes: false, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_get_numeric_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_numeric`.
@@ -121,7 +125,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_computed,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 1, writes: false, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_computed`.
@@ -221,7 +225,7 @@ const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 1, writes: true, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set`.
@@ -343,7 +347,7 @@ const LAW_ELEMENT_READ_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_element_read,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: law_element_read_heap, depth: 1, writes: false, element: Some(p::ElementPath { operation: p::Element::Read, depth: 1, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: law_element_read_heap, depth: 1, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.element_read`.
@@ -915,7 +919,7 @@ const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.declining`.
@@ -1008,7 +1012,7 @@ const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_budget,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.budget`.
@@ -1055,4 +1059,374 @@ fn law_budget_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
         },
         _ => None,
     }
+}
+
+const LAW_COPY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "law.copy_length",
+    function: p::function("cb88110221e1b5ae504c3d80208e55c3fa481852ddd3d1facce28b1279b088e4"),
+    callees: &[
+        p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
+        p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"),
+    ],
+    literals: &[],
+    fields: &[],
+    records: &[],
+    registers: 1,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: law_copy_length,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: law_copy_length_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `law.copy_length`.
+fn law_copy_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.call(1, 0, 1)?;
+    Ok(ctx.take(0))
+}
+fn law_copy_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            let charge_mark = heap.mark();
+            if let Some(value) = (|| {
+                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                Some(v1)
+            })() { return Some(value); }
+            heap.rewind(charge_mark);
+            None
+        },
+        _ => None,
+    }
+}
+
+const LAW_COPY_READ_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "law.copy_read",
+    function: p::function("39f1592b83ac9af98f62f330f96a60cc9dcff77ae163d3437d022a2702e6ee3c"),
+    callees: &[],
+    literals: &[],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "key", path: &[] },
+        p::PlanLocal { name: "dynamic", path: &[0] },
+        p::PlanLocal { name: "value", path: &[1] },
+    ],
+    closures: &[
+        &[0, 0],
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[1, 0],
+            call: p::SiteCall::Apply,
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2],
+            loops: &[],
+        },
+    ],
+    run: law_copy_read,
+    template: None,
+};
+
+/// `law.copy_read`.
+fn law_copy_read(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 { ctx.adopt(1, 1)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.closure(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.local(2, 0)?; }
+        if r == 0 { ctx.local(0, 1)?; }
+        if r == 0 { ctx.local(1, 2)?; }
+        if r == 1 { r = 0; } else if r == 0 { ctx.apply(0, 0, 2)?; }
+        if r == 0 { ctx.bind(3, 0)?; }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+
+const LAW_COPY_SNAPSHOT_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "law.copy_snapshot",
+    function: p::function("2920631c1a0c104979b49666db128ec32e3bab695c9158955ebad807af007c09"),
+    callees: &[
+        p::function("cb88110221e1b5ae504c3d80208e55c3fa481852ddd3d1facce28b1279b088e4"),
+        p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"),
+        p::function("6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255"),
+        p::function("39f1592b83ac9af98f62f330f96a60cc9dcff77ae163d3437d022a2702e6ee3c"),
+        p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
+        p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x41efffffffe00000),
+        p::PlanLiteral::Text("RangeError"),
+        p::PlanLiteral::Text("Invalid array length"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "length", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+        p::PlanLocal { name: "index", path: &[3] },
+        p::PlanLocal { name: "value", path: &[4, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[4, 1, 0, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
+    run: law_copy_snapshot,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: law_copy_snapshot_bulk, depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+};
+
+/// `law.copy_snapshot`.
+fn law_copy_snapshot(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(1, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.literal(3, 2)?;
+            ctx.call(2, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 {
+                ctx.local(3, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(1, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(0, 0)?; }
+                if r == 0 { ctx.local(3, 1)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 2)?; }
+                if r == 0 { ctx.bind(4, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(4, 0)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
+                ctx.call(4, 2, 1)?;
+                ctx.set_index(1, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.literal(5, 1)?;
+                ctx.call(5, 0, 2)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(4); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
+}
+static LAW_COPY_SNAPSHOT_COPY: p::CopyLoop = p::CopyLoop { kind: p::CopyKind::Dense, read: p::ElementPath { operation: p::Element::Read, depth: 5, room: 3, requires: &[p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },] }, read_units: 13, loop_units: 2, temporary_values: 12 };
+fn law_copy_snapshot_bulk(heap: &mut dyn p::TemplateHeap, args: &[Value], _: &[lash_kernel_doc::PreparedNative]) -> Option<Value> { heap.copy(args, &LAW_COPY_SNAPSHOT_COPY) }
+
+const TS_ARRAY_DENSE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "ts.array.dense",
+    function: p::function("79d1468d80479d77cef2ff7302429a4500f1f2e8d07d38158ee04cb306f498cc"),
+    callees: &[
+        p::function("cb88110221e1b5ae504c3d80208e55c3fa481852ddd3d1facce28b1279b088e4"),
+        p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"),
+        p::function("6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255"),
+        p::function("39f1592b83ac9af98f62f330f96a60cc9dcff77ae163d3437d022a2702e6ee3c"),
+        p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
+        p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"),
+    ],
+    literals: &[
+        p::PlanLiteral::Float(0x41efffffffe00000),
+        p::PlanLiteral::Text("RangeError"),
+        p::PlanLiteral::Text("Invalid array length"),
+        p::PlanLiteral::Null,
+        p::PlanLiteral::Float(0x0000000000000000),
+        p::PlanLiteral::Int("1"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 3,
+    slots: &[
+        p::PlanLocal { name: "target", path: &[] },
+        p::PlanLocal { name: "length", path: &[0] },
+        p::PlanLocal { name: "output", path: &[2] },
+        p::PlanLocal { name: "index", path: &[3] },
+        p::PlanLocal { name: "value", path: &[4, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[
+        p::PlanSite {
+            path: &[4, 1, 0, 0],
+            call: p::SiteCall::Invoke(3),
+            dst: 0,
+            roles: &[],
+            bound: &[0, 1, 2, 3],
+            loops: &[p::PlanLoop::While],
+        },
+    ],
+    run: ts_array_dense,
+    template: None,
+};
+
+/// `ts.array.dense`.
+fn ts_array_dense(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit> {
+    let mut r = entry;
+    if r == 0 { ctx.adopt(0, 0)?; }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(0, 0, 1)?;
+        ctx.bind(1, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(0, 0)?;
+        ctx.local(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.literal(1, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.literal(3, 2)?;
+            ctx.call(2, 0, 3)?;
+            return Err(p::PlanExit::Raise(ctx.take(0)));
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(2, 0)?;
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.literal(4, 0)?;
+        ctx.bind(3, 0)?;
+    }
+    if r == 0 || matches!(r, 1) {
+        if r == 0 { ctx.begin()?; }
+        if r == 0 { ctx.enter_while(); }
+        'l0: loop {
+            if r == 0 { ctx.meter(2)?; } else if !matches!(r, 1) { break 'l0; }
+            if r == 0 {
+                ctx.local(3, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(1, 0, 2)?;
+            }
+            if r == 0 { if !ctx.test(0, p::Test::While)? { break 'l0; } ctx.pass_while(); }
+            if r == 0 || matches!(r, 1) {
+                if r == 0 { ctx.begin()?; }
+                if r == 0 { ctx.local(0, 0)?; }
+                if r == 0 { ctx.local(3, 1)?; }
+                if r == 1 { r = 0; } else if r == 0 { ctx.invoke(0, 3, 0, 2)?; }
+                if r == 0 { ctx.bind(4, 0)?; }
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.pin(0)?;
+                ctx.local(2, 1)?;
+                ctx.local(2, 2)?;
+                ctx.call(4, 2, 1)?;
+                ctx.set_index(1, 0)?;
+            }
+            if r == 0 {
+                ctx.begin()?;
+                ctx.local(3, 0)?;
+                ctx.literal(5, 1)?;
+                ctx.call(5, 0, 2)?;
+                ctx.assign(3, 0)?;
+            }
+            if r == 0 { ctx.unbind(4); }
+            if r == 0 { ctx.begin()?; }
+        }
+        ctx.leave_while(0);
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        return Ok(ctx.take(0));
+    }
+    if r != 0 {
+        return Err(ctx.lost(r));
+    }
+    ctx.begin()?;
+    Ok(Value::Null)
 }

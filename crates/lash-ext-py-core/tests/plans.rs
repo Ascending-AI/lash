@@ -60,10 +60,10 @@ struct Probes {
 
 // This fixture observes probes only; the VM owns charging the same paths.
 impl lash_kernel_doc::plan::TemplateMeter for Probes {
-    fn mark(&self) -> usize {
-        0
+    fn mark(&self) -> lash_kernel_doc::plan::ChargeMark {
+        lash_kernel_doc::plan::ChargeMark::default()
     }
-    fn rewind(&mut self, _: usize) {}
+    fn rewind(&mut self, _: lash_kernel_doc::plan::ChargeMark) {}
     fn form(&mut self, _: lash_kernel_value::FunctionId, _: lash_kernel_doc::plan::FormCharge) {}
     fn bill(
         &mut self,

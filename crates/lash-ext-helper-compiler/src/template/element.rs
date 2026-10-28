@@ -14,10 +14,11 @@ const ITEM: &str = "element_item";
 const TUPLE_LENGTH: &str = "element_tuple_length";
 
 pub(super) struct Proof {
-    operation: Element,
-    kind: ValueKind,
-    hole: bool,
-    requires: Vec<(FunctionId, NativeFact)>,
+    pub(super) copy: bool,
+    pub(super) operation: Element,
+    pub(super) kind: ValueKind,
+    pub(super) hole: bool,
+    pub(super) requires: Vec<(FunctionId, NativeFact)>,
 }
 
 fn symbol(code: &str, kind: ValueKind) -> Symbol {
@@ -49,6 +50,9 @@ impl Proof {
 
     pub(super) fn heap(&self, form: &Form, state: &mut State) -> Option<Symbol> {
         match form {
+            Form::Tuple(items) if self.copy && items.is_empty() => {
+                Some(symbol("element_unit", ValueKind::Tuple))
+            }
             Form::Len {
                 collection: "List",
                 target,
@@ -100,10 +104,12 @@ impl Proof {
             .map(|arg| arg.constant)
             .collect::<Option<Vec<_>>>()
         {
-            if !matches!(fact, SymbolicNative::Kind | SymbolicNative::Same)
-                && !values
-                    .iter()
-                    .all(|value| matches!(value, Value::Int(_) | Value::Float(_)))
+            if !matches!(
+                fact,
+                SymbolicNative::Kind | SymbolicNative::Same | SymbolicNative::Not
+            ) && !values
+                .iter()
+                .all(|value| matches!(value, Value::Int(_) | Value::Float(_)))
             {
                 return None;
             }
@@ -137,6 +143,11 @@ impl Proof {
     }
 
     fn same(&self, a: &Symbol, b: &Symbol) -> Option<bool> {
+        if (a.code == ITEM && b.code == "element_unit")
+            || (b.code == ITEM && a.code == "element_unit")
+        {
+            return Some(self.hole);
+        }
         if a.code == b.code {
             return Some(true);
         }
@@ -191,6 +202,13 @@ impl Proof {
             (ScalarOp::Le, None) if number(a) == Some(0.0) && key(b) => true,
             (ScalarOp::Lt, None) if key(a) && number(b) == Some(0.0) => false,
             (ScalarOp::Lt, None) if length(a) && key(b) => false,
+            (ScalarOp::Lt, None)
+                if number(a)
+                    .is_some_and(|n| n >= lash_kernel_doc::plan::ELEMENT_POSITIONS as f64)
+                    && length(b) =>
+            {
+                false
+            }
             _ => return None,
         };
         Symbol::constant(Value::Bool(truth))
@@ -242,6 +260,7 @@ pub(super) fn derive(library: &Library, definition: &FunctionDefinition) -> Opti
             heap: true,
             captured: captured(&body.block, library)?,
             element: Some(Proof {
+                copy: false,
                 operation,
                 kind,
                 hole,
@@ -340,8 +359,17 @@ pub(super) fn describe(
     depth: u32,
     requires: &[(FunctionId, NativeFact)],
 ) -> Option<String> {
+    describe_room(operation, depth, 2, requires)
+}
+
+pub(super) fn describe_room(
+    operation: Element,
+    depth: u32,
+    room: u32,
+    requires: &[(FunctionId, NativeFact)],
+) -> Option<String> {
     let mut code = format!(
-        "Some(p::ElementPath {{ operation: p::Element::{operation:?}, depth: {depth}, room: 2, requires: &["
+        "Some(p::ElementPath {{ operation: p::Element::{operation:?}, depth: {depth}, room: {room}, requires: &["
     );
     for (function, fact) in requires {
         let fact = match *fact {

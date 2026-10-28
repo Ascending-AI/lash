@@ -1293,12 +1293,17 @@ fn lean(program: Vec<Event>) -> Box<[Event]> {
 }
 
 impl LoopPlan {
-    /// Compile the verified scalar facts directly, without a region runner.
-    pub(crate) fn typed_repeat(&self, exe: &Executable) -> Option<Typed> {
+    /// Project admitted registers, retaining this plan's independent semantic
+    /// and canonical event authority.
+    pub(crate) fn typed_repeat(
+        &self,
+        exe: &Executable,
+        registers: &[crate::machine::islands::compiled::Instruction],
+    ) -> Option<Typed> {
         let Head::While(test) = &self.head else {
             return None;
         };
-        let run = typed::compile(exe, exe.charging(), Some(test), &self.body, 0)?;
+        let run = typed::compile(exe, registers, exe.charging(), Some(test), &self.body, 0)?;
         run.whole.then_some(run)
     }
 

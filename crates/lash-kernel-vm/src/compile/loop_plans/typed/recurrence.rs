@@ -147,10 +147,11 @@ impl<T: Domain> Recurrence<T> {
         let mut before = counter;
         let mut iterations = 0_u64;
         let mut units = 0_u64;
+        let budget = headroom.budget();
         let ended = loop {
-            if !headroom.admits_iteration(units) {
+            let Some(_admission) = budget.as_ref().and_then(|budget| budget.admit(units)) else {
                 break Ran::Done(0);
-            }
+            };
             let read = |at: usize| if varies[at] { counter } else { fixed[at] };
             let (a, b) = (read(0), read(1));
             match T::truth(test.op, a, b) {

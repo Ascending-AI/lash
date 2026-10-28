@@ -11,12 +11,25 @@ pub(super) fn has_charges(steps: &[Step]) -> bool {
     })
 }
 
+#[derive(Clone)]
+pub(super) enum SourceCharge {
+    Form(lash_kernel_doc::plan::FormCharge),
+    Bill {
+        function: FunctionId,
+        args: Vec<Symbol>,
+        result: Symbol,
+    },
+}
+
 impl State {
-    pub(super) fn charge(&mut self, form: &str) {
+    pub(super) fn charge(&mut self, form: lash_kernel_doc::plan::FormCharge) {
         if let Some(owner) = self.charging {
+            if self.describe {
+                self.charges.push(SourceCharge::Form(form));
+            }
             let target = if self.heap { "heap" } else { "meter" };
             self.steps.push(Step::Meter(format!(
-                "{target}.form(const {{ p::function({:?}) }}, p::FormCharge::{form});",
+                "{target}.form(const {{ p::function({:?}) }}, p::FormCharge::{form:?});",
                 owner.to_string()
             )));
         }
@@ -43,7 +56,15 @@ impl Evaluator<'_> {
                 .collect::<Vec<_>>()
                 .join(", ")
         });
+        let charged_args = (bill && state.describe).then(|| args.clone());
         let answer = self.call_inner(function, args, state, depth)?;
+        if let Some(args) = charged_args {
+            state.charges.push(SourceCharge::Bill {
+                function,
+                args,
+                result: answer.clone(),
+            });
+        }
         if let Some(given) = given {
             let target = if self.heap { "heap" } else { "meter" };
             state.steps.push(Step::Meter(format!(

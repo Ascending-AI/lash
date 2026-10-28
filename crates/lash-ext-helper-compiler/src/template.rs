@@ -32,7 +32,7 @@ mod bulk;
 mod element;
 mod forwarding;
 mod metering;
-use metering::tree;
+use metering::{SourceCharge, tree};
 
 /// The most native calls and arena forms one path's answer takes.
 const PATH_CALLS: usize = 8;
@@ -54,6 +54,7 @@ struct Symbol {
     constant: Option<Value>,
     kind: Option<ValueKind>,
     calls: usize,
+    closure: Option<FunctionId>,
 }
 
 impl Symbol {
@@ -78,6 +79,7 @@ impl Symbol {
             constant: Some(value),
             kind: Some(value.kind()),
             calls: 0,
+            closure: None,
         })
     }
 
@@ -88,6 +90,7 @@ impl Symbol {
             constant: None,
             kind,
             calls,
+            closure: None,
         }
     }
 }
@@ -384,6 +387,8 @@ struct State {
     charging: Option<FunctionId>,
     vars: BTreeMap<Name, Symbol>,
     steps: Vec<Step>,
+    charges: Vec<SourceCharge>,
+    describe: bool,
     depth: u32,
     probes: Vec<Probe>,
     /// Whether the path declared or assigned a plan variable, with a bind
@@ -556,13 +561,27 @@ impl Evaluator<'_> {
         match rhs {
             Rhs::Expr(expr) => self.expr(expr, state, depth),
             Rhs::Action(Action::Call {
+                callee: Callee::Value(name),
+                args,
+            }) if self.element.is_some() => {
+                let closure = state.vars.get(name)?.closure?;
+                let args = args
+                    .iter()
+                    .map(|arg| {
+                        state.charge(lash_kernel_doc::plan::FormCharge::Argument);
+                        Self::atom(arg, state)
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                self.helper(self.library.definition(&closure)?, args, state, depth)
+            }
+            Rhs::Action(Action::Call {
                 callee: Callee::Local(function),
                 args,
             }) => {
                 let args = args
                     .iter()
                     .map(|arg| {
-                        state.charge("Argument");
+                        state.charge(lash_kernel_doc::plan::FormCharge::Argument);
                         Self::atom(arg, state)
                     })
                     .collect::<Option<Vec<_>>>()?;
@@ -610,8 +629,31 @@ impl Evaluator<'_> {
     }
 
     fn expr(&mut self, expr: &Expr, state: &mut State, depth: u32) -> Option<Symbol> {
-        state.charge("Expression");
+        state.charge(lash_kernel_doc::plan::FormCharge::Expression);
         match expr {
+            Expr::Closure(closure) if self.element.is_some() => {
+                let definition = self.library.definition(&closure.function)?;
+                let params = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>();
+                if !lash_kernel_doc::snapshot::CodeReads::of(
+                    &params,
+                    &definition.body()?.block,
+                    &self.library.registry,
+                )
+                .free
+                .is_empty()
+                {
+                    return None;
+                }
+                let mut symbol =
+                    Symbol::computed("read_closure".into(), Some(ValueKind::Closure), 0);
+                symbol.closure = Some(closure.function);
+                Some(symbol)
+            }
             Expr::Literal(literal) => Self::literal(literal),
             Expr::Variable(name) => state.vars.get(name).cloned(),
             Expr::Call { function, args } => {
@@ -660,7 +702,9 @@ impl Evaluator<'_> {
                     .map(|item| self.expr(item, state, depth))
                     .collect::<Option<Vec<_>>>()?;
                 let calls = items.iter().map(|item| item.calls).sum();
-                state.charge(&format!("Construction({})", items.len()));
+                state.charge(lash_kernel_doc::plan::FormCharge::Construction(
+                    u32::try_from(items.len()).ok()?,
+                ));
                 let form = Form::Tuple(codes(&items));
                 let kind = Some(ValueKind::Tuple);
                 Some(self.heap_step(state, form, (kind, calls)))
@@ -776,6 +820,7 @@ impl Evaluator<'_> {
                 return None;
             }
             if let Some(native) = registered.native() {
+                state.depth = state.depth.max(depth + 1);
                 return self
                     .element
                     .as_mut()?
@@ -924,6 +969,8 @@ impl Evaluator<'_> {
             charging: matches!(definition.metering(), lash_kernel_doc::Metering::Statements)
                 .then_some(definition.identity()),
             steps: Vec::new(),
+            charges: Vec::new(),
+            describe: state.describe,
             vars: definition
                 .signature
                 .params
@@ -944,6 +991,7 @@ impl Evaluator<'_> {
         }
         if results.len() == 1 {
             let (nested, value) = results.pop()?;
+            state.charges.extend(nested.charges);
             state.steps.extend(nested.steps);
             return value.or_else(|| Symbol::constant(Value::Null));
         }
@@ -1028,7 +1076,7 @@ impl Evaluator<'_> {
                 _ => Vec::new(),
             };
         }
-        state.charge("Statement");
+        state.charge(lash_kernel_doc::plan::FormCharge::Statement);
         match stmt {
             Stmt::Return { value } => self
                 .expr(value, state, depth)
@@ -1098,6 +1146,12 @@ impl Evaluator<'_> {
                     index: index.code,
                     value: value.code,
                 });
+                self.block(rest, state, depth)
+            }
+            Stmt::Do { value } if self.element.is_some() => {
+                if self.expr(value, state, depth).is_none() {
+                    return Vec::new();
+                }
                 self.block(rest, state, depth)
             }
             Stmt::If {
@@ -1276,6 +1330,7 @@ impl Evaluator<'_> {
                         },
                         kind: Some(kind),
                         calls: 0,
+                        closure: None,
                     },
                 );
             }
@@ -1634,7 +1689,7 @@ pub(crate) fn emit(
                 });
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element: {element}, record_write: {record_write}, callees: &[",
+                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, copy: None, element: {element}, record_write: {record_write}, callees: &[",
                 heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {

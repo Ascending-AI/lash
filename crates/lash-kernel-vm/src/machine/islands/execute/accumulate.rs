@@ -74,23 +74,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if let (Value::Text(left), Value::Text(right)) = (left, right)
             && let Some(value) = left.concat(right)
         {
-            if !self.resident_room(0) {
-                return None;
-            }
-            self.covered = false;
-            if let Some(close) = &site.close
-                && !self.close(close)
-            {
-                return Some(Err(self.at_operands(close.head, site.reg, values)));
-            }
+            let accepted = self.concatenation_admission(
+                site,
+                charge,
+                left.as_str().len() as u64,
+                right.as_str().len() as u64,
+                0,
+            )?;
             return Some(
-                if self
-                    .formula(charge.units(left.as_str().len() as u64, right.as_str().len() as u64))
-                {
-                    Ok(Value::Text(value))
-                } else {
-                    Err(self.at_operands(site.pc, site.reg, values))
-                },
+                self.commit_admission(accepted, None)
+                    .map(|()| Value::Text(value)),
             );
         }
         if self.accumulator.as_ref().is_some_and(
@@ -109,26 +102,44 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if bytes <= lash_kernel_doc::arena::ShortText::MAX as u64 {
             return None;
         }
-        if !self.resident_room(self.arena.text_install_bound(bytes).checked_add(bytes)?) {
-            return None;
-        }
-        self.covered = false;
-        if let Some(close) = &site.close
-            && !self.close(close)
-        {
-            return Some(Err(self.at_operands(close.head, site.reg, values)));
-        }
-        let Some(value) = self.arena.concat_text(*left_value, *right_value) else {
-            return Some(Err(self.at_operands(site.pc, site.reg, values)));
-        };
+        let accepted = self.concatenation_admission(
+            site,
+            charge,
+            left_bytes,
+            right_bytes,
+            self.arena.text_install_bound(bytes).checked_add(bytes)?,
+        )?;
+        let value = self.arena.concat_text(*left_value, *right_value)?;
         if self.memory {
             self.transient += bytes;
         }
-        Some(if self.formula(charge.units(left_bytes, right_bytes)) {
-            Ok(value)
-        } else {
-            Err(self.at_operands(site.pc, site.reg, values))
-        })
+        Some(self.commit_admission(accepted, None).map(|()| value))
+    }
+
+    #[inline(always)]
+    fn concatenation_admission(
+        &self,
+        site: &OperatorSite,
+        charge: crate::compile::TextCharge,
+        left: u64,
+        right: u64,
+        room: u64,
+    ) -> Option<super::super::admission::Accepted> {
+        self.direct_resources(
+            super::super::admission::DepthNeed::Compiled(site.depth),
+            room,
+        )?;
+        self.source_admission(
+            None,
+            0,
+            if self.accounting {
+                charge.units(left, right)
+            } else {
+                0
+            },
+            self.accounting.then_some(site.close).flatten(),
+            false,
+        )
     }
 
     #[inline(always)]
@@ -265,14 +276,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 Some(&value),
             ),
         };
-        match units {
-            Some(units) if self.formula(units) => {
-                #[cfg(test)]
-                super::super::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
-                Some(Ok(appended.made))
-            }
-            _ => Some(Err(self.at_operands(site.pc, site.reg, values))),
+        let Some(units) = units else {
+            return Some(Err(self.at_operands(site.pc, site.reg, values)));
+        };
+        let units = if self.accounting { units } else { 0 };
+        let Some(accepted) = self.source_admission(None, 0, units, None, false) else {
+            return Some(Err(self.at_operands(site.pc, site.reg, values)));
+        };
+        if let Err(stop) = self.commit_admission(accepted, None) {
+            return Some(Err(stop));
         }
+        if units != 0
+            && let Some(tape) = self.tape
+        {
+            tape.push(Weight::Atomic(units));
+        }
+        #[cfg(test)]
+        super::super::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
+        Some(Ok(appended.made))
     }
 }
 

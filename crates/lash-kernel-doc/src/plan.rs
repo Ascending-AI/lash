@@ -88,19 +88,35 @@ pub type MeteredEntry =
 /// Collects the successful scalar path's ordered charges. A failed alternative
 /// rewinds its speculative events before another path is tried.
 pub trait TemplateMeter {
-    fn mark(&self) -> usize;
-    fn rewind(&mut self, mark: usize);
+    fn mark(&self) -> ChargeMark;
+    fn rewind(&mut self, mark: ChargeMark);
     fn form(&mut self, function: FunctionId, form: FormCharge);
     fn bill(&mut self, function: FunctionId, args: &[Value], result: Value);
+}
+
+/// A speculative charge checkpoint. Totals can rewind without recording events.
+#[derive(Clone, Copy, Default)]
+pub struct ChargeMark {
+    pub units: u64,
+    pub pace: u64,
+    pub events: usize,
+    pub valid: bool,
+}
+
+/// One ordered source charge, shared by scalar and heap specializations.
+#[derive(Clone, Copy)]
+pub struct ChargeEvent {
+    pub units: u64,
+    pub function: Option<FunctionId>,
 }
 
 /// Value-only use of a generated template (its metered entry is used to run it).
 pub struct Unmetered;
 impl TemplateMeter for Unmetered {
-    fn mark(&self) -> usize {
-        0
+    fn mark(&self) -> ChargeMark {
+        ChargeMark::default()
     }
-    fn rewind(&mut self, _: usize) {}
+    fn rewind(&mut self, _: ChargeMark) {}
     fn form(&mut self, _: FunctionId, _: FormCharge) {}
     fn bill(&mut self, _: FunctionId, _: &[Value], _: Value) {}
 }
@@ -158,12 +174,32 @@ pub struct HeapTemplate {
     /// the write is the path's last fallible step, but what runs after
     /// the call in its caller's statement may still fail.
     pub writes: bool,
+    /// A source-derived shallow copy, before lowering to bulk storage operations.
+    pub copy: Option<&'static CopyLoop>,
     /// A collection access certified from its source over unchanged arguments.
     pub element: Option<ElementPath>,
     /// A source-certified record membership guard followed by the write
     /// `target[key] = value`, returning `value`, over three unchanged
     /// arguments. Other operand kinds retain the ordinary template.
     pub record_write: Option<RecordWrite>,
+}
+
+/// Membership and hole policy of a source-derived copy loop.
+#[derive(Clone, Copy, Debug)]
+pub enum CopyKind {
+    Concat,
+    Dense,
+}
+
+/// An inductive copy-loop description. A read retains its ordinary closure
+/// charges, including each item's immutable nested comparison size.
+#[derive(Debug)]
+pub struct CopyLoop {
+    pub kind: CopyKind,
+    pub read: ElementPath,
+    pub read_units: u64,
+    pub loop_units: u64,
+    pub temporary_values: u32,
 }
 
 /// A source-certified collection operation. Other operand paths keep their source body.
@@ -267,18 +303,9 @@ pub trait TemplateHeap: TemplateMeter {
     fn field(&mut self, target: Value, field: &str) -> Option<Value>;
     /// The tuple of `items`.
     fn tuple(&mut self, items: &[Value]) -> Option<Value>;
-    /// A source-certified shallow concatenation. The body reads each
-    /// present list member through an ordinary charged closure costing
-    /// `read_units` plus its immutable nested comparison size; holes are
-    /// copied without that read. Records retain their branded-array path.
-    fn concat(&mut self, receiver: Value, arguments: Value, read_units: u64) -> Option<Value> {
-        let _ = (receiver, arguments, read_units);
-        None
-    }
-    /// A certified dense snapshot, converting holes to Absent and retaining
-    /// the body's charged reads and all continuation tests of its loop.
-    fn dense(&mut self, source: Value, read_units: u64, loop_units: u64) -> Option<Value> {
-        let _ = (source, read_units, loop_units);
+    /// Lower a source-derived copy loop, retaining its read and hole policy.
+    fn copy(&mut self, args: &[Value], path: &CopyLoop) -> Option<Value> {
+        let _ = (args, path);
         None
     }
     /// `set target[index] = value`: its growth held and what it changes
@@ -439,7 +466,7 @@ const fn digit(byte: u8) -> u8 {
 pub struct Cursor(pub u32);
 
 /// A statement-metered body's fixed charge points, in evaluation order.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum FormCharge {
     Statement,
     Expression,

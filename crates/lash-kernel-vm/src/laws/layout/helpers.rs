@@ -136,6 +136,7 @@ pub(in crate::laws) fn helper_probes(
                 callees: &[],
                 depth: 1,
                 writes: false,
+                copy: None,
                 element: None,
                 record_write: None,
             }),
@@ -299,6 +300,7 @@ pub(in crate::laws) fn helper_probes(
                     callees: &[],
                     depth: 1,
                     writes: false,
+                    copy: None,
                     element: (receiver == "Map(Any, Any)").then_some(
                         lash_kernel_doc::plan::ElementPath {
                             operation: lash_kernel_doc::plan::Element::ReadMap,

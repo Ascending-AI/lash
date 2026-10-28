@@ -54,20 +54,18 @@ impl Meter {
     ) {
         let units = if exact {
             charges
-                .events
-                .iter()
-                .map(|(units, _)| *units)
-                .chain(final_fee)
-                .fold(0_u64, u64::saturating_add)
+                .measurement
+                .units
+                .saturating_add(final_fee.unwrap_or(0))
         } else {
-            charges.pace
+            charges.measurement.pace
         };
         self.units = self.units.saturating_add(units);
         if self.record {
             let events = charges
                 .events
                 .into_iter()
-                .map(|(units, _)| units)
+                .map(|event| event.units)
                 .chain(final_fee)
                 .map(Weight::Atomic)
                 .collect();

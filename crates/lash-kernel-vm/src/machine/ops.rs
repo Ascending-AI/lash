@@ -714,6 +714,7 @@ impl KernelMachine {
                 &self.regs[args..args + function.arity],
                 exe,
                 self.bounds.charge == crate::Charge::Exact,
+                self.bounds.charge == crate::Charge::Exact,
             )
         {
             self.observe(Event::NativeEnter { task, lib });
@@ -808,7 +809,8 @@ impl KernelMachine {
     ) -> Eval<()> {
         self.observe(Event::NativeFast);
         self.pin_value(&value)?;
-        for (units, function) in charges.events {
+        for event in charges.events {
+            let lash_kernel_doc::plan::ChargeEvent { units, function } = event;
             self.charge(units).map_err(|halt| {
                 let interrupt = Interrupt::from(halt);
                 match function.and_then(|function| exe.library_lib(&function)) {
@@ -818,7 +820,7 @@ impl KernelMachine {
             })?;
         }
         if self.bounds.charge == crate::Charge::Off {
-            self.charged = self.charged.saturating_add(charges.pace);
+            self.charged = self.charged.saturating_add(charges.measurement.pace);
         }
         let function = exe.lib(lib);
         if self.charging && function.header.charge().is_some() {
@@ -867,6 +869,7 @@ impl KernelMachine {
             && let Some((value, charges)) = entry.metered(
                 &self.regs[args..end],
                 exe,
+                self.bounds.charge == crate::Charge::Exact,
                 self.bounds.charge == crate::Charge::Exact,
             )
         {

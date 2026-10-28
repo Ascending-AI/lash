@@ -215,7 +215,7 @@ impl Islands {
 }
 
 impl Block {
-    fn owns_loop(&self, id: StmtId) -> bool {
+    pub(crate) fn owns_loop(&self, id: StmtId) -> bool {
         self.statements
             .iter()
             .any(|statement| match &statement.kind {

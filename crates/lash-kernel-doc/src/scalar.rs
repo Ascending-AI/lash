@@ -13,7 +13,8 @@ use crate::{Float, Value};
 pub fn size_bit(value: Value) -> Option<u8> {
     match value {
         Value::Int(word) => Some(word_size_bit(word)),
-        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) => Some(0),
+        Value::Float(value) => Some(float_size_bit(value.get())),
+        Value::Null | Value::Absent | Value::Bool(_) => Some(0),
         _ => None,
     }
 }
@@ -22,6 +23,12 @@ pub fn size_bit(value: Value) -> Option<u8> {
 #[inline(always)]
 pub fn word_size_bit(word: i64) -> u8 {
     u8::from(word != 0)
+}
+
+/// The size bit for a value already proven to be a binary64 number.
+#[inline(always)]
+pub const fn float_size_bit(_: f64) -> u8 {
+    0
 }
 
 /// Guest equality for values whose answer needs no arena reads.

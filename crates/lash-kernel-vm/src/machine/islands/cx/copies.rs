@@ -3,32 +3,28 @@
 use super::{Args, HeapCx, NewObject, Value};
 
 impl HeapCx<'_, '_> {
-    pub(super) fn concat_sources(
+    pub(super) fn copy_loop(
         &mut self,
-        receiver: Value,
-        arguments: Value,
-        read_units: u64,
+        args: &[Value],
+        path: &lash_kernel_doc::plan::CopyLoop,
     ) -> Option<Value> {
-        self.copy_sources(receiver, Some(arguments), read_units, None)
-    }
-
-    pub(super) fn dense_source(
-        &mut self,
-        source: Value,
-        read_units: u64,
-        loop_units: u64,
-    ) -> Option<Value> {
-        if !matches!(source, Value::List(_)) {
-            return None;
+        use lash_kernel_doc::plan::CopyKind;
+        match (path.kind, args) {
+            (CopyKind::Concat, [receiver, arguments]) => {
+                self.copy_sources(*receiver, Some(*arguments), path, None)
+            }
+            (CopyKind::Dense, [source @ Value::List(_)]) => {
+                self.copy_sources(*source, None, path, Some(path.loop_units))
+            }
+            _ => None,
         }
-        self.copy_sources(source, None, read_units, Some(loop_units))
     }
 
     fn copy_sources(
         &mut self,
         receiver: Value,
         arguments: Option<Value>,
-        read_units: u64,
+        path: &lash_kernel_doc::plan::CopyLoop,
         loop_units: Option<u64>,
     ) -> Option<Value> {
         if !self.cx.exe.charging()
@@ -72,7 +68,10 @@ impl HeapCx<'_, '_> {
                 .checked_add(sources.map_or(0, |source| source.len()))?
                 .checked_add(1)?
                 .checked_mul(lash_kernel_state::arena::VALUE_BYTES)?
-                .checked_add(1024)?;
+                .checked_add(
+                    (u64::from(path.temporary_values) * lash_kernel_state::arena::VALUE_BYTES)
+                        .max(1024),
+                )?;
             if self.cx.memory
                 && room
                     > self
@@ -134,7 +133,7 @@ impl HeapCx<'_, '_> {
             }
             (values, reads, nested)
         };
-        let units = read_units.checked_mul(reads)?.checked_add(nested)?;
+        let units = path.read_units.checked_mul(reads)?.checked_add(nested)?;
         let units = units.checked_add(match loop_units {
             Some(units) => units.checked_mul((values.len() as u64).checked_add(1)?)?,
             None => 0,
@@ -149,7 +148,7 @@ impl HeapCx<'_, '_> {
         self.built = true;
         // Reads enter an ordinary closure, even inside an uncharged library
         // body. Its charges and declared loop tests survive that boundary.
-        self.charges.push((units, None, true));
+        self.charges.push(units, None, true);
         Some(value)
     }
 }

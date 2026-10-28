@@ -434,7 +434,7 @@ impl Op {
 
 /// An operand's address, resolved once, including captured cell identity.
 /// Registers retain values evaluated before any intervening guest call.
-pub(in crate::machine::islands) enum Operand {
+pub(crate) enum Operand {
     Register(u32),
     Literal { reg: u32, value: Value },
     Local { reg: u32, at: usize, miss: u32 },
@@ -472,14 +472,14 @@ impl From<Read> for Operand {
     }
 }
 
-pub(in crate::machine::islands) enum Destination {
+pub(crate) enum Destination {
     Register,
     Write(Box<WriteSite>),
 }
 
 /// Reads evaluated inside a call, before its close and admission. Their
 /// values become caller roots only when the call suspends that caller.
-pub(in crate::machine::islands) struct CallInputs {
+pub(crate) struct CallInputs {
     prefix: CallPrefix,
     pub(in crate::machine::islands) callee: Option<Operand>,
     pub(in crate::machine::islands) args: Box<[Operand]>,

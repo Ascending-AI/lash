@@ -63,7 +63,7 @@ mod templates;
 pub(crate) use reads::{
     Field, PropertySlot, ReadSite, find as find_property, write as write_property,
 };
-pub(crate) use template_meter::MeteredCharges;
+pub(crate) use template_meter::{MeteredCharges, TapedCharges};
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 
 pub(crate) use crate::machine::islands::cx::{
@@ -1533,4 +1533,34 @@ pub(crate) fn import_result_check(ty: &lash_kernel_value::Type) -> Option<fn(doc
 
 pub(crate) fn import_result_fits(ty: &lash_kernel_value::Type, value: doc::Value) -> bool {
     import_result_check(ty).is_some_and(|fits| fits(value))
+}
+
+/// Resolve both numeric domains once from the installed entry and signature.
+pub(crate) fn numeric_pair(function: &Lib, checked: bool) -> Option<lash_kernel_doc::scalar::Pair> {
+    use lash_kernel_doc::scalar::{Pair, ScalarOp};
+    use lash_kernel_doc::{Float, Value};
+    let pair = function.specialization.prepared.as_ref()?.0.pair()?;
+    let accepts = |op: ScalarOp, value: Value| {
+        !checked
+            || function
+                .header
+                .signature
+                .params
+                .iter()
+                .all(|param| import_result_fits(&param.ty, value))
+                && import_result_fits(
+                    &function.header.signature.result,
+                    if op.compares() {
+                        Value::Bool(false)
+                    } else {
+                        value
+                    },
+                )
+    };
+    Some(Pair {
+        floats: pair
+            .floats
+            .filter(|op| accepts(*op, Value::Float(Float::new(0.0)))),
+        ints: pair.ints.filter(|op| accepts(*op, Value::Int(0))),
+    })
 }

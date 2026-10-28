@@ -128,10 +128,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 // The enclosing formula covers library calls, but ordinary
                 // closures and declared loop tests still bill their work.
                 // A recording retains their individual source events.
-                if recording && (!charges.events.is_empty() || charges.pace != 0) {
+                if recording && (!charges.events.is_empty() || charges.measurement.pace != 0) {
                     return None;
                 }
-                cx.body_paths = charges.pace != 0;
+                cx.body_paths = charges.measurement.pace != 0;
                 cx.meter.charges(charges, false, None);
                 Some(value)
             })

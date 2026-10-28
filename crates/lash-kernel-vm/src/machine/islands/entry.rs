@@ -251,12 +251,12 @@ impl KernelMachine {
                     function,
                     &self.regs[args..args + function.arity],
                     &value,
-                    room.saturating_sub(charges.pace),
+                    room.saturating_sub(charges.measurement.pace),
                 )
             }) {
                 return None;
             }
-            cx.body_paths = charges.pace != 0;
+            cx.body_paths = charges.measurement.pace != 0;
             cx.meter.charges(charges, false, None);
             Some(value)
         });

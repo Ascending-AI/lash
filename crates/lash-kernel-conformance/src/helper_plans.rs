@@ -594,7 +594,7 @@ fn compare_control(source: &str, charge: u64) -> Observed {
 /// name with the same operation still specializes. The body differential
 /// retains charges, held bytes and every bounded prefix as its oracle.
 #[test]
-fn element_specializations_follow_the_exact_body_instead_of_its_name() {
+fn specializations_follow_the_exact_body_instead_of_its_name() {
     for name in [
         "ts.get_numeric",
         "ts.get_computed",
@@ -651,6 +651,46 @@ fn element_specializations_follow_the_exact_body_instead_of_its_name() {
     for charge in 0..100 {
         compare_control(source, charge);
     }
+    let copy = |name| {
+        control::PLANS
+            .iter()
+            .find(|plan| plan.name == name)
+            .unwrap()
+            .template
+            .as_ref()
+            .and_then(|template| template.heap.as_ref())
+            .and_then(|heap| heap.copy)
+    };
+    assert!(
+        copy("law.copy_snapshot").is_some(),
+        "the derived copy runs under an unrelated name"
+    );
+    assert!(
+        copy("ts.array.dense").is_none(),
+        "changing the copied value withdraws the bulk path"
+    );
+    let complete = compare_control(
+        "main { let xs = [1, (), [7]] let copied = invoke law.copy_snapshot(xs) let changed = invoke ts.array.dense(xs) return (copied, changed) }",
+        1_000_000,
+    );
+    assert_eq!(
+        complete.end,
+        crate::ExpectedEnd::Finished(Datum::Tuple(vec![
+            Datum::List(vec![
+                Datum::Int(1.into()),
+                Datum::Absent,
+                Datum::List(vec![Datum::Int(7.into())])
+            ]),
+            Datum::List(vec![
+                Datum::List(vec![
+                    Datum::Int(1.into()),
+                    Datum::Tuple(vec![]),
+                    Datum::List(vec![Datum::Int(7.into())])
+                ]);
+                3
+            ]),
+        ]))
+    );
 }
 
 /// K-FORM-014..017: catch sees only guest raises, cleanup runs in order,

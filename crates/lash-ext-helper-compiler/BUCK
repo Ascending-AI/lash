@@ -25,7 +25,6 @@ lash_rust_library(
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "lash_ext_helper_compiler"),
     compile_data_patterns = [
         "tests/control.kernel",
-        "src/template/*.kernel",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-ext-helper-compiler",
@@ -67,7 +66,6 @@ lash_rust_binary(
     declared_features = [],
     compile_data_patterns = [
         "tests/control.kernel",
-        "src/template/*.kernel",
     ],
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "regenerate"),
     extra_compile_data = [
@@ -166,7 +164,6 @@ lash_rust_feature_library(
     exec_properties = sized_exec_properties("lash-ext-helper-compiler", "lash_ext_helper_compiler"),
     compile_data_patterns = [
         "tests/control.kernel",
-        "src/template/*.kernel",
     ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-ext-helper-compiler",

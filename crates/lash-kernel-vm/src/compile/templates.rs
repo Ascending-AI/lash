@@ -82,6 +82,18 @@ impl Entry {
         if template.entry.is_none() && template.heap.is_none() {
             return None;
         }
+        if let Some(path) = template.heap.as_ref().and_then(|heap| heap.copy)
+            && !path.read.requires.iter().all(|requirement| {
+                registry.get(&requirement.function).is_some_and(|function| {
+                    function.definition().guard.is_none()
+                        && function.native().is_some_and(|native| {
+                            requirement.fact.accepts(&native.specialization())
+                        })
+                })
+            })
+        {
+            return None;
+        }
         Some(Self::Template {
             template,
             natives,

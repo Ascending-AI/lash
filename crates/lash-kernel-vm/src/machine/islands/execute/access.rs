@@ -39,7 +39,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             [x] => super::super::compiled::unary(site, *x, self.exe)?,
             [x, y] => match site
                 .pair
-                .and_then(|pair| super::super::compiled::typed(site, &pair, *x, *y, self.exe, true))
+                .and_then(|pair| super::super::compiled::typed(site, &pair, *x, *y, true))
             {
                 Some(answer) => answer,
                 None if args.iter().all(scalar) => {

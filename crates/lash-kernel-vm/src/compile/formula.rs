@@ -645,6 +645,11 @@ impl ScalarTable {
         })
     }
 
+    /// The resolved prices consumed by an unboxed representation.
+    pub(crate) fn entries(&self) -> [u64; 16] {
+        *self.units
+    }
+
     /// The units of the scalar sizes `mask` states.
     #[inline(always)]
     pub(crate) fn units(&self, mask: u8) -> Option<u64> {

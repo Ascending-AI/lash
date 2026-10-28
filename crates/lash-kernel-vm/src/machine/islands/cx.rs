@@ -320,14 +320,15 @@ impl Cx<'_> {
 
     pub(crate) fn metered_on(&mut self, function: &Lib, values: &[Value]) -> Option<Value> {
         let (entry, fast) = function.specialization.prepared.as_ref()?;
-        let (value, mut charges) = entry.metered(values, self.exe, self.charging)?;
+        let (value, mut charges) =
+            entry.metered(values, self.exe, self.charging, self.meter.recording())?;
         if self.charging && function.header.charge().is_some() {
             let answer = PreparedAnswer {
                 value,
                 scalar_sizes: None,
             };
             let units = self.units(function, fast, values, Fresh::default(), &answer)?;
-            charges.events.push((units, None));
+            charges.push(units, None, false);
         }
         self.meter.charges(charges, self.charging, None);
         Some(value)
@@ -534,21 +535,7 @@ impl Cx<'_> {
             self.declined = declined;
             return None;
         }
-        let pace = paths
-            .charges
-            .iter()
-            .filter(|(_, _, paced)| *paced)
-            .map(|(units, _, _)| *units)
-            .sum();
-        let events = if paths.cx.charging {
-            std::mem::take(&mut paths.charges)
-                .into_iter()
-                .map(|(units, function, _)| (units, function))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        Some((value?, crate::compile::MeteredCharges { events, pace }))
+        paths.charges.valid().then_some((value?, paths.charges))
     }
 
     /// `function`'s prepared `answer` on `args`, charged as the
@@ -845,18 +832,19 @@ struct HeapCx<'c, 'a> {
     mark: u64,
     /// Whether a write was held where the paths began.
     held: bool,
-    charges: Vec<(u64, Option<FunctionId>, bool)>,
+    charges: crate::compile::MeteredCharges,
 }
 
 impl<'c, 'a> HeapCx<'c, 'a> {
     fn new(cx: &'c mut Cx<'a>, callees: &'c [LibId], level: u32) -> Self {
         let mark = cx.transient;
         let held = cx.held.is_some();
+        let record = cx.meter.recording() && cx.charging;
         Self {
             cx,
             callees,
             level,
-            charges: Vec::new(),
+            charges: crate::compile::MeteredCharges::new(record),
             spoiled: false,
             built: false,
             mark,
@@ -885,16 +873,13 @@ impl<'c, 'a> HeapCx<'c, 'a> {
     /// immediate paths, then, above [`INNER`], its heap paths.
     fn inner(&mut self, function: &Lib, args: &[Value]) -> Option<Value> {
         let entry = inner(function)?;
-        if let Some((value, charges)) = entry.metered(args, self.cx.exe, self.cx.charging) {
-            self.charges.extend(
-                charges
-                    .events
-                    .into_iter()
-                    .map(|(units, function)| (units, function, false)),
-            );
-            if !self.cx.charging {
-                self.charges.push((charges.pace, None, true));
-            }
+        if let Some((value, mut charges)) = entry.metered(
+            args,
+            self.cx.exe,
+            self.cx.charging,
+            self.cx.meter.recording(),
+        ) {
+            self.charges.append(&mut charges);
             return Some(value);
         }
         let value = match entry.call(args) {
@@ -919,37 +904,28 @@ impl<'c, 'a> HeapCx<'c, 'a> {
 }
 
 impl TemplateMeter for HeapCx<'_, '_> {
-    fn mark(&self) -> usize {
-        self.charges.len()
+    fn mark(&self) -> lash_kernel_doc::plan::ChargeMark {
+        self.charges.mark()
     }
-    fn rewind(&mut self, mark: usize) {
-        self.charges.truncate(mark);
+    fn rewind(&mut self, mark: lash_kernel_doc::plan::ChargeMark) {
+        self.charges.rewind(mark);
     }
     fn form(&mut self, function: FunctionId, form: FormCharge) {
-        let (units, pace) = form.measurement();
-        self.charges.push((units, Some(function), pace));
+        self.charges.form(function, form, self.cx.charging);
     }
     fn bill(&mut self, function: FunctionId, args: &[Value], result: Value) {
-        if !self.cx.charging {
-            return;
-        }
-        let units = self.cx.exe.library_lib(&function).and_then(|id| {
-            self.cx
-                .formula(&self.cx.exe.lib(id).charge, args, Some(&result))
+        let cx = &mut self.cx;
+        self.charges.bill(function, cx.charging, || {
+            cx.exe
+                .library_lib(&function)
+                .and_then(|id| cx.formula(&cx.exe.lib(id).charge, args, Some(&result)))
         });
-        match units {
-            Some(units) => self.charges.push((units, Some(function), false)),
-            None => self.spoiled = true,
-        }
     }
 }
 
 impl TemplateHeap for HeapCx<'_, '_> {
-    fn concat(&mut self, receiver: Value, arguments: Value, read_units: u64) -> Option<Value> {
-        self.concat_sources(receiver, arguments, read_units)
-    }
-    fn dense(&mut self, source: Value, read_units: u64, loop_units: u64) -> Option<Value> {
-        self.dense_source(source, read_units, loop_units)
+    fn copy(&mut self, args: &[Value], path: &lash_kernel_doc::plan::CopyLoop) -> Option<Value> {
+        self.copy_loop(args, path)
     }
 
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {

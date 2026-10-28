@@ -908,6 +908,7 @@ pub enum ResidentRead {
 /// operand facts. Other operations keep their prepared or general entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SymbolicNative {
+    Not,
     Kind,
     Same,
     ToFloat,

@@ -16,13 +16,14 @@ use crate::compile::{
 mod program;
 use program::Build;
 pub(super) use program::{
-    AccessShape, AccessSite, CallInputs, CollectionAppend, CollectionStep, Destination,
-    Instruction, Merge, Op, Operand, Placement, Read, ReadSlot, Reduction, Visit, WriteSite,
+    AccessShape, AccessSite, CallInputs, CollectionAppend, CollectionStep, Destination, Merge,
+    Operand, Placement, ReadSlot, Reduction, Visit, WriteSite,
 };
+pub(crate) use program::{Instruction, Op, Read};
 
 /// Heap text construction and operations the source handler must answer.
 #[derive(Clone, Copy)]
-pub(super) enum Deferred {
+pub(crate) enum Deferred {
     Source(u32),
     Text {
         dst: u32,
@@ -55,7 +56,7 @@ pub(crate) struct Compiled {
 
 /// Private copies used only when a source region's charge close refuses.
 #[derive(Clone, Copy)]
-pub(super) struct Restart {
+pub(crate) struct Restart {
     pub(super) statement: StmtId,
     pub(super) head: u32,
     pub(super) reg: u32,
@@ -147,7 +148,7 @@ impl Layout {
 
 /// The depth check an operator's call makes (`K-BND-002`).
 #[derive(Clone, Copy)]
-pub(super) enum Depth {
+pub(crate) enum Depth {
     None,
     /// An operation's admission, then its template's frames beyond one.
     Operation(u32),
@@ -156,12 +157,12 @@ pub(super) enum Depth {
 }
 
 /// A compiled operator or helper call.
-pub(super) struct OperatorSite {
-    pub(super) checked: bool,
-    pub(super) lib: LibId,
+pub(crate) struct OperatorSite {
+    pub(crate) checked: bool,
+    pub(crate) lib: LibId,
     pub(super) entry: Entry,
-    pub(super) table: ScalarTable,
-    pub(super) pair: Option<lash_kernel_doc::scalar::Pair>,
+    pub(crate) table: ScalarTable,
+    pub(crate) pair: Option<lash_kernel_doc::scalar::Pair>,
     pub(super) texts: Option<lash_kernel_doc::scalar::ScalarOp>,
     pub(super) concat: Option<crate::compile::TextCharge>,
     /// What its typed path's answer on two floats charges: its table's
@@ -172,10 +173,10 @@ pub(super) struct OperatorSite {
     /// What its close charges.
     pub(super) fixed: u64,
     pub(super) pc: u32,
-    pub(super) reg: u32,
-    pub(super) counted: Option<usize>,
-    pub(super) act: Option<ActIx>,
-    pub(super) root: Option<StmtId>,
+    pub(crate) reg: u32,
+    pub(crate) counted: Option<usize>,
+    pub(crate) act: Option<ActIx>,
+    pub(crate) root: Option<StmtId>,
     /// A body-only helper exposes its frame to work observation.
     pub(super) body_when_observed: bool,
     pub(super) depth: Depth,
@@ -186,7 +187,7 @@ pub(super) struct OperatorSite {
 
 /// A source-certified member read and its formula's scalar prices.
 #[derive(Clone, Copy)]
-pub(super) enum MemberAccess {
+pub(crate) enum MemberAccess {
     Float(u64),
     Int { zero: u64, nonzero: u64 },
     Map(crate::compile::LengthCharge),
@@ -194,7 +195,7 @@ pub(super) enum MemberAccess {
 }
 
 /// A prepared heap operation keeps the same semantic call coordinates.
-pub(super) struct HeapSite {
+pub(crate) struct HeapSite {
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
     pub(super) pc: u32,
@@ -207,7 +208,7 @@ pub(super) struct HeapSite {
 }
 
 /// A compiled general native call.
-pub(super) struct NativeSite {
+pub(crate) struct NativeSite {
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
     pub(super) pc: u32,
@@ -220,7 +221,7 @@ pub(super) struct NativeSite {
 
 /// A native whose answer an island reads from the arena.
 #[derive(Clone, Copy)]
-pub(super) enum Direct {
+pub(crate) enum Direct {
     /// A resident collection's length and constant native charge.
     Length(lash_kernel_doc::ValueKind, u64),
     /// A resident sequence item, retaining the native formula.
@@ -234,7 +235,7 @@ pub(super) enum Direct {
 
 /// A compiled test `same(x, ())` of a value against the empty tuple,
 /// answered without building the tuple.
-pub(super) struct UnitSite {
+pub(crate) struct UnitSite {
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
     /// Where an exit before it resumes: where the tuple's construction
@@ -244,7 +245,7 @@ pub(super) struct UnitSite {
 }
 
 /// A compiled island call.
-pub(super) struct CallSite {
+pub(crate) struct CallSite {
     pub(super) checked: bool,
     pub(super) inputs: Option<Box<CallInputs>>,
     /// The source library call and root action, retained on materialization.
@@ -266,7 +267,7 @@ pub(super) struct CallSite {
 }
 
 /// A helper's certified member write with its source admission and formula.
-pub(super) struct MemberWrite {
+pub(crate) struct MemberWrite {
     pub(super) element: Option<u64>,
     pub(super) guard: lash_kernel_state::arena::Key,
     pub(super) accepts: [bool; 2],
@@ -278,7 +279,7 @@ pub(super) struct MemberWrite {
     pub(super) depth: u32,
 }
 
-pub(super) enum MemberCharge {
+pub(crate) enum MemberCharge {
     Known(u64),
     Text(crate::compile::LengthCharge),
 }
@@ -286,7 +287,7 @@ pub(super) enum MemberCharge {
 /// Where library `lib`'s body call may answer immediately: an uncharged
 /// body of its own parameters whose prepared entry is not statement
 /// metered. The call depth its immediate paths need beyond the caller's.
-pub(super) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
+pub(crate) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
     let function = exe.lib(lib);
     let LibRun::Body(code) = function.run else {
         return None;
@@ -303,12 +304,12 @@ pub(super) fn answer_depth(exe: &Executable, lib: LibId) -> Option<u32> {
 
 /// A source-certified text forwarding path and its derived charge kernel.
 #[derive(Clone, Copy)]
-pub(super) struct Append {
+pub(crate) struct Append {
     pub(super) charge: Option<crate::compile::TextCharge>,
 }
 
 /// A whole typed scalar loop, compiled from its verified ordered facts.
-pub(super) struct RepeatSite {
+pub(crate) struct RepeatSite {
     pub(super) run: crate::compile::Typed,
     pub(super) iteration_max: u64,
 }
@@ -435,19 +436,9 @@ pub(super) fn typed(
     pair: &lash_kernel_doc::scalar::Pair,
     x: Value,
     y: Value,
-    exe: &Executable,
     charging: bool,
 ) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
-    let signature = site.checked.then(|| &exe.lib(site.lib).header.signature);
-    if signature.is_some_and(|signature| {
-        !signature.params.iter().zip([x, y]).all(|(param, value)| {
-            (param.optional && matches!(value, Value::Absent))
-                || crate::compile::import_result_fits(&param.ty, value)
-        })
-    }) {
-        return None;
-    }
     let answer = match (x, y) {
         (Value::Float(p), Value::Float(q)) => Some((
             scalar::floats(pair.floats?, p, q)?,
@@ -466,15 +457,13 @@ pub(super) fn typed(
         }
         _ => None,
     }?;
-    signature
-        .is_none_or(|signature| crate::compile::import_result_fits(&signature.result, answer.0))
-        .then_some(answer)
+    Some(answer)
 }
 
 /// A native's certified text relation. Keep arena reads and variable-length
 /// charging out of the numeric operator's instruction path.
 #[inline(never)]
-pub(super) fn text_relation(
+pub(crate) fn text_relation(
     site: &OperatorSite,
     x: Value,
     y: Value,
@@ -522,7 +511,7 @@ pub(super) fn text_relation(
 /// An immediate unary answer uses the same prepared entry and scalar
 /// table as the general operator path, without an arena measurement.
 #[inline(always)]
-pub(super) fn unary(
+pub(crate) fn unary(
     site: &OperatorSite,
     x: Value,
     exe: &Executable,
@@ -590,7 +579,7 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         checked: invoke.is_some_and(|invoke| invoke.checked),
         lib: *lib,
         entry: entry.clone(),
-        pair: entry.pair(),
+        pair: crate::compile::numeric_pair(function, invoke.is_some_and(|invoke| invoke.checked)),
         texts: match &function.run {
             LibRun::Native { .. } => function.specialization.native.text_relation,
             _ => None,
@@ -615,9 +604,16 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
 }
 
 /// A kind-pure pair of calls and its first general answer per kind.
-pub(super) struct KindTest {
+pub(crate) struct KindTest {
     pub(super) kind: OperatorSite,
     pub(super) same: OperatorSite,
     pub(super) literal: Value,
     pub(super) memo: crate::compile::kind_test::KindMemo,
+}
+
+#[cfg(test)]
+pub(crate) fn source_registers(plan: &IslandPlan, exe: &Executable) -> Option<Vec<Instruction>> {
+    let mut build = Build::new(exe, &plan.shared, plan.stream(exe), None, 0);
+    build.block(&plan.body)?;
+    Some(build.ops)
 }
