@@ -10,7 +10,7 @@ use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
 
 use super::census::{CensusGraph, EntityFacts, SweepSet};
 use super::census_graph::binding_values;
-pub use super::census_graph::{frame_values, state_values};
+pub use super::census_graph::{frame_values, incoming_bytes, state_values};
 use super::heap_impl::PagedHeap;
 
 /// What the machine's walk of its holdings gives a sweep.
@@ -19,6 +19,7 @@ pub struct Walked {
     /// The keys of the session bindings written since the last projection
     /// point: the machine's walk gives what they hold.
     pub session: Vec<Vec<u8>>,
+    pub root_and_control_bytes: u64,
 }
 
 /// A durable run's holdings in memory, as a resident sweep reads them in
@@ -46,6 +47,10 @@ pub trait ResidentRoots {
     /// Whether the run holds `entity` whole in memory. This includes clean
     /// objects already read from their pages and every changed object.
     fn contains(&mut self, entity: EntityId) -> bool;
+    /// Bytes reached without a durable identity, including bodies discovered
+    /// through entity_edges after walk returned.
+    fn anonymous_entity_bytes(&self) -> u64;
+    fn entity_local_bytes(&mut self, entity: EntityId) -> Result<u64, HeapFault>;
     /// Walks what the resident `entity` holds: the identities it names to
     /// `out`, the page forms of immutables on their pages to `pages`.
     ///
@@ -100,6 +105,27 @@ pub(super) struct ResidentGraph<'a> {
 }
 
 impl CensusGraph for ResidentGraph<'_> {
+    fn root_and_control_bytes(&mut self) -> Result<u64, HeapFault> {
+        let mut bytes = self.walked.root_and_control_bytes;
+        self.heap
+            .visit_session_bindings_over(&self.walked.session, &mut |binding| {
+                bytes = bytes
+                    .checked_add(super::tree::Cell::cost(binding))
+                    .ok_or_else(|| HeapFault::Malformed("session holding cost overflow".into()))?;
+                Ok(())
+            })?;
+        Ok(bytes)
+    }
+    fn anonymous_entity_bytes(&self) -> u64 {
+        self.resident.anonymous_entity_bytes()
+    }
+    fn task_result_bytes(&mut self, task: TaskId) -> Result<u64, HeapFault> {
+        Ok(self
+            .resident
+            .ended_result(task)?
+            .as_ref()
+            .map_or(0, lash_kernel_doc::LogicalHeldV1::local))
+    }
     fn value_edges(
         &mut self,
         value: &PageValue,
@@ -120,7 +146,10 @@ impl CensusGraph for ResidentGraph<'_> {
     }
     fn entity_facts(&mut self, entity: EntityId) -> Result<Option<EntityFacts>, HeapFault> {
         if self.resident.contains(entity) {
-            return Ok(Some(EntityFacts { has_edges: true }));
+            return Ok(Some(EntityFacts {
+                has_edges: true,
+                local_bytes: self.resident.entity_local_bytes(entity)?,
+            }));
         }
         self.heap.entity_facts(entity)
     }

@@ -94,6 +94,10 @@ pub struct Facts {
     pub page: std::cell::OnceCell<PageValue>,
     /// An immutable composite's summary.
     pub summary: Summary,
+    /// Logical occurrence cost of an immutable composite, computed on the
+    /// first normalization. Shared immutable DAGs reuse the calculation, not
+    /// the holding charge. Representation changes preserve this cost.
+    logical_immutable_cost: std::cell::OnceCell<u64>,
     /// Exact unsaturated sum of flat member charge sizes, never persisted.
     flat: Option<sizes::FlatSize>,
     /// A resident map's, set's or record's key index.
@@ -1538,6 +1542,54 @@ mod tests {
         let counted = arena.held();
         arena.recount_resident();
         assert_eq!(counted, arena.held());
+    }
+
+    /// LogicalHeldV1: a fresh immutable containing a cold immutable uses the
+    /// admitted child's complete summary. Pricing must not demand a payload.
+    #[test]
+    fn nested_cold_immutable_occurrences_use_admitted_summaries() {
+        use lash_kernel_doc::heap::{LogicalBytes, Payload, TupleRef, TupleSummary};
+        let mut arena = Arena::new();
+        let descriptor = PageValue::Tuple(Arc::new(TupleRef {
+            normal: Default::default(),
+            family: None,
+            summary: TupleSummary {
+                task_edges: 0,
+                len: 1,
+                cost: LogicalBytes(17),
+                has_edges: false,
+                depth: 1,
+            },
+            body: Payload::paged(NO_PAGE),
+        }));
+        let child = Value::Tuple(arena.immutable(
+            Body::Tuple(Sequence {
+                len: 1,
+                chunks: Chunks::Split(vec![Chunk::Cold {
+                    page: NO_PAGE,
+                    len: 1,
+                }]),
+            }),
+            Summary {
+                depth: 1,
+                ..Default::default()
+            },
+            Some(descriptor),
+        ));
+        let outer = arena.tuple(vec![child, child], 8).unwrap();
+        let error = arena.error("k", "m", outer);
+        // The cold tuple holds one 17-byte integer: 16 + 17 = 33.
+        // Ordinary immutable occurrences are priced twice: 16 + 2*33 = 82.
+        assert_eq!(arena.logical_local(&outer).unwrap(), 82);
+        assert_eq!(arena.logical_local(&error).unwrap(), 100);
+        let mut shared = child;
+        for _ in 0..32 {
+            shared = arena.tuple(vec![shared, shared], 64).unwrap();
+        }
+        assert_eq!(
+            arena.logical_local(&shared).unwrap(),
+            49 * (1_u64 << 32) - 16
+        );
     }
 
     /// FIG-6814: while an empty tuple is live, every empty tuple the run

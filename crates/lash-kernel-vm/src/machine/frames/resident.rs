@@ -7,6 +7,7 @@
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::arena::{Arena, Reach, Reached, VALUE_BYTES};
 use lash_kernel_state::kernel_internals::resident::frame_values;
+use lash_kernel_state::kernel_internals::tree::Cell;
 use lash_kernel_state::paged::FrameRecord;
 
 use super::{Frames, row};
@@ -51,6 +52,39 @@ impl Frames {
             })?;
         }
         Ok(())
+    }
+
+    /// Prices cached frame holdings and cold frame summaries for normalization.
+    pub(in crate::machine) fn logical_control_bytes(
+        &self,
+        arena: &Arena,
+    ) -> Result<u64, HeapFault> {
+        let mut bytes = 0_u64;
+        for index in 0..self.len {
+            let local = match self.cache.iter().find(|(at, _)| *at == index) {
+                Some((_, frame)) => {
+                    let mut local = lash_kernel_doc::LogicalHeldV1::FRAME;
+                    let mut problem = None;
+                    frame.each_value(&mut |value| match arena.logical_local(value).and_then(|n| {
+                        local.checked_add(n).ok_or_else(|| {
+                            HeapFault::Malformed("frame holding cost overflow".into())
+                        })
+                    }) {
+                        Ok(n) => local = n,
+                        Err(e) => problem = Some(e),
+                    });
+                    if let Some(e) = problem {
+                        return Err(e);
+                    }
+                    local
+                }
+                None => row::<FrameRecord>(&self.rows, index, &self.access)?.cost(),
+            };
+            bytes = bytes
+                .checked_add(local)
+                .ok_or_else(|| HeapFault::Malformed("frame stack holding cost overflow".into()))?;
+        }
+        Ok(bytes)
     }
 
     /// The bytes the capacity meter counts for the resident frames

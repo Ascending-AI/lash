@@ -12,6 +12,28 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 impl CensusGraph for PagedHeap {
+    fn root_and_control_bytes(&mut self) -> Result<u64, HeapFault> {
+        let mut bytes = self.session.cost();
+        visit_tree(&self.tasks, &self.access, &mut |task| {
+            bytes = bytes
+                .checked_add(task.frames.cost())
+                .and_then(|n| n.checked_add(incoming_bytes(&task.state)))
+                .ok_or_else(|| HeapFault::Malformed("root holding cost overflow".into()))?;
+            Ok(())
+        })?;
+        Ok(bytes)
+    }
+    fn task_result_bytes(&mut self, task: TaskId) -> Result<u64, HeapFault> {
+        Ok(self
+            .tasks
+            .get(&ordinal_key(task.0), &self.access)?
+            .map_or(0, |row| match &row.state {
+                TaskStateRecord::Ended(ended) => ended
+                    .retained()
+                    .map_or(0, lash_kernel_doc::LogicalHeldV1::local),
+                _ => 0,
+            }))
+    }
     fn value_edges(
         &mut self,
         value: &PageValue,
@@ -38,9 +60,10 @@ impl CensusGraph for PagedHeap {
         })
     }
     fn entity_facts(&mut self, entity: EntityId) -> Result<Option<EntityFacts>, HeapFault> {
-        Ok(self
-            .current_head(entity)?
-            .map(|_| EntityFacts { has_edges: true }))
+        Ok(self.current_head(entity)?.map(|head| EntityFacts {
+            has_edges: true,
+            local_bytes: head.cost(),
+        }))
     }
     fn entity_edges(
         &mut self,
@@ -372,4 +395,16 @@ pub(crate) fn visit_tree<T: Cell>(
         }
     })?;
     error.map_or(Ok(()), Err)
+}
+
+/// Incoming outcomes are guest holdings; wait/join identifiers are trace
+/// roots only. Ended results are counted when their task is reached.
+pub fn incoming_bytes(state: &TaskStateRecord) -> u64 {
+    match state {
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+            ..
+        } => lash_kernel_doc::LogicalHeldV1::local(v),
+        _ => 0,
+    }
 }

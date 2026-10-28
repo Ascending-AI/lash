@@ -653,6 +653,60 @@ impl Tasks {
         }
         Ok(())
     }
+    pub(super) fn logical_control_bytes(
+        &self,
+        arena: &lash_kernel_state::arena::Arena,
+    ) -> Result<u64, HeapFault> {
+        use lash_kernel_state::kernel_internals::resident::incoming_bytes;
+        let mut bytes = 0_u64;
+        let mut problem = None;
+        self.rows.visit(&self.access, &mut |key, row| {
+            let local = (|| {
+                let ordinal = u64::from_be_bytes(
+                    key.try_into()
+                        .map_err(|_| HeapFault::Malformed("task key is not an ordinal".into()))?,
+                );
+                if let Some(task) = self.cached_task(ordinal) {
+                    task.frames
+                        .logical_control_bytes(arena)?
+                        .checked_add(incoming_bytes(&task.record.state))
+                } else {
+                    row.frames.cost().checked_add(incoming_bytes(&row.state))
+                }
+                .ok_or_else(|| HeapFault::Malformed("task holding cost overflow".into()))
+            })();
+            match local.and_then(|n| {
+                bytes
+                    .checked_add(n)
+                    .ok_or_else(|| HeapFault::Malformed("tasks holding cost overflow".into()))
+            }) {
+                Ok(n) => {
+                    bytes = n;
+                    true
+                }
+                Err(e) => {
+                    problem = Some(e);
+                    false
+                }
+            }
+        })?;
+        if let Some(e) = problem {
+            return Err(e);
+        }
+        // Fresh tasks have no row until a projection first publishes them.
+        for (id, task) in self.cache.iter().flatten() {
+            if self.rows.get(&ordinal_key(*id), &self.access)?.is_none() {
+                bytes = bytes
+                    .checked_add(task.frames.logical_control_bytes(arena)?)
+                    .and_then(|n| n.checked_add(incoming_bytes(&task.record.state)))
+                    .ok_or_else(|| {
+                        HeapFault::Malformed("fresh task holding cost overflow".into())
+                    })?;
+            }
+        }
+        Ok(bytes)
+    }
+
     /// The bytes the capacity meter counts for the cached tasks' resident
     /// frames (FIG-6791).
     pub(super) fn control_bytes(&self) -> u64 {

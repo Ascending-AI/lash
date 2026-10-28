@@ -206,6 +206,7 @@ impl Marks {
 
 pub(super) struct Proof {
     pub entities: u64,
+    pub holdings: crate::paged::census::NormalizedHoldings,
     marks: Marks,
 }
 
@@ -285,6 +286,10 @@ pub(super) fn trace(
     limits.validate()?;
     let mut marks = Marks::new(limits);
     marks.budget(0)?;
+    let mut holdings = crate::paged::census::NormalizedHoldings {
+        root_and_control_bytes: graph.root_and_control_bytes()?,
+        entity_local_bytes: 0,
+    };
     let mut roots = Vec::new();
     graph.persistent_roots(&mut |value| {
         marks.tick()?;
@@ -332,6 +337,10 @@ pub(super) fn trace(
         .chain(transient.native_args)
     {
         marks.tick()?;
+        holdings.root_and_control_bytes = holdings
+            .root_and_control_bytes
+            .checked_add(lash_kernel_doc::LogicalHeldV1::local(value))
+            .ok_or_else(|| malformed("root holding cost overflow"))?;
         marks.edges(|out| graph.value_edges(value, out))?;
     }
     for value in transient.borrowed {
@@ -376,6 +385,10 @@ pub(super) fn trace(
                         let facts = graph
                             .entity_facts(entity)?
                             .ok_or_else(|| malformed("root reaches absent entity"))?;
+                        holdings.entity_local_bytes = holdings
+                            .entity_local_bytes
+                            .checked_add(facts.local_bytes)
+                            .ok_or_else(|| malformed("entity holding cost overflow"))?;
                         entities = entities
                             .checked_add(1)
                             .ok_or_else(|| malformed("reached entity count overflow"))?;
@@ -384,13 +397,31 @@ pub(super) fn trace(
                         }
                     }
                     Domain::Task => {
+                        holdings.root_and_control_bytes = holdings
+                            .root_and_control_bytes
+                            .checked_add(graph.task_result_bytes(TaskId(ordinal))?)
+                            .ok_or_else(|| malformed("task result holding cost overflow"))?;
                         marks.edges(|out| graph.task_result(TaskId(ordinal), out))?;
                     }
                 }
             }
         }
     }
-    Ok(Proof { entities, marks })
+    // A resident entity's edges can discover anonymous bodies after the
+    // initial roots were walked. Read that disjoint component only now.
+    holdings.entity_local_bytes = holdings
+        .entity_local_bytes
+        .checked_add(graph.anonymous_entity_bytes())
+        .ok_or_else(|| malformed("anonymous holding cost overflow"))?;
+    holdings
+        .entity_local_bytes
+        .checked_add(holdings.root_and_control_bytes)
+        .ok_or_else(|| malformed("total holding cost overflow"))?;
+    Ok(Proof {
+        entities,
+        holdings,
+        marks,
+    })
 }
 
 /// How many entities the census holds, each checked present.

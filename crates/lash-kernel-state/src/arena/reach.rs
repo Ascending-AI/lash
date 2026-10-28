@@ -27,6 +27,13 @@ pub enum Reached<'a> {
 #[derive(Debug, Default)]
 pub struct Reach {
     marked: Vec<ArenaHandle>,
+    anonymous_local_bytes: u64,
+}
+
+impl Reach {
+    pub fn anonymous_local_bytes(&self) -> u64 {
+        self.anonymous_local_bytes
+    }
 }
 
 fn stale() -> HeapFault {
@@ -232,9 +239,18 @@ impl Arena {
                 continue;
             }
             facts.mark = true;
+            reach.marked.push(handle);
+            if facts.entity.is_none() && is_mutable(body) {
+                reach.anonymous_local_bytes = reach
+                    .anonymous_local_bytes
+                    .checked_add(self.logical_body_bytes(handle)?)
+                    .ok_or_else(|| {
+                        HeapFault::Malformed("anonymous holding cost overflow".into())
+                    })?;
+            }
+            let facts = &self.facts[handle.index() as usize];
             #[cfg(any(test, feature = "perf-witness"))]
             crate::perf_witness::record(|work| work.arena_marks += 1);
-            reach.marked.push(handle);
             if let Some(entity) = facts.entity {
                 out(Reached::Identity(Identity::Object(entity)))?;
                 continue;
@@ -268,5 +284,132 @@ impl Arena {
             pending.extend(captures.iter().copied());
         }
         Ok(tasks)
+    }
+}
+
+impl Arena {
+    /// The occurrence price without projecting an immutable or loading its
+    /// payload. An admitted cold descriptor already owns the complete summary.
+    pub fn logical_local(&self, value: &Value) -> Result<u64, HeapFault> {
+        use lash_kernel_doc::LogicalHeldV1 as Cost;
+        let overflow = || HeapFault::Malformed("immutable holding cost overflow".into());
+        if let Some(handle) = value.handle() {
+            let body = self.objects.get(handle).ok_or_else(stale)?;
+            let facts = &self.facts[handle.index() as usize];
+            if !is_mutable(body)
+                && let Some(page) = facts.page.get()
+            {
+                return Ok(Cost::local(page));
+            }
+            if matches!(value, Value::Tuple(_) | Value::Error(_)) {
+                if let Some(cost) = facts.logical_immutable_cost.get() {
+                    return Ok(*cost);
+                }
+                let cost = match (value, body) {
+                    (Value::Tuple(_), Body::Tuple(sequence)) => {
+                        let mut bytes = Cost::REFERENCE;
+                        for index in 0..sequence.chunks.count() {
+                            let values = sequence.chunks.resident(index).ok_or_else(|| {
+                                HeapFault::Malformed("cold tuple has no admitted summary".into())
+                            })?;
+                            for member in values {
+                                bytes = bytes
+                                    .checked_add(self.logical_local(member)?)
+                                    .ok_or_else(overflow)?;
+                            }
+                        }
+                        bytes
+                    }
+                    (Value::Error(_), Body::Error(error)) => {
+                        if !matches!(error.kind, Value::Text(_) | Value::LongText(_))
+                            || !matches!(error.message, Value::Text(_) | Value::LongText(_))
+                        {
+                            return Err(HeapFault::Malformed(
+                                "error text holding is malformed".into(),
+                            ));
+                        }
+                        let kind = self
+                            .logical_local(&error.kind)?
+                            .checked_sub(Cost::REFERENCE)
+                            .ok_or_else(overflow)?;
+                        let message = self
+                            .logical_local(&error.message)?
+                            .checked_sub(Cost::REFERENCE)
+                            .ok_or_else(overflow)?;
+                        let data = self.logical_local(&error.data)?;
+                        Cost::REFERENCE
+                            .checked_add(kind)
+                            .and_then(|n| n.checked_add(message))
+                            .and_then(|n| n.checked_add(data))
+                            .ok_or_else(overflow)?
+                    }
+                    _ => {
+                        return Err(HeapFault::Malformed(
+                            "immutable holding has another body kind".into(),
+                        ));
+                    }
+                };
+                let _ = facts.logical_immutable_cost.set(cost);
+                return Ok(cost);
+            }
+        }
+        let semantics = self.semantics();
+        Cost::native_local(
+            lash_kernel_doc::Args::new(&[], self.objects(), &semantics),
+            value,
+        )
+        .map_err(|problem| HeapFault::Malformed(format!("logical occurrence cost: {problem}")))
+    }
+
+    /// Full direct body cost. A partly cold mutable uses its current paged
+    /// head instead; calling this method must never price resident chunks only.
+    pub fn logical_body_bytes(&self, handle: ArenaHandle) -> Result<u64, HeapFault> {
+        use lash_kernel_doc::LogicalHeldV1 as Cost;
+        let body = self.objects.get(handle).ok_or_else(stale)?;
+        let members = |chunks: &lash_kernel_doc::arena::Chunks| -> Result<u64, HeapFault> {
+            let mut bytes = 0_u64;
+            for index in 0..chunks.count() {
+                let values = chunks
+                    .resident(index)
+                    .ok_or_else(|| HeapFault::Malformed("logical body has cold members".into()))?;
+                for value in values {
+                    bytes = bytes
+                        .checked_add(self.logical_local(value)?)
+                        .ok_or_else(|| {
+                            HeapFault::Malformed("member holding cost overflow".into())
+                        })?;
+                }
+            }
+            Ok(bytes)
+        };
+        let bytes = match body {
+            Body::List(seq) => members(&seq.chunks)?,
+            Body::Map(table) | Body::Set(table) => members(&table.chunks)?,
+            Body::Record(table) => members(&table.chunks)?
+                .checked_sub(
+                    table
+                        .len
+                        .checked_mul(Cost::REFERENCE)
+                        .ok_or_else(|| HeapFault::Malformed("record cost overflow".into()))?,
+                )
+                .ok_or_else(|| HeapFault::Malformed("record cost underflow".into()))?,
+            Body::Closure { captures, .. } => (captures.len() as u64)
+                .checked_mul(Cost::ENTITY_EDGE)
+                .ok_or_else(|| HeapFault::Malformed("capture cost overflow".into()))?,
+            Body::Cell(value) => self.logical_local(value)?,
+            _ => {
+                return Err(HeapFault::Malformed(
+                    "immutable has no entity body price".into(),
+                ));
+            }
+        };
+        Cost::OBJECT
+            .checked_add(bytes)
+            .ok_or_else(|| HeapFault::Malformed("body holding cost overflow".into()))
+    }
+
+    pub fn logical_entity_bytes(&self, entity: EntityId) -> Result<u64, HeapFault> {
+        let handle = self.entities.get(&entity).copied().ok_or_else(stale)?;
+        self.logical_body_bytes(handle)
     }
 }

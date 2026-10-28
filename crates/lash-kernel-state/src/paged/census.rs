@@ -6,10 +6,9 @@
 //! actual current roots, transient ones included, over the pages' edge
 //! summaries (never payload bytes), and removes what it did not reach.
 //!
-//! The census prices nothing: memory is metered by the machine's capacity
-//! meter, which counts the arena storage and control state a run holds
-//! (FIG-6791). A sweep is what the meter runs before it decides at the
-//! memory bound, and the sweep generation is what the machine reloads its
+//! A sweep also records logical cost components for its reached bodies and
+//! supplied root owners. Guest admission currently uses the machine's capacity
+//! meter (FIG-6791). Its sweep generation is what the machine reloads its
 //! swept task roots on.
 //!
 //! No collection runs to park, resume or release a worker; no in-progress
@@ -61,8 +60,18 @@ impl AccountingCertificate {
 /// instead of its body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EntityFacts {
+    /// Full direct logical cost, including cold member occurrences.
+    pub local_bytes: u64,
     /// Whether the entity's body names any entity or task.
     pub has_edges: bool,
+}
+
+/// Logical cost components from a completed normalization. Borrowed trace roots carry
+/// no occurrence charge; mutable bodies are priced once by identity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NormalizedHoldings {
+    pub entity_local_bytes: u64,
+    pub root_and_control_bytes: u64,
 }
 
 /// Why the census could not sweep. Neither variant is a guest bound.
@@ -103,6 +112,17 @@ pub struct SweepSet {
 ///
 /// Implemented by the paged heap (layer hp-heap, FIG-6188).
 pub trait CensusGraph {
+    /// Current source-owned root occurrences and frame headers. Trace mirrors
+    /// and bookkeeping references are excluded.
+    fn root_and_control_bytes(&mut self) -> Result<u64, HeapFault>;
+    /// Mutable bodies not yet assigned durable identities, reached by the
+    /// resident root walk. They are disjoint from entity_facts.
+    fn anonymous_entity_bytes(&self) -> u64 {
+        0
+    }
+    /// The local occurrence price of a retained ended result. A result is
+    /// charged only when the trace keeps its task.
+    fn task_result_bytes(&mut self, task: TaskId) -> Result<u64, HeapFault>;
     /// Identity edges at any immutable nesting depth, including paged
     /// tuples, read from summaries without assembling scalar payloads.
     fn value_edges(

@@ -80,7 +80,20 @@ impl ResidentRoots for Holdings<'_> {
         {
             arena.reach(reach, value, &mut out)?;
         }
-        Ok(Walked { session })
+        let mut root_and_control_bytes = self
+            .tasks
+            .logical_control_bytes(&arena)?
+            .checked_add(self.session.logical_written_bytes(&arena)?)
+            .ok_or_else(|| HeapFault::Malformed("root holding cost overflow".into()))?;
+        for value in &self.registers {
+            root_and_control_bytes = root_and_control_bytes
+                .checked_add(arena.logical_local(value)?)
+                .ok_or_else(|| HeapFault::Malformed("operand holding cost overflow".into()))?;
+        }
+        Ok(Walked {
+            session,
+            root_and_control_bytes,
+        })
     }
     fn page_roots(
         &mut self,
@@ -90,6 +103,12 @@ impl ResidentRoots for Holdings<'_> {
     }
     fn contains(&mut self, entity: EntityId) -> bool {
         self.arena.borrow().holds_resident(entity)
+    }
+    fn anonymous_entity_bytes(&self) -> u64 {
+        self.reach.as_ref().map_or(0, Reach::anonymous_local_bytes)
+    }
+    fn entity_local_bytes(&mut self, entity: EntityId) -> Result<u64, HeapFault> {
+        self.arena.borrow().logical_entity_bytes(entity)
     }
     fn entity_edges(
         &mut self,

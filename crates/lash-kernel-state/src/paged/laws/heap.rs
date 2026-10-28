@@ -167,7 +167,35 @@ fn aliases_see_one_mutation_across_seal_and_open() {
         ]))
         .expect("aliases");
     write_list(&mut heap, list, 0..1, |_| int(7)).expect("write");
-    let heap = reopen(&mut heap, &pages);
+    let check_holdings = |heap: &mut PagedHeap| {
+        let mut census = Census::restore(heap.certificate()).unwrap();
+        let owned = [PageValue::List(aliases)];
+        census
+            .refine(
+                heap,
+                &TransientRoots {
+                    borrowed: &owned,
+                    pinned: &owned,
+                    registers: &[],
+                    native_args: &[],
+                    fresh: &[],
+                },
+            )
+            .unwrap();
+        // Outer list: 32 + 2*16; inner list: 32 + (16 + 1).
+        // Both alias edges reach the same inner body. The borrowed mirror
+        // has no occurrence charge. Neither payload nor page layout enters.
+        assert_eq!(
+            census.normalized_holdings(),
+            census::NormalizedHoldings {
+                entity_local_bytes: 113,
+                root_and_control_bytes: 16,
+            }
+        );
+    };
+    check_holdings(&mut heap);
+    let mut heap = reopen(&mut heap, &pages);
+    check_holdings(&mut heap);
     for i in 0..2 {
         let Some(PageValue::List(id)) = heap.list_get(aliases, i).expect("alias") else {
             panic!("list alias");

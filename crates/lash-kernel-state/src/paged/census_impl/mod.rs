@@ -16,6 +16,7 @@ pub struct Census {
     certificate: AccountingCertificate,
     limits: TraceLimits,
     last_trace: TraceStats,
+    normalized: super::census::NormalizedHoldings,
 }
 
 impl Census {
@@ -41,6 +42,12 @@ impl Census {
         Ok(())
     }
 
+    /// Components from the last completed trace. Mutations do not refresh this
+    /// receipt; it is not an incremental retained-balance ledger.
+    pub fn normalized_holdings(&self) -> super::census::NormalizedHoldings {
+        self.normalized
+    }
+
     pub fn last_trace_stats(&self) -> TraceStats {
         self.last_trace
     }
@@ -54,6 +61,7 @@ impl AllocationCensus for Census {
             certificate,
             limits: TraceLimits::default(),
             last_trace: TraceStats::default(),
+            normalized: Default::default(),
         })
     }
 
@@ -93,7 +101,9 @@ impl AllocationCensus for Census {
             .ok_or_else(|| malformed("refinement count overflow"))?;
         let proof = trace::trace(graph, transient, self.limits)?;
         let entities = proof.entities;
+        let holdings = proof.holdings;
         self.last_trace = proof.sweep(graph)?;
+        self.normalized = holdings;
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| {
             work.completed_refinements += 1;

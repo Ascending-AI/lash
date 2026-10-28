@@ -661,7 +661,7 @@ pub mod execution {
         fn cost(&self) -> u64 {
             match &self.value {
                 BoundRecord::Value(v) => value_cost(v),
-                BoundRecord::Shared(_) => 0,
+                BoundRecord::Shared(_) => LogicalHeldV1::REFERENCE,
             }
         }
         fn children(&self, out: &mut Vec<PageRef>) {

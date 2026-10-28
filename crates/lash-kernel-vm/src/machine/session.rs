@@ -570,6 +570,17 @@ impl Session {
         written
     }
 
+    pub(super) fn logical_written_bytes(
+        &self,
+        arena: &lash_kernel_state::arena::Arena,
+    ) -> Result<u64, HeapFault> {
+        self.written().iter().try_fold(0_u64, |bytes, (_, bound)| {
+            bytes
+                .checked_add(arena.logical_local(&bound.value)?)
+                .ok_or_else(|| HeapFault::Malformed("session holding cost overflow".into()))
+        })
+    }
+
     /// The keys of the bindings written since the last projection point,
     /// giving `out` what their values reach (seam I, FIG-6748).
     pub(super) fn reach(
