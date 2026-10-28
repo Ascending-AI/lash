@@ -523,7 +523,7 @@ fn room_shared_binding_growth() {
             ((root.clone(), parameter), true),
             ((declared.clone(), Name::new("x")), true),
         ]),
-        &Default::default(),
+        &std::collections::BTreeMap::new(),
         &std::collections::BTreeSet::from([Name::new("x")]),
     );
     source.verify().unwrap();
