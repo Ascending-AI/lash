@@ -348,6 +348,27 @@ reason = "a projection identity, not a stored-format version"
         with self.assertRaises(gate.RegistryError):
             self.problems()
 
+    def test_automatic_witnesses_preserve_registry_and_manifest_parity(self) -> None:
+        import subprocess
+        import apply_format_witnesses as automatic
+
+        # Allocation must edit the writer's symbol, not replace the manifest
+        # row with a copied counter that can drift from the actual writer.
+        self.write(str(gate.MANIFEST), self.manifest)
+        self.write(str(gate.DEFAULT_CONFIG.relative_to(gate.ROOT)), self.registry_text)
+        for args in [("init", "--quiet"), ("add", "--all"),
+                     ("commit", "--quiet", "-m", "base")]:
+            subprocess.run(["git", "-c", "user.name=fixture",
+                            "-c", "user.email=fixture@example.invalid",
+                            "-c", "commit.gpgsign=false", *args], cwd=self.repo, check=True,
+                           capture_output=True)
+        self.write("crates/demo/src/lib.rs", SOURCE.replace("pub id: String,", "pub id: u64,"))
+        automatic.apply(self.repo, "HEAD")
+        self.assertEqual(self.problems(), [])
+        self.assertIn("pub const WIRE_VERSION: u16 = 4;",
+                      (self.repo / "crates/demo/src/lib.rs").read_text())
+        self.assertEqual((self.repo / gate.MANIFEST).read_text(), self.manifest)
+
     def test_a_surface_without_an_upgrade_policy_fails(self) -> None:
         self.write("crates/demo/src/lib.rs", SOURCE.replace('/// version_surface = "migrate"\n', ""))
         self.assertTrue(any("needs version_surface" in p for p in self.problems()))

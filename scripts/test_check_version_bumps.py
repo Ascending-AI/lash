@@ -311,11 +311,117 @@ class Fixture(unittest.TestCase):
 
 
 class FreezeVerdicts(Fixture):
-    def test_a_stored_shape_requires_its_witness_before_the_cut(self) -> None:
+    def test_a_stored_shape_lands_without_a_manual_witness_before_the_cut(self) -> None:
         self.write("crates/demo/src/lib.rs", WIDER_RECORD)
-        result = self.run_command(self.base, self.commit("stored shape change"), strict=False)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("Bump WIRE_VERSION strictly past 3", result.stderr)
+        self.commit("stored shape change")
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT.with_name("apply_format_witnesses.py")),
+             "--repo", str(self.repo), "--base", self.base],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        view = gate.WorktreeView(self.repo)
+        surface = next(s for s in gate.discovered_surfaces(view) if s.constant == "WIRE_VERSION")
+        self.assertEqual(gate.version_at(view, surface), 4)
+        head = self.commit("automatic witnesses")
+        result = self.run_command(self.base, head, strict=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        strict = self.run_command(self.base, head)
+        self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
+        self.assertIn("without its upgrade evidence", strict.stderr)
+        notes = list((self.repo / "docs/host-upgrades/unreleased").glob("auto-formats-*.md"))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("WIRE_VERSION", notes[0].read_text())
+        self.assertIn("Reset", notes[0].read_text())
+        import apply_format_witnesses as automatic
+        self.assertEqual(automatic.apply(self.repo, self.base), [])
+
+    def test_parallel_shape_edits_rebase_and_allocate_against_current_main(self) -> None:
+        import apply_format_witnesses as automatic
+
+        self.write("crates/demo/src/peer.rs", PEER.replace('version_surface = "coexist"', 'version_surface = "drain"'))
+        self.base = self.commit("a second stored surface")
+        self.git("checkout", "-b", "record")
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        self.commit("record shape")
+        automatic.apply(self.repo, self.base)
+        first = self.commit("first automatic landing")
+        self.git("checkout", "-b", "peer", self.base)
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("String", "u64"))
+        self.commit("peer shape")
+        self.git("rebase", "record")
+        automatic.apply(self.repo, first)
+        merged = self.commit("second automatic landing")
+        result = self.run_command(first, merged, strict=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        view = gate.WorktreeView(self.repo)
+        versions = {s.constant: gate.version_at(view, s) for s in gate.discovered_surfaces(view)}
+        self.assertEqual(versions, {"WIRE_VERSION": 4, "PEER_PROTOCOL_VERSION": 2})
+        # A subsequent branch changing that same record must get 5, never reuse
+        # the first branch's 4. Its source contains no manual witness edit.
+        self.write("crates/demo/src/lib.rs", (self.repo / "crates/demo/src/lib.rs").read_text()
+                   .replace("pub owner: String,", "pub owner: u64,"))
+        automatic.apply(self.repo, merged)
+        view = gate.WorktreeView(self.repo)
+        versions = {s.constant: gate.version_at(view, s) for s in gate.discovered_surfaces(view)}
+        self.assertEqual(versions, {"WIRE_VERSION": 5, "PEER_PROTOCOL_VERSION": 2})
+
+    def test_schema_allocation_keeps_provisioning_equal_to_the_descriptor(self) -> None:
+        import apply_format_witnesses as automatic
+
+        self.write("crates/demo/src/schema.rs", STORE.replace("SCHEMA_VERSION", "POSTGRES_SCHEMA_VERSION"))
+        self.write("crates/demo/src/migrate.rs", MIGRATIONS)
+        self.write("crates/demo/schema.sql", SCHEMA)
+        self.write("crates/lash-postgres-store/schema.sql",
+                   "INSERT INTO lash_schema_versions (component, version, min_reader) "
+                   "VALUES ('lash-postgres-store', 7, 7);\n")
+        base = self.commit("schema and provisioning stamp")
+        self.write("crates/demo/schema.sql", WIDER_SCHEMA)
+        automatic.apply(self.repo, base)
+        self.assertIn("POSTGRES_SCHEMA_VERSION: i32 = 8;",
+                      (self.repo / "crates/demo/src/schema.rs").read_text())
+        self.assertIn("VALUES ('lash-postgres-store', 8, 8)",
+                      (self.repo / "crates/lash-postgres-store/schema.sql").read_text())
+        head = self.commit("automatic schema stamp")
+        self.assertEqual(self.run_command(base, head, strict=False).returncode, 0)
+        strict = self.run_command(base, head)
+        self.assertEqual(strict.returncode, 1)
+        self.assertIn("add a step", strict.stderr)
+        # Absorb a lane that already advanced the descriptor by hand, too.
+        path = self.repo / "crates/demo/src/schema.rs"
+        path.write_text(path.read_text().replace("= 8;", "= 9;"))
+        automatic.apply(self.repo, head)
+        self.assertIn("VALUES ('lash-postgres-store', 9, 9)",
+                      (self.repo / "crates/lash-postgres-store/schema.sql").read_text())
+
+    def test_a_frozen_wire_schema_uses_its_complete_host_reset_witness(self) -> None:
+        import apply_format_witnesses as automatic
+        from unittest import mock
+
+        with mock.patch.dict(gate.PRE_CUT_RESET_WITNESSES, {"PEER_PROTOCOL_VERSION": "WIRE_VERSION"}):
+            self.write("crates/demo/src/lib.rs", LIB.replace("items(Record, encode_record)",
+                       'items(Record, encode_record), roots(path = "crates/demo/src/dto/hello.rs", Hello)'))
+            self.base = self.commit("the host witness covers the wire projection")
+            self.write("crates/demo/src/dto/hello.rs", DTO.replace("String", "u64"))
+            automatic.apply(self.repo, self.base)
+            view = gate.WorktreeView(self.repo)
+            versions = {s.constant: gate.version_at(view, s) for s in gate.discovered_surfaces(view)}
+            self.assertEqual(versions, {"WIRE_VERSION": 4, "PEER_PROTOCOL_VERSION": 1})
+            result = gate.check_views(gate.RevisionView(self.repo, self.base), view, strict=True)
+            self.assertTrue(any(f.surface.constant == "PEER_PROTOCOL_VERSION" for f in result.failures))
+            # A delegation cannot hide a shape the host witness does not guard.
+            self.write("crates/demo/src/lib.rs", LIB)
+            with self.assertRaisesRegex(gate.CheckError, "does not cover"):
+                automatic.apply(self.repo, self.base)
+
+    def test_the_cut_disables_automatic_edits_and_keeps_strict_evidence(self) -> None:
+        import apply_format_witnesses as automatic
+
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        with self.assertRaisesRegex(gate.CheckError, "Bump WIRE_VERSION strictly past 3"):
+            automatic.apply(self.repo, self.base, strict=True)
+        self.assertEqual((self.repo / "crates/demo/src/lib.rs").read_text(), WIDER_RECORD)
+        self.assertFalse((self.repo / "docs").exists())
 
     def test_a_coexist_wire_can_still_change_in_place_before_the_cut(self) -> None:
         self.write("crates/demo/src/dto/hello.rs", DTO.replace("String", "u64"))
@@ -934,10 +1040,33 @@ class Reachable(Fixture):
         self.assertEqual(code, 2, output)
         self.assertIn("names no adapter this tree declares", output)
 
+    def test_a_reexported_durable_field_adapter_is_followed(self) -> None:
+        path = "crates/demo/src/dto/hello.rs"
+        self.write(path, ROOTED_DTO.replace('with = "stamp"',
+                                           'serialize_with = "crate::exports::write_stamp"'))
+        self.write("crates/demo/src/exports.rs",
+                   "pub use crate::dto::hello::stamp::serialize as write_stamp;\n")
+        self.base = self.commit("a facade reexports its field adapter")
+        code, output = self.changed(path, "serialize_u64(*at)", "serialize_u32(*at as u32)")
+        self.assertEqual(code, 1, output)
+        self.assertIn("serialize", output)
+
     def test_an_adapter_the_tree_does_not_declare_cannot_be_evaluated(self) -> None:
         code, output = self.changed("crates/demo/src/dto/hello.rs", 'with = "stamp"', 'with = "gone"')
         self.assertEqual(code, 2, output)
         self.assertIn("with = 'gone' names no adapter this tree declares", output)
+
+    def test_a_durable_serializer_is_part_of_its_stored_shape(self) -> None:
+        path = "crates/demo/src/dto/hello.rs"
+        for spelling in ("impl crate::DurableSerialize for Code",
+                         "impl crate::DurableSerialize\n    for Code"):
+            with self.subTest(spelling=spelling):
+                source = ROOTED_DTO.replace("impl Serialize for Code", spelling)
+                self.write(path, source)
+                self.base = self.commit("explicit durable serializer")
+                code, output = self.changed(path, 'serialize_str("code")', 'serialize_str("new_code")')
+                self.assertEqual(code, 1, output)
+                self.assertIn("DurableSerialize for Code", output)
 
     def test_a_hand_written_impl_is_guarded_and_its_fields_are_not_followed(self) -> None:
         self.assertNotIn("Digits", {shape.name for shape, _ in self.closure().depths})
@@ -1111,7 +1240,7 @@ class RegistryMoves(Fixture):
     def test_a_new_surface_is_reported_as_registered(self) -> None:
         self.write(
             "crates/demo/src/cursor.rs",
-            '/// version_surface = "coexist"\n'
+            '/// version_surface = "drain"\n'
             "/// version_guard(items(Cursor))\n"
             "pub const CURSOR_VERSION: u32 = 1;\npub struct Cursor(u64);\n",
         )
@@ -1119,6 +1248,13 @@ class RegistryMoves(Fixture):
         self.assertEqual(code, 0, output)
         self.assertIn("registered by this change: crates/demo/src/cursor.rs:CURSOR_VERSION", output)
         self.assertIn("3 of 3 surfaces evaluated", output)
+
+        import apply_format_witnesses as automatic
+        automatic.apply(self.repo, self.base)
+        notes = list((self.repo / "docs/host-upgrades/unreleased").glob("auto-formats-*.md"))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("CURSOR_VERSION", notes[0].read_text())
+        self.assertIn("= absent", notes[0].read_text())
 
     def test_a_relocated_constant_keeps_its_base_version(self) -> None:
         (self.repo / "crates/demo/src/peer.rs").unlink()
@@ -1276,6 +1412,57 @@ class RealRepository(unittest.TestCase):
         result = gate.check_views(self.view, self.view, strict=True)
         self.assertEqual(((), ()), (result.errors, result.failures))
         self.assertEqual(len(self.surfaces), len(result.evaluated))
+
+    def test_host_stored_projections_cannot_change_without_their_witness(self) -> None:
+        key = "crates/lash/src/formats.rs:HOST_STORED_SCHEMA_VERSION"
+        self.assertIn(key, self.surfaces, "host-stored projections need a reported witness")
+        # Roots named by the persistence and schema guides, independently of
+        # the marker: changing any of these JSON contracts must be detected.
+        roots = {
+            "crates/lash-core-store/src/transcript/mod.rs": "CommittedTurnWithCalls",
+            "crates/lash-core-store/src/tool_run/tool_hooks.rs": "BeforeCheckVerdict",
+            "crates/lash-execution-contracts/src/process/projection.rs": "ProjectedObservedProcess",
+            "crates/lash-core/src/runtime/observation/process_workflow.rs": "ProcessWorkflowOverlay",
+            "crates/lash-kernel-view/src/lib.rs": "WorkflowView",
+            "crates/lash-kernel-doc/src/source_map.rs": "SourceMap",
+            "crates/lash-kernel-doc/src/caption.rs": "Captions",
+            "crates/lash-kernel-edit/src/authoring.rs": "Operation",
+            "crates/lash-trace/src/event.rs": "TraceEvent",
+        }
+        files = {}
+        for path, name in roots.items():
+            text = self.view.content(path)
+            match = re.search(r"(?m)^pub (?:struct|enum) " + name + r"\b", text)
+            self.assertIsNotNone(match, name)
+            files[path] = text[:match.start()] + '#[serde(rename = "changed_host_contract")]\n' + text[match.start():]
+        result = gate.check_views(self.view, PlantedView(self.view, files),
+                                  only=frozenset({key}), strict=True)
+        self.assertFalse(result.errors, result)
+        self.assertEqual(len(result.failures), 1, result)
+        for name in roots.values():
+            self.assertIn(name, result.failures[0].detail)
+        before_cut = gate.check_views(self.view, PlantedView(self.view, files),
+                                     only=frozenset({key, "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION"}),
+                                     strict=False)
+        self.assertFalse(before_cut.errors, before_cut)
+        self.assertEqual({f.surface.key for f in before_cut.failures}, {key})
+
+    def test_fig_7506_environment_content_reference_requires_a_checkpoint_witness(self) -> None:
+        # cc0e5b332f changed exactly this persisted field; use the old
+        # spelling as the baseline, under today's checkpoint guards.
+        path = "crates/lash-sansio/src/sansio/machine_state.rs"
+        text = self.view.content(path)
+        before = text.replace("environment: Option<CheckpointContentRef>",
+                              "environment: Option<SyncedEnvironment>", 1)
+        self.assertNotEqual(before, text)
+        key = "crates/lash-protocol-types/src/lib.rs:TURN_CHECKPOINT_SCHEMA_VERSION"
+        host = "crates/lash/src/formats.rs:HOST_STORED_SCHEMA_VERSION"
+        result = gate.check_views(PlantedView(self.view, {path: before}), self.view,
+                                  only=frozenset({key, host}), strict=False)
+        self.assertFalse(result.errors, result)
+        self.assertEqual({f.surface.key for f in result.failures}, {key, host}, result)
+        for finding in result.failures:
+            self.assertIn("TurnCheckpoint", finding.detail)
 
     def test_the_ddl_stamps_are_the_surfaces_that_guard_ddl(self) -> None:
         stamps = {key for key in self.surfaces if self.declaration(key).catalogs}

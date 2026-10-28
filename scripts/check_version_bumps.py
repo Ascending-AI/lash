@@ -20,8 +20,8 @@ constant itself, by a marker in its doc comment::
     pub const DEMO_VERSION: u32 = 3;
 
 The marker is documentation, not an attribute: it states what the version
-versions, no build, lint or feature-gate check reads it, and this script and
-``check_format_registry.py`` are its only readers. It sits in the constant's
+versions. This script, ``check_format_registry.py`` and the automatic landing
+step read it. It sits in the constant's
 own block of doc comments and attributes, with no blank line between that
 block and the ``const``.
 
@@ -69,11 +69,13 @@ dropping a shape from a marker does not excuse changing it, a constant that
 disappears does not excuse the shapes it guarded, and dropping a ``catalog``
 does not excuse the step.
 
-Stored formats require a changed witness even before 1.0. Only coexist
-wire formats without token codecs retain the pre-1.0 in-place policy. FIG-4494 flips
-``STRICT_VERSION_BUMPS`` at the cut; ``--strict`` exercises that policy now.
-Strict mode requires the bump. In both modes, a bump without its evidence,
-a backwards version, and a guard that cannot be evaluated exit nonzero.
+Stored formats require a changed witness even before 1.0. Before the cut,
+``scripts/land`` calls ``apply_format_witnesses.py`` after rebase to allocate
+those witnesses and generate the host reset note. No migration evidence is
+required before 1.0. FIG-4494 flips ``STRICT_VERSION_BUMPS`` at the cut for
+both commands; automatic allocation then stops and explicit bumps with upgrade
+evidence are required. ``--strict`` exercises that policy now. A backwards
+version and a guard that cannot be evaluated fail in both modes.
 A reachable type the tree cannot resolve is such a guard.
 ``version_guard_closure.py`` prints each surface's closure, its cycles and
 what the walk leaves opaque.
@@ -116,6 +118,10 @@ MARKER = "version_guard"
 GUARD_KINDS = ("items", "shapes", "impls", "file", "roots")
 # FIG-4494 flips this at the 1.0 cut for every caller, including CI.
 STRICT_VERSION_BUMPS = False
+# Trace schema filenames stay at 37 before the cut. Host-retained trace and
+# overlay bytes have a separate reset witness, which must cover the complete
+# trace projection. Strict mode ignores this pre-cut ownership relation.
+PRE_CUT_RESET_WITNESSES = {"TRACE_SCHEMA_VERSION": "HOST_STORED_SCHEMA_VERSION"}
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -393,9 +399,9 @@ RUST_SERDE_SHAPE = re.compile(
     r"(?:struct|enum)[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 RUST_SERDE_IMPL = re.compile(
-    r"(?m)^[ \t]*impl(?:[ \t]*<[^>{}]*>)?[ \t]+"
-    r"((?:serde::)?(?:Serialize|Deserialize)(?:[ \t]*<[^>{}]*>)?)"
-    r"[ \t]+for[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
+    r"(?m)^[ \t]*impl(?:\s*<[^>{}]*>)?\s+"
+    r"((?:[A-Za-z_][A-Za-z0-9_]*::)*(?:Serialize|Deserialize|DurableSerialize)(?:\s*<[^>{}]*>)?)"
+    r"\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
     """Every production declaration called one of `names`.
@@ -433,7 +439,7 @@ def named_rust_serde_impls(text: str, names: Iterable[str]) -> dict[str, str]:
     wanted = set(names)
     found: dict[str, str] = {}
     for match in RUST_SERDE_IMPL.finditer(text):
-        trait = "Deserialize" if "Deserialize" in match.group(1) else "Serialize"
+        trait = re.search(r"\b(DurableSerialize|Deserialize|Serialize)\b", match.group(1))[1]
         name = f"{trait} for {match.group(2)}"
         if name not in wanted:
             continue
@@ -1846,9 +1852,14 @@ class Reachability:
     # -- adapters ------------------------------------------------------------
 
     def _adapter(
-        self, kind: str, written: str, origin: Shape, opaque: list[tuple[str, str]]
+        self, kind: str, written: str, origin: Shape, opaque: list[tuple[str, str]],
+        trail: tuple[tuple[str, str], ...] = (),
     ) -> list[Entry]:
         """The text of a `with` module or a `*_with` function."""
+        hop = (origin.path, written)
+        if hop in trail or len(trail) >= 8:
+            raise _Unresolved(f"{kind} = {written!r} has a cyclic adapter re-export")
+        trail = (*trail, hop)
         segments = tuple(part.strip() for part in written.split("::") if part.strip())
         if not segments:
             raise _Unresolved(f"{kind} = {written!r} names nothing")
@@ -1883,10 +1894,17 @@ class Reachability:
             if function is None:
                 found.append((path, label, strip_rust_trivia(text)))
             else:
-                found.extend(
+                local = [
                     (path, name, value)
                     for name, value in named_rust_items(text, [function]).items()
-                )
+                ]
+                found.extend(local)
+                if not local:
+                    for name, target, _ in index_file(text).uses:
+                        if name == function:
+                            found.extend(self._adapter(
+                                kind, "::".join(target), Shape(path, "", 0, ""), opaque, trail,
+                            ))
         if not found and kind == "with":
             # A `with` path may also name a type that carries a `remote` derive.
             try:
@@ -2006,7 +2024,8 @@ class Reachability:
                 continue
             text = self.view.projected(path) or ""
             impls = named_rust_serde_impls(
-                text, (f"Serialize for {shape.name}", f"Deserialize for {shape.name}")
+                text, tuple(f"{trait} for {shape.name}" for trait in
+                            ("Serialize", "Deserialize", "DurableSerialize"))
             )
             extra.extend((path, name, value) for name, value in impls.items())
             hand_written = hand_written or bool(impls)
@@ -2870,6 +2889,27 @@ def check_views(
                         )
                     )
                 elif changed and head_version == base_version:
+                    reset_name = None if strict else PRE_CUT_RESET_WITNESSES.get(surface.constant)
+                    reset = next((s for s in surfaces if s.constant == reset_name), None)
+                    if reset is not None:
+                        reset_declaration = _declaration(head_view, reset)
+                        if reset.upgrade == "coexist" or reset_declaration is None:
+                            raise CheckError(f"{reset.constant} is not a stored-format reset witness")
+                        reset_entries = [
+                            entry for guard in reset_declaration.guards
+                            for entry in guard_signature(head_view, guard, enforce_presence=True)
+                        ]
+                        missing = comparable(head_entries) - comparable(reset_entries)
+                        if missing:
+                            raise CheckError(f"{reset.constant} does not cover {surface.constant}: "
+                                             + ", ".join(sorted(name for name, _ in missing)))
+                        old_reset = _base_surface(reset, base_surfaces, head_keys)
+                        if old_reset is not None and version_at(head_view, reset) <= version_at(base_view, old_reset):
+                            failures.append(Finding(reset, f"{reset.constant} must advance for the changed {surface.constant} projection"))
+                        else:
+                            in_place.append(Finding(surface, f"pre-1.0 reset witnessed by {reset.constant}; wire schema stays {head_version}"))
+                        evaluated.append(surface)
+                        continue
                     witness_required = (strict or surface.upgrade != "coexist"
                                         or any(name.startswith("token codecs:")
                                                for _, name, _ in head_entries))
@@ -2888,7 +2928,7 @@ def check_views(
                     )
                 elif head_version > base_version:
                     missing: list[int] = []
-                    if surface.decoder_laws:
+                    if strict and surface.decoder_laws:
                         if lifts is None:
                             lifts = registered_lifts(head_view)
                         missing = [
@@ -2904,7 +2944,7 @@ def check_views(
                                 catalogs[catalog] = catalog_steps(head_view, catalog)
                     unstepped = [
                         (catalog, version)
-                        for catalog, steps in catalogs.items()
+                        for catalog, steps in catalogs.items() if strict
                         if (
                             version := missing_catalog_step(
                                 steps, base_version, head_version
@@ -2938,7 +2978,9 @@ def check_views(
                         )
                     else:
                         evidence = (
-                            "lift rows registered"
+                            "pre-1.0 reset, no upgrade evidence required"
+                            if not strict
+                            else "lift rows registered"
                             if surface.decoder_laws
                             else "catalog steps registered"
                             if catalogs

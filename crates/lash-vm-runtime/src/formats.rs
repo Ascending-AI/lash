@@ -3,11 +3,11 @@
 //! kernel versions a build interprets, and these constants are what a fleet
 //! compares.
 //!
-//! The semantic kernel version and the document token encoding are separate
-//! compatibility witnesses. Before 1.0, a token-encoding change requires a
-//! reset, without a migration or old-body reader. Kernel semantic succession
-//! governs parked runs and saved-function admission; its `synthetic-next`
-//! build interprets the successor only it knows.
+//! Kernel semantics and stored formats have separate compatibility witnesses.
+//! Before 1.0, format changes advance their stamps automatically and require
+//! reset, without migrations or old-body readers. Kernel semantic succession
+//! still governs interpreter admission; its `synthetic-next` build interprets
+//! the successor only it knows.
 
 use lash_kernel_doc::KernelVersion;
 
@@ -35,6 +35,7 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 ///
 /// version_guard(
 ///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
+///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
 /// )
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
@@ -74,8 +75,6 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 1;
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 2;
 
-const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.number());
-
 /// A saved function: a function a session keeps between cells, held in an
 /// immutable FunctionBundle node with every saved function it uses. Its
 /// code is a kernel document node of its own, its captures are frozen page
@@ -84,10 +83,10 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 /// the kernel migration rewrites each stored one, alone, when its session
 /// is restored or seeded.
 ///
-/// A saved function is declared in the document of each cell that uses it,
-/// so it is held in the version this build's dialects lower a cell in. The
-/// synthetic successor changes no dialect, so this surface does not move
-/// under it.
+/// A saved function is declared in the document of each cell that uses it.
+/// Its format stamp tracks stored bytes independently of the semantic kernel
+/// version. The synthetic successor changes no saved-function encoding, so
+/// this stamp does not move under it.
 ///
 /// version_guard(
 ///     items(path = "crates/lash-kernel-doc/src/snapshot/collect.rs", CaptureRefusal, VALUE_KINDS),
@@ -102,8 +101,6 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 1;
-
-const _: () = assert!(KERNEL_SAVED_FUNCTION_VERSION == lash_kernel_doc::KERNEL_VERSION);
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored

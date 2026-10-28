@@ -13,7 +13,10 @@ use lash_kernel_value::tokens::TokenError;
 /// The one host token grammar this build accepts. No migration or fallback
 /// decoder is provided for opaque host blobs.
 /// version_surface = "coexist"
-/// version_guard(items(DOCUMENT_GRAMMAR_VERSION, decode))
+/// version_guard(
+///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
+///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
+/// )
 pub const DOCUMENT_GRAMMAR_VERSION: u32 = 2;
 
 /// An opaque document, its lash-issued identity and its grammar tag.

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 
+from apply_format_witnesses import apply as apply_format_witnesses
 
 GENERATED = re.compile(
     r"(^|/)BUCK$|^tools/buck2/target-inventory\.json$"
@@ -152,7 +153,21 @@ def main():
         run("git", "fetch", "origin", "main")
         main_sha = git("rev-parse", "origin/main")
         rebase()
-        run("python3", "scripts/check_version_bumps.py", "--base", main_sha, "--head", "HEAD")
+        authored = git("rev-parse", "HEAD")
+        witness_paths = apply_format_witnesses(Path.cwd(), main_sha)
+        if witness_paths:
+            run("git", "add", "--", *witness_paths)
+            ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s"))
+            subject = "Advance format witnesses for the rebased shapes"
+            if ticket:
+                subject += " " + ticket.group()
+            run("git", "commit", "-m", subject, "-m",
+                "Hosts that retain stores or opaque bytes in the previous formats "
+                "must reset or recreate them before deployment. The generated "
+                "host-upgrade entry lists the changed stamps. No new opt-in, "
+                "migration or old-shape reader is provided.")
+        # Allocation validates the complete planned tree, including unchanged
+        # guards and the post-cut evidence. Do not project it a second time.
         run("python3", "scripts/perf-gates.py", "check-sources")
         run("kiln", "clippy")
         if args.dry_run:
@@ -161,6 +176,13 @@ def main():
         if push(main_sha):
             print("landed " + git("rev-parse", "HEAD"))
             return
+        if witness_paths:
+            # Drop only our own generated commit, with a clean tree, before
+            # rebasing authored work again. Never rebase allocated integers:
+            # the next main may already have allocated the same values.
+            if git("status", "--porcelain", "--untracked-files=all"):
+                raise RuntimeError("dirty tree after push; cannot regenerate witnesses")
+            run("git", "reset", "--keep", authored)
         if attempt < 5:
             print(f"main moved; retrying rebase ({attempt + 1}/5)", flush=True)
     raise RuntimeError("main kept moving: exhausted five rebase retries")

@@ -311,6 +311,68 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
 }
 
 #[tokio::test]
+async fn an_automatically_advanced_grammar_refuses_the_previous_store() {
+    use lash_core::durable_port::domain::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
+    };
+    use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
+
+    // The pre-FIG-7507 writer's eight-field list, independent of today's
+    // Document encoder and its stamp. Keep the old framing frozen here.
+    let document =
+        lash_kernel_doc::parse_document("kernel 1\nnumbers by_spelling\nmain { return null }\n")
+            .expect("valid fixture document");
+    let mut old = TokenWriter::new();
+    old.seq(8);
+    document.library.0.encode(&mut old);
+    document.imports.encode(&mut old);
+    document.exports.encode(&mut old);
+    document.main.encode(&mut old);
+    document.functions.encode(&mut old);
+    document.requires.encode(&mut old);
+    document.numbers.encode(&mut old);
+    document.private_bindings.encode(&mut old);
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1_048_576)));
+    let root = staging
+        .encode(NodeKind::DOCUMENT, TypedBody::logical(old.as_bytes()))
+        .expect("fixture stages");
+    let store = FakeStore::default().with_items(
+        DurableSurface::ModuleArtifact,
+        vec![DurableItem {
+            surface: DurableSurface::ModuleArtifact,
+            cursor: root.to_hex(),
+            process_id: None,
+            session_id: None,
+            status: None,
+            owner_record: None,
+            payload: DurablePayload::GraphNode(
+                staging.get(&root).expect("staged root").bytes.to_vec(),
+            ),
+        }],
+    );
+    let report = probe_store(&store, PreflightOptions::summary())
+        .await
+        .expect("probe reads the previous stamp");
+    let row = component(&report, DurableFormat::KernelDocument);
+    assert_eq!(row.verdict, ComponentVerdict::Refused);
+    assert_eq!(
+        row.found,
+        vec![FoundVersion {
+            version: 1,
+            count: 1
+        }]
+    );
+    assert_eq!(report.outcome, PreflightOutcome::Refused);
+    assert_eq!(report.drain.len(), 1);
+    assert!(
+        report
+            .refusal_message()
+            .expect("the old store is refused")
+            .contains("recreate the store")
+    );
+}
+
+#[tokio::test]
 async fn a_22d_function_store_requires_reset_before_decode() {
     use lash_core::durable_port::domain::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,

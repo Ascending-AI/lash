@@ -1,4 +1,4 @@
-//! Every durable format version this build writes, in one typed table.
+//! Stored-format witnesses for runtime writers and host-held records.
 //!
 //! Lash's durable formats fail closed (ADR 0055/0061/0064): there is no
 //! migration decoder at any of these boundaries, so state parked by another
@@ -12,12 +12,11 @@
 //! [`FormatVersion`] distinguishes a comparable counter from an opaque build
 //! identity rather than collapsing both into one field.
 //!
-//! **This module re-exports; it does not redefine.** Each constant below is the
-//! same symbol the code that writes the format uses, lifted through its owning
-//! crate. Drift between "the version the runtime writes" and "the version the
-//! manifest reports" is therefore not a bug that can be introduced: there is
-//! one definition and the compiler resolves it. A central table of copied
-//! integers would have exactly that bug, which is why this is not one.
+//! Writer versions are re-exported from their owning crates, so the manifest
+//! reports the symbol the encoder uses. The host-storage witness is owned here:
+//! its records live in product databases rather than one Lash writer crate.
+//! That source-wide witness also covers published optional contracts; it is
+//! deliberately conservative when a build enables only some runtime features.
 //!
 //! # What is *not* here
 //!
@@ -78,6 +77,56 @@ pub use lash_vm_runtime::{
     LASH_KERNEL_VERSION,
 };
 
+/// The host-held records and projections documented in the host guides.
+/// Compare this witness with the writing build before reopening host mirrors.
+/// Before 1.0, a change requires recreation; this is independent of semantic
+/// kernel versions and the trace schema's public file name.
+///
+/// version_guard(
+///     shapes(path = "crates/lash-core-store/src/transcript/mod.rs", cover(CommittedTurn, CommittedTurnWithCalls, CommittedTurnsPage)),
+///     shapes(path = "crates/lash-core-store/src/tool_run/tool_hooks.rs", cover(BeforeCheckVerdict, AfterCheckVerdict, CheckRecord)),
+///     roots(path = "crates/lash-core-store/src/store/history.rs", HistoryCursor, CommittedTurnCursor),
+///     roots(path = "crates/lash-core-store/src/packages.rs", LinkRecord, PackageRecord),
+///     roots(path = "crates/lash-vocabulary/src/package.rs", PublicationRecord, NamespaceSnapshot),
+///     roots(path = "crates/lash/src/turn.rs", CommittedTurnsWithCallsPage, TurnToolCallRef, TurnModelCallRef, ToolCallRead),
+///     roots(path = "crates/lash/src/process_history.rs", ProcessEventsRead),
+///     roots(path = "crates/lash/src/change_page.rs", ChangePage),
+///     roots(path = "crates/lash-execution-contracts/src/process/observation.rs", ObservedProcess, ObservedProcessEvent, ObservedProcessChange),
+///     roots(path = "crates/lash-execution-contracts/src/process/events.rs", ProcessEventPage, ProcessEventReadOutcome, ProcessAwaitOutput),
+///     shapes(path = "crates/lash-execution-contracts/src/process/projection.rs", cover(ProjectedObservedProcess, ProjectedProcessEvent)),
+///     items(path = "crates/lash-execution-contracts/src/process/projection.rs", projection, payload_for_projection),
+///     shapes(path = "crates/lash-core/src/runtime/observation/process_workflow.rs", cover(ProcessWorkflowOverlay)),
+///     roots(path = "crates/lash-core/src/runtime/observation/replay.rs", SessionCursor),
+///     items(path = "crates/lash-core/src/runtime/observation/replay.rs", SESSION_CURSOR_PREFIX),
+///     roots(path = "crates/lash-core/src/runtime/observation/process_replay.rs", ProcessObservationCursor),
+///     items(path = "crates/lash-core/src/runtime/observation/process_replay.rs", PROCESS_OBSERVATION_CURSOR_PREFIX),
+///     roots(path = "crates/lash-core-execution/src/plugin/tool_hooks.rs", CachedToolSuccess),
+///     shapes(path = "crates/lash-kernel-view/src/*.rs", cover(WorkflowView, CallableView, CaptionView, EntryView)),
+///     shapes(path = "crates/lash-kernel-doc/src/source_map.rs", cover(SourceMap, SourceMapWire)),
+///     shapes(path = "crates/lash-kernel-doc/src/caption.rs", path = "crates/lash-kernel-doc/src/caption/target.rs", cover(Captions)),
+///     roots(path = "crates/lash-kernel-doc/src/correspondence.rs", Correspondence),
+///     roots(path = "crates/lash-kernel-doc/src/document_bytes.rs", DocumentBytes),
+///     shapes(
+///         path = "crates/lash-kernel-edit/src/authoring.rs",
+///         path = "crates/lash-kernel-edit/src/edit.rs",
+///         path = "crates/lash-kernel-edit/src/extract.rs",
+///         path = "crates/lash-kernel-edit/src/refusal.rs",
+///         path = "crates/lash-kernel-edit/src/canvas.rs",
+///         cover(Operation, Transaction, Extraction, EditRefusal),
+///     ),
+///     roots(path = "crates/lash-kernel-package/src/materialize.rs", MaterializeRefusal),
+///     shapes(path = "crates/lash-trace/src/*.rs", cover(TraceRecord, WorkflowExecutionOverlay)),
+///     items(path = "crates/lash-trace/src/workflow_overlay.rs", fold_workflow_overlay),
+///     shapes(path = "crates/lash-core-execution/src/tool_live.rs", cover(ToolLiveItem, ToolLiveFilter)),
+///     roots(path = "crates/lash-sansio/src/sansio/machine_state.rs", SavedTurn),
+///     roots(path = "crates/lash-sansio/src/sansio/turn_protocol.rs", SyncedEnvironment),
+///     roots(path = "crates/lash-protocol-types/src/tool_output.rs", ToolValue, ToolCallRecord, ToolCallOutput, ToolFailure, ToolCancellation, TurnControl, ToolControl),
+///     items(path = "crates/lash-protocol-types/src/tool_output.rs", projected_json_value, value_for_projection, to_json_value),
+/// )
+/// version_surface = "drain"
+/// format_manifest = "HostStoredShapes"
+pub const HOST_STORED_SCHEMA_VERSION: u32 = 1;
+
 /// One durable format whose version decides whether stored bytes open under
 /// this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -117,6 +166,8 @@ pub enum DurableFormat {
     RecordConfigRequestIdentity,
     /// The identity encoding of a create-session semantic-boundary request.
     CreateSessionRequestIdentity,
+    /// Records and projections hosts persist or mirror in their own stores.
+    HostStoredShapes,
     /// The serialized sans-IO turn checkpoint.
     TurnCheckpoint,
     /// The bodies of a tool round's run records.
@@ -190,6 +241,7 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => "append request identity",
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
+            DurableFormat::HostStoredShapes => "host-stored records and projections",
             DurableFormat::TurnCheckpoint => "turn checkpoint",
             DurableFormat::RunRecord => "run record",
             DurableFormat::WaitRow => "wait row",
@@ -227,6 +279,7 @@ impl DurableFormat {
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
+            DurableFormat::HostStoredShapes => UpgradePolicy::Drain,
             DurableFormat::TurnCheckpoint => UpgradePolicy::Drain,
             DurableFormat::RunRecord => UpgradePolicy::Drain,
             DurableFormat::WaitRow => UpgradePolicy::Drain,
@@ -396,6 +449,13 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             owning_crate: "lash-core",
             constant: "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION",
             probe: FormatProbe::IdentityOnly,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::HostStoredShapes,
+            version: FormatVersion::Counter(HOST_STORED_SCHEMA_VERSION),
+            owning_crate: "lash-runtime",
+            constant: "HOST_STORED_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {
             format: DurableFormat::TurnCheckpoint,

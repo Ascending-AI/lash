@@ -1,17 +1,10 @@
 name: Version bumps
 
-# The strict version-bump gate (FIG-4494): a guarded shape that changes
-# without its version constant bumping, a bump without its upgrade evidence,
-# and a guard that cannot be evaluated all fail it. It has no report-only
-# mode.
-#
-# Until the lash 1.0 cut ends the version freeze (FIG-3846), shapes change in
-# place and this job reports those changes as failures; that is expected, and
-# is why the workflow is not a required check yet and the job below is
-# `continue-on-error`: it still runs and reports, but its red cannot take the
-# board. The cut (FIG-4097/Z07) removes the exemption, makes the check
-# required and adds it to `publish-crates`' `needs` in release.yml — exactly
-# the activation `scripts/check_cut_residual.py` allows in a cut candidate.
+# Land allocates pre-1.0 format witnesses after rebase and records the host
+# reset note. This read-only job verifies the resulting stamps. At the 1.0 cut,
+# scripts/check_version_bumps.py's single STRICT_VERSION_BUMPS switch disables
+# allocation and requires explicit bumps plus migrate/drain/coexist evidence.
+# The cut also adds this job to publish-crates' needs in release.yml.
 #
 # It runs on every push to main, and on a pull request or merge group whose
 # diff touches a registered versioned surface (`scripts/ci_plan.py

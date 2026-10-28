@@ -251,6 +251,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
                 "actor state: decoded only by a node whose format set names it, under the claim filter",
             )
         }
+        DurableFormat::HostStoredShapes => SurfaceRelation::Unwalkable(
+            "host-owned storage: compare build witnesses before reopening mirrors; \
+             Lash cannot enumerate the host's rows",
+        ),
         DurableFormat::TurnCheckpoint => SurfaceRelation::Unwalkable(
             "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
              this version gates live outside lash's own store",
