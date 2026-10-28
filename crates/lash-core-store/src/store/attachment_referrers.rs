@@ -20,7 +20,10 @@ impl AttachmentWriteToken {
 
     /// Stable lowercase hexadecimal encoding used by durable stores.
     pub fn as_hex(self) -> String {
-        format!("{:032x}", self.0)
+        uuid::Uuid::from_u128(self.0)
+            .simple()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_owned()
     }
 }
 
