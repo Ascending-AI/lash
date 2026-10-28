@@ -187,88 +187,87 @@ equal and no higher charges. Full evidence is in
 
 ## Monty comparison
 
-The full optimized FIG-7485 snapshot on 2026-10-28 uses source
-`5069896a062429db5e426b422aae1f5f2171b7d9`, based on main
-`c8680459bdbb50a249b8880100aab33eb8a0fea9`. It includes the core VM
-optimizations from FIG-7486. All 17 Python workloads ran on Monty 1.4.0,
-and all 170 measured Monty results equal CPython's. All 85 engine/workload
-rows and 850 measured samples passed source, result and geometry checks.
-That snapshot and its attribution remain archived. The table below uses the
-merged FIG-7484 measurement described next for every numeric row.
+The FIG-7485 second-pass snapshot on 2026-10-28 uses full optimized source
+`861eb0f84e1e2c83cb0b73345a7c92e02b7016e6`, based on main
+`13c6be0c63b44e5ccb9d3d56be912ef6b474f1f5`. It includes pymonty-coll,
+triage29 and FIG-7510's shared admission implementation. Every numeric row
+below comes from this single snapshot. The fresh starting baseline was
+`1ed410899125068dfd653cd9546cf1accaaa73c6`.
 
-There were five low/high pairs, one warmup and factor 20, pinned to CPU 0,
-with observation off and exact charge and memory metering enabled. All 340
-scoped Lash windows and 510 reference process windows qualified at >=99%
-PMU running time. The process had an 8 GiB address-space cap. Shared-host
-wall time is unclaimed. Values are median incremental instructions/op;
-the Python and TS units retain their separate denominators.
+All 85 engine/workload rows and 850 samples passed independent source,
+result, reference identity, trip and work-unit checks. Five low/high pairs,
+one warmup and factor 20 ran on CPU 0 with observation off, exact charge
+and held-byte accounting, and an 8 GiB address-space cap. All 340 scoped
+Lash and 510 reference instruction windows qualified at >=99% PMU running
+time. Values are median incremental instructions/op. Python and TS retain
+their separate work denominators. Shared-host wall time is unclaimed.
 
-In the archived FIG-7485 run, the three owned string rows were at most 2x
-Monty. No Lash row regressed more than 1% against the fresh starting baseline
-`1c93dfa7cfd2`, and every TS/QuickJS row was at most 10x.
-Before the string lane, templating, string_build1
-and int_to_string were 6.113x, 1.999x and 1.201x Monty respectively.
-
-All numeric rows in the table, including `json_transform`, were refreshed for
-FIG-7484 on 2026-10-28 from the full optimized tree based on main
-`54b4f002b6d4`. All 85 engine/workload rows completed with unchanged sources
-and work units, using three low/high pairs, one warmup and factor 20.
-All 204 Lash and 306 reference PMU windows ran at 100%.
-All five owned rows meet 2x Monty. No Lash row regresses more than 1% against
-the fresh starting baseline
-`1c93dfa7cfd2`. Every TS/QuickJS row meets 10x. The same-binary memory-off
-diagnostic gives the net deltas in the table; it does not explain the complete
-above-parity gap. Charge-off changes optimization admission and is confounded.
-Intrinsic-cost attribution remains open. Raw full-build results, source proof,
-charge census and diagnostics are in
-`/workspace/notes/lash/tasks/lanes/r33/pymonty-coll.evidence/`, especially
-`final-20.json`, `final-20-assessment.json` and `semantic-costs.md`.
+No Lash row regressed more than 1% against the fresh baseline; the maximum
+was +0.4940% for TS prop_write. Every TS/QuickJS instruction ratio is <=10x,
+with a maximum of 9.8761x for prop_read. string_build1 fell 9.8925%, from
+2481.42 to 2235.94 instructions/append. templating fell 4.0298%, from
+1112375.05 to 1067548.11 instructions/trip. int_to_string is unchanged.
 
 | Python workload | Lash-Python instr/op | Monty instr/op | Lash/Monty | Lash-TS/QuickJS |
 |---|---:|---:|---:|---:|
-| object_sort | 15231.73 | 7769.02 | 1.9606x | 8.8896x |
-| map_set_string | 6131.37 | 5409.13 | 1.1335x | 6.7173x |
-| records | 37817321.84 | 20827300.95 | 1.8158x | 8.5265x |
-| sort_bench | 7529471.16 | 5577154.89 | 1.3501x | 7.2242x |
-| json_transform | 2691128.79 | 1599389.74 | 1.6826x | 1.7981x |
-| string_build1 | 2481.39 | 1242.51 | 1.9971x | 8.4088x |
-| templating | 1113274.74 | 565627.21 | 1.9682x | 3.2221x |
-| empty_loop | 319.99 | 193.40 | 1.6545x | 3.4249x |
-| prop_write | 1164.25 | 742.02 | 1.5690x | 9.5913x |
-| func_closure_call | 2485.25 | 1771.84 | 1.4026x | 6.9930x |
-| object_build | 5184.43 | 3767.55 | 1.3761x | 1.9060x |
-| array_read | 876.70 | 695.25 | 1.2610x | 8.6670x |
-| func_call | 1050.25 | 902.55 | 1.1637x | 2.9594x |
-| prop_read | 1101.24 | 1023.26 | 1.0762x | 9.8980x |
-| int_to_string | 1207.91 | 1470.95 | 0.8212x | 3.4665x |
-| int_arith | 527.01 | 720.63 | 0.7313x | 2.4305x |
-| float_arith | 608.29 | 1251.39 | 0.4861x | 2.3582x |
+| object_sort | 15244.98 | 7769.02 | 1.9623x | 8.8736x |
+| map_set_string | 6135.30 | 5409.23 | 1.1342x | 6.7391x |
+| records | 37882815.26 | 20827404.95 | 1.8189x | 8.5195x |
+| sort_bench | 7545993.00 | 5577089.84 | 1.3530x | 7.2184x |
+| json_transform | 2694601.74 | 1599345.53 | 1.6848x | 1.7970x |
+| string_build1 | 2235.94 | 1242.44 | 1.7996x | 7.6102x |
+| templating | 1067548.11 | 565598.68 | 1.8875x | 3.0844x |
+| empty_loop | 319.96 | 193.43 | 1.6541x | 3.4335x |
+| prop_write | 1164.25 | 742.01 | 1.5691x | 9.6392x |
+| func_closure_call | 2485.26 | 1771.87 | 1.4026x | 6.9931x |
+| object_build | 5184.42 | 3767.55 | 1.3761x | 1.8991x |
+| array_read | 880.70 | 695.25 | 1.2667x | 8.6916x |
+| func_call | 1050.25 | 902.57 | 1.1636x | 2.9593x |
+| prop_read | 1105.26 | 1023.27 | 1.0801x | 9.8761x |
+| int_to_string | 1207.91 | 1470.95 | 0.8212x | 3.4683x |
+| int_arith | 526.98 | 720.68 | 0.7312x | 2.4364x |
+| float_arith | 608.26 | 1251.32 | 0.4861x | 2.3623x |
 
-Typed integer/string formatting now shares ordinary conversion paths,
-and f-strings use the same list-and-join lowering as TS templates.
-Resident text joins and concatenations retain their native charge formulas,
-work reservations and rollback rules; distinct long append operands borrow
-their resident bytes directly. The unchanged Python sources still run with
-exact metering, held-byte accounting and durable park/resume.
+Resident text construction now installs its known metadata directly.
+Owned append already transfers the String and chunk buffer. Its new immutable
+header no longer walks generic body members, cold chunks or flat collection
+summaries, or replaces Facts already cleared when their slot was released.
+Resident joins and concatenations use the same installer in both dialects.
+Tokens, zero-list membership, residency, old operand summaries, work admission,
+charge formulas and rollback remain unchanged. All seven matched charge and
+held-byte probes equal the baseline. Workloads, prices and budgets are unchanged.
 
-Those guarantees do not yet explain the entire above-parity cost.
-The paired final-adapter memory-policy ablation and its exact deltas are in
-`/workspace/notes/lash/tasks/lanes/r33/pymonty-str.evidence/semantic-costs.md`.
-Turning charge off changes execution paths, so its difference is not an
-intrinsic metering-cost estimate. Complete attribution for templating and
-string_build1 remains open. Core-row attribution remains documented in
-`/workspace/notes/lash/tasks/lanes/r33/pymonty-core.evidence/semantic-costs.md`;
-its earlier component ablations are not final optimized component costs.
+A controlled full optimized ablation removes only the formula-bound refusal,
+keeping exact-mode executor flags, formula evaluation, charge totals and memory
+admission. Five 1/500-trip pairs preserve outputs and execution census; all
+adapter resource totals agree, and the source is restored afterward. Removing
+that check saves a net 11.11 instructions/append, with an observed pair-difference
+envelope of 10.67 to 11.24. For templating it costs a net 310.84 more
+instructions/trip, so it establishes no positive isolated contribution there.
+These are effects of one check implementation, not an intrinsic lower bound.
+The larger unexplained residual remains. FIG-7485 stays open under the rule
+that an above-parity row needs a complete measured semantic explanation.
 
-Monty executable SHA-256 is
+Python 159/159, VM 216/216 and SQLite 14/14 passed on this integrated tree.
+Conformance passed 139/142; the exact three failures also execute and fail on
+plain parent main 13c6be0c63. Full conformance is not a passing gate.
+
+Raw results, executable/source identities, per-window counters, the charge
+census, parent counterfactuals and the causal ablation are in
+`/workspace/notes/lash/tasks/lanes/r33/pymonty-str2.evidence/`, especially
+`after.json`, `verification.json`, `matrix-summary.json`, `charge-census.json`,
+`integrated-core-verdict.json`, `integrated-parent-verdict.json` and
+`formula-bound-assessment.json`. First-pass and collection-lane measurements
+remain archived in the neighboring `pymonty-str.evidence` and
+`pymonty-coll.evidence` directories.
+
+Monty is the pinned 1.4.0 executable, SHA-256
 `4479e7306fdf0c6a2a567aa139150ac47c75ab3c0138ec2c4efa010c382a87e0`.
-QuickJS source is `04be246001599f5995fa2f2d8c91a0f198d3f34c`, executable
-`ec68673b92708e38971b58682bae94ca3775e106358c82f6fcd55526b8fd3ec4`.
-CPython is 3.12.3; the receipt retains its executable hash.
-Raw results, sources, per-window counters, artifact identities, the charge
-census and correctness receipts are in
-`/workspace/notes/lash/tasks/lanes/r33/pymonty-str.evidence/`, particularly
-`after.json`, `verification.json`, `charge-census.json` and `report.md`.
+Its public resource limits cover duration, allocator-backed memory, recursion,
+suspensions and sleep; they do not expose Lash's deterministic formula budget.
+The exact tag and published source identity are retained in
+`monty-source-identity.json`. Full reference executable identities remain in
+`after.json` and `baseline-binaries.sha256`.
 
 `--profile <directory>` performs a separate `perf record` run per selected lash
 workload and dialect, writing perf data, perf-script stacks, and Inferno folded
