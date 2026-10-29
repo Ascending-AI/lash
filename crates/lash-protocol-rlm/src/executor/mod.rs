@@ -42,7 +42,6 @@ pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UN
 pub use session::{CodeModeExecutionState, saved_function_pins};
 pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};
 
-use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 

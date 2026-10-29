@@ -414,7 +414,7 @@ fn process_and_cell_execution_spans_retain_the_terminal_bound() {
                 language: "typescript".into(),
                 started_at_ms: 1000,
                 duration_ms: 1,
-                output: String::new().into(),
+                output: String::new(),
                 output_chars: 0,
                 observation_count: 0,
                 observation_projections: Vec::new(),
