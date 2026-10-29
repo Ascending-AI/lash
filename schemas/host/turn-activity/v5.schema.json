@@ -2049,28 +2049,37 @@
     },
     "CellResource": {
       "description": "A cell bound in its native units. Time values use nanoseconds.",
-      "enum": [
-        "charges",
-        "memory_bytes",
-        "live_tasks",
-        "call_depth",
-        "requests_per_park",
-        "join_members",
-        "worker_cpu_nanos",
-        "held_wall_nanos",
-        "compute_nanos",
-        "serialization_nanos",
-        "library_work",
-        "host_read_nanos",
-        "worker_memory_bytes",
-        "effects",
-        "checkpoint_bytes",
-        "tool_calls",
-        "effect_value_bytes",
-        "vm_state_bytes",
-        "frame_bytes"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "charges",
+            "memory_bytes",
+            "live_tasks",
+            "call_depth",
+            "requests_per_park",
+            "join_members",
+            "worker_cpu_nanos",
+            "held_wall_nanos",
+            "compute_nanos",
+            "serialization_nanos",
+            "library_work",
+            "host_read_nanos",
+            "worker_memory_bytes",
+            "effects",
+            "checkpoint_bytes",
+            "tool_calls",
+            "effect_value_bytes",
+            "vm_state_bytes",
+            "frame_bytes"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "worker_deadline_nanos",
+          "description": "A worker exchange deadline, without an identified compute/serialization phase.",
+          "type": "string"
+        }
+      ]
     },
     "CgroupController": {
       "description": "A cgroup v2 controller a worker's limits need.",
@@ -16478,7 +16487,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/turn-activity/v4",
+  "$id": "https://lash.dev/schemas/turn-activity/v5",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "App-facing semantic activity emitted during a turn.\n\n`id` is unique per emitted activity event. `correlation_id` groups related\nevents in the same logical activity, such as code start/completion, tool\nstart/completion, or text deltas from one output block.",
   "oneOf": [
@@ -17059,6 +17068,6 @@
   ],
   "title": "TurnActivity",
   "type": "object",
-  "x-lash-schema-version": 4,
+  "x-lash-schema-version": 5,
   "x-lash-version-constant": "TURN_ACTIVITY_SCHEMA_VERSION"
 }

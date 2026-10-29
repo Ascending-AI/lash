@@ -1,4 +1,4 @@
-// Derived from v4.schema.json by scripts/generate-workflow-schemas.py.
+// Derived from v5.schema.json by scripts/generate-workflow-schemas.py.
 // JSON Schema remains authoritative for value constraints and validation.
 
 /**
@@ -721,7 +721,7 @@ export type CellPrint = {
 /**
  * A cell bound in its native units. Time values use nanoseconds.
  */
-export type CellResource = ("charges" | "memory_bytes" | "live_tasks" | "call_depth" | "requests_per_park" | "join_members" | "worker_cpu_nanos" | "held_wall_nanos" | "compute_nanos" | "serialization_nanos" | "library_work" | "host_read_nanos" | "worker_memory_bytes" | "effects" | "checkpoint_bytes" | "tool_calls" | "effect_value_bytes" | "vm_state_bytes" | "frame_bytes");
+export type CellResource = (("charges" | "memory_bytes" | "live_tasks" | "call_depth" | "requests_per_park" | "join_members" | "worker_cpu_nanos" | "held_wall_nanos" | "compute_nanos" | "serialization_nanos" | "library_work" | "host_read_nanos" | "worker_memory_bytes" | "effects" | "checkpoint_bytes" | "tool_calls" | "effect_value_bytes" | "vm_state_bytes" | "frame_bytes") | "worker_deadline_nanos");
 
 /**
  * A cgroup v2 controller a worker's limits need.

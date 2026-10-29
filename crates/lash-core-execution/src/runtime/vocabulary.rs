@@ -124,7 +124,7 @@ impl EventSink for NoopEventSink {
 /// version_guard(roots(TurnActivity))
 /// version_surface = "coexist"
 /// format_outside_manifest = "host turn-activity wire contract: live stream readers, not a fleet store format"
-pub const TURN_ACTIVITY_SCHEMA_VERSION: u32 = 4;
+pub const TURN_ACTIVITY_SCHEMA_VERSION: u32 = 5;
 
 /// App-facing semantic activity emitted during a turn.
 ///

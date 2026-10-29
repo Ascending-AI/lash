@@ -753,28 +753,37 @@
     },
     "CellResource": {
       "description": "A cell bound in its native units. Time values use nanoseconds.",
-      "enum": [
-        "charges",
-        "memory_bytes",
-        "live_tasks",
-        "call_depth",
-        "requests_per_park",
-        "join_members",
-        "worker_cpu_nanos",
-        "held_wall_nanos",
-        "compute_nanos",
-        "serialization_nanos",
-        "library_work",
-        "host_read_nanos",
-        "worker_memory_bytes",
-        "effects",
-        "checkpoint_bytes",
-        "tool_calls",
-        "effect_value_bytes",
-        "vm_state_bytes",
-        "frame_bytes"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "charges",
+            "memory_bytes",
+            "live_tasks",
+            "call_depth",
+            "requests_per_park",
+            "join_members",
+            "worker_cpu_nanos",
+            "held_wall_nanos",
+            "compute_nanos",
+            "serialization_nanos",
+            "library_work",
+            "host_read_nanos",
+            "worker_memory_bytes",
+            "effects",
+            "checkpoint_bytes",
+            "tool_calls",
+            "effect_value_bytes",
+            "vm_state_bytes",
+            "frame_bytes"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "worker_deadline_nanos",
+          "description": "A worker exchange deadline, without an identified compute/serialization phase.",
+          "type": "string"
+        }
+      ]
     },
     "ChargeSafetyDenialReason": {
       "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",
@@ -3690,6 +3699,17 @@
           ],
           "description": "The typed failure code of a failed operation."
         },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceToolFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The terminal's typed failure classification, bound and governed diagnostics."
+        },
         "started_at_ms": {
           "description": "Wall-clock epoch milliseconds the operation's scope retained as its\nstart.",
           "format": "uint64",
@@ -4054,6 +4074,16 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceToolFailure"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "kind": {
@@ -6057,6 +6087,17 @@
     "TraceToolFailure": {
       "description": "A failed call as a trace carries it: the failure's classification, which\nis structure and survives every content policy, hook and bound, and its\ngoverned [diagnostics](TraceToolFailure::diagnostics).",
       "properties": {
+        "bound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Content-free bound evidence from the terminal cause. It survives\ndiagnostic content omission, hooks and bounds."
+        },
         "class": {
           "$ref": "#/$defs/ToolFailureClass"
         },

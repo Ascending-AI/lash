@@ -17,6 +17,40 @@
       ],
       "type": "object"
     },
+    "CellResource": {
+      "description": "A cell bound in its native units. Time values use nanoseconds.",
+      "oneOf": [
+        {
+          "enum": [
+            "charges",
+            "memory_bytes",
+            "live_tasks",
+            "call_depth",
+            "requests_per_park",
+            "join_members",
+            "worker_cpu_nanos",
+            "held_wall_nanos",
+            "compute_nanos",
+            "serialization_nanos",
+            "library_work",
+            "host_read_nanos",
+            "worker_memory_bytes",
+            "effects",
+            "checkpoint_bytes",
+            "tool_calls",
+            "effect_value_bytes",
+            "vm_state_bytes",
+            "frame_bytes"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "worker_deadline_nanos",
+          "description": "A worker exchange deadline, without an identified compute/serialization phase.",
+          "type": "string"
+        }
+      ]
+    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -36,6 +70,60 @@
     "EffectId": {
       "pattern": "^e:([0-9a-f]{2})+$",
       "type": "string"
+    },
+    "ExecutionBoundFact": {
+      "description": "The bound that ended a kernel execution, with only the receipts received.",
+      "properties": {
+        "consumed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/CellResource"
+        },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "resource",
+        "limit"
+      ],
+      "type": "object"
     },
     "ExecutionScope": {
       "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
@@ -137,6 +225,10 @@
     },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
     },
     "LinkId": {
@@ -559,6 +651,16 @@
               "type": [
                 "string",
                 "null"
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceToolFailure"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "kind": {
@@ -988,6 +1090,48 @@
           "type": "object"
         }
       ]
+    },
+    "TraceToolFailure": {
+      "description": "A failed call as a trace carries it: the failure's classification, which\nis structure and survives every content policy, hook and bound, and its\ngoverned [diagnostics](TraceToolFailure::diagnostics).",
+      "properties": {
+        "bound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Content-free bound evidence from the terminal cause. It survives\ndiagnostic content omission, hooks and bounds."
+        },
+        "class": {
+          "$ref": "#/$defs/ToolFailureClass"
+        },
+        "code": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "description": "`ToolResults` content: one JSON object holding the failure's\n`message`, and its `cause` and `raw` evidence when it has them. A\ncontent hook sees it at the `tool_results` path, and may rewrite it\nto any JSON value. Absent when that content is not captured, or was\nomitted, offloaded or over its bound."
+        },
+        "source": {
+          "$ref": "#/$defs/ToolFailureSource"
+        },
+        "suggested_delay_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "source"
+      ],
+      "type": "object"
     },
     "Unit": {
       "description": "The code a node belongs to.",

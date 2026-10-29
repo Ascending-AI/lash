@@ -619,7 +619,7 @@ export type CellOutcome = ({
 /**
  * A cell bound in its native units. Time values use nanoseconds.
  */
-export type CellResource = ("charges" | "memory_bytes" | "live_tasks" | "call_depth" | "requests_per_park" | "join_members" | "worker_cpu_nanos" | "held_wall_nanos" | "compute_nanos" | "serialization_nanos" | "library_work" | "host_read_nanos" | "worker_memory_bytes" | "effects" | "checkpoint_bytes" | "tool_calls" | "effect_value_bytes" | "vm_state_bytes" | "frame_bytes");
+export type CellResource = (("charges" | "memory_bytes" | "live_tasks" | "call_depth" | "requests_per_park" | "join_members" | "worker_cpu_nanos" | "held_wall_nanos" | "compute_nanos" | "serialization_nanos" | "library_work" | "host_read_nanos" | "worker_memory_bytes" | "effects" | "checkpoint_bytes" | "tool_calls" | "effect_value_bytes" | "vm_state_bytes" | "frame_bytes") | "worker_deadline_nanos");
 
 /**
  * Why host charge-safety policy denied an otherwise transport-retryable
@@ -1789,6 +1789,10 @@ export type TraceDomainCompletion = {
    */
   "error_code"?: (FailureCode | null);
   /**
+   * The terminal's typed failure classification, bound and governed diagnostics.
+   */
+  "failure"?: (TraceToolFailure | null);
+  /**
    * Wall-clock epoch milliseconds the operation's scope retained as its
    * start.
    */
@@ -1902,6 +1906,7 @@ export type TraceLanguageExecution = (({
   [key: string]: unknown;
 } | {
   "error"?: (string | null);
+  "failure"?: (TraceToolFailure | null);
   "kind": "execution_finished";
   "status": TraceLanguageExecutionStatus;
   "subject": TraceRuntimeSubject;
@@ -2496,6 +2501,11 @@ export type TraceToolCancellation = {
  * governed [diagnostics](TraceToolFailure::diagnostics).
  */
 export type TraceToolFailure = {
+  /**
+   * Content-free bound evidence from the terminal cause. It survives
+   * diagnostic content omission, hooks and bounds.
+   */
+  "bound"?: (ExecutionBoundFact | null);
   "class": ToolFailureClass;
   "code": string;
   /**
